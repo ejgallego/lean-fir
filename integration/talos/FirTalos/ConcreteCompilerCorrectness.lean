@@ -823,6 +823,215 @@ theorem CodeAdapted.stringLiteralLet_eq
           simpa using targetEq⟩
 
 /--
+Generic compiler/adaptor inversion for a direct `let` whose value code reads
+one source local and invokes one runtime operation.
+
+This is the shared static shape behind object, `USize`, and packed-scalar
+projections.  It recovers both numeric local slots, the numeric import slot,
+and the independently compiled continuation from the production compiler and
+adapter.
+-/
+theorem CodeAdapted.localRuntimeCallLet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceId : FVarId}
+    {operation : RuntimeOp}
+    {resultKind : AbiKind}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet sourceId, .call (.runtime operation)])
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ sourceIndex callIndex resultIndex targetRest,
+      Fir.Wasm.compileLetValue context decl =
+          .ok [.localGet sourceId, .call (.runtime operation)] ∧
+        findFVar? (functionBindings sourceFunction) sourceId =
+          some sourceIndex ∧
+        callIndex? sourceModule (.runtime operation) = some callIndex ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some resultKind ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          .localGet sourceIndex :: .call callIndex ::
+            .localSet resultIndex :: targetRest := by
+  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+      actualValueCompiled, restCompiled, valueAdapted, restAdapted,
+      resultFound, targetEq⟩ :=
+    CodeAdapted.let_eq adapted
+  rw [valueCompiled] at actualValueCompiled
+  injection actualValueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨alignedIndex, alignedFound, resultKindAt⟩ :=
+    localsAligned localCompiled
+  rw [resultFound] at alignedFound
+  injection alignedFound with indexEq
+  subst alignedIndex
+  obtain ⟨indices, callIndex, sourceFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [sourceId]) (operation := operation) valueAdapted
+  cases sourceFound with
+  | cons sourceFound noMore =>
+      cases noMore
+      subst targetValue
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      exact ⟨_, callIndex, resultIndex, targetRest, valueCompiled,
+        sourceFound, callFound, resultFound, resultKindAt,
+        continuationAdapted, by simpa using targetEq⟩
+
+/-- Production compiler/adaptor inversion for an object projection `let`. -/
+theorem CodeAdapted.objectProjectionLet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (valueEq : decl.value = .oproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ objectIndex callIndex resultIndex targetRest,
+      Fir.Wasm.compileLetValue context decl =
+          .ok [.localGet objectId,
+            .call (.runtime (.objectProj index resultKind))] ∧
+        findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        callIndex? sourceModule
+            (.runtime (.objectProj index resultKind)) =
+          some callIndex ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some resultKind ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          .localGet objectIndex :: .call callIndex ::
+            .localSet resultIndex :: targetRest := by
+  apply CodeAdapted.localRuntimeCallLet_eq localsAligned
+    (compileLetValue_objectProjection valueEq valueKind objectCompiled)
+    localCompiled adapted
+
+/-- Production compiler/adaptor inversion for a `USize` projection `let`. -/
+theorem CodeAdapted.usizeProjectionLet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind : AbiKind}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (valueEq : decl.value = .uproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .usize)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .usize))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ objectIndex callIndex resultIndex targetRest,
+      Fir.Wasm.compileLetValue context decl =
+          .ok [.localGet objectId,
+            .call (.runtime (.usizeProj index))] ∧
+        findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        callIndex? sourceModule (.runtime (.usizeProj index)) =
+          some callIndex ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some .usize ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          .localGet objectIndex :: .call callIndex ::
+            .localSet resultIndex :: targetRest := by
+  apply CodeAdapted.localRuntimeCallLet_eq localsAligned
+    (compileLetValue_usizeProjection valueEq valueKind objectCompiled)
+    localCompiled adapted
+
+/-- Production compiler/adaptor inversion for a packed-scalar projection. -/
+theorem CodeAdapted.scalarProjectionLet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {width offset : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ objectIndex callIndex resultIndex targetRest,
+      Fir.Wasm.compileLetValue context decl =
+          .ok [.localGet objectId,
+            .call (.runtime (.scalarProj width offset resultKind))] ∧
+        findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        callIndex? sourceModule
+            (.runtime (.scalarProj width offset resultKind)) =
+          some callIndex ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some resultKind ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          .localGet objectIndex :: .call callIndex ::
+            .localSet resultIndex :: targetRest := by
+  apply CodeAdapted.localRuntimeCallLet_eq localsAligned
+    (compileLetValue_scalarProjection valueEq valueKind objectCompiled)
+    localCompiled adapted
+
+/--
 Constructor-allocation inversion for the complete `compileArgs` language.
 The argument prefix may freely mix compiler-resolved locals and erased
 constants; successful whole-body adaptation determines its exact target
@@ -1402,6 +1611,327 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet
   intro nextWitness extension nextRuntimeRelated valueRelated
   exact continued continuationAdapted resultFound targetSet extension
     nextRuntimeRelated valueRelated
+
+/--
+Certificate-free recursive correctness for an object-projection `let`.
+
+The production compiler and adapter determine both local slots, the concrete
+projection import, and the continuation split.  The source/state relation
+determines the physical object operand.  The only projection-specific dynamic
+invariant exposed to the caller is the constructor descriptor for that
+operand; the concrete read and result relation then follow from W6.
+-/
+theorem ConcreteSupportedExport.codeWP_objectProjectionLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .oproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject value : Value}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getObjectField sourceRuntime sourceObject index = .ok value)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (descriptorReady :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ info fieldKinds,
+            witness.descriptors.lookup? objectWord =
+                some (.constructor info fieldKinds) ∧
+              fieldKinds[index]? = some resultKind)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {resultWord : Word32},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex
+                (.i32 (UInt32.ofNat resultWord.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {resultWord : Word32} {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex
+                (.i32 (UInt32.ofNat resultWord.value)) =
+              some updated →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime (bind sourceEnv decl.fvarId value)
+            continuation targetRest (clearFailure initial) updated witness
+            tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
+      objectFound, callFound, resultFound, resultKindAt,
+      continuationAdapted, bodyEq⟩ :=
+    CodeAdapted.objectProjectionLet_eq spec.localsAligned valueEq valueKind
+      objectCompiled localCompiled spec.bodyAdapted
+  obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+    spec.localsAligned objectCompiled
+  rw [objectFound] at alignedObjectFound
+  injection alignedObjectFound with objectIndexEq
+  subst alignedObjectIndex
+  obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+    stateRelated.resolve sourceLookup objectFound objectKindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨info, fieldKinds, descriptor, fieldKind⟩ :=
+        descriptorReady objectRelated
+      obtain ⟨resultWord, concreteRead, _, _⟩ :=
+        objectProjStep_of_refines stateRelated.1 objectRelated descriptor
+          fieldKind projected
+      obtain ⟨updated, targetSet⟩ := localSetReady resultFound
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.objectProjectionCall callFound
+      rw [bodyEq]
+      apply codeWP_objectProjection_let valueEq valueCompiled objectFound
+        callFound sourceLookup projected stateRelated resultFound resultKindAt
+        hObject objectRelated descriptor fieldKind concreteRead imported
+        spec.hostsSatisfy inBounds contracted params results targetSet
+      exact continued continuationAdapted resultFound targetSet
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/--
+Certificate-free recursive correctness for a `USize` projection `let`.
+The source object lane is recovered from the compiler-assigned local; the
+constructor descriptor is the only additional heap-shape invariant.
+-/
+theorem ConcreteSupportedExport.codeWP_usizeProjectionLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .uproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .usize)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .usize))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject : Value}
+    {value : UInt64}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getUSizeSlot sourceRuntime sourceObject index = .ok (.usize value))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (descriptorReady :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ info fieldKinds,
+            witness.descriptors.lookup? objectWord =
+              some (.constructor info fieldKinds))
+    (localSetReady :
+      ∀ {resultIndex : Nat},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i64 value) = some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex (.i64 value) = some updated →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime
+            (bind sourceEnv decl.fvarId (.usize value)) continuation targetRest
+            (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
+      objectFound, callFound, resultFound, resultKindAt,
+      continuationAdapted, bodyEq⟩ :=
+    CodeAdapted.usizeProjectionLet_eq spec.localsAligned valueEq valueKind
+      objectCompiled localCompiled spec.bodyAdapted
+  obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+    spec.localsAligned objectCompiled
+  rw [objectFound] at alignedObjectFound
+  injection alignedObjectFound with objectIndexEq
+  subst alignedObjectIndex
+  obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+    stateRelated.resolve sourceLookup objectFound objectKindAt
+  have tobjectRelated := physicalRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨info, fieldKinds, descriptor⟩ :=
+        descriptorReady objectRelated
+      obtain ⟨updated, targetSet⟩ := localSetReady resultFound
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.usizeProjectionCall callFound
+      rw [bodyEq]
+      apply codeWP_usizeProjection_let valueEq valueCompiled objectFound
+        callFound sourceLookup projected stateRelated resultFound resultKindAt
+        hObject objectRelated descriptor imported spec.hostsSatisfy inBounds
+        contracted params results targetSet
+      exact continued continuationAdapted resultFound targetSet
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/--
+Certificate-free recursive correctness for a packed integer-scalar projection.
+
+The generic compiler/adaptor inversion and source-local relation determine the
+target prefix and object operand.  `concreteStep` is precisely the
+operation-specific refinement boundary: for that derived object word, the
+concrete reader returns one physical lane related to the successful source
+projection.
+-/
+theorem ConcreteSupportedExport.codeWP_scalarProjectionLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {width offset : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject sourceValue : Value}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getScalarField sourceRuntime sourceObject width offset =
+        .ok sourceValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (concreteStep :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ physical,
+            scalarProjStep width offset resultKind initial
+                [.i32 (UInt32.ofNat objectWord.value)] =
+              .Return [physical] (clearFailure initial) ∧
+            PhysicalValueRel witness resultKind physical sourceValue)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {physical : Wasm.Value},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated, locals.set? resultIndex physical = some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {physical : Wasm.Value} {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex physical = some updated →
+          PhysicalValueRel witness resultKind physical sourceValue →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime (bind sourceEnv decl.fvarId sourceValue)
+            continuation targetRest (clearFailure initial) updated witness
+            tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
+      objectFound, callFound, resultFound, resultKindAt,
+      continuationAdapted, bodyEq⟩ :=
+    CodeAdapted.scalarProjectionLet_eq spec.localsAligned valueEq valueKind
+      objectCompiled localCompiled spec.bodyAdapted
+  obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+    spec.localsAligned objectCompiled
+  rw [objectFound] at alignedObjectFound
+  injection alignedObjectFound with objectIndexEq
+  subst alignedObjectIndex
+  obtain ⟨objectPhysical, hObject, physicalObjectRelated⟩ :=
+    stateRelated.resolve sourceLookup objectFound objectKindAt
+  have tobjectRelated := physicalObjectRelated.toTObject objectRefines
+  cases tobjectRelated with
+  | word32 objectRelated =>
+      obtain ⟨physical, operation, physicalRelated⟩ :=
+        concreteStep objectRelated
+      obtain ⟨updated, targetSet⟩ := localSetReady resultFound
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.scalarProjectionCall callFound
+      rw [bodyEq]
+      apply codeWP_scalarProjection_let valueEq valueCompiled objectFound
+        callFound sourceLookup projected stateRelated resultFound resultKindAt
+        hObject physicalRelated imported spec.hostsSatisfy inBounds contracted
+        params results operation targetSet
+      exact continued continuationAdapted resultFound targetSet
+        physicalRelated
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
 
 /--
 Certificate-free recursive correctness for the complete constructor argument

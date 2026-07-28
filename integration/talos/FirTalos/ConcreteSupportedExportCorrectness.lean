@@ -243,6 +243,129 @@ theorem ConcreteSupportedExport.allocCtorCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment for a concrete object-field projection. -/
+theorem ConcreteSupportedExport.objectProjectionCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {index id : Nat}
+    {resultKind : AbiKind}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.objectProj index resultKind)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (objectProjContract index) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = objectProjStep index initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, objectProjFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
+/-- Resolver/adaptor alignment for a concrete `USize`-slot projection. -/
+theorem ConcreteSupportedExport.usizeProjectionCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {index id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime (.usizeProj index)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (usizeProjContract index) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = usizeProjStep index initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, usizeProjFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
+/-- Resolver/adaptor alignment for a concrete packed-scalar projection. -/
+theorem ConcreteSupportedExport.scalarProjectionCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {width offset id : Nat}
+    {resultKind : AbiKind}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.scalarProj width offset resultKind)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (scalarProjContract width offset resultKind) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  obtain ⟨_, actualContract, _, actualContractFound, _⟩ :=
+    spec.hostsSatisfy id inBounds
+  have resolvedSome :
+      resolvedContract? (.scalarProj width offset resultKind) =
+        some actualContract :=
+    contracted.symm.trans actualContractFound
+  simp only [resolvedContract?, hostFn?] at resolvedSome contracted
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = scalarProjStep width offset resultKind initial args)
+    split at resolvedSome
+    · rename_i supported
+      simpa only [supported, if_true, Option.map_some, scalarProjFn]
+        using contracted
+    · simp at resolvedSome
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- The syntax-directed proof for the statically selected generated function
 constructs T1's exact successful-declaration certificate. -/
 theorem ConcreteSupportedExport.toSuccessfulDeclaration

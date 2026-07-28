@@ -3507,6 +3507,22 @@ remains intentionally operation-polymorphic: it is invoked at the physical
 operands produced by the compiler/evaluator proof. No FIR semantic contract or
 executable ABI changed.
 
+W6.6ed moves all three projection forms onto the same certificate-free
+recursive path. One generic `localRuntimeCallLet_eq` theorem inverts the
+production shape shared by object, `USize`, and packed-scalar projections:
+one compiler-selected source local, one resolved runtime call, one destination
+write, and an independently compiled continuation. The three public
+`codeWP_*ProjectionLet` rules recover their numeric locals, import, exact host
+contract, and physical object operand from `ConcreteSupportedExport`,
+`LocalLayoutAligned`, and `StateRelated`. Object and `USize` reads require only
+the constructor-descriptor invariant needed by the existing heap theorem;
+packed-scalar reads expose one operation-specific refinement at the derived
+object word. The contract harness applies every rule with arbitrary
+continuations and no caller-supplied target program, local/import indices,
+host contract, or translation simulation. The next step is to assemble these
+direct-value rules into the structural source-code induction. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

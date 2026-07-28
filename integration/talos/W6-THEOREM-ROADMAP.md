@@ -375,12 +375,13 @@ acceptance tests pass.
    target execution from a source return evaluation. Keep the
    certificate-free application in
    `ConcreteCompilerCorrectnessContract.lean`.
-3. Completed direct-value instances: natural and UTF-8 String literals plus
-   all-`fvar` constructor allocation now use the actual compiler/adaptor
+3. Completed direct-value instances: natural and UTF-8 String literals,
+   mixed local/erased constructor allocation, and object/`USize`/packed-scalar
+   projections now use the actual compiler/adaptor
    equations, resolver alignment, concrete allocation refinement, checked
-   local writes, arbitrary continuations, and finite return corollaries.
-   Generalize constructor argument prefixes to erased constants, then cover
-   projections and assemble the structural direct-`let` induction.
+   local writes, and arbitrary continuations. Literal and constructor families
+   also have finite return corollaries. Assemble these rules into the
+   structural direct-`let` induction.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

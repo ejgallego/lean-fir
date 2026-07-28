@@ -312,6 +312,233 @@ example
     parameterCount allocated localSetReady
 
 /--
+Object projection is compositional without a target-code certificate.  Static
+slots and calls are derived; the caller exposes only the semantic read, the
+constructor descriptor invariant, local capacity, and the continuation IH.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .oproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject value : Value}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getObjectField sourceRuntime sourceObject index = .ok value)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (descriptorReady :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ info fieldKinds,
+            witness.descriptors.lookup? objectWord =
+                some (.constructor info fieldKinds) ∧
+              fieldKinds[index]? = some resultKind)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {resultWord : Word32},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex
+                (.i32 (UInt32.ofNat resultWord.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {resultWord : Word32} {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex
+                (.i32 (UInt32.ofNat resultWord.value)) =
+              some updated →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime (bind sourceEnv decl.fvarId value)
+            continuation targetRest (clearFailure initial) updated witness
+            tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q :=
+  spec.codeWP_objectProjectionLet valueEq valueKind objectCompiled
+    objectRefines localCompiled sourceLookup projected stateRelated
+    descriptorReady localSetReady continued
+
+/-- `USize` projection has the same certificate-free recursive boundary. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {index : Nat}
+    {objectId : FVarId}
+    {objectKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .uproj index objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .usize)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .usize))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject : Value}
+    {value : UInt64}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getUSizeSlot sourceRuntime sourceObject index = .ok (.usize value))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (descriptorReady :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ info fieldKinds,
+            witness.descriptors.lookup? objectWord =
+              some (.constructor info fieldKinds))
+    (localSetReady :
+      ∀ {resultIndex : Nat},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i64 value) = some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex (.i64 value) = some updated →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime
+            (bind sourceEnv decl.fvarId (.usize value)) continuation targetRest
+            (clearFailure initial) updated witness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q :=
+  spec.codeWP_usizeProjectionLet valueEq valueKind objectCompiled
+    objectRefines localCompiled sourceLookup projected stateRelated
+    descriptorReady localSetReady continued
+
+/--
+Packed integer projection exposes only its operation-specific concrete read
+refinement; all compiler, adapter, resolver, and local-layout evidence is
+derived.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {width offset : Nat}
+    {objectId : FVarId}
+    {objectKind resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .sproj width offset objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject sourceValue : Value}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (sourceLookup : lookup sourceEnv objectId = some sourceObject)
+    (projected :
+      getScalarField sourceRuntime sourceObject width offset =
+        .ok sourceValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (concreteStep :
+      ∀ {objectWord : Word32},
+        ValueRel witness .tobject (.word32 objectWord) sourceObject →
+          ∃ physical,
+            scalarProjStep width offset resultKind initial
+                [.i32 (UInt32.ofNat objectWord.value)] =
+              .Return [physical] (clearFailure initial) ∧
+            PhysicalValueRel witness resultKind physical sourceValue)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {physical : Wasm.Value},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated, locals.set? resultIndex physical = some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {physical : Wasm.Value} {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex physical = some updated →
+          PhysicalValueRel witness resultKind physical sourceValue →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env sourceRuntime (bind sourceEnv decl.fvarId sourceValue)
+            continuation targetRest (clearFailure initial) updated witness
+            tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q :=
+  spec.codeWP_scalarProjectionLet valueEq valueKind objectCompiled
+    objectRefines localCompiled sourceLookup projected stateRelated concreteStep
+    localSetReady continued
+
+/--
 Mixed local/erased constructor allocation exposes the recursive
 certificate-free API. Static code and physical operands are derived
 internally; the caller supplies only the concrete allocation refinement at

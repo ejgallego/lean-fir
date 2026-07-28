@@ -167,13 +167,18 @@ prefix without a caller-supplied readiness witness. `codeWP_constructorLet`
 composes an arbitrary continuation, and `correctConstructorReturn` closes the
 finite export. The earlier all-`fvar` theorems remain compatibility
 specializations.
+Object, `USize`, and packed integer projections now share one generic
+`localRuntimeCallLet_eq` inversion. Their public recursive rules derive the
+numeric object/result locals, runtime import, concrete resolver contract, and
+physical object operand from the real pipeline and `StateRelated`, then
+compose the existing W6 heap refinements with any verified continuation.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
-applications and the literal/constructor recursive APIs on the
+applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary under `make talos-check`.
 Existing certificate-shaped modules are retained only as internal sources of
 operation and invariant lemmas while erased-field constructor prefixes,
-projection direct lets, the structural source-evaluation induction,
-control-flow, calls, externals, caches, and faults are migrated. The first
+the structural source-evaluation induction, control-flow, calls, externals,
+caches, and faults are migrated. The first
 endpoint preserves finite source behaviors conditionally;
 later finite-trace and weak-simulation work will cover divergence without
 proving source termination.
