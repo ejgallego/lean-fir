@@ -162,6 +162,45 @@ theorem ConcreteSupportedExport.naturalLiteralCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment specializes to the exact concrete UTF-8 String
+literal contract expected by the allocation refinement theorem. -/
+theorem ConcreteSupportedExport.stringLiteralCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {value : String}
+    {id : Nat}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.literal (.str value) .object)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (stringLiteralContract value) ∧
+        imp.params.length = 0 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = stringLiteralStep value initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, stringLiteralFn]
+      using contracted
+  · change imp.params.length = 0 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- The syntax-directed proof for the statically selected generated function
 constructs T1's exact successful-declaration certificate. -/
 theorem ConcreteSupportedExport.toSuccessfulDeclaration

@@ -43,10 +43,14 @@ Cross-cutting W6.5 state:
   `CodeAdapted.let_eq` now inverts arbitrary direct-`let` compilation and
   adaptation into value/continuation fragments and the destination slot;
   `codeWP_naturalLiteralLet` uses that inversion to compose the same concrete
-  literal step with an arbitrary verified compiler-selected continuation; and
+  literal step with an arbitrary verified compiler-selected continuation.
+  `stringLiteralLet_eq`, `codeWP_stringLiteralLet`, and
+  `correctStringLiteralReturn` close the equivalent UTF-8 `.object` lane
+  through concrete allocation, resolver alignment, witness growth, and finite
+  exported execution; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
-  applications have no caller-supplied simulation premise. UTF-8
-  string/constructor/projection direct lets, the structural source-evaluation
+  applications have no caller-supplied simulation premise.
+  Constructor/projection direct lets, the structural source-evaluation
   induction, control-flow, calls, externals, caches, and faults remain to
   migrate from the internal certificate-shaped scaffolding;
 - the current UTF-8 string writer has exact byte readback and spatial-frame

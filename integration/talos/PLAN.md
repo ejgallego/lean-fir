@@ -3465,6 +3465,20 @@ strings are the next direct-let instance, followed by the structural
 source-evaluation induction and constructor/projection lets. No FIR semantic
 contract or executable ABI changed.
 
+W6.6ea instantiates the corrected direct-compiler path for UTF-8 String
+literals. Static resolver alignment now yields the exact concrete
+`stringLiteralContract`. `CodeAdapted.stringLiteralLet_eq` derives the
+compiler-selected `.object` host call, numeric import/local slots, and
+independently adapted continuation from the general direct-`let` inversion.
+`ConcreteSupportedExport.codeWP_stringLiteralLet` composes exact UTF-8 heap
+allocation and witness extension with an arbitrary continuation correctness
+hypothesis, while `correctStringLiteralReturn` packages the immediate-return
+case into finite source evaluation and exported target termination. The
+contract harness applies both String APIs without a caller-built simulation
+certificate. Constructor/projection direct lets and the structural
+source-evaluation induction are next. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

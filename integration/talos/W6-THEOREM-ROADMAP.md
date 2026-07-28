@@ -114,9 +114,13 @@ destination local. `naturalLiteralLet_eq` specializes that rule, and
 literal step with an arbitrary compiler-selected continuation. Its recursive
 premise is the semantic correctness induction hypothesis for that
 continuation, not a caller-built translation certificate.
+`stringLiteralLet_eq` and `codeWP_stringLiteralLet` provide the equivalent
+recursive rule for exact UTF-8 String allocation in the `.object` lane.
+`correctStringLiteralReturn` also closes the finite whole-export String
+instance through the concrete resolver contract and heap-witness extension.
 `ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
-that the two finite export theorems and the recursive direct-`let` rule have
-no translation-certificate premise.
+that the finite return/Nat/String export theorems and both literal recursive
+rules have no translation-certificate premise.
 
 ### T3. Whole-export success
 
