@@ -620,6 +620,10 @@ def subInt (left right : Int) : Int :=
   left - right
 
 @[noinline]
+def natAbsInt (value : Int) : Nat :=
+  value.natAbs
+
+@[noinline]
 def intPosImmediate : Int :=
   2147483647
 
@@ -1059,7 +1063,7 @@ private def intClassifyFormTrace : Array String :=
 private def intOfNatFormTrace : Array String :=
   #["fap", "extern", "return"]
 
-private def binaryExternalFormTrace : Array String :=
+private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
@@ -2249,7 +2253,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2271,7 +2275,7 @@ def cases : Array Case := #[
       "external", "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2293,7 +2297,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "cancellation", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2315,7 +2319,7 @@ def cases : Array Case := #[
       "arithmetic", "subtraction", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2337,7 +2341,7 @@ def cases : Array Case := #[
       "external", "arithmetic", "subtraction", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2359,7 +2363,7 @@ def cases : Array Case := #[
       "arithmetic", "subtraction", "cancellation", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2367,6 +2371,80 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.sub]
     provenance := firProvenance
       "Subtract equal multi-limb heap Int values to immediate zero" },
+  { id := "int-nat-abs-multi-limb-positive"
+    entry := ``Source.natAbsInt
+    args := #[.int 340282366920938463463374607431768211473]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ =>
+      .nat (Source.natAbsInt 340282366920938463463374607431768211473)
+    tags := #["stress", "int", "nat", "signed", "heap", "multi-limb",
+      "external", "conversion", "magnitude"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.natAbs]
+    requiredExecutedExternals := #[``Int.natAbs]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.natAbs]
+    requiredExecutedExternalTrace := some #[``Int.natAbs]
+    provenance := firProvenance
+      "Take the natural magnitude of a positive multi-limb heap Int" },
+  { id := "int-nat-abs-multi-limb-negative"
+    entry := ``Source.natAbsInt
+    args := #[.int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ =>
+      .nat (Source.natAbsInt (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "nat", "signed", "negative", "heap",
+      "multi-limb", "external", "conversion", "magnitude"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.natAbs]
+    requiredExecutedExternals := #[``Int.natAbs]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.natAbs]
+    requiredExecutedExternalTrace := some #[``Int.natAbs]
+    provenance := firProvenance
+      "Take the natural magnitude of a negative multi-limb heap Int" },
+  { id := "int-nat-abs-immediate-negative-boundary"
+    entry := ``Source.natAbsInt
+    args := #[.int (-2147483648)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.natAbsInt (-2147483648))
+    tags := #["stress", "int", "nat", "signed", "negative", "boundary",
+      "external", "conversion", "magnitude"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.natAbs]
+    requiredExecutedExternals := #[``Int.natAbs]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.natAbs]
+    requiredExecutedExternalTrace := some #[``Int.natAbs]
+    provenance := firProvenance
+      "Take the natural magnitude at the negative immediate Int boundary" },
+  { id := "int-nat-abs-heap-negative-boundary"
+    entry := ``Source.natAbsInt
+    args := #[.int (-2147483649)]
+    argSchemas := #[.int]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.natAbsInt (-2147483649))
+    tags := #["stress", "int", "nat", "signed", "negative", "boundary",
+      "heap", "external", "conversion", "magnitude"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.natAbs]
+    requiredExecutedExternals := #[``Int.natAbs]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.natAbs]
+    requiredExecutedExternalTrace := some #[``Int.natAbs]
+    provenance := firProvenance
+      "Take the natural magnitude of the first negative heap Int" },
   { id := "int-literal-immediate-positive"
     entry := ``Source.intPosImmediate
     resultSchema := .int
@@ -2578,7 +2656,7 @@ def cases : Array Case := #[
       "subtraction", "heap", "multi-limb"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Nat.sub]
     requiredExecutedExternals := #[``Nat.sub]
     requiredExecutedExternalCounts :=
@@ -2600,7 +2678,7 @@ def cases : Array Case := #[
       "subtraction", "heap", "multi-limb", "equality", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Nat.sub]
     requiredExecutedExternals := #[``Nat.sub]
     requiredExecutedExternalCounts :=
@@ -2623,7 +2701,7 @@ def cases : Array Case := #[
       "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
     requiredExternals := #[``Nat.sub]
     requiredExecutedExternals := #[``Nat.sub]
     requiredExecutedExternalCounts :=
