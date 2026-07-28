@@ -356,12 +356,26 @@ private def uint16Codec : FixedWidthValueCodec UInt16 where
     | _ => none
   encode value := .scalar (.uint16 value)
 
+private def int16Codec : FixedWidthValueCodec Int16 where
+  name := "Int16"
+  decode?
+    | .scalar (.uint16 value) => some ⟨value⟩
+    | _ => none
+  encode value := .scalar (.uint16 value.toUInt16)
+
 private def uint32Codec : FixedWidthValueCodec UInt32 where
   name := "UInt32"
   decode?
     | .scalar (.uint32 value) => some value
     | _ => none
   encode value := .scalar (.uint32 value)
+
+private def int32Codec : FixedWidthValueCodec Int32 where
+  name := "Int32"
+  decode?
+    | .scalar (.uint32 value) => some ⟨value⟩
+    | _ => none
+  encode value := .scalar (.uint32 value.toUInt32)
 
 private def uint64Codec : FixedWidthValueCodec UInt64 where
   name := "UInt64"
@@ -370,12 +384,26 @@ private def uint64Codec : FixedWidthValueCodec UInt64 where
     | _ => none
   encode value := .scalar (.uint64 value)
 
+private def int64Codec : FixedWidthValueCodec Int64 where
+  name := "Int64"
+  decode?
+    | .scalar (.uint64 value) => some ⟨value⟩
+    | _ => none
+  encode value := .scalar (.uint64 value.toUInt64)
+
 private def usizeCodec : FixedWidthValueCodec USize where
   name := "USize"
   decode?
     | .usize value => some value.toUSize
     | _ => none
   encode value := .usize value.toUInt64
+
+private def isizeCodec : FixedWidthValueCodec ISize where
+  name := "ISize"
+  decode?
+    | .usize value => some ⟨value.toUSize⟩
+    | _ => none
+  encode value := .usize value.toUSize.toUInt64
 
 private def externalFixedWidthValue (codec : FixedWidthValueCodec α)
     (request : ExternalRequest) (value : Value) : Except RuntimeFault α :=
@@ -1845,6 +1873,238 @@ private def fixedWidthConversionGuard (sourceCodec : FixedWidthValueCodec α)
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
+private structure SignedFixedWidthContract (α : Type) where
+  typeName : Name
+  width : Nat
+  codec : FixedWidthValueCodec α
+  ofNat : Nat → α
+  ofInt : Int → α
+  toInt : α → Int
+  add : α → α → α
+  sub : α → α → α
+  mul : α → α → α
+  div : α → α → α
+  modulo : α → α → α
+  land : α → α → α
+  lor : α → α → α
+  xor : α → α → α
+  shiftLeft : α → α → α
+  shiftRight : α → α → α
+  complement : α → α
+  neg : α → α
+  abs : α → α
+  decEq : α → α → Bool
+  decLt : α → α → Bool
+  decLe : α → α → Bool
+
+private def signedFixedWidthContractGuard
+    (contract : SignedFixedWidthContract α) : Bool :=
+  let magnitude : Nat := 2 ^ (contract.width - 1)
+  let minimum : Int := -(Int.ofNat magnitude)
+  let maximum : Int := Int.ofNat (magnitude - 1)
+  let value := contract.ofInt
+  let name := contract.typeName
+  fixedWidthBinaryGuard contract.codec name contract.add
+      (value maximum) (value 1) (value minimum) &&
+    fixedWidthBinaryGuard contract.codec name contract.sub
+      (value minimum) (value 1) (value maximum) &&
+    fixedWidthBinaryGuard contract.codec name contract.mul
+      (value (Int.ofNat (2 ^ (contract.width - 2)))) (value 2) (value minimum) &&
+    fixedWidthBinaryGuard contract.codec name contract.div
+      (value (-7)) (value 3) (value (-2)) &&
+    fixedWidthBinaryGuard contract.codec name contract.div
+      (value minimum) (value (-1)) (value minimum) &&
+    fixedWidthBinaryGuard contract.codec name contract.div
+      (value (-7)) (value 0) (value 0) &&
+    fixedWidthBinaryGuard contract.codec name contract.modulo
+      (value (-7)) (value 3) (value (-1)) &&
+    fixedWidthBinaryGuard contract.codec name contract.modulo
+      (value 7) (value (-3)) (value 1) &&
+    fixedWidthBinaryGuard contract.codec name contract.modulo
+      (value (-7)) (value 0) (value (-7)) &&
+    fixedWidthBinaryGuard contract.codec name contract.land
+      (value (-16)) (value 60) (value 48) &&
+    fixedWidthBinaryGuard contract.codec name contract.lor
+      (value (-64)) (value 60) (value (-4)) &&
+    fixedWidthBinaryGuard contract.codec name contract.xor
+      (value (-16)) (value 60) (value (-52)) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftLeft
+      (value (minimum + 1)) (value (-(Int.ofNat contract.width))) (value (minimum + 1)) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftLeft
+      (value (minimum + 1)) (value (-1)) (value minimum) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftLeft
+      (value (minimum + 1)) (value (Int.ofNat contract.width + 1)) (value 2) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftRight
+      (value (minimum + 1)) (value (-(Int.ofNat contract.width))) (value (minimum + 1)) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftRight
+      (value (minimum + 1)) (value (-1)) (value (-1)) &&
+    fixedWidthBinaryGuard contract.codec name contract.shiftRight
+      (value (minimum + 1)) (value (Int.ofNat contract.width + 1)) (value (minimum / 2)) &&
+    fixedWidthUnaryGuard contract.codec name contract.complement
+      (value 0) (value (-1)) &&
+    fixedWidthUnaryGuard contract.codec name contract.neg
+      (value minimum) (value minimum) &&
+    fixedWidthUnaryGuard contract.codec name contract.abs
+      (value (-7)) (value 7) &&
+    fixedWidthUnaryGuard contract.codec name contract.abs
+      (value minimum) (value minimum) &&
+    fixedWidthDecisionGuard contract.codec name contract.decEq
+      (value (-1)) (value (-1)) true &&
+    fixedWidthDecisionGuard contract.codec name contract.decEq
+      (value (-1)) (value 1) false &&
+    fixedWidthDecisionGuard contract.codec name contract.decLt
+      (value (-1)) (value 0) true &&
+    fixedWidthDecisionGuard contract.codec name contract.decLt
+      (value maximum) (value minimum) false &&
+    fixedWidthDecisionGuard contract.codec name contract.decLe
+      (value minimum) (value minimum) true &&
+    fixedWidthDecisionGuard contract.codec name contract.decLe
+      (value 0) (value (-1)) false &&
+    natToFixedWidthGuard contract.codec name contract.ofNat
+      (2 ^ contract.width - 1) (value (-1)) &&
+    natToFixedWidthGuard contract.codec name contract.ofNat
+      (2 ^ contract.width) (value 0) &&
+    natToFixedWidthGuard contract.codec name contract.ofNat
+      multiLimbNat (value 17) &&
+    intToFixedWidthGuard contract.codec name contract.ofInt
+      (maximum + 1) (value minimum) &&
+    intToFixedWidthGuard contract.codec name contract.ofInt
+      (minimum - 1) (value maximum) &&
+    intToFixedWidthGuard contract.codec name contract.ofInt
+      multiLimbInt (value 17) &&
+    intToFixedWidthGuard contract.codec name contract.ofInt
+      (-multiLimbInt) (value (-17)) &&
+    fixedWidthToIntGuard contract.codec name contract.toInt
+      (value minimum) minimum &&
+    fixedWidthToIntGuard contract.codec name contract.toInt
+      (value maximum) maximum
+
+private def int8Contract : SignedFixedWidthContract Int8 where
+  typeName := ``Int8
+  width := 8
+  codec := int8Codec
+  ofNat := Int8.ofNat
+  ofInt := Int8.ofInt
+  toInt := Int8.toInt
+  add := Int8.add
+  sub := Int8.sub
+  mul := Int8.mul
+  div := Int8.div
+  modulo := Int8.mod
+  land := Int8.land
+  lor := Int8.lor
+  xor := Int8.xor
+  shiftLeft := Int8.shiftLeft
+  shiftRight := Int8.shiftRight
+  complement := Int8.complement
+  neg := Int8.neg
+  abs := Int8.abs
+  decEq := fun left right => decide (left = right)
+  decLt := fun left right => decide (left < right)
+  decLe := fun left right => decide (left ≤ right)
+
+private def int16Contract : SignedFixedWidthContract Int16 where
+  typeName := ``Int16
+  width := 16
+  codec := int16Codec
+  ofNat := Int16.ofNat
+  ofInt := Int16.ofInt
+  toInt := Int16.toInt
+  add := Int16.add
+  sub := Int16.sub
+  mul := Int16.mul
+  div := Int16.div
+  modulo := Int16.mod
+  land := Int16.land
+  lor := Int16.lor
+  xor := Int16.xor
+  shiftLeft := Int16.shiftLeft
+  shiftRight := Int16.shiftRight
+  complement := Int16.complement
+  neg := Int16.neg
+  abs := Int16.abs
+  decEq := fun left right => decide (left = right)
+  decLt := fun left right => decide (left < right)
+  decLe := fun left right => decide (left ≤ right)
+
+private def int32Contract : SignedFixedWidthContract Int32 where
+  typeName := ``Int32
+  width := 32
+  codec := int32Codec
+  ofNat := Int32.ofNat
+  ofInt := Int32.ofInt
+  toInt := Int32.toInt
+  add := Int32.add
+  sub := Int32.sub
+  mul := Int32.mul
+  div := Int32.div
+  modulo := Int32.mod
+  land := Int32.land
+  lor := Int32.lor
+  xor := Int32.xor
+  shiftLeft := Int32.shiftLeft
+  shiftRight := Int32.shiftRight
+  complement := Int32.complement
+  neg := Int32.neg
+  abs := Int32.abs
+  decEq := fun left right => decide (left = right)
+  decLt := fun left right => decide (left < right)
+  decLe := fun left right => decide (left ≤ right)
+
+private def int64Contract : SignedFixedWidthContract Int64 where
+  typeName := ``Int64
+  width := 64
+  codec := int64Codec
+  ofNat := Int64.ofNat
+  ofInt := Int64.ofInt
+  toInt := Int64.toInt
+  add := Int64.add
+  sub := Int64.sub
+  mul := Int64.mul
+  div := Int64.div
+  modulo := Int64.mod
+  land := Int64.land
+  lor := Int64.lor
+  xor := Int64.xor
+  shiftLeft := Int64.shiftLeft
+  shiftRight := Int64.shiftRight
+  complement := Int64.complement
+  neg := Int64.neg
+  abs := Int64.abs
+  decEq := fun left right => decide (left = right)
+  decLt := fun left right => decide (left < right)
+  decLe := fun left right => decide (left ≤ right)
+
+private def isizeContract : SignedFixedWidthContract ISize where
+  typeName := ``ISize
+  width := System.Platform.numBits
+  codec := isizeCodec
+  ofNat := ISize.ofNat
+  ofInt := ISize.ofInt
+  toInt := ISize.toInt
+  add := ISize.add
+  sub := ISize.sub
+  mul := ISize.mul
+  div := ISize.div
+  modulo := ISize.mod
+  land := ISize.land
+  lor := ISize.lor
+  xor := ISize.xor
+  shiftLeft := ISize.shiftLeft
+  shiftRight := ISize.shiftRight
+  complement := ISize.complement
+  neg := ISize.neg
+  abs := ISize.abs
+  decEq := fun left right => decide (left = right)
+  decLt := fun left right => decide (left < right)
+  decLe := fun left right => decide (left ≤ right)
+
+#guard signedFixedWidthContractGuard int8Contract
+#guard signedFixedWidthContractGuard int16Contract
+#guard signedFixedWidthContractGuard int32Contract
+#guard signedFixedWidthContractGuard int64Contract
+#guard signedFixedWidthContractGuard isizeContract
+
 private def int8 (value : Int) : Int8 :=
   Int8.ofInt value
 
@@ -2471,29 +2731,67 @@ private def fixedWidthConversionHandler (name : Name)
     (operation : α → β) : NamedExternalHandler :=
   { name, call := fixedWidthConversionExternal sourceCodec targetCodec operation }
 
-private def int8ExternalHandlers : List NamedExternalHandler := [
-  fixedWidthBinaryHandler ``Int8.add int8Codec Int8.add,
-  fixedWidthBinaryHandler ``Int8.sub int8Codec Int8.sub,
-  fixedWidthBinaryHandler ``Int8.mul int8Codec Int8.mul,
-  fixedWidthBinaryHandler ``Int8.div int8Codec Int8.div,
-  fixedWidthBinaryHandler ``Int8.mod int8Codec Int8.mod,
-  fixedWidthBinaryHandler ``Int8.land int8Codec Int8.land,
-  fixedWidthBinaryHandler ``Int8.lor int8Codec Int8.lor,
-  fixedWidthBinaryHandler ``Int8.xor int8Codec Int8.xor,
-  fixedWidthBinaryHandler ``Int8.shiftLeft int8Codec Int8.shiftLeft,
-  fixedWidthBinaryHandler ``Int8.shiftRight int8Codec Int8.shiftRight,
-  fixedWidthUnaryHandler ``Int8.complement int8Codec Int8.complement,
-  fixedWidthUnaryHandler ``Int8.neg int8Codec Int8.neg,
-  fixedWidthUnaryHandler ``Int8.abs int8Codec Int8.abs,
-  fixedWidthDecisionHandler ``Int8.decEq int8Codec
-    (fun left right => decide (left = right)),
-  fixedWidthDecisionHandler ``Int8.decLt int8Codec
-    (fun left right => decide (left < right)),
-  fixedWidthDecisionHandler ``Int8.decLe int8Codec
-    (fun left right => decide (left ≤ right)),
-  natToFixedWidthHandler ``Int8.ofNat int8Codec Int8.ofNat,
-  intToFixedWidthHandler ``Int8.ofInt int8Codec Int8.ofInt,
-  fixedWidthToIntHandler ``Int8.toInt int8Codec Int8.toInt
+private def signedFixedWidthExternalHandlers
+    (contract : SignedFixedWidthContract α) : List NamedExternalHandler :=
+  let externalName (suffix : String) := Name.str contract.typeName suffix
+  [
+    fixedWidthBinaryHandler (externalName "add") contract.codec contract.add,
+    fixedWidthBinaryHandler (externalName "sub") contract.codec contract.sub,
+    fixedWidthBinaryHandler (externalName "mul") contract.codec contract.mul,
+    fixedWidthBinaryHandler (externalName "div") contract.codec contract.div,
+    fixedWidthBinaryHandler (externalName "mod") contract.codec contract.modulo,
+    fixedWidthBinaryHandler (externalName "land") contract.codec contract.land,
+    fixedWidthBinaryHandler (externalName "lor") contract.codec contract.lor,
+    fixedWidthBinaryHandler (externalName "xor") contract.codec contract.xor,
+    fixedWidthBinaryHandler (externalName "shiftLeft") contract.codec contract.shiftLeft,
+    fixedWidthBinaryHandler (externalName "shiftRight") contract.codec contract.shiftRight,
+    fixedWidthUnaryHandler (externalName "complement") contract.codec contract.complement,
+    fixedWidthUnaryHandler (externalName "neg") contract.codec contract.neg,
+    fixedWidthUnaryHandler (externalName "abs") contract.codec contract.abs,
+    fixedWidthDecisionHandler (externalName "decEq") contract.codec contract.decEq,
+    fixedWidthDecisionHandler (externalName "decLt") contract.codec contract.decLt,
+    fixedWidthDecisionHandler (externalName "decLe") contract.codec contract.decLe,
+    natToFixedWidthHandler (externalName "ofNat") contract.codec contract.ofNat,
+    intToFixedWidthHandler (externalName "ofInt") contract.codec contract.ofInt,
+    fixedWidthToIntHandler (externalName "toInt") contract.codec contract.toInt
+  ]
+
+private def int8ExternalHandlers : List NamedExternalHandler :=
+  signedFixedWidthExternalHandlers int8Contract
+
+private def int16ExternalHandlers : List NamedExternalHandler :=
+  signedFixedWidthExternalHandlers int16Contract
+
+private def int32ExternalHandlers : List NamedExternalHandler :=
+  signedFixedWidthExternalHandlers int32Contract
+
+private def int64ExternalHandlers : List NamedExternalHandler :=
+  signedFixedWidthExternalHandlers int64Contract
+
+private def isizeExternalHandlers : List NamedExternalHandler :=
+  signedFixedWidthExternalHandlers isizeContract
+
+private def signedFixedWidthConversionHandlers : List NamedExternalHandler := [
+  fixedWidthConversionHandler ``Int8.toInt16 int8Codec int16Codec Int8.toInt16,
+  fixedWidthConversionHandler ``Int8.toInt32 int8Codec int32Codec Int8.toInt32,
+  fixedWidthConversionHandler ``Int8.toInt64 int8Codec int64Codec Int8.toInt64,
+  fixedWidthConversionHandler ``Int8.toISize int8Codec isizeCodec Int8.toISize,
+  fixedWidthConversionHandler ``Int16.toInt8 int16Codec int8Codec Int16.toInt8,
+  fixedWidthConversionHandler ``Int16.toInt32 int16Codec int32Codec Int16.toInt32,
+  fixedWidthConversionHandler ``Int16.toInt64 int16Codec int64Codec Int16.toInt64,
+  fixedWidthConversionHandler ``Int16.toISize int16Codec isizeCodec Int16.toISize,
+  fixedWidthConversionHandler ``Int32.toInt8 int32Codec int8Codec Int32.toInt8,
+  fixedWidthConversionHandler ``Int32.toInt16 int32Codec int16Codec Int32.toInt16,
+  fixedWidthConversionHandler ``Int32.toInt64 int32Codec int64Codec Int32.toInt64,
+  fixedWidthConversionHandler ``Int32.toISize int32Codec isizeCodec Int32.toISize,
+  fixedWidthConversionHandler ``Int64.toInt8 int64Codec int8Codec Int64.toInt8,
+  fixedWidthConversionHandler ``Int64.toInt16 int64Codec int16Codec Int64.toInt16,
+  fixedWidthConversionHandler ``Int64.toInt32 int64Codec int32Codec Int64.toInt32,
+  fixedWidthConversionHandler ``Int64.toISize int64Codec isizeCodec Int64.toISize,
+  fixedWidthConversionHandler ``ISize.toInt8 isizeCodec int8Codec ISize.toInt8,
+  fixedWidthConversionHandler ``ISize.toInt16 isizeCodec int16Codec ISize.toInt16,
+  fixedWidthConversionHandler ``ISize.toInt32 isizeCodec int32Codec ISize.toInt32,
+  fixedWidthConversionHandler ``ISize.toInt64 isizeCodec int64Codec ISize.toInt64
 ]
 
 private def uint8ExternalHandlers : List NamedExternalHandler := [
@@ -2632,10 +2930,12 @@ private def usizeExternalHandlers : List NamedExternalHandler := [
 ]
 
 private def fixedWidthExternalHandlers : List NamedExternalHandler :=
-  int8ExternalHandlers ++ uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
+  int8ExternalHandlers ++ int16ExternalHandlers ++ int32ExternalHandlers ++
+    int64ExternalHandlers ++ isizeExternalHandlers ++ signedFixedWidthConversionHandlers ++
+    uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
     uint64ExternalHandlers ++ usizeExternalHandlers
 
-#guard fixedWidthExternalHandlers.length == 124
+#guard fixedWidthExternalHandlers.length == 220
 
 #guard fixedWidthExternalHandlers.all fun handler =>
   (fixedWidthExternalHandlers.filter fun candidate =>

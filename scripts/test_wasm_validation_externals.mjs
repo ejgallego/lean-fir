@@ -99,6 +99,44 @@ const signedFixedWidthFamilies = [
       fixedWidthScalarValue("uint8", BigInt.asUintN(8, value)),
     wrongValue: fixedWidthScalarValue("uint16", 1n),
   },
+  {
+    typeName: "Int16",
+    width: 16,
+    decode: (value, context) =>
+      BigInt.asIntN(16, scalarUInt16(value, context)),
+    encode: value =>
+      fixedWidthScalarValue("uint16", BigInt.asUintN(16, value)),
+    wrongValue: fixedWidthScalarValue("uint8", 1n),
+  },
+  {
+    typeName: "Int32",
+    width: 32,
+    decode: (value, context) =>
+      BigInt.asIntN(32, scalarUInt32(value, context)),
+    encode: value =>
+      fixedWidthScalarValue("uint32", BigInt.asUintN(32, value)),
+    wrongValue: fixedWidthScalarValue("uint8", 1n),
+  },
+  {
+    typeName: "Int64",
+    width: 64,
+    decode: (value, context) =>
+      BigInt.asIntN(64, scalarUInt64(value, context)),
+    encode: value =>
+      fixedWidthScalarValue("uint64", BigInt.asUintN(64, value)),
+    wrongValue: fixedWidthScalarValue("uint8", 1n),
+  },
+  {
+    typeName: "ISize",
+    width: 64,
+    decode: (value, context) =>
+      BigInt.asIntN(64, semanticUSize(value, context)),
+    encode: value => ({
+      kind: "usize",
+      value: BigInt.asUintN(64, value),
+    }),
+    wrongValue: fixedWidthScalarValue("uint64", 1n),
+  },
 ];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
@@ -343,14 +381,24 @@ for (const source of fixedWidthFamilies) {
 }
 assert.equal(fixedWidthConversionCount, 20);
 
-for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies) {
+for (const {
+  typeName,
+  width,
+  decode,
+  encode,
+  wrongValue,
+} of signedFixedWidthFamilies) {
   const declaration = suffix => `${typeName}.${suffix}`;
+  const min = -(1n << BigInt(width - 1));
+  const max = (1n << BigInt(width - 1)) - 1n;
+  const halfRange = 1n << BigInt(width - 2);
+  const nearMin = min + 1n;
   for (const [suffix, left, right, expected] of [
-    ["add", 127n, 1n, -128n],
-    ["sub", -128n, 1n, 127n],
-    ["mul", 64n, 2n, -128n],
+    ["add", max, 1n, min],
+    ["sub", min, 1n, max],
+    ["mul", halfRange, 2n, min],
     ["div", -7n, 3n, -2n],
-    ["div", -128n, -1n, -128n],
+    ["div", min, -1n, min],
     ["div", -7n, 0n, 0n],
     ["mod", -7n, 3n, -1n],
     ["mod", 7n, -3n, 1n],
@@ -358,12 +406,12 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
     ["land", -16n, 60n, 48n],
     ["lor", -64n, 60n, -4n],
     ["xor", -16n, 60n, -52n],
-    ["shiftLeft", -127n, -8n, -127n],
-    ["shiftLeft", -127n, -1n, -128n],
-    ["shiftLeft", -127n, 9n, 2n],
-    ["shiftRight", -127n, -8n, -127n],
-    ["shiftRight", -127n, -1n, -1n],
-    ["shiftRight", -127n, 9n, -64n],
+    ["shiftLeft", nearMin, -BigInt(width), nearMin],
+    ["shiftLeft", nearMin, -1n, min],
+    ["shiftLeft", nearMin, BigInt(width + 1), 2n],
+    ["shiftRight", nearMin, -BigInt(width), nearMin],
+    ["shiftRight", nearMin, -1n, -1n],
+    ["shiftRight", nearMin, BigInt(width + 1), nearMin >> 1n],
   ]) {
     const name = declaration(suffix);
     const host = new SemanticHost();
@@ -379,9 +427,9 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
   }
   for (const [suffix, input, expected] of [
     ["complement", 0n, -1n],
-    ["neg", -128n, -128n],
+    ["neg", min, min],
     ["abs", -7n, 7n],
-    ["abs", -128n, -128n],
+    ["abs", min, min],
   ]) {
     const name = declaration(suffix);
     const host = new SemanticHost();
@@ -397,8 +445,8 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
     ["decEq", -1n, -1n, 1n],
     ["decEq", -1n, 1n, 0n],
     ["decLt", -1n, 0n, 1n],
-    ["decLt", 127n, -128n, 0n],
-    ["decLe", -128n, -128n, 1n],
+    ["decLt", max, min, 0n],
+    ["decLe", min, min, 1n],
     ["decLe", 0n, -1n, 0n],
   ]) {
     const name = declaration(suffix);
@@ -419,8 +467,8 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
   }
 
   for (const [input, expected] of [
-    [255n, -1n],
-    [256n, 0n],
+    [(1n << BigInt(width)) - 1n, -1n],
+    [1n << BigInt(width), 0n],
     [0x100000000000000000000000000000011n, 17n],
   ]) {
     const name = declaration("ofNat");
@@ -435,8 +483,8 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
   }
 
   for (const [input, expected] of [
-    [128n, -128n],
-    [-129n, 127n],
+    [max + 1n, min],
+    [min - 1n, max],
     [0x100000000000000000000000000000011n, 17n],
     [-0x100000000000000000000000000000011n, -17n],
   ]) {
@@ -451,7 +499,7 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
     assert.equal(integerValue(host, inputValue, `${name} retained input`), input);
   }
 
-  for (const input of [-128n, 127n]) {
+  for (const input of [min, max]) {
     const name = declaration("toInt");
     const host = new SemanticHost();
     const inputValue = encode(input);
@@ -459,7 +507,8 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
     const result = invoke(
       validationExternalRegistry[name], host, [inputValue]);
     assert.equal(integerValue(host, result, `${name} result`), input);
-    assert.equal(host.nextLocation, frontier);
+    const allocates = input < -0x80000000n || input > 0x7fffffffn;
+    assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
     assert.equal(decode(inputValue, `${name} retained input`), input);
   }
 
@@ -485,6 +534,38 @@ for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies)
     new SemanticHost(),
     [wrongValue]));
 }
+
+let signedFixedWidthConversionCount = 0;
+for (const source of signedFixedWidthFamilies) {
+  for (const target of signedFixedWidthFamilies) {
+    if (source.typeName === target.typeName) {
+      continue;
+    }
+    signedFixedWidthConversionCount += 1;
+    const name = `${source.typeName}.to${target.typeName}`;
+    const input = BigInt.asIntN(
+      source.width, -0x123456789abcdefn);
+    const expected = BigInt.asIntN(target.width, input);
+    assert.strictEqual(
+      formatExternalRegistry[name],
+      validationExternalRegistry[name]);
+    const host = new SemanticHost();
+    const inputValue = source.encode(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(target.decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(
+      source.decode(inputValue, `${name} retained input`),
+      input);
+    assert.throws(() => invoke(
+      validationExternalRegistry[name],
+      new SemanticHost(),
+      [source.wrongValue]));
+  }
+}
+assert.equal(signedFixedWidthConversionCount, 20);
 
 for (const [leftValue, rightValue, expected, allocates] of [
   [6n, 7n, 42n, false],

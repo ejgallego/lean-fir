@@ -140,13 +140,17 @@ function scalarFixedWidthCodec(scalarKind, width) {
   };
 }
 
-function signedScalarFixedWidthCodec(scalarKind, width) {
-  const unsigned = scalarFixedWidthCodec(scalarKind, width);
+function signedFixedWidthCodec(unsigned, width) {
   return {
     decode: (value, context) =>
       BigInt.asIntN(width, unsigned.decode(value, context)),
     encode: value => unsigned.encode(BigInt.asUintN(width, value)),
   };
+}
+
+function signedScalarFixedWidthCodec(scalarKind, width) {
+  return signedFixedWidthCodec(
+    scalarFixedWidthCodec(scalarKind, width), width);
 }
 
 const usizeFixedWidthCodec = {
@@ -164,6 +168,10 @@ const fixedWidthCodecs = {
 
 const signedFixedWidthCodecs = {
   Int8: signedScalarFixedWidthCodec("uint8", 8),
+  Int16: signedScalarFixedWidthCodec("uint16", 16),
+  Int32: signedScalarFixedWidthCodec("uint32", 32),
+  Int64: signedScalarFixedWidthCodec("uint64", 64),
+  ISize: signedFixedWidthCodec(usizeFixedWidthCodec, 64),
 };
 
 function fixedWidthBinary(declaration, codec, operation) {
@@ -242,6 +250,20 @@ function fixedWidthConversionFamily(sourceTypeName) {
   const sourceCodec = fixedWidthCodecs[sourceTypeName];
   return Object.fromEntries(
     Object.entries(fixedWidthCodecs)
+      .filter(([targetTypeName]) => targetTypeName !== sourceTypeName)
+      .map(([targetTypeName, targetCodec]) => {
+        const declaration = `${sourceTypeName}.to${targetTypeName}`;
+        return [
+          declaration,
+          fixedWidthConversion(declaration, sourceCodec, targetCodec),
+        ];
+      }));
+}
+
+function signedFixedWidthConversionFamily(sourceTypeName) {
+  const sourceCodec = signedFixedWidthCodecs[sourceTypeName];
+  return Object.fromEntries(
+    Object.entries(signedFixedWidthCodecs)
       .filter(([targetTypeName]) => targetTypeName !== sourceTypeName)
       .map(([targetTypeName, targetCodec]) => {
         const declaration = `${sourceTypeName}.to${targetTypeName}`;
@@ -520,6 +542,39 @@ export const validationExternalRegistry = {
     "Int8.ofInt", signedFixedWidthCodecs.Int8),
   "Int8.toInt": fixedWidthToInteger(
     "Int8.toInt", signedFixedWidthCodecs.Int8),
+  ...signedFixedWidthConversionFamily("Int8"),
+  ...signedFixedWidthExternalFamily("Int16", 16, signedFixedWidthCodecs.Int16),
+  "Int16.ofNat": naturalToFixedWidth(
+    "Int16.ofNat", signedFixedWidthCodecs.Int16),
+  "Int16.ofInt": integerToFixedWidth(
+    "Int16.ofInt", signedFixedWidthCodecs.Int16),
+  "Int16.toInt": fixedWidthToInteger(
+    "Int16.toInt", signedFixedWidthCodecs.Int16),
+  ...signedFixedWidthConversionFamily("Int16"),
+  ...signedFixedWidthExternalFamily("Int32", 32, signedFixedWidthCodecs.Int32),
+  "Int32.ofNat": naturalToFixedWidth(
+    "Int32.ofNat", signedFixedWidthCodecs.Int32),
+  "Int32.ofInt": integerToFixedWidth(
+    "Int32.ofInt", signedFixedWidthCodecs.Int32),
+  "Int32.toInt": fixedWidthToInteger(
+    "Int32.toInt", signedFixedWidthCodecs.Int32),
+  ...signedFixedWidthConversionFamily("Int32"),
+  ...signedFixedWidthExternalFamily("Int64", 64, signedFixedWidthCodecs.Int64),
+  "Int64.ofNat": naturalToFixedWidth(
+    "Int64.ofNat", signedFixedWidthCodecs.Int64),
+  "Int64.ofInt": integerToFixedWidth(
+    "Int64.ofInt", signedFixedWidthCodecs.Int64),
+  "Int64.toInt": fixedWidthToInteger(
+    "Int64.toInt", signedFixedWidthCodecs.Int64),
+  ...signedFixedWidthConversionFamily("Int64"),
+  ...signedFixedWidthExternalFamily("ISize", 64, signedFixedWidthCodecs.ISize),
+  "ISize.ofNat": naturalToFixedWidth(
+    "ISize.ofNat", signedFixedWidthCodecs.ISize),
+  "ISize.ofInt": integerToFixedWidth(
+    "ISize.ofInt", signedFixedWidthCodecs.ISize),
+  "ISize.toInt": fixedWidthToInteger(
+    "ISize.toInt", signedFixedWidthCodecs.ISize),
+  ...signedFixedWidthConversionFamily("ISize"),
   ...fixedWidthExternalFamily("UInt8", 8, fixedWidthCodecs.UInt8),
   "UInt8.ofNat": naturalToFixedWidth(
     "UInt8.ofNat", fixedWidthCodecs.UInt8),
