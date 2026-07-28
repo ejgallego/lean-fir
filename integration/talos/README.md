@@ -172,13 +172,23 @@ Object, `USize`, and packed integer projections now share one generic
 numeric object/result locals, runtime import, concrete resolver contract, and
 physical object operand from the real pipeline and `StateRelated`, then
 compose the existing W6 heap refinements with any verified continuation.
+`DirectValueEvaluates` and `codeWP_of_directValueEvaluates` now assemble these
+one-node boundaries into the first real structural theorem: arbitrary finite
+return/direct-value spines are proved by induction while the target split and
+numeric destination at every node are recovered from the production compiler
+and adapter. The exact remaining condition is
+`DirectLetRuntimeRefines`: every admitted successful direct source step must
+have a matching concrete step that establishes the related continuation state
+and preserves the selected resource invariant. This is a uniform runtime law,
+not a caller-built source/target derivation.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
-certificate-free boundary under `make talos-check`.
+certificate-free boundary, including the new structural theorem, under
+`make talos-check`.
 Existing certificate-shaped modules are retained only as internal sources of
 operation and invariant lemmas while erased-field constructor prefixes,
-the structural source-evaluation induction, control-flow, calls, externals,
-caches, and faults are migrated. The first
+the concrete direct-runtime law, control-flow, calls, externals, caches, and
+faults are migrated. The first
 endpoint preserves finite source behaviors conditionally;
 later finite-trace and weak-simulation work will cover divergence without
 proving source termination.

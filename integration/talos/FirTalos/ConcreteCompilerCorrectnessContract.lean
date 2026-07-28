@@ -54,6 +54,60 @@ example
   spec.correctReturn sourceEvaluation stateRelated parameterCount
 
 /--
+The structural direct-value theorem accepts one uniform runtime-refinement law,
+not a source/target translation derivation.  The complete target program,
+every target split, and every numeric local are recovered from
+`CodeAdapted`, which itself records the executable compiler/adaptor result.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {Invariant :
+      RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant : Invariant sourceRuntime sourceEnv initial locals witness)
+    (runtimeRefines :
+      DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Supported Invariant)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue :=
+  codeWP_of_directValueEvaluates evaluation adapted localsAligned stateRelated
+    invariant runtimeRefines parameterCount resultCount
+
+/--
 The recursive direct-`let` API is likewise certificate-free: its only
 recursive premise is correctness of the compiler-selected continuation.
 -/

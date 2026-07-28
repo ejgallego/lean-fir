@@ -380,8 +380,13 @@ acceptance tests pass.
    projections now use the actual compiler/adaptor
    equations, resolver alignment, concrete allocation refinement, checked
    local writes, and arbitrary continuations. Literal and constructor families
-   also have finite return corollaries. Assemble these rules into the
-   structural direct-`let` induction.
+   also have finite return corollaries. The first structural direct-`let`
+   theorem now covers arbitrary finite return/direct-value spines. Its
+   `DirectLetRuntimeRefines` premise is a uniform runtime law over
+   compiler/adaptor outputs, parameterized by the admitted declaration
+   predicate and the resource invariant; it is not a per-program translation
+   certificate. Discharge that law from the existing operation refinements for
+   the currently admitted direct-value fragment.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

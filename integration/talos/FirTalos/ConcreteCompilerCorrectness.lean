@@ -2163,6 +2163,212 @@ theorem ConcreteSupportedExport.codeWP_constructorFVarLet
   exact continued continuationAdapted resultFound targetSet
 
 /--
+Successful source evaluation for the first structural compiler fragment:
+returns and direct-value `let` nodes.
+
+This is a source semantic relation, not a translation certificate.  It is the
+direct-value subrelation of `CodeEvaluates`; target code remains absent and is
+recovered exclusively from the executable compiler and Talos adapter.
+-/
+inductive DirectValueEvaluates (context : Fir.Wasm.Context)
+    (Supported : LCNF.LetDecl .impure → Prop) :
+    RuntimeState → Env → LCNF.Code .impure → RuntimeState → Value → Prop where
+  | ret
+      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv
+        (.return result)
+        sourceRuntime sourceValue
+  | letValue
+      (supported : Supported decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (continued :
+        DirectValueEvaluates context Supported nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation
+          resultRuntime resultValue) :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv
+        (.let decl continuation) resultRuntime resultValue
+
+/-- The direct-value evaluation view is a sound restriction of the existing
+proof-facing source semantics. -/
+theorem DirectValueEvaluates.toCodeEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue) :
+    CodeEvaluates context sourceRuntime sourceEnv sourceCode resultRuntime
+      resultValue := by
+  induction evaluation with
+  | ret sourceLookup =>
+      exact .ret sourceLookup
+  | letValue _ sourceStep _ ih =>
+      exact .letValue sourceStep ih
+
+/-- Direct-value evaluation also denotes an actual finite run of the
+repository's executable source interpreter. -/
+theorem DirectValueEvaluates.execEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue)
+    (externals : ExternalImpl) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) :=
+  evaluation.toCodeEvaluates.execEvaluates externals
+
+/--
+The uniform runtime condition needed by the structural direct-`let` proof.
+
+For every successful direct source value accepted by the production compiler
+and adapter, the concrete runtime must implement the same step and establish
+the related continuation state.  This property contains no target program or
+per-source translation derivation: `valueCode`, `targetValue`, and
+`resultIndex` are universally quantified outputs of the executable pipeline.
+The operation-specific W6 refinement theorems discharge its cases.
+-/
+def DirectLetRuntimeRefines
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (Supported : LCNF.LetDecl .impure → Prop)
+    (Invariant :
+      RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex : Nat}
+      {witness : RefinementWitness},
+    Supported decl →
+      Invariant sourceRuntime sourceEnv targetStore targetLocals witness →
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness,
+        LetStepSimulates context sourceFunction module hostEnv decl targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+          targetLocals nextLocals resultIndex witness nextWitness ∧
+        Invariant nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+          nextStore nextLocals nextWitness
+
+/--
+Structural, certificate-free partial correctness for the direct-value code
+spine.
+
+The proof inducts over source syntax and successful source evaluation.  At
+each `let`, `CodeAdapted.let_eq` recovers the exact value prefix, destination
+local, and recursively compiled continuation from the production pipeline;
+`DirectLetRuntimeRefines` supplies only the uniform runtime refinement law.
+The return leaf derives the final ABI lane and physical value from
+`StateRelated`.
+-/
+theorem codeWP_of_directValueEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {Invariant :
+      RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant : Invariant sourceRuntime sourceEnv initial locals witness)
+    (runtimeRefines :
+      DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Supported Invariant)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing target initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst target
+      exact ⟨initial, witness, kind, physical,
+        codeWP_return_to_exactBodyPost
+          (callerTail := callerTail) localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup parameterCount resultCount,
+        stateRelated.1, stateRelated.2.1, valueRelated⟩
+  | letValue supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+        runtimeRefines supported invariant sourceStep stateRelated valueCompiled
+          valueAdapted resultFound
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 nextInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+
+/--
 Certificate-free partial compiler correctness for the base return case.
 
 The only dynamic premise is a source evaluation. The target proof is derived

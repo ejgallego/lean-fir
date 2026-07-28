@@ -3523,6 +3523,26 @@ host contract, or translation simulation. The next step is to assemble these
 direct-value rules into the structural source-code induction. No FIR semantic
 contract or executable ABI changed.
 
+W6.6ee supplies that first structural induction. `DirectValueEvaluates` is a
+source-only finite evaluation relation for return and direct-value `let`
+spines, with a proof that it embeds in the existing `CodeEvaluates` semantics
+and hence in executable `ExecEvaluates`. `DirectLetRuntimeRefines` states the
+uniform condition that the runtime must prove: for every admitted successful
+source step and every value prefix accepted by the production compiler and
+adapter, concrete execution establishes `LetStepSimulates` and preserves a
+caller-chosen resource invariant. It universally quantifies the emitted value
+program and numeric destination local rather than storing either as a
+translation witness. `codeWP_of_directValueEvaluates` then inducts over an
+arbitrarily long direct-value spine, inverts `compileCode`/adaptation at every
+node, threads the related concrete state, and derives the exact final
+function-body postcondition, runtime relation, clear failure channel, and
+ABI-indexed result relation. The compile-time contract harness applies this
+theorem without `ConcreteCodeSimulation` or another source/target certificate.
+The next slice discharges the uniform runtime law from the existing
+literal/constructor/projection refinements for the currently admitted
+direct-value fragment, then extends the induction with effects and control
+flow. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

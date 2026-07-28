@@ -58,9 +58,13 @@ Cross-cutting W6.5 state:
   object operand and arbitrary continuation; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
   applications have no caller-supplied simulation premise.
-  The structural source-evaluation induction, control-flow, calls, externals,
-  caches, and faults remain to migrate from the internal certificate-shaped
-  scaffolding;
+  `DirectValueEvaluates` and `codeWP_of_directValueEvaluates` now provide the
+  first structural source-evaluation induction for arbitrarily long
+  return/direct-value spines. The only step interface is the uniform
+  `DirectLetRuntimeRefines` law over admitted declarations, compiler/adaptor
+  outputs, and a preserved resource invariant. Discharging that law from the
+  listed operation refinements, then adding control-flow, calls, externals,
+  caches, and faults, remains;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness
