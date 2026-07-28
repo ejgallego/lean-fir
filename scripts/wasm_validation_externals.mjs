@@ -1,5 +1,6 @@
 import assert from "./wasm_assert.mjs";
 import {
+  stringExtract,
   stringLength,
   stringNext,
   stringOffsetOfPos,
@@ -88,6 +89,17 @@ function stringNaturalToNatural(declaration, operation) {
   };
 }
 
+function stringExtractExternal({ args, host, world }) {
+  assert.equal(args.length, 3, "String.Internal.extract external arity mismatch");
+  const source = stringValue(host, args[0], "String.Internal.extract source");
+  const begin = naturalValue(host, args[1], "String.Internal.extract begin");
+  const end = naturalValue(host, args[2], "String.Internal.extract end");
+  return {
+    value: host.alloc({ kind: "string", value: stringExtract(source, begin, end) }),
+    world,
+  };
+}
+
 function setByteArray({ args, host, world }) {
   assert.equal(args.length, 3, "ByteArray.set! external arity mismatch");
   const source = args[0];
@@ -142,6 +154,7 @@ export const validationExternalRegistry = {
     stringNaturalToNatural("String.Internal.offsetOfPos", stringOffsetOfPos),
   "String.Internal.next":
     stringNaturalToNatural("String.Internal.next", stringNext),
+  "String.Internal.extract": stringExtractExternal,
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");

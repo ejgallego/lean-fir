@@ -434,6 +434,19 @@ private def stringNext (source : String) (position : Nat) : Nat :=
   | some first => position + utf8Width first
   | none => position + 1
 
+private def stringExtract (source : String) (beginPos endPos : Nat) : String :=
+  let rec take : List Char → Nat → List Char
+    | [], _ => []
+    | char :: chars, position =>
+        if position == endPos then []
+        else char :: take chars (position + char.utf8Size)
+  let rec seek : List Char → Nat → List Char
+    | [], _ => []
+    | chars@(char :: tail), position =>
+        if position == beginPos then take chars position
+        else seek tail (position + char.utf8Size)
+  if beginPos >= endPos then "" else String.ofList (seek source.toList 0)
+
 private def stringCharToNatExternal (operation : String → Char → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -473,6 +486,20 @@ private def stringOffsetOfPosExternal (request : ExternalRequest) (runtime : Run
 private def stringNextExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse :=
   stringNatToNatExternal stringNext request runtime
+
+private def stringExtractExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [source, beginPos, endPos] := request.args.toList
+    | throw (.arityMismatch 3 request.args.size)
+  let source ← externalString request runtime source
+  let beginPos ← externalNat request runtime beginPos
+  let endPos ← externalNat request runtime endPos
+  let (runtime, reference) := alloc runtime (.string (stringExtract source beginPos endPos))
+  return {
+    value := .object reference
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
 
 private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
@@ -653,6 +680,48 @@ private def stringNatToNatGuard (name : Name) (operation : String → Nat → Na
 #guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 8 9
 
 #guard stringNatToNatGuard ``String.Internal.next stringNext "Aé😀Z" 50 51
+
+private def stringExtractGuard (source : String) (beginPos endPos : Nat)
+    (expected : String) : Bool :=
+  let (runtime, sourceReference) := alloc {} (.string source)
+  let (runtime, beginValue) := literal runtime (.nat beginPos)
+  let (runtime, endValue) := literal runtime (.nat endPos)
+  let request : ExternalRequest := {
+    name := ``String.Internal.extract
+    paramTypes := #[]
+    resultType := default
+    args := #[.object sourceReference, beginValue, endValue] }
+  match stringExtractExternal request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalString request after response.value, sourceReference, response.value with
+      | .ok actual, .heap sourceLocation, .object (.heap resultLocation) =>
+          match getLiveCell runtime sourceLocation, getLiveCell after sourceLocation with
+          | .ok beforeSource, .ok afterSource =>
+              actual == expected &&
+              beforeSource == afterSource &&
+              resultLocation == runtime.nextLocation &&
+              response.nextLocation == runtime.nextLocation + 1 &&
+              response.world == runtime.world
+          | _, _ => false
+      | _, _, _ => false
+
+#guard stringExtractGuard "Aé😀Z" 0 8 "Aé😀Z"
+
+#guard stringExtractGuard "Aé😀Z" 1 7 "é😀"
+
+#guard stringExtractGuard "Aé😀Z" 4 7 ""
+
+#guard stringExtractGuard "Aé😀Z" 3 4 "😀Z"
+
+#guard stringExtractGuard "Aé😀Z" 1 50 "é😀Z"
+
+#guard stringExtractGuard "Aé😀Z" 7 3 ""
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -971,6 +1040,8 @@ private def validationExternals : ExternalImpl where
       stringOffsetOfPosExternal request runtime
     else if request.name == ``String.Internal.next then
       stringNextExternal request runtime
+    else if request.name == ``String.Internal.extract then
+      stringExtractExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then

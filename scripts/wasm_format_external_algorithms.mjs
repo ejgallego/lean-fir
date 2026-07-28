@@ -50,10 +50,24 @@ export function stringUtf8ByteSize(source) {
 }
 
 export function stringExtract(source, begin, end) {
-  const bytes = encoder.encode(source);
-  const beginIndex = Math.min(Number(begin), bytes.length);
-  const endIndex = Math.min(Number(end), bytes.length);
-  return beginIndex < endIndex ? decoder.decode(bytes.slice(beginIndex, endIndex)) : "";
+  if (begin >= end) return "";
+  let position = 0n;
+  let result = "";
+  let foundBegin = false;
+  for (const char of source) {
+    if (!foundBegin) {
+      if (position === begin) {
+        foundBegin = true;
+      } else {
+        position += BigInt(encoder.encode(char).length);
+        continue;
+      }
+    }
+    if (position === end) return result;
+    result += char;
+    position += BigInt(encoder.encode(char).length);
+  }
+  return foundBegin ? result : "";
 }
 
 export function stringNext(source, position) {

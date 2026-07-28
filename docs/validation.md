@@ -1479,7 +1479,8 @@ Wasm import boundary and retains its own private event-time heap views.
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Nat.sub`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`, `Int.ofNat`,
 `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
-`ByteArray.get!`, `ByteArray.set!`, `String.Internal.length`,
+`ByteArray.get!`, `ByteArray.set!`, `String.Internal.extract`,
+`String.Internal.length`,
 `String.utf8ByteSize`, `String.Internal.posOf`,
 `String.Internal.offsetOfPos`, `String.Internal.next`, and the validation-owned
 Nat and ByteArray effect recorders are currently allowlisted. Natural addition
@@ -1495,7 +1496,10 @@ semantics: search returns a byte index, byte-to-character offset rounds a
 mid-scalar position forward, and `next` advances by the leading byte's encoded
 width or by one at a continuation, end, or past-end position. They accept both
 tagged and heap natural positions, preserve the heap and world, and return an
-exact natural position. The integer primitives decode and
+exact natural position. String extraction also consumes raw byte positions: an
+invalid begin boundary returns empty, while an invalid or past-end end boundary
+returns the suffix from a valid begin. It preserves the source and world and
+allocates one exact String result. The integer primitives decode and
 re-encode both signed immediate and heap representations; `Int.add` and
 `Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
 signed input to an exact natural result, and `Int.decLt` returns the scalar

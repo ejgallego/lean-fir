@@ -9,7 +9,6 @@ import {
 } from "./wasm_validation_externals.mjs";
 import {
   stringAppend,
-  stringExtract,
   stringPushn,
 } from "./wasm_format_external_algorithms.mjs";
 
@@ -47,13 +46,6 @@ export const formatExternalRegistry = {
     const codePoint = scalarUInt32(args[1], "String.Internal.pushn character");
     const count = naturalValue(host, args[2], "String.Internal.pushn count");
     return { value: stringResult(host, stringPushn(source, codePoint, count)), world };
-  },
-  "String.Internal.extract": ({ args, host, world }) => {
-    assert.equal(args.length, 3, "String.Internal.extract external arity mismatch");
-    const source = stringValue(host, args[0], "String.Internal.extract source");
-    const begin = naturalValue(host, args[1], "String.Internal.extract begin");
-    const end = naturalValue(host, args[2], "String.Internal.extract end");
-    return { value: stringResult(host, stringExtract(source, begin, end)), world };
   },
   panicCore: unreachablePanicHelper,
   "instInhabitedOfMonad._redArg": unreachablePanicHelper,
