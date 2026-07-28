@@ -249,6 +249,22 @@ def uint8ToNat (value : UInt8) : Nat :=
   UInt8.toNat value
 
 @[noinline]
+def uint8ToUInt16 (value : UInt8) : UInt16 :=
+  UInt8.toUInt16 value
+
+@[noinline]
+def uint8ToUInt32 (value : UInt8) : UInt32 :=
+  UInt8.toUInt32 value
+
+@[noinline]
+def uint8ToUInt64 (value : UInt8) : UInt64 :=
+  UInt8.toUInt64 value
+
+@[noinline]
+def uint8ToUSize (value : UInt8) : USize :=
+  UInt8.toUSize value
+
+@[noinline]
 def addUInt16 (left right : UInt16) : UInt16 :=
   UInt16.add left right
 
@@ -315,6 +331,22 @@ def natToUInt16 (value : Nat) : UInt16 :=
 @[noinline]
 def uint16ToNat (value : UInt16) : Nat :=
   UInt16.toNat value
+
+@[noinline]
+def uint16ToUInt8 (value : UInt16) : UInt8 :=
+  UInt16.toUInt8 value
+
+@[noinline]
+def uint16ToUInt32 (value : UInt16) : UInt32 :=
+  UInt16.toUInt32 value
+
+@[noinline]
+def uint16ToUInt64 (value : UInt16) : UInt64 :=
+  UInt16.toUInt64 value
+
+@[noinline]
+def uint16ToUSize (value : UInt16) : USize :=
+  UInt16.toUSize value
 
 def idUInt32 (value : UInt32) : UInt32 :=
   value
@@ -386,6 +418,22 @@ def natToUInt32 (value : Nat) : UInt32 :=
 @[noinline]
 def uint32ToNat (value : UInt32) : Nat :=
   UInt32.toNat value
+
+@[noinline]
+def uint32ToUInt8 (value : UInt32) : UInt8 :=
+  UInt32.toUInt8 value
+
+@[noinline]
+def uint32ToUInt16 (value : UInt32) : UInt16 :=
+  UInt32.toUInt16 value
+
+@[noinline]
+def uint32ToUInt64 (value : UInt32) : UInt64 :=
+  UInt32.toUInt64 value
+
+@[noinline]
+def uint32ToUSize (value : UInt32) : USize :=
+  UInt32.toUSize value
 
 def idUInt64 (value : UInt64) : UInt64 :=
   value
@@ -459,6 +507,22 @@ def uint64ToNat (value : UInt64) : Nat :=
   UInt64.toNat value
 
 @[noinline]
+def uint64ToUInt8 (value : UInt64) : UInt8 :=
+  UInt64.toUInt8 value
+
+@[noinline]
+def uint64ToUInt16 (value : UInt64) : UInt16 :=
+  UInt64.toUInt16 value
+
+@[noinline]
+def uint64ToUInt32 (value : UInt64) : UInt32 :=
+  UInt64.toUInt32 value
+
+@[noinline]
+def uint64ToUSize (value : UInt64) : USize :=
+  UInt64.toUSize value
+
+@[noinline]
 def addUSize (left right : USize) : USize :=
   USize.add left right
 
@@ -525,6 +589,22 @@ def natToUSize (value : Nat) : USize :=
 @[noinline]
 def usizeToNat (value : USize) : Nat :=
   USize.toNat value
+
+@[noinline]
+def usizeToUInt8 (value : USize) : UInt8 :=
+  USize.toUInt8 value
+
+@[noinline]
+def usizeToUInt16 (value : USize) : UInt16 :=
+  USize.toUInt16 value
+
+@[noinline]
+def usizeToUInt32 (value : USize) : UInt32 :=
+  USize.toUInt32 value
+
+@[noinline]
+def usizeToUInt64 (value : USize) : UInt64 :=
+  USize.toUInt64 value
 
 def maxUInt8 : UInt8 := 255
 
@@ -1707,6 +1787,28 @@ private def exactFixedWidthToNatExternalCase (codec : FixedWidthCaseCodec α)
   resultSchema := .nat
   native := fun _ => .nat (operation input)
   tags := (tags.push "fixed-width-unsigned-conversion").push "nat-word-conversion"
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactFixedWidthConversionExternalCase
+    (sourceCodec : FixedWidthCaseCodec α) (targetCodec : FixedWidthCaseCodec β)
+    (id : String) (entry : Lean.Name) (operation : α → β)
+    (external : Lean.Name) (input : α) (tags : Array String) (note : String) :
+    Case := {
+  id
+  entry
+  args := #[sourceCodec.datum input]
+  argSchemas := #[sourceCodec.schema]
+  resultSchema := targetCodec.schema
+  native := fun _ => targetCodec.datum (operation input)
+  tags :=
+    (tags.push "fixed-width-unsigned-conversion").push "fixed-width-cross-conversion"
   requiredLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfForms := #["fap", "extern", "return"]
   requiredExecutedLcnfFormTrace := some externalCallFormTrace
@@ -3264,6 +3366,126 @@ private def preConversionCases : Array Case := #[
 ]
 
 private def conversionCases : Array Case := #[
+  exactFixedWidthConversionExternalCase uint8CaseCodec uint16CaseCodec
+    "uint8-to-uint16" ``Source.uint8ToUInt16 Source.uint8ToUInt16
+    ``UInt8.toUInt16 255
+    #["stress", "scalar", "uint8", "uint16", "external", "conversion",
+      "cross-width", "widening", "i32"]
+    "Zero-extend the maximum UInt8 to UInt16 without sign extension",
+  exactFixedWidthConversionExternalCase uint8CaseCodec uint32CaseCodec
+    "uint8-to-uint32" ``Source.uint8ToUInt32 Source.uint8ToUInt32
+    ``UInt8.toUInt32 255
+    #["stress", "scalar", "uint8", "uint32", "external", "conversion",
+      "cross-width", "widening", "i32"]
+    "Zero-extend the maximum UInt8 to UInt32 without sign extension",
+  exactFixedWidthConversionExternalCase uint8CaseCodec uint64CaseCodec
+    "uint8-to-uint64" ``Source.uint8ToUInt64 Source.uint8ToUInt64
+    ``UInt8.toUInt64 255
+    #["stress", "scalar", "uint8", "uint64", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64"]
+    "Zero-extend the maximum UInt8 across the i32-to-i64 boundary",
+  exactFixedWidthConversionExternalCase uint8CaseCodec usizeCaseCodec
+    "uint8-to-usize" ``Source.uint8ToUSize Source.uint8ToUSize
+    ``UInt8.toUSize 255
+    #["stress", "uint8", "usize", "usize-external", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64", "semantic-lean64"]
+    "Zero-extend the maximum UInt8 to semantic Lean64 USize",
+  exactFixedWidthConversionExternalCase uint16CaseCodec uint8CaseCodec
+    "uint16-to-uint8" ``Source.uint16ToUInt8 Source.uint16ToUInt8
+    ``UInt16.toUInt8 273
+    #["stress", "scalar", "uint16", "uint8", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i32"]
+    "Reduce 2^8 + 17 modulo 2^8 while narrowing UInt16 to UInt8",
+  exactFixedWidthConversionExternalCase uint16CaseCodec uint32CaseCodec
+    "uint16-to-uint32" ``Source.uint16ToUInt32 Source.uint16ToUInt32
+    ``UInt16.toUInt32 65535
+    #["stress", "scalar", "uint16", "uint32", "external", "conversion",
+      "cross-width", "widening", "i32"]
+    "Zero-extend the maximum UInt16 to UInt32 without sign extension",
+  exactFixedWidthConversionExternalCase uint16CaseCodec uint64CaseCodec
+    "uint16-to-uint64" ``Source.uint16ToUInt64 Source.uint16ToUInt64
+    ``UInt16.toUInt64 65535
+    #["stress", "scalar", "uint16", "uint64", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64"]
+    "Zero-extend the maximum UInt16 across the i32-to-i64 boundary",
+  exactFixedWidthConversionExternalCase uint16CaseCodec usizeCaseCodec
+    "uint16-to-usize" ``Source.uint16ToUSize Source.uint16ToUSize
+    ``UInt16.toUSize 65535
+    #["stress", "uint16", "usize", "usize-external", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64", "semantic-lean64"]
+    "Zero-extend the maximum UInt16 to semantic Lean64 USize",
+  exactFixedWidthConversionExternalCase uint32CaseCodec uint8CaseCodec
+    "uint32-to-uint8" ``Source.uint32ToUInt8 Source.uint32ToUInt8
+    ``UInt32.toUInt8 273
+    #["stress", "scalar", "uint32", "uint8", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i32"]
+    "Reduce 2^8 + 17 modulo 2^8 while narrowing UInt32 to UInt8",
+  exactFixedWidthConversionExternalCase uint32CaseCodec uint16CaseCodec
+    "uint32-to-uint16" ``Source.uint32ToUInt16 Source.uint32ToUInt16
+    ``UInt32.toUInt16 65553
+    #["stress", "scalar", "uint32", "uint16", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i32"]
+    "Reduce 2^16 + 17 modulo 2^16 while narrowing UInt32 to UInt16",
+  exactFixedWidthConversionExternalCase uint32CaseCodec uint64CaseCodec
+    "uint32-to-uint64" ``Source.uint32ToUInt64 Source.uint32ToUInt64
+    ``UInt32.toUInt64 4294967295
+    #["stress", "scalar", "uint32", "uint64", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64"]
+    "Zero-extend the maximum UInt32 across the i32-to-i64 boundary",
+  exactFixedWidthConversionExternalCase uint32CaseCodec usizeCaseCodec
+    "uint32-to-usize" ``Source.uint32ToUSize Source.uint32ToUSize
+    ``UInt32.toUSize 4294967295
+    #["stress", "uint32", "usize", "usize-external", "external", "conversion",
+      "cross-width", "widening", "i32-to-i64", "semantic-lean64"]
+    "Zero-extend the maximum UInt32 to semantic Lean64 USize",
+  exactFixedWidthConversionExternalCase uint64CaseCodec uint8CaseCodec
+    "uint64-to-uint8" ``Source.uint64ToUInt8 Source.uint64ToUInt8
+    ``UInt64.toUInt8 273
+    #["stress", "scalar", "uint64", "uint8", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32"]
+    "Reduce 2^8 + 17 modulo 2^8 while narrowing UInt64 to UInt8",
+  exactFixedWidthConversionExternalCase uint64CaseCodec uint16CaseCodec
+    "uint64-to-uint16" ``Source.uint64ToUInt16 Source.uint64ToUInt16
+    ``UInt64.toUInt16 65553
+    #["stress", "scalar", "uint64", "uint16", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32"]
+    "Reduce 2^16 + 17 modulo 2^16 while narrowing UInt64 to UInt16",
+  exactFixedWidthConversionExternalCase uint64CaseCodec uint32CaseCodec
+    "uint64-to-uint32" ``Source.uint64ToUInt32 Source.uint64ToUInt32
+    ``UInt64.toUInt32 4294967313
+    #["stress", "scalar", "uint64", "uint32", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32"]
+    "Reduce 2^32 + 17 modulo 2^32 while narrowing UInt64 to UInt32",
+  exactFixedWidthConversionExternalCase uint64CaseCodec usizeCaseCodec
+    "uint64-to-usize" ``Source.uint64ToUSize Source.uint64ToUSize
+    ``UInt64.toUSize 0x8000000000000011
+    #["stress", "uint64", "usize", "usize-external", "external", "conversion",
+      "cross-width", "same-width", "high-bit", "i64", "semantic-lean64"]
+    "Preserve a high-bit UInt64 exactly when converting to semantic Lean64 USize",
+  exactFixedWidthConversionExternalCase usizeCaseCodec uint8CaseCodec
+    "usize-to-uint8" ``Source.usizeToUInt8 Source.usizeToUInt8
+    ``USize.toUInt8 273
+    #["stress", "usize", "usize-external", "uint8", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32", "semantic-lean64"]
+    "Reduce 2^8 + 17 modulo 2^8 while narrowing USize to UInt8",
+  exactFixedWidthConversionExternalCase usizeCaseCodec uint16CaseCodec
+    "usize-to-uint16" ``Source.usizeToUInt16 Source.usizeToUInt16
+    ``USize.toUInt16 65553
+    #["stress", "usize", "usize-external", "uint16", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32", "semantic-lean64"]
+    "Reduce 2^16 + 17 modulo 2^16 while narrowing USize to UInt16",
+  exactFixedWidthConversionExternalCase usizeCaseCodec uint32CaseCodec
+    "usize-to-uint32" ``Source.usizeToUInt32 Source.usizeToUInt32
+    ``USize.toUInt32 4294967313
+    #["stress", "usize", "usize-external", "uint32", "external", "conversion",
+      "cross-width", "narrowing", "modulo", "i64-to-i32", "semantic-lean64"]
+    "Reduce 2^32 + 17 modulo 2^32 while narrowing USize to UInt32",
+  exactFixedWidthConversionExternalCase usizeCaseCodec uint64CaseCodec
+    "usize-to-uint64" ``Source.usizeToUInt64 Source.usizeToUInt64
+    ``USize.toUInt64 0x8000000000000011
+    #["stress", "usize", "usize-external", "uint64", "external", "conversion",
+      "cross-width", "same-width", "high-bit", "i64", "semantic-lean64"]
+    "Preserve a high-bit semantic Lean64 USize exactly when converting to UInt64",
   exactNatToUInt8ExternalCase
     "nat-to-uint8-max" ``Source.natToUInt8 Source.natToUInt8
     ``UInt8.ofNat 255
@@ -6139,13 +6361,16 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "fixed-width-unsigned-external").size == 110
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "usize-external").size == 32
+  validationCase.tags.contains "usize-external").size == 40
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-unsigned-conversion").size == 35
+  validationCase.tags.contains "fixed-width-unsigned-conversion").size == 55
 
 #guard (cases.filter fun validationCase =>
   validationCase.tags.contains "small-word-nat-conversion").size == 15
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "fixed-width-cross-conversion").size == 20
 
 #guard System.Platform.numBits == 64
 

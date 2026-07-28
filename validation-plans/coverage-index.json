@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 356,
-        "minimumComparisons": 356,
+        "minimumCases": 376,
+        "minimumComparisons": 376,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 356,
-        "minimumComparisons": 712,
+        "minimumCases": 376,
+        "minimumComparisons": 752,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 365,
-      "minimumTierCases": 721,
-      "minimumComparisons": 1077
+      "minimumUniqueCases": 385,
+      "minimumTierCases": 761,
+      "minimumComparisons": 1137
     },
     "machine": {
-      "minimumCases": 365,
-      "minimumInterpreterSteps": 3440,
+      "minimumCases": 385,
+      "minimumInterpreterSteps": 3560,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -207,6 +207,10 @@
         "UInt16.shiftRight",
         "UInt16.sub",
         "UInt16.toNat",
+        "UInt16.toUInt32",
+        "UInt16.toUInt64",
+        "UInt16.toUInt8",
+        "UInt16.toUSize",
         "UInt16.xor",
         "UInt32.add",
         "UInt32.complement",
@@ -224,6 +228,10 @@
         "UInt32.shiftRight",
         "UInt32.sub",
         "UInt32.toNat",
+        "UInt32.toUInt16",
+        "UInt32.toUInt64",
+        "UInt32.toUInt8",
+        "UInt32.toUSize",
         "UInt32.xor",
         "UInt64.add",
         "UInt64.complement",
@@ -241,6 +249,10 @@
         "UInt64.shiftRight",
         "UInt64.sub",
         "UInt64.toNat",
+        "UInt64.toUInt16",
+        "UInt64.toUInt32",
+        "UInt64.toUInt8",
+        "UInt64.toUSize",
         "UInt64.xor",
         "UInt8.add",
         "UInt8.complement",
@@ -258,6 +270,10 @@
         "UInt8.shiftRight",
         "UInt8.sub",
         "UInt8.toNat",
+        "UInt8.toUInt16",
+        "UInt8.toUInt32",
+        "UInt8.toUInt64",
+        "UInt8.toUSize",
         "UInt8.xor",
         "USize.add",
         "USize.complement",
@@ -275,6 +291,10 @@
         "USize.shiftRight",
         "USize.sub",
         "USize.toNat",
+        "USize.toUInt16",
+        "USize.toUInt32",
+        "USize.toUInt64",
+        "USize.toUInt8",
         "USize.xor"
       ]
     }
