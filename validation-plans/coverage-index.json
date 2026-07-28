@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 321,
-        "minimumComparisons": 321,
+        "minimumCases": 341,
+        "minimumComparisons": 341,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 321,
-        "minimumComparisons": 642,
+        "minimumCases": 341,
+        "minimumComparisons": 682,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 330,
-      "minimumTierCases": 651,
-      "minimumComparisons": 972
+      "minimumUniqueCases": 350,
+      "minimumTierCases": 691,
+      "minimumComparisons": 1032
     },
     "machine": {
-      "minimumCases": 330,
-      "minimumInterpreterSteps": 3230,
+      "minimumCases": 350,
+      "minimumInterpreterSteps": 3350,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -232,9 +232,11 @@
         "UInt64.mod",
         "UInt64.mul",
         "UInt64.neg",
+        "UInt64.ofNat",
         "UInt64.shiftLeft",
         "UInt64.shiftRight",
         "UInt64.sub",
+        "UInt64.toNat",
         "UInt64.xor",
         "UInt8.add",
         "UInt8.complement",
@@ -262,9 +264,11 @@
         "USize.mod",
         "USize.mul",
         "USize.neg",
+        "USize.ofNat",
         "USize.shiftLeft",
         "USize.shiftRight",
         "USize.sub",
+        "USize.toNat",
         "USize.xor"
       ]
     }

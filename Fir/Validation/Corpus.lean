@@ -427,6 +427,14 @@ def decideUInt64Le (left right : UInt64) : Bool :=
   decide (left ≤ right)
 
 @[noinline]
+def natToUInt64 (value : Nat) : UInt64 :=
+  UInt64.ofNat value
+
+@[noinline]
+def uint64ToNat (value : UInt64) : Nat :=
+  UInt64.toNat value
+
+@[noinline]
 def addUSize (left right : USize) : USize :=
   USize.add left right
 
@@ -485,6 +493,14 @@ def decideUSizeLt (left right : USize) : Bool :=
 @[noinline]
 def decideUSizeLe (left right : USize) : Bool :=
   decide (left ≤ right)
+
+@[noinline]
+def natToUSize (value : Nat) : USize :=
+  USize.ofNat value
+
+@[noinline]
+def usizeToNat (value : USize) : Nat :=
+  USize.toNat value
 
 def maxUInt8 : UInt8 := 255
 
@@ -1636,6 +1652,46 @@ private def exactFixedWidthDecisionExternalCase (codec : FixedWidthCaseCodec α)
   requiredExecutedExternalTrace := some #[external]
   provenance := firProvenance note }
 
+private def exactNatToFixedWidthExternalCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (operation : Nat → α)
+    (external : Lean.Name) (input : Nat) (tags : Array String) (note : String) :
+    Case := {
+  id
+  entry
+  args := #[.nat input]
+  argSchemas := #[.nat]
+  resultSchema := codec.schema
+  native := fun _ => codec.datum (operation input)
+  tags := (tags.push "fixed-width-unsigned-conversion").push "nat-word-conversion"
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactFixedWidthToNatExternalCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (operation : α → Nat)
+    (external : Lean.Name) (input : α) (tags : Array String) (note : String) :
+    Case := {
+  id
+  entry
+  args := #[codec.datum input]
+  argSchemas := #[codec.schema]
+  resultSchema := .nat
+  native := fun _ => .nat (operation input)
+  tags := (tags.push "fixed-width-unsigned-conversion").push "nat-word-conversion"
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
 private def exactUInt8BinaryExternalCase :=
   exactFixedWidthBinaryExternalCase uint8CaseCodec
 
@@ -1672,6 +1728,12 @@ private def exactUInt64UnaryExternalCase :=
 private def exactUInt64DecisionExternalCase :=
   exactFixedWidthDecisionExternalCase uint64CaseCodec
 
+private def exactNatToUInt64ExternalCase :=
+  exactNatToFixedWidthExternalCase uint64CaseCodec
+
+private def exactUInt64ToNatExternalCase :=
+  exactFixedWidthToNatExternalCase uint64CaseCodec
+
 private def exactUSizeBinaryExternalCase :=
   exactFixedWidthBinaryExternalCase usizeCaseCodec
 
@@ -1680,6 +1742,12 @@ private def exactUSizeUnaryExternalCase :=
 
 private def exactUSizeDecisionExternalCase :=
   exactFixedWidthDecisionExternalCase usizeCaseCodec
+
+private def exactNatToUSizeExternalCase :=
+  exactNatToFixedWidthExternalCase usizeCaseCodec
+
+private def exactUSizeToNatExternalCase :=
+  exactFixedWidthToNatExternalCase usizeCaseCodec
 
 private def pairedExternalCallFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "ctor", "return"]
@@ -1715,7 +1783,7 @@ private def reuseGrowDeleteSharedFormTrace : Array String :=
     "jump", "fap", "inc", "return", "dec", "cases", "del", "inc", "ctor",
     "return", "ctor", "return"]
 
-def cases : Array Case := #[
+private def preConversionCases : Array Case := #[
   { id := "lit-nat"
     entry := ``Source.litNat
     resultSchema := .nat
@@ -3150,7 +3218,138 @@ def cases : Array Case := #[
     ``UInt64.decLe 0xffffffffffffffff 0
     #["stress", "scalar", "uint64", "external", "decision", "ordering",
       "less-or-equal", "false", "boundary", "i64"]
-    "Reject non-strict unsigned ordering from maximum UInt64 to zero",
+    "Reject non-strict unsigned ordering from maximum UInt64 to zero"
+]
+
+private def conversionCases : Array Case := #[
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-small" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 17
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "immediate-input", "i64"]
+    "Convert a small tagged Nat to an exact UInt64 scalar",
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-immediate-max" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 9223372036854775807
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "immediate-input", "boundary", "i64"]
+    "Convert the maximum tagged Nat to UInt64 without losing its high payload bits",
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-first-heap" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 9223372036854775808
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "i64"]
+    "Convert the first heap Nat to the UInt64 value at bit 63",
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-max" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 18446744073709551615
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "maximum", "i64"]
+    "Convert the maximum in-range 64-bit Nat to the maximum UInt64",
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-modulus" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 18446744073709551616
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "overflow", "wraparound", "i64"]
+    "Wrap the first out-of-range Nat at exactly 2^64 to UInt64 zero",
+  exactNatToUInt64ExternalCase
+    "nat-to-uint64-multi-limb" ``Source.natToUInt64 Source.natToUInt64
+    ``UInt64.ofNat 340282366920938463463374607431768211473
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "multi-limb", "wraparound", "i64"]
+    "Reduce 2^128 + 17 modulo 2^64 while converting a multi-limb Nat to UInt64",
+  exactUInt64ToNatExternalCase
+    "uint64-to-nat-zero" ``Source.uint64ToNat Source.uint64ToNat
+    ``UInt64.toNat 0
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "from-fixed-width", "immediate-result", "boundary", "i64"]
+    "Convert UInt64 zero to a tagged Nat",
+  exactUInt64ToNatExternalCase
+    "uint64-to-nat-immediate-max" ``Source.uint64ToNat Source.uint64ToNat
+    ``UInt64.toNat 0x7fffffffffffffff
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "from-fixed-width", "immediate-result", "boundary", "i64"]
+    "Convert bit-63-minus-one UInt64 to the maximum tagged Nat",
+  exactUInt64ToNatExternalCase
+    "uint64-to-nat-first-heap" ``Source.uint64ToNat Source.uint64ToNat
+    ``UInt64.toNat 0x8000000000000000
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "from-fixed-width", "heap-result", "allocation", "boundary", "i64"]
+    "Allocate the first heap Nat while converting the UInt64 bit-63 boundary",
+  exactUInt64ToNatExternalCase
+    "uint64-to-nat-max" ``Source.uint64ToNat Source.uint64ToNat
+    ``UInt64.toNat 0xffffffffffffffff
+    #["stress", "scalar", "uint64", "external", "conversion", "nat",
+      "from-fixed-width", "heap-result", "allocation", "boundary", "maximum", "i64"]
+    "Allocate an exact heap Nat for the maximum UInt64",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-small" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 17
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "immediate-input", "i64", "semantic-lean64"]
+    "Convert a small tagged Nat to an exact semantic Lean64 USize",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-immediate-max" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 9223372036854775807
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "immediate-input", "boundary", "i64", "semantic-lean64"]
+    "Convert the maximum tagged Nat to Lean64 USize without losing high payload bits",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-first-heap" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 9223372036854775808
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "i64", "semantic-lean64"]
+    "Convert the first heap Nat to semantic Lean64 USize at bit 63",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-max" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 18446744073709551615
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "maximum", "i64",
+      "semantic-lean64"]
+    "Convert the maximum in-range 64-bit Nat to maximum semantic Lean64 USize",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-modulus" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 18446744073709551616
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "boundary", "overflow", "wraparound", "i64",
+      "semantic-lean64"]
+    "Wrap the first out-of-range Nat at exactly 2^64 to semantic Lean64 USize zero",
+  exactNatToUSizeExternalCase
+    "nat-to-usize-multi-limb" ``Source.natToUSize Source.natToUSize
+    ``USize.ofNat 340282366920938463463374607431768211473
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "to-fixed-width", "heap-input", "multi-limb", "wraparound", "i64",
+      "semantic-lean64"]
+    "Reduce 2^128 + 17 modulo 2^64 while converting a multi-limb Nat to USize",
+  exactUSizeToNatExternalCase
+    "usize-to-nat-zero" ``Source.usizeToNat Source.usizeToNat
+    ``USize.toNat 0
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "from-fixed-width", "immediate-result", "boundary", "i64", "semantic-lean64"]
+    "Convert semantic Lean64 USize zero to a tagged Nat",
+  exactUSizeToNatExternalCase
+    "usize-to-nat-immediate-max" ``Source.usizeToNat Source.usizeToNat
+    ``USize.toNat 0x7fffffffffffffff
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "from-fixed-width", "immediate-result", "boundary", "i64", "semantic-lean64"]
+    "Convert bit-63-minus-one Lean64 USize to the maximum tagged Nat",
+  exactUSizeToNatExternalCase
+    "usize-to-nat-first-heap" ``Source.usizeToNat Source.usizeToNat
+    ``USize.toNat 0x8000000000000000
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "from-fixed-width", "heap-result", "allocation", "boundary", "i64",
+      "semantic-lean64"]
+    "Allocate the first heap Nat while converting the Lean64 USize bit-63 boundary",
+  exactUSizeToNatExternalCase
+    "usize-to-nat-max" ``Source.usizeToNat Source.usizeToNat
+    ``USize.toNat 0xffffffffffffffff
+    #["stress", "usize", "usize-external", "external", "conversion", "nat",
+      "from-fixed-width", "heap-result", "allocation", "boundary", "maximum", "i64",
+      "semantic-lean64"]
+    "Allocate an exact heap Nat for the maximum semantic Lean64 USize"
+]
+
+private def postConversionCases : Array Case := #[
   exactUSizeBinaryExternalCase
     "usize-add-overflow" ``Source.addUSize Source.addUSize ``USize.add
     0xffffffffffffffff 1
@@ -5770,6 +5969,9 @@ def cases : Array Case := #[
       "Copy a shared byte array while preserving its original alias through ByteArray.set!" }
 ]
 
+def cases : Array Case :=
+  preConversionCases ++ conversionCases ++ postConversionCases
+
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
 def requiredFinalExecutedForms : Array String :=
   #["box", "cases", "ctor", "dec", "del", "extern", "fap", "fvar", "inc", "isShared",
@@ -5790,7 +5992,10 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "fixed-width-unsigned-external").size == 110
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "usize-external").size == 22
+  validationCase.tags.contains "usize-external").size == 32
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "fixed-width-unsigned-conversion").size == 20
 
 #guard System.Platform.numBits == 64
 
