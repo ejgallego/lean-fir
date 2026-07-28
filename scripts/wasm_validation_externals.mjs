@@ -446,8 +446,20 @@ export const validationExternalRegistry = {
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
   ...fixedWidthExternalFamily("UInt8", 8, scalarFixedWidthCodec("uint8", 8)),
+  "UInt8.ofNat": naturalToFixedWidth(
+    "UInt8.ofNat", scalarFixedWidthCodec("uint8", 8)),
+  "UInt8.toNat": fixedWidthToNatural(
+    "UInt8.toNat", scalarFixedWidthCodec("uint8", 8)),
   ...fixedWidthExternalFamily("UInt16", 16, scalarFixedWidthCodec("uint16", 16)),
+  "UInt16.ofNat": naturalToFixedWidth(
+    "UInt16.ofNat", scalarFixedWidthCodec("uint16", 16)),
+  "UInt16.toNat": fixedWidthToNatural(
+    "UInt16.toNat", scalarFixedWidthCodec("uint16", 16)),
   ...fixedWidthExternalFamily("UInt32", 32, scalarFixedWidthCodec("uint32", 32)),
+  "UInt32.ofNat": naturalToFixedWidth(
+    "UInt32.ofNat", scalarFixedWidthCodec("uint32", 32)),
+  "UInt32.toNat": fixedWidthToNatural(
+    "UInt32.toNat", scalarFixedWidthCodec("uint32", 32)),
   ...fixedWidthExternalFamily("UInt64", 64, scalarFixedWidthCodec("uint64", 64)),
   "UInt64.ofNat": naturalToFixedWidth(
     "UInt64.ofNat", scalarFixedWidthCodec("uint64", 64)),

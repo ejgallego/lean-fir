@@ -1800,6 +1800,42 @@ private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
 #guard fixedWidthToNatGuard usizeCodec ``USize.toNat
   USize.toNat 0xffffffffffffffff 18446744073709551615
 
+#guard natToFixedWidthGuard uint8Codec ``UInt8.ofNat
+  UInt8.ofNat 255 255
+
+#guard natToFixedWidthGuard uint8Codec ``UInt8.ofNat
+  UInt8.ofNat 256 0
+
+#guard natToFixedWidthGuard uint8Codec ``UInt8.ofNat
+  UInt8.ofNat multiLimbNat 17
+
+#guard fixedWidthToNatGuard uint8Codec ``UInt8.toNat
+  UInt8.toNat 255 255
+
+#guard natToFixedWidthGuard uint16Codec ``UInt16.ofNat
+  UInt16.ofNat 65535 65535
+
+#guard natToFixedWidthGuard uint16Codec ``UInt16.ofNat
+  UInt16.ofNat 65536 0
+
+#guard natToFixedWidthGuard uint16Codec ``UInt16.ofNat
+  UInt16.ofNat multiLimbNat 17
+
+#guard fixedWidthToNatGuard uint16Codec ``UInt16.toNat
+  UInt16.toNat 65535 65535
+
+#guard natToFixedWidthGuard uint32Codec ``UInt32.ofNat
+  UInt32.ofNat 4294967295 4294967295
+
+#guard natToFixedWidthGuard uint32Codec ``UInt32.ofNat
+  UInt32.ofNat 4294967296 0
+
+#guard natToFixedWidthGuard uint32Codec ``UInt32.ofNat
+  UInt32.ofNat multiLimbNat 17
+
+#guard fixedWidthToNatGuard uint32Codec ``UInt32.toNat
+  UInt32.toNat 4294967295 4294967295
+
 #guard fixedWidthBinaryGuard uint8Codec ``UInt8.add UInt8.add 255 1 0
 
 #guard fixedWidthBinaryGuard uint8Codec ``UInt8.sub UInt8.sub 0 1 255
@@ -2118,6 +2154,167 @@ private def usizeDecisionGuard (name : Name) (operation : USize → USize → Bo
 #guard usizeDecisionGuard ``USize.decLe
   (fun left right => decide (left ≤ right)) 0xffffffffffffffff 0 false
 
+private abbrev ExternalHandler :=
+  ExternalRequest → RuntimeState → Except RuntimeFault ExternalResponse
+
+private structure NamedExternalHandler where
+  name : Name
+  call : ExternalHandler
+
+private def fixedWidthBinaryHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : α → α → α) : NamedExternalHandler :=
+  { name, call := fixedWidthBinaryExternal codec operation }
+
+private def fixedWidthUnaryHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : α → α) : NamedExternalHandler :=
+  { name, call := fixedWidthUnaryExternal codec operation }
+
+private def fixedWidthDecisionHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : α → α → Bool) : NamedExternalHandler :=
+  { name, call := fixedWidthDecisionExternal codec operation }
+
+private def natToFixedWidthHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : Nat → α) : NamedExternalHandler :=
+  { name, call := natToFixedWidthExternal codec operation }
+
+private def fixedWidthToNatHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : α → Nat) : NamedExternalHandler :=
+  { name, call := fixedWidthToNatExternal codec operation }
+
+private def uint8ExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``UInt8.add uint8Codec UInt8.add,
+  fixedWidthBinaryHandler ``UInt8.sub uint8Codec UInt8.sub,
+  fixedWidthBinaryHandler ``UInt8.mul uint8Codec UInt8.mul,
+  fixedWidthBinaryHandler ``UInt8.div uint8Codec UInt8.div,
+  fixedWidthBinaryHandler ``UInt8.mod uint8Codec UInt8.mod,
+  fixedWidthBinaryHandler ``UInt8.land uint8Codec UInt8.land,
+  fixedWidthBinaryHandler ``UInt8.lor uint8Codec UInt8.lor,
+  fixedWidthBinaryHandler ``UInt8.xor uint8Codec UInt8.xor,
+  fixedWidthBinaryHandler ``UInt8.shiftLeft uint8Codec UInt8.shiftLeft,
+  fixedWidthBinaryHandler ``UInt8.shiftRight uint8Codec UInt8.shiftRight,
+  fixedWidthUnaryHandler ``UInt8.complement uint8Codec UInt8.complement,
+  fixedWidthUnaryHandler ``UInt8.neg uint8Codec UInt8.neg,
+  fixedWidthDecisionHandler ``UInt8.decEq uint8Codec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``UInt8.decLt uint8Codec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``UInt8.decLe uint8Codec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``UInt8.ofNat uint8Codec UInt8.ofNat,
+  fixedWidthToNatHandler ``UInt8.toNat uint8Codec UInt8.toNat
+]
+
+private def uint16ExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``UInt16.add uint16Codec UInt16.add,
+  fixedWidthBinaryHandler ``UInt16.sub uint16Codec UInt16.sub,
+  fixedWidthBinaryHandler ``UInt16.mul uint16Codec UInt16.mul,
+  fixedWidthBinaryHandler ``UInt16.div uint16Codec UInt16.div,
+  fixedWidthBinaryHandler ``UInt16.mod uint16Codec UInt16.mod,
+  fixedWidthBinaryHandler ``UInt16.land uint16Codec UInt16.land,
+  fixedWidthBinaryHandler ``UInt16.lor uint16Codec UInt16.lor,
+  fixedWidthBinaryHandler ``UInt16.xor uint16Codec UInt16.xor,
+  fixedWidthBinaryHandler ``UInt16.shiftLeft uint16Codec UInt16.shiftLeft,
+  fixedWidthBinaryHandler ``UInt16.shiftRight uint16Codec UInt16.shiftRight,
+  fixedWidthUnaryHandler ``UInt16.complement uint16Codec UInt16.complement,
+  fixedWidthUnaryHandler ``UInt16.neg uint16Codec UInt16.neg,
+  fixedWidthDecisionHandler ``UInt16.decEq uint16Codec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``UInt16.decLt uint16Codec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``UInt16.decLe uint16Codec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``UInt16.ofNat uint16Codec UInt16.ofNat,
+  fixedWidthToNatHandler ``UInt16.toNat uint16Codec UInt16.toNat
+]
+
+private def uint32ExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``UInt32.add uint32Codec UInt32.add,
+  fixedWidthBinaryHandler ``UInt32.sub uint32Codec UInt32.sub,
+  fixedWidthBinaryHandler ``UInt32.mul uint32Codec UInt32.mul,
+  fixedWidthBinaryHandler ``UInt32.div uint32Codec UInt32.div,
+  fixedWidthBinaryHandler ``UInt32.mod uint32Codec UInt32.mod,
+  fixedWidthBinaryHandler ``UInt32.land uint32Codec UInt32.land,
+  fixedWidthBinaryHandler ``UInt32.lor uint32Codec UInt32.lor,
+  fixedWidthBinaryHandler ``UInt32.xor uint32Codec UInt32.xor,
+  fixedWidthBinaryHandler ``UInt32.shiftLeft uint32Codec UInt32.shiftLeft,
+  fixedWidthBinaryHandler ``UInt32.shiftRight uint32Codec UInt32.shiftRight,
+  fixedWidthUnaryHandler ``UInt32.complement uint32Codec UInt32.complement,
+  fixedWidthUnaryHandler ``UInt32.neg uint32Codec UInt32.neg,
+  fixedWidthDecisionHandler ``UInt32.decEq uint32Codec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``UInt32.decLt uint32Codec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``UInt32.decLe uint32Codec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``UInt32.ofNat uint32Codec UInt32.ofNat,
+  fixedWidthToNatHandler ``UInt32.toNat uint32Codec UInt32.toNat
+]
+
+private def uint64ExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``UInt64.add uint64Codec UInt64.add,
+  fixedWidthBinaryHandler ``UInt64.sub uint64Codec UInt64.sub,
+  fixedWidthBinaryHandler ``UInt64.mul uint64Codec UInt64.mul,
+  fixedWidthBinaryHandler ``UInt64.div uint64Codec UInt64.div,
+  fixedWidthBinaryHandler ``UInt64.mod uint64Codec UInt64.mod,
+  fixedWidthBinaryHandler ``UInt64.land uint64Codec UInt64.land,
+  fixedWidthBinaryHandler ``UInt64.lor uint64Codec UInt64.lor,
+  fixedWidthBinaryHandler ``UInt64.xor uint64Codec UInt64.xor,
+  fixedWidthBinaryHandler ``UInt64.shiftLeft uint64Codec UInt64.shiftLeft,
+  fixedWidthBinaryHandler ``UInt64.shiftRight uint64Codec UInt64.shiftRight,
+  fixedWidthUnaryHandler ``UInt64.complement uint64Codec UInt64.complement,
+  fixedWidthUnaryHandler ``UInt64.neg uint64Codec UInt64.neg,
+  fixedWidthDecisionHandler ``UInt64.decEq uint64Codec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``UInt64.decLt uint64Codec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``UInt64.decLe uint64Codec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``UInt64.ofNat uint64Codec UInt64.ofNat,
+  fixedWidthToNatHandler ``UInt64.toNat uint64Codec UInt64.toNat
+]
+
+private def usizeExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``USize.add usizeCodec USize.add,
+  fixedWidthBinaryHandler ``USize.sub usizeCodec USize.sub,
+  fixedWidthBinaryHandler ``USize.mul usizeCodec USize.mul,
+  fixedWidthBinaryHandler ``USize.div usizeCodec USize.div,
+  fixedWidthBinaryHandler ``USize.mod usizeCodec USize.mod,
+  fixedWidthBinaryHandler ``USize.land usizeCodec USize.land,
+  fixedWidthBinaryHandler ``USize.lor usizeCodec USize.lor,
+  fixedWidthBinaryHandler ``USize.xor usizeCodec USize.xor,
+  fixedWidthBinaryHandler ``USize.shiftLeft usizeCodec USize.shiftLeft,
+  fixedWidthBinaryHandler ``USize.shiftRight usizeCodec USize.shiftRight,
+  fixedWidthUnaryHandler ``USize.complement usizeCodec USize.complement,
+  fixedWidthUnaryHandler ``USize.neg usizeCodec USize.neg,
+  fixedWidthDecisionHandler ``USize.decEq usizeCodec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``USize.decLt usizeCodec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``USize.decLe usizeCodec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``USize.ofNat usizeCodec USize.ofNat,
+  fixedWidthToNatHandler ``USize.toNat usizeCodec USize.toNat
+]
+
+private def fixedWidthExternalHandlers : List NamedExternalHandler :=
+  uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
+    uint64ExternalHandlers ++ usizeExternalHandlers
+
+#guard fixedWidthExternalHandlers.length == 85
+
+#guard fixedWidthExternalHandlers.all fun handler =>
+  (fixedWidthExternalHandlers.filter fun candidate =>
+    candidate.name == handler.name).length == 1
+
+private def dispatchNamedExternal? : List NamedExternalHandler → ExternalRequest →
+    RuntimeState → Option (Except RuntimeFault ExternalResponse)
+  | [], _, _ => none
+  | handler :: handlers, request, runtime =>
+      if handler.name == request.name then
+        some (handler.call request runtime)
+      else
+        dispatchNamedExternal? handlers request runtime
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
@@ -2205,181 +2402,12 @@ private def validationExternals : ExternalImpl where
       intDecLtExternal request runtime
     else if request.name == ``Int.decLe then
       intDecLeExternal request runtime
-    else if request.name == ``UInt8.add then
-      fixedWidthBinaryExternal uint8Codec UInt8.add request runtime
-    else if request.name == ``UInt8.sub then
-      fixedWidthBinaryExternal uint8Codec UInt8.sub request runtime
-    else if request.name == ``UInt8.mul then
-      fixedWidthBinaryExternal uint8Codec UInt8.mul request runtime
-    else if request.name == ``UInt8.div then
-      fixedWidthBinaryExternal uint8Codec UInt8.div request runtime
-    else if request.name == ``UInt8.mod then
-      fixedWidthBinaryExternal uint8Codec UInt8.mod request runtime
-    else if request.name == ``UInt8.land then
-      fixedWidthBinaryExternal uint8Codec UInt8.land request runtime
-    else if request.name == ``UInt8.lor then
-      fixedWidthBinaryExternal uint8Codec UInt8.lor request runtime
-    else if request.name == ``UInt8.xor then
-      fixedWidthBinaryExternal uint8Codec UInt8.xor request runtime
-    else if request.name == ``UInt8.shiftLeft then
-      fixedWidthBinaryExternal uint8Codec UInt8.shiftLeft request runtime
-    else if request.name == ``UInt8.shiftRight then
-      fixedWidthBinaryExternal uint8Codec UInt8.shiftRight request runtime
-    else if request.name == ``UInt8.complement then
-      fixedWidthUnaryExternal uint8Codec UInt8.complement request runtime
-    else if request.name == ``UInt8.neg then
-      fixedWidthUnaryExternal uint8Codec UInt8.neg request runtime
-    else if request.name == ``UInt8.decEq then
-      fixedWidthDecisionExternal uint8Codec
-        (fun left right => decide (left = right)) request runtime
-    else if request.name == ``UInt8.decLt then
-      fixedWidthDecisionExternal uint8Codec
-        (fun left right => decide (left < right)) request runtime
-    else if request.name == ``UInt8.decLe then
-      fixedWidthDecisionExternal uint8Codec
-        (fun left right => decide (left ≤ right)) request runtime
-    else if request.name == ``UInt16.add then
-      fixedWidthBinaryExternal uint16Codec UInt16.add request runtime
-    else if request.name == ``UInt16.sub then
-      fixedWidthBinaryExternal uint16Codec UInt16.sub request runtime
-    else if request.name == ``UInt16.mul then
-      fixedWidthBinaryExternal uint16Codec UInt16.mul request runtime
-    else if request.name == ``UInt16.div then
-      fixedWidthBinaryExternal uint16Codec UInt16.div request runtime
-    else if request.name == ``UInt16.mod then
-      fixedWidthBinaryExternal uint16Codec UInt16.mod request runtime
-    else if request.name == ``UInt16.land then
-      fixedWidthBinaryExternal uint16Codec UInt16.land request runtime
-    else if request.name == ``UInt16.lor then
-      fixedWidthBinaryExternal uint16Codec UInt16.lor request runtime
-    else if request.name == ``UInt16.xor then
-      fixedWidthBinaryExternal uint16Codec UInt16.xor request runtime
-    else if request.name == ``UInt16.shiftLeft then
-      fixedWidthBinaryExternal uint16Codec UInt16.shiftLeft request runtime
-    else if request.name == ``UInt16.shiftRight then
-      fixedWidthBinaryExternal uint16Codec UInt16.shiftRight request runtime
-    else if request.name == ``UInt16.complement then
-      fixedWidthUnaryExternal uint16Codec UInt16.complement request runtime
-    else if request.name == ``UInt16.neg then
-      fixedWidthUnaryExternal uint16Codec UInt16.neg request runtime
-    else if request.name == ``UInt16.decEq then
-      fixedWidthDecisionExternal uint16Codec
-        (fun left right => decide (left = right)) request runtime
-    else if request.name == ``UInt16.decLt then
-      fixedWidthDecisionExternal uint16Codec
-        (fun left right => decide (left < right)) request runtime
-    else if request.name == ``UInt16.decLe then
-      fixedWidthDecisionExternal uint16Codec
-        (fun left right => decide (left ≤ right)) request runtime
-    else if request.name == ``UInt32.add then
-      fixedWidthBinaryExternal uint32Codec UInt32.add request runtime
-    else if request.name == ``UInt32.sub then
-      fixedWidthBinaryExternal uint32Codec UInt32.sub request runtime
-    else if request.name == ``UInt32.mul then
-      fixedWidthBinaryExternal uint32Codec UInt32.mul request runtime
-    else if request.name == ``UInt32.div then
-      fixedWidthBinaryExternal uint32Codec UInt32.div request runtime
-    else if request.name == ``UInt32.mod then
-      fixedWidthBinaryExternal uint32Codec UInt32.mod request runtime
-    else if request.name == ``UInt32.land then
-      fixedWidthBinaryExternal uint32Codec UInt32.land request runtime
-    else if request.name == ``UInt32.lor then
-      fixedWidthBinaryExternal uint32Codec UInt32.lor request runtime
-    else if request.name == ``UInt32.xor then
-      fixedWidthBinaryExternal uint32Codec UInt32.xor request runtime
-    else if request.name == ``UInt32.shiftLeft then
-      fixedWidthBinaryExternal uint32Codec UInt32.shiftLeft request runtime
-    else if request.name == ``UInt32.shiftRight then
-      fixedWidthBinaryExternal uint32Codec UInt32.shiftRight request runtime
-    else if request.name == ``UInt32.complement then
-      fixedWidthUnaryExternal uint32Codec UInt32.complement request runtime
-    else if request.name == ``UInt32.neg then
-      fixedWidthUnaryExternal uint32Codec UInt32.neg request runtime
-    else if request.name == ``UInt32.decEq then
-      fixedWidthDecisionExternal uint32Codec
-        (fun left right => decide (left = right)) request runtime
-    else if request.name == ``UInt32.decLt then
-      fixedWidthDecisionExternal uint32Codec
-        (fun left right => decide (left < right)) request runtime
-    else if request.name == ``UInt32.decLe then
-      fixedWidthDecisionExternal uint32Codec
-        (fun left right => decide (left ≤ right)) request runtime
-    else if request.name == ``UInt64.add then
-      fixedWidthBinaryExternal uint64Codec UInt64.add request runtime
-    else if request.name == ``UInt64.sub then
-      fixedWidthBinaryExternal uint64Codec UInt64.sub request runtime
-    else if request.name == ``UInt64.mul then
-      fixedWidthBinaryExternal uint64Codec UInt64.mul request runtime
-    else if request.name == ``UInt64.div then
-      fixedWidthBinaryExternal uint64Codec UInt64.div request runtime
-    else if request.name == ``UInt64.mod then
-      fixedWidthBinaryExternal uint64Codec UInt64.mod request runtime
-    else if request.name == ``UInt64.land then
-      fixedWidthBinaryExternal uint64Codec UInt64.land request runtime
-    else if request.name == ``UInt64.lor then
-      fixedWidthBinaryExternal uint64Codec UInt64.lor request runtime
-    else if request.name == ``UInt64.xor then
-      fixedWidthBinaryExternal uint64Codec UInt64.xor request runtime
-    else if request.name == ``UInt64.shiftLeft then
-      fixedWidthBinaryExternal uint64Codec UInt64.shiftLeft request runtime
-    else if request.name == ``UInt64.shiftRight then
-      fixedWidthBinaryExternal uint64Codec UInt64.shiftRight request runtime
-    else if request.name == ``UInt64.complement then
-      fixedWidthUnaryExternal uint64Codec UInt64.complement request runtime
-    else if request.name == ``UInt64.neg then
-      fixedWidthUnaryExternal uint64Codec UInt64.neg request runtime
-    else if request.name == ``UInt64.decEq then
-      fixedWidthDecisionExternal uint64Codec
-        (fun left right => decide (left = right)) request runtime
-    else if request.name == ``UInt64.decLt then
-      fixedWidthDecisionExternal uint64Codec
-        (fun left right => decide (left < right)) request runtime
-    else if request.name == ``UInt64.decLe then
-      fixedWidthDecisionExternal uint64Codec
-        (fun left right => decide (left ≤ right)) request runtime
-    else if request.name == ``UInt64.ofNat then
-      natToFixedWidthExternal uint64Codec UInt64.ofNat request runtime
-    else if request.name == ``UInt64.toNat then
-      fixedWidthToNatExternal uint64Codec UInt64.toNat request runtime
-    else if request.name == ``USize.add then
-      fixedWidthBinaryExternal usizeCodec USize.add request runtime
-    else if request.name == ``USize.sub then
-      fixedWidthBinaryExternal usizeCodec USize.sub request runtime
-    else if request.name == ``USize.mul then
-      fixedWidthBinaryExternal usizeCodec USize.mul request runtime
-    else if request.name == ``USize.div then
-      fixedWidthBinaryExternal usizeCodec USize.div request runtime
-    else if request.name == ``USize.mod then
-      fixedWidthBinaryExternal usizeCodec USize.mod request runtime
-    else if request.name == ``USize.land then
-      fixedWidthBinaryExternal usizeCodec USize.land request runtime
-    else if request.name == ``USize.lor then
-      fixedWidthBinaryExternal usizeCodec USize.lor request runtime
-    else if request.name == ``USize.xor then
-      fixedWidthBinaryExternal usizeCodec USize.xor request runtime
-    else if request.name == ``USize.shiftLeft then
-      fixedWidthBinaryExternal usizeCodec USize.shiftLeft request runtime
-    else if request.name == ``USize.shiftRight then
-      fixedWidthBinaryExternal usizeCodec USize.shiftRight request runtime
-    else if request.name == ``USize.complement then
-      fixedWidthUnaryExternal usizeCodec USize.complement request runtime
-    else if request.name == ``USize.neg then
-      fixedWidthUnaryExternal usizeCodec USize.neg request runtime
-    else if request.name == ``USize.decEq then
-      fixedWidthDecisionExternal usizeCodec
-        (fun left right => decide (left = right)) request runtime
-    else if request.name == ``USize.decLt then
-      fixedWidthDecisionExternal usizeCodec
-        (fun left right => decide (left < right)) request runtime
-    else if request.name == ``USize.decLe then
-      fixedWidthDecisionExternal usizeCodec
-        (fun left right => decide (left ≤ right)) request runtime
-    else if request.name == ``USize.ofNat then
-      natToFixedWidthExternal usizeCodec USize.ofNat request runtime
-    else if request.name == ``USize.toNat then
-      fixedWidthToNatExternal usizeCodec USize.toNat request runtime
     else
-      .error (.externalFailure request.name "external is not in the validation allowlist")
+      match dispatchNamedExternal? fixedWidthExternalHandlers request runtime with
+      | some response => response
+      | none =>
+          .error (.externalFailure request.name
+            "external is not in the validation allowlist")
 
 /-- Stable human-readable compiler artifact retained beside the machine result. -/
 def Artifact.format (artifact : Artifact) : CoreM String := do

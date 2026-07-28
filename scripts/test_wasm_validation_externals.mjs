@@ -229,10 +229,11 @@ for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies
   assert.throws(() => decode(encode(max + 1n), `${typeName} out-of-range`));
 }
 
-for (const { typeName, decode, encode, wrongValue } of fixedWidthFamilies.filter(
-  ({ typeName }) => typeName === "UInt64" || typeName === "USize")) {
+for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies) {
   const ofNatName = `${typeName}.ofNat`;
   const toNatName = `${typeName}.toNat`;
+  const max = (1n << BigInt(width)) - 1n;
+  const modulus = 1n << BigInt(width);
   assert.strictEqual(
     formatExternalRegistry[ofNatName],
     validationExternalRegistry[ofNatName]);
@@ -242,9 +243,8 @@ for (const { typeName, decode, encode, wrongValue } of fixedWidthFamilies.filter
 
   for (const [input, expected] of [
     [0n, 0n],
-    [0x7fffffffffffffffn, 0x7fffffffffffffffn],
-    [0xffffffffffffffffn, 0xffffffffffffffffn],
-    [0x10000000000000000n, 0n],
+    [max, max],
+    [modulus, 0n],
     [0x100000000000000000000000000000011n, 17n],
   ]) {
     const host = new SemanticHost();
@@ -257,12 +257,15 @@ for (const { typeName, decode, encode, wrongValue } of fixedWidthFamilies.filter
     assert.equal(naturalValue(host, inputValue, `${ofNatName} retained input`), input);
   }
 
-  for (const [input, allocates] of [
-    [0n, false],
-    [0x7fffffffffffffffn, false],
-    [0x8000000000000000n, true],
-    [0xffffffffffffffffn, true],
-  ]) {
+  const toNatCases = width === 64
+    ? [
+        [0n, false],
+        [0x7fffffffffffffffn, false],
+        [0x8000000000000000n, true],
+        [max, true],
+      ]
+    : [[0n, false], [max, false]];
+  for (const [input, allocates] of toNatCases) {
     const host = new SemanticHost();
     const inputValue = encode(input);
     const frontier = host.nextLocation;
