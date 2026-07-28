@@ -426,6 +426,66 @@ def decideUInt64Lt (left right : UInt64) : Bool :=
 def decideUInt64Le (left right : UInt64) : Bool :=
   decide (left ≤ right)
 
+@[noinline]
+def addUSize (left right : USize) : USize :=
+  USize.add left right
+
+@[noinline]
+def subUSize (left right : USize) : USize :=
+  USize.sub left right
+
+@[noinline]
+def mulUSize (left right : USize) : USize :=
+  USize.mul left right
+
+@[noinline]
+def divUSize (left right : USize) : USize :=
+  USize.div left right
+
+@[noinline]
+def modUSize (left right : USize) : USize :=
+  USize.mod left right
+
+@[noinline]
+def landUSize (left right : USize) : USize :=
+  USize.land left right
+
+@[noinline]
+def lorUSize (left right : USize) : USize :=
+  USize.lor left right
+
+@[noinline]
+def xorUSize (left right : USize) : USize :=
+  USize.xor left right
+
+@[noinline]
+def shiftLeftUSize (value count : USize) : USize :=
+  USize.shiftLeft value count
+
+@[noinline]
+def shiftRightUSize (value count : USize) : USize :=
+  USize.shiftRight value count
+
+@[noinline]
+def complementUSize (value : USize) : USize :=
+  USize.complement value
+
+@[noinline]
+def negUSize (value : USize) : USize :=
+  USize.neg value
+
+@[noinline]
+def decideUSizeEq (left right : USize) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideUSizeLt (left right : USize) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideUSizeLe (left right : USize) : Bool :=
+  decide (left ≤ right)
+
 def maxUInt8 : UInt8 := 255
 
 def maxUInt16 : UInt16 := 65535
@@ -1493,28 +1553,28 @@ private def exactIntNatExternalCase
   provenance := firProvenance note }
 
 private structure FixedWidthCaseCodec (α : Type) where
-  width : Nat
-  value : α → UInt64
+  schema : ValidationSchema
+  datum : α → ValidationDatum
 
 private def uint8CaseCodec : FixedWidthCaseCodec UInt8 where
-  width := 8
-  value := fun value => UInt64.ofNat value.toNat
+  schema := .bits 8
+  datum value := .bits 8 (UInt64.ofNat value.toNat)
 
 private def uint16CaseCodec : FixedWidthCaseCodec UInt16 where
-  width := 16
-  value := fun value => UInt64.ofNat value.toNat
+  schema := .bits 16
+  datum value := .bits 16 (UInt64.ofNat value.toNat)
 
 private def uint32CaseCodec : FixedWidthCaseCodec UInt32 where
-  width := 32
-  value := fun value => UInt64.ofNat value.toNat
+  schema := .bits 32
+  datum value := .bits 32 (UInt64.ofNat value.toNat)
 
 private def uint64CaseCodec : FixedWidthCaseCodec UInt64 where
-  width := 64
-  value := id
+  schema := .bits 64
+  datum := .bits 64
 
-private def FixedWidthCaseCodec.datum (codec : FixedWidthCaseCodec α)
-    (value : α) : ValidationDatum :=
-  .bits codec.width (codec.value value)
+private def usizeCaseCodec : FixedWidthCaseCodec USize where
+  schema := .usize
+  datum value := .usize value.toUInt64
 
 private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
     (id : String) (entry : Lean.Name) (operation : α → α → α)
@@ -1523,8 +1583,8 @@ private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
   id
   entry
   args := #[codec.datum left, codec.datum right]
-  argSchemas := #[.bits codec.width, .bits codec.width]
-  resultSchema := .bits codec.width
+  argSchemas := #[codec.schema, codec.schema]
+  resultSchema := codec.schema
   native := fun _ => codec.datum (operation left right)
   tags := tags.push "fixed-width-unsigned-external"
   requiredLcnfForms := #["fap", "extern", "return"]
@@ -1543,8 +1603,8 @@ private def exactFixedWidthUnaryExternalCase (codec : FixedWidthCaseCodec α)
   id
   entry
   args := #[codec.datum input]
-  argSchemas := #[.bits codec.width]
-  resultSchema := .bits codec.width
+  argSchemas := #[codec.schema]
+  resultSchema := codec.schema
   native := fun _ => codec.datum (operation input)
   tags := tags.push "fixed-width-unsigned-external"
   requiredLcnfForms := #["fap", "extern", "return"]
@@ -1563,7 +1623,7 @@ private def exactFixedWidthDecisionExternalCase (codec : FixedWidthCaseCodec α)
   id
   entry
   args := #[codec.datum left, codec.datum right]
-  argSchemas := #[.bits codec.width, .bits codec.width]
+  argSchemas := #[codec.schema, codec.schema]
   resultSchema := .bool
   native := fun _ => .bool (operation left right)
   tags := tags.push "fixed-width-unsigned-external"
@@ -1611,6 +1671,15 @@ private def exactUInt64UnaryExternalCase :=
 
 private def exactUInt64DecisionExternalCase :=
   exactFixedWidthDecisionExternalCase uint64CaseCodec
+
+private def exactUSizeBinaryExternalCase :=
+  exactFixedWidthBinaryExternalCase usizeCaseCodec
+
+private def exactUSizeUnaryExternalCase :=
+  exactFixedWidthUnaryExternalCase usizeCaseCodec
+
+private def exactUSizeDecisionExternalCase :=
+  exactFixedWidthDecisionExternalCase usizeCaseCodec
 
 private def pairedExternalCallFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "ctor", "return"]
@@ -3082,6 +3151,139 @@ def cases : Array Case := #[
     #["stress", "scalar", "uint64", "external", "decision", "ordering",
       "less-or-equal", "false", "boundary", "i64"]
     "Reject non-strict unsigned ordering from maximum UInt64 to zero",
+  exactUSizeBinaryExternalCase
+    "usize-add-overflow" ``Source.addUSize Source.addUSize ``USize.add
+    0xffffffffffffffff 1
+    #["stress", "usize", "usize-external", "external", "arithmetic", "addition",
+      "overflow", "wraparound", "boundary", "i64", "semantic-lean64"]
+    "Wrap maximum Lean64 USize plus one to zero through the native runtime external",
+  exactUSizeBinaryExternalCase
+    "usize-sub-underflow" ``Source.subUSize Source.subUSize ``USize.sub
+    0 1
+    #["stress", "usize", "usize-external", "external", "arithmetic", "subtraction",
+      "underflow", "wraparound", "boundary", "i64", "semantic-lean64"]
+    "Wrap Lean64 USize zero minus one to the maximum value",
+  exactUSizeBinaryExternalCase
+    "usize-mul-overflow" ``Source.mulUSize Source.mulUSize ``USize.mul
+    0x8000000000000000 2
+    #["stress", "usize", "usize-external", "external", "arithmetic",
+      "multiplication", "overflow", "wraparound", "boundary", "i64",
+      "semantic-lean64"]
+    "Discard the high multiplication bit at the frozen Lean64 USize width",
+  exactUSizeBinaryExternalCase
+    "usize-div-floor" ``Source.divUSize Source.divUSize ``USize.div
+    0xffffffffffffffff 3
+    #["stress", "usize", "usize-external", "external", "arithmetic", "division",
+      "floor", "boundary", "i64", "semantic-lean64"]
+    "Compute unsigned floor division at the maximum Lean64 USize",
+  exactUSizeBinaryExternalCase
+    "usize-div-zero" ``Source.divUSize Source.divUSize ``USize.div
+    0xffffffffffffffff 0
+    #["stress", "usize", "usize-external", "external", "arithmetic", "division",
+      "zero-divisor", "boundary", "i64", "semantic-lean64"]
+    "Pin total Lean64 USize division by zero to zero",
+  exactUSizeBinaryExternalCase
+    "usize-mod-remainder" ``Source.modUSize Source.modUSize ``USize.mod
+    0xffffffffffffffff 16
+    #["stress", "usize", "usize-external", "external", "arithmetic", "remainder",
+      "boundary", "i64", "semantic-lean64"]
+    "Retain the low four bits as the Lean64 USize remainder",
+  exactUSizeBinaryExternalCase
+    "usize-mod-zero" ``Source.modUSize Source.modUSize ``USize.mod
+    0xffffffffffffffff 0
+    #["stress", "usize", "usize-external", "external", "arithmetic", "remainder",
+      "zero-divisor", "boundary", "i64", "semantic-lean64"]
+    "Pin Lean64 USize remainder by zero to the dividend",
+  exactUSizeBinaryExternalCase
+    "usize-land-mixed" ``Source.landUSize Source.landUSize ``USize.land
+    0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0
+    #["stress", "usize", "usize-external", "external", "bitwise", "and",
+      "mixed-bits", "i64", "semantic-lean64"]
+    "Intersect alternating Lean64 USize bit groups exactly",
+  exactUSizeBinaryExternalCase
+    "usize-lor-mixed" ``Source.lorUSize Source.lorUSize ``USize.lor
+    0xf00000000000000f 0x0ff00ff00ff00ff0
+    #["stress", "usize", "usize-external", "external", "bitwise", "or",
+      "mixed-bits", "i64", "semantic-lean64"]
+    "Union separated Lean64 USize bit groups across high and low boundaries",
+  exactUSizeBinaryExternalCase
+    "usize-xor-mixed" ``Source.xorUSize Source.xorUSize ``USize.xor
+    0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0
+    #["stress", "usize", "usize-external", "external", "bitwise", "xor",
+      "mixed-bits", "i64", "semantic-lean64"]
+    "Exclusive-or alternating Lean64 USize bit groups exactly",
+  exactUSizeBinaryExternalCase
+    "usize-shift-left-count-64" ``Source.shiftLeftUSize Source.shiftLeftUSize
+    ``USize.shiftLeft 0x8000000000000001 64
+    #["stress", "usize", "usize-external", "external", "bitwise", "shift-left",
+      "masked-count", "boundary", "i64", "semantic-lean64"]
+    "Mask a Lean64 USize left-shift count of 64 to zero",
+  exactUSizeBinaryExternalCase
+    "usize-shift-left-count-65" ``Source.shiftLeftUSize Source.shiftLeftUSize
+    ``USize.shiftLeft 0x8000000000000001 65
+    #["stress", "usize", "usize-external", "external", "bitwise", "shift-left",
+      "masked-count", "overflow", "boundary", "i64", "semantic-lean64"]
+    "Mask a Lean64 USize left-shift count of 65 to one and discard the high bit",
+  exactUSizeBinaryExternalCase
+    "usize-shift-right-count-64" ``Source.shiftRightUSize Source.shiftRightUSize
+    ``USize.shiftRight 0x8000000000000001 64
+    #["stress", "usize", "usize-external", "external", "bitwise", "shift-right",
+      "masked-count", "boundary", "i64", "semantic-lean64"]
+    "Mask a Lean64 USize right-shift count of 64 to zero",
+  exactUSizeBinaryExternalCase
+    "usize-shift-right-count-65" ``Source.shiftRightUSize Source.shiftRightUSize
+    ``USize.shiftRight 0x8000000000000001 65
+    #["stress", "usize", "usize-external", "external", "bitwise", "shift-right",
+      "masked-count", "logical", "boundary", "i64", "semantic-lean64"]
+    "Mask a Lean64 USize right-shift count of 65 to one and shift logically",
+  exactUSizeUnaryExternalCase
+    "usize-complement-zero" ``Source.complementUSize Source.complementUSize
+    ``USize.complement 0
+    #["stress", "usize", "usize-external", "external", "bitwise", "complement",
+      "boundary", "i64", "semantic-lean64"]
+    "Complement Lean64 USize zero to the exact 64-bit maximum",
+  exactUSizeUnaryExternalCase
+    "usize-neg-one" ``Source.negUSize Source.negUSize ``USize.neg 1
+    #["stress", "usize", "usize-external", "external", "arithmetic", "negation",
+      "wraparound", "boundary", "i64", "semantic-lean64"]
+    "Negate Lean64 USize one modulo 2^64",
+  exactUSizeDecisionExternalCase
+    "usize-dec-eq-max-true" ``Source.decideUSizeEq Source.decideUSizeEq
+    ``USize.decEq 0xffffffffffffffff 0xffffffffffffffff
+    #["stress", "usize", "usize-external", "external", "decision", "equality",
+      "true", "boundary", "i64", "semantic-lean64"]
+    "Decide equality of two maximum Lean64 USize values",
+  exactUSizeDecisionExternalCase
+    "usize-dec-eq-max-zero-false" ``Source.decideUSizeEq Source.decideUSizeEq
+    ``USize.decEq 0xffffffffffffffff 0
+    #["stress", "usize", "usize-external", "external", "decision", "equality",
+      "false", "boundary", "i64", "semantic-lean64"]
+    "Reject equality of maximum and zero Lean64 USize values",
+  exactUSizeDecisionExternalCase
+    "usize-dec-lt-zero-max-true" ``Source.decideUSizeLt Source.decideUSizeLt
+    ``USize.decLt 0 0xffffffffffffffff
+    #["stress", "usize", "usize-external", "external", "decision", "ordering",
+      "less-than", "true", "boundary", "i64", "semantic-lean64"]
+    "Order Lean64 USize zero strictly before the maximum",
+  exactUSizeDecisionExternalCase
+    "usize-dec-lt-max-zero-false" ``Source.decideUSizeLt Source.decideUSizeLt
+    ``USize.decLt 0xffffffffffffffff 0
+    #["stress", "usize", "usize-external", "external", "decision", "ordering",
+      "less-than", "false", "boundary", "i64", "semantic-lean64"]
+    "Reject strict unsigned ordering from maximum Lean64 USize to zero",
+  exactUSizeDecisionExternalCase
+    "usize-dec-le-max-max-true" ``Source.decideUSizeLe Source.decideUSizeLe
+    ``USize.decLe 0xffffffffffffffff 0xffffffffffffffff
+    #["stress", "usize", "usize-external", "external", "decision", "ordering",
+      "less-or-equal", "true", "equality", "boundary", "i64",
+      "semantic-lean64"]
+    "Accept non-strict ordering at the Lean64 USize maximum",
+  exactUSizeDecisionExternalCase
+    "usize-dec-le-max-zero-false" ``Source.decideUSizeLe Source.decideUSizeLe
+    ``USize.decLe 0xffffffffffffffff 0
+    #["stress", "usize", "usize-external", "external", "decision", "ordering",
+      "less-or-equal", "false", "boundary", "i64", "semantic-lean64"]
+    "Reject non-strict unsigned ordering from maximum Lean64 USize to zero",
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8
@@ -5585,7 +5787,12 @@ def requiredSourceAdministrativeStepKinds : Array String :=
     "admin:yield-cache", "admin:yield-done"]
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-unsigned-external").size == 88
+  validationCase.tags.contains "fixed-width-unsigned-external").size == 110
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "usize-external").size == 22
+
+#guard System.Platform.numBits == 64
 
 #guard cases.all fun validationCase => !validationCase.requiredExecutedLcnfForms.isEmpty
 

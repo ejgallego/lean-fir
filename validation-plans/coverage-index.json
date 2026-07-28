@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 299,
-        "minimumComparisons": 299,
+        "minimumCases": 321,
+        "minimumComparisons": 321,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 299,
-        "minimumComparisons": 598,
+        "minimumCases": 321,
+        "minimumComparisons": 642,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 308,
-      "minimumTierCases": 607,
-      "minimumComparisons": 906
+      "minimumUniqueCases": 330,
+      "minimumTierCases": 651,
+      "minimumComparisons": 972
     },
     "machine": {
-      "minimumCases": 308,
-      "minimumInterpreterSteps": 3098,
+      "minimumCases": 330,
+      "minimumInterpreterSteps": 3230,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -250,7 +250,22 @@
         "UInt8.shiftLeft",
         "UInt8.shiftRight",
         "UInt8.sub",
-        "UInt8.xor"
+        "UInt8.xor",
+        "USize.add",
+        "USize.complement",
+        "USize.decEq",
+        "USize.decLe",
+        "USize.decLt",
+        "USize.div",
+        "USize.land",
+        "USize.lor",
+        "USize.mod",
+        "USize.mul",
+        "USize.neg",
+        "USize.shiftLeft",
+        "USize.shiftRight",
+        "USize.sub",
+        "USize.xor"
       ]
     }
   }
