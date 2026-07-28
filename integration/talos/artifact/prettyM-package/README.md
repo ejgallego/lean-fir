@@ -83,11 +83,14 @@ the final zero-function-import W7 artifact. It owns a `WebAssembly.Memory`,
 starts its private frontier at byte 1024, and exports low-level
 `fir_heap_frontier`, `fir_heap_set_frontier`, `fir_heap_alloc`, and typed raw
 store operations. The accompanying `runtime/` tree supplies the current
-concrete JavaScript implementations of the remaining 52 function imports.
+concrete JavaScript implementations of the remaining 46 function imports.
 All 27 constructor-allocation operations, all four immediate-Natural literal
 operations, all 87 closure-allocation operations, all ten direct
 constructor-setter operations, and all four nonrecursive reference-count
-increments in the styled artifact are resident in Wasm.
+increments in the styled artifact are resident in Wasm. All five distinct
+recursive decrement operations and nonrecursive delete are resident as well;
+constructor children and statically object-like closure captures are released
+inside the module.
 The standalone
 resident literal module also covers UTF-8 strings, but the four String imports
 remain until their JavaScript-consuming externals move into Wasm. While other

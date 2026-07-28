@@ -203,3 +203,33 @@ run_cmd do
   | .error error =>
       throwError
         "failed to write resident styled increment module: {repr error}"
+  let releases := incrementArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentRelease.isRelease
+  unless releases.size == 6 do
+    throwError "resident styled Format recursive-release inventory changed"
+  let releaseArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeReleases incrementArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled releases: {repr error}"
+  unless releaseArtifact.module.imports.size == 46 &&
+      releaseArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentRelease.isRelease operation do
+    throwError "resident styled Format recursive-release frontier changed"
+  unless releaseArtifact.module.imports.size + releases.size ==
+      incrementArtifact.module.imports.size do
+    throwError "resident styled release import accounting changed"
+  unless releaseArtifact.module.closureDispatch ==
+      incrementArtifact.module.closureDispatch &&
+      releaseArtifact.module.closureDescriptors ==
+        incrementArtifact.module.closureDescriptors do
+    throwError "resident styled releases changed closure metadata"
+  unless (List.range releases.size).all fun ordinal =>
+      releaseArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentRelease.releaseName ordinal) do
+    throwError "resident styled release helper exports changed"
+  match ← releaseArtifact.write
+      "_build/source-pretty-format-trace-resident-releases.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled release module: {repr error}"

@@ -31,6 +31,9 @@ node run-resident-setters.mjs _build/resident-setters.wasm
 lake exe fir-wasm-artifact resident-increments \
   _build/resident-increments.wasm
 node run-resident-increments.mjs _build/resident-increments.wasm
+lake exe fir-wasm-artifact resident-releases \
+  _build/resident-releases.wasm
+node run-resident-releases.mjs _build/resident-releases.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
@@ -78,11 +81,13 @@ resident_pretties=(
   "source-pretty-format-resident-partial-applications"
   "source-pretty-format-resident-setters"
   "source-pretty-format-resident-increments"
+  "source-pretty-format-resident-releases"
   "source-pretty-format-trace-resident-constructors"
   "source-pretty-format-trace-resident-naturals"
   "source-pretty-format-trace-resident-partial-applications"
   "source-pretty-format-trace-resident-setters"
   "source-pretty-format-trace-resident-increments"
+  "source-pretty-format-trace-resident-releases"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -128,12 +133,16 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-setters.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-increments.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-releases.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-naturals.wasm.lcnf \
   _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf \
   _build/source-pretty-format-trace-resident-setters.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-setters.wasm.lcnf \
   _build/source-pretty-format-trace-resident-increments.wasm.lcnf
+cmp _build/source-pretty-format-trace-resident-increments.wasm.lcnf \
+  _build/source-pretty-format-trace-resident-releases.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
@@ -146,7 +155,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-naturals.wasm \
   _build/source-pretty-format-resident-partial-applications.wasm \
   _build/source-pretty-format-resident-setters.wasm \
-  _build/source-pretty-format-resident-increments.wasm
+  _build/source-pretty-format-resident-increments.wasm \
+  _build/source-pretty-format-resident-releases.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -269,6 +279,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-setters.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-increments.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-releases.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -358,6 +370,13 @@ lake exe fir-wasm-artifact resident-increments \
 cmp "$first/resident/increments.wasm" "$second/resident/increments.wasm"
 cmp "$first/resident/increments.wasm.json" \
   "$second/resident/increments.wasm.json"
+lake exe fir-wasm-artifact resident-releases \
+  "$first/resident/releases.wasm"
+lake exe fir-wasm-artifact resident-releases \
+  "$second/resident/releases.wasm"
+cmp "$first/resident/releases.wasm" "$second/resident/releases.wasm"
+cmp "$first/resident/releases.wasm.json" \
+  "$second/resident/releases.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

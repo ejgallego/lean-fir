@@ -5,6 +5,7 @@ import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentReferenceCount
+import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -107,6 +108,20 @@ def internalizeIncrements (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident increments: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeReleases (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentRelease.internalizeReleases artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident recursive releases: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -243,9 +258,18 @@ def compileIncrementModule (entry : Name) :
   let result ← compileSetterModule entry
   return result.bind internalizeIncrements
 
+/--
+Continue from nonrecursive increments and internalize recursive decrements and
+nonrecursive delete using the retained closure-capture descriptor table.
+-/
+def compileReleaseModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileIncrementModule entry
+  return result.bind internalizeReleases
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileIncrementModule entry
+  compileReleaseModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

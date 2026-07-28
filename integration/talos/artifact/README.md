@@ -99,6 +99,9 @@ node run-resident-setters.mjs _build/resident-setters.wasm
 lake exe fir-wasm-artifact resident-increments \
   _build/resident-increments.wasm
 node run-resident-increments.mjs _build/resident-increments.wasm
+lake exe fir-wasm-artifact resident-releases \
+  _build/resident-releases.wasm
+node run-resident-releases.mjs _build/resident-releases.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -374,7 +377,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-naturals.wasm \
   _build/source-pretty-format-resident-partial-applications.wasm \
   _build/source-pretty-format-resident-setters.wasm \
-  _build/source-pretty-format-resident-increments.wasm
+  _build/source-pretty-format-resident-increments.wasm \
+  _build/source-pretty-format-resident-releases.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -565,9 +569,26 @@ node call-concrete-pretty-format.mjs \
 
 Final LCNF and both retained closure tables remain byte-identical. Text
 `prettyM` advances from 54 to 50 imports, while styled `prettyM` advances from
-56 to 52. Recursive `dec` and `delete` remain separate because they must walk
-owned constructor/closure fields. The text audit is now
+56 to 52. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50`.
+
+The following checkpoint internalizes the five distinct recursive `dec`
+operations plus nonrecursive `delete` in each facade. A shared Wasm helper
+marks a count-one parent released before recursively visiting constructor
+object slots or the object-like captures selected by the retained closure
+descriptor table. Checked immediate and promoted-tag lanes remain no-ops;
+unchecked lanes, stale headers, underflow, unknown or mismatched descriptors,
+and cycles trap:
+
+```text
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-releases.wasm
+```
+
+Final LCNF, closure dispatch, and closure descriptors remain byte-identical.
+Text `prettyM` advances from 50 to 44 imports, while styled `prettyM` advances
+from 52 to 46. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44`.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
@@ -583,8 +604,8 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 52 function imports: two more than
-the text-only 50-import checkpoint in order to preserve the exact
+memory and allocator and currently has 46 function imports: two more than
+the text-only 44-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare
