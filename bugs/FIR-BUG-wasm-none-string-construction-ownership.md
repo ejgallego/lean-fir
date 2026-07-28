@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-string-construction-ownership
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-07-28
 reproduction: scripts/wasm_format_externals.mjs
-regression: none
+regression: Fir/Validation/Corpus.lean
 ---
 
 # Summary
@@ -91,4 +91,8 @@ none
 
 ## Resolution and regression
 
-unresolved
+Fixed in `ec8efe1` by sharing exact copy-on-write handlers between the
+validation and formatting registries and pinning every ownership path with
+Lean and JavaScript guards. Nine `string-append-*` and `string-pushn-*` corpus
+cases compare Lean native execution, LCNF, and V8 across unique, shared,
+self-aliased, empty, zero-count, and non-BMP construction boundaries.

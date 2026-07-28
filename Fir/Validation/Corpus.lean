@@ -135,6 +135,29 @@ def stringNext (value : String) (position : Nat) : Nat :=
 def stringExtract (value : String) (beginPos endPos : Nat) : String :=
   String.Internal.extract value ⟨beginPos⟩ ⟨endPos⟩
 
+@[noinline]
+def stringAppend (left right : String) : String :=
+  String.Internal.append left right
+
+@[noinline]
+def stringAppendShared (left right : String) : String × String :=
+  let result := String.Internal.append left right
+  (left, result)
+
+@[noinline]
+def stringAppendSelfShared (value : String) : String × String :=
+  let result := String.Internal.append value value
+  (value, result)
+
+@[noinline]
+def stringPushnNonBmp (source : String) (count : Nat) : String :=
+  String.Internal.pushn source '😀' count
+
+@[noinline]
+def stringPushnNonBmpShared (source : String) (count : Nat) : String × String :=
+  let result := String.Internal.pushn source '😀' count
+  (source, result)
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -904,6 +927,9 @@ private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
+private def stringPairDatum (value : String × String) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
+
 private def byteArrayPairPairDatum
     (value : (ByteArray × ByteArray) × (ByteArray × ByteArray)) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayPairDatum value.1, byteArrayPairDatum value.2]
@@ -1101,6 +1127,15 @@ private def intOfNatFormTrace : Array String :=
 
 private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
+
+private def sharedStringAppendFormTrace : Array String :=
+  #["inc", "fap", "extern", "ctor", "return"]
+
+private def stringPushnFormTrace : Array String :=
+  #["lit", "fap", "extern", "return"]
+
+private def sharedStringPushnFormTrace : Array String :=
+  #["lit", "inc", "fap", "extern", "ctor", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "dec", "return"]
@@ -1716,6 +1751,168 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.Internal.extract]
     provenance := firProvenance
       "Return empty for a begin position greater than the end position" },
+  { id := "string-append-empty-right"
+    entry := ``Source.stringAppend
+    args := #[.string "Aé😀", .string ""]
+    argSchemas := #[.string, .string]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringAppend "Aé😀" "")
+    tags := #["stress", "string", "unicode", "construction", "append", "empty",
+      "external", "ownership", "unique", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Append an empty borrowed right operand while consuming a unique Unicode source" },
+  { id := "string-append-empty-left"
+    entry := ``Source.stringAppend
+    args := #[.string "", .string "\u0000é😀"]
+    argSchemas := #[.string, .string]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringAppend "" "\u0000é😀")
+    tags := #["stress", "string", "unicode", "construction", "append", "empty",
+      "nul", "non-bmp", "external", "ownership", "unique", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Grow a consumed empty String with NUL, BMP, and non-BMP borrowed contents" },
+  { id := "string-append-unicode"
+    entry := ``Source.stringAppend
+    args := #[.string "A\u0000é", .string "😀Z"]
+    argSchemas := #[.string, .string]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringAppend "A\u0000é" "😀Z")
+    tags := #["stress", "string", "unicode", "construction", "append", "nul",
+      "bmp", "non-bmp", "external", "ownership", "unique", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Append NUL, BMP, and non-BMP contents across the consumed/borrowed boundary" },
+  { id := "string-append-shared"
+    entry := ``Source.stringAppendShared
+    args := #[.string "Aé", .string "😀Z"]
+    argSchemas := #[.string, .string]
+    resultSchema := .ctor "Prod.mk" 0 #[.string, .string]
+    native := fun _ => stringPairDatum (Source.stringAppendShared "Aé" "😀Z")
+    tags := #["stress", "string", "unicode", "construction", "append", "external",
+      "ownership", "shared", "copy-on-write", "alias", "non-bmp"]
+    requiredLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfFormTrace := some sharedStringAppendFormTrace
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Retain the consumed left alias while append takes its shared copy-on-write path" },
+  { id := "string-append-self-shared"
+    entry := ``Source.stringAppendSelfShared
+    args := #[.string "Aé😀"]
+    argSchemas := #[.string]
+    resultSchema := .ctor "Prod.mk" 0 #[.string, .string]
+    native := fun _ => stringPairDatum (Source.stringAppendSelfShared "Aé😀")
+    tags := #["stress", "string", "unicode", "construction", "append", "external",
+      "ownership", "shared", "copy-on-write", "alias", "self-alias", "non-bmp"]
+    requiredLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfFormTrace := some sharedStringAppendFormTrace
+    requiredExternals := #[``String.Internal.append]
+    requiredExecutedExternals := #[``String.Internal.append]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.append]
+    requiredExecutedExternalTrace := some #[``String.Internal.append]
+    provenance := firProvenance
+      "Use one retained String as both consumed left and borrowed right append operands" },
+  { id := "string-pushn-zero"
+    entry := ``Source.stringPushnNonBmp
+    args := #[.string "Aé", .nat 0]
+    argSchemas := #[.string, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringPushnNonBmp "Aé" 0)
+    tags := #["stress", "string", "unicode", "construction", "pushn", "zero",
+      "external", "ownership", "unique", "no-op", "boundary"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some stringPushnFormTrace
+    requiredExternals := #[``String.Internal.pushn]
+    requiredExecutedExternals := #[``String.Internal.pushn]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.pushn]
+    requiredExecutedExternalTrace := some #[``String.Internal.pushn]
+    provenance := firProvenance
+      "Require zero-count pushn to return its exact consumed source without allocation" },
+  { id := "string-pushn-nonbmp-two"
+    entry := ``Source.stringPushnNonBmp
+    args := #[.string "Aé", .nat 2]
+    argSchemas := #[.string, .nat]
+    resultSchema := .string
+    native := fun _ => .string (Source.stringPushnNonBmp "Aé" 2)
+    tags := #["stress", "string", "unicode", "construction", "pushn", "non-bmp",
+      "external", "ownership", "unique", "multiplicity"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some stringPushnFormTrace
+    requiredExternals := #[``String.Internal.pushn]
+    requiredExecutedExternals := #[``String.Internal.pushn]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.pushn]
+    requiredExecutedExternalTrace := some #[``String.Internal.pushn]
+    provenance := firProvenance
+      "Append two complete non-BMP scalars while consuming a unique source" },
+  { id := "string-pushn-zero-shared"
+    entry := ``Source.stringPushnNonBmpShared
+    args := #[.string "Aé", .nat 0]
+    argSchemas := #[.string, .nat]
+    resultSchema := .ctor "Prod.mk" 0 #[.string, .string]
+    native := fun _ => stringPairDatum (Source.stringPushnNonBmpShared "Aé" 0)
+    tags := #["stress", "string", "unicode", "construction", "pushn", "zero",
+      "external", "ownership", "shared", "alias", "no-op", "boundary"]
+    requiredLcnfForms := #["inc", "lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfFormTrace := some sharedStringPushnFormTrace
+    requiredExternals := #[``String.Internal.pushn]
+    requiredExecutedExternals := #[``String.Internal.pushn]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.pushn]
+    requiredExecutedExternalTrace := some #[``String.Internal.pushn]
+    provenance := firProvenance
+      "Retain a shared source across zero-count pushn and return both aliases" },
+  { id := "string-pushn-shared-nonbmp-two"
+    entry := ``Source.stringPushnNonBmpShared
+    args := #[.string "Aé", .nat 2]
+    argSchemas := #[.string, .nat]
+    resultSchema := .ctor "Prod.mk" 0 #[.string, .string]
+    native := fun _ => stringPairDatum (Source.stringPushnNonBmpShared "Aé" 2)
+    tags := #["stress", "string", "unicode", "construction", "pushn", "non-bmp",
+      "external", "ownership", "shared", "copy-on-write", "alias", "multiplicity"]
+    requiredLcnfForms := #["inc", "lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["inc", "lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfFormTrace := some sharedStringPushnFormTrace
+    requiredExternals := #[``String.Internal.pushn]
+    requiredExecutedExternals := #[``String.Internal.pushn]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.pushn]
+    requiredExecutedExternalTrace := some #[``String.Internal.pushn]
+    provenance := firProvenance
+      "Retain the source while repeated non-BMP push takes its shared copy-on-write path" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8
