@@ -101,6 +101,13 @@ function naturalRemainder(left, right) {
   return right === 0n ? left : left % right;
 }
 
+function naturalShiftRight(value, count) {
+  if (value === 0n || count >= BigInt(value.toString(2).length)) {
+    return 0n;
+  }
+  return value >> count;
+}
+
 function euclideanRemainder(left, right) {
   if (right === 0n) {
     return left;
@@ -243,6 +250,12 @@ export const validationExternalRegistry = {
   "Nat.mul": naturalBinary("Nat.mul", (left, right) => left * right),
   "Nat.div": naturalBinary("Nat.div", naturalDivision),
   "Nat.mod": naturalBinary("Nat.mod", naturalRemainder),
+  "Nat.land": naturalBinary("Nat.land", (left, right) => left & right),
+  "Nat.lor": naturalBinary("Nat.lor", (left, right) => left | right),
+  "Nat.xor": naturalBinary("Nat.xor", (left, right) => left ^ right),
+  "Nat.shiftLeft": naturalBinary(
+    "Nat.shiftLeft", (value, count) => value << count),
+  "Nat.shiftRight": naturalBinary("Nat.shiftRight", naturalShiftRight),
   "Nat.decEq": naturalDecision("Nat.decEq", (left, right) => left === right),
   "Nat.decLt": naturalDecision("Nat.decLt", (left, right) => left < right),
   "Nat.decLe": naturalDecision("Nat.decLe", (left, right) => left <= right),

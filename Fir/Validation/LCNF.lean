@@ -375,6 +375,26 @@ private def natModExternal (request : ExternalRequest) (runtime : RuntimeState) 
     Except RuntimeFault ExternalResponse :=
   natBinaryExternal (· % ·) request runtime
 
+private def natLandExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal Nat.land request runtime
+
+private def natLorExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal Nat.lor request runtime
+
+private def natXorExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal Nat.xor request runtime
+
+private def natShiftLeftExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal Nat.shiftLeft request runtime
+
+private def natShiftRightExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal Nat.shiftRight request runtime
+
 private def natDecisionExternal (operation : Nat → Nat → Bool)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -707,6 +727,31 @@ private def stringToNatGuard (name : Name) (operation : String → Nat)
   26 false
 
 #guard natBinaryGuard ``Nat.mod (· % ·) multiLimbNat 0 multiLimbNat true
+
+#guard natBinaryGuard ``Nat.land Nat.land multiLimbNat 18446744073709551619 1 false
+
+#guard natBinaryGuard ``Nat.lor Nat.lor multiLimbNat 18446744073709551619
+  340282366920938463481821351505477763091 true
+
+#guard natBinaryGuard ``Nat.xor Nat.xor multiLimbNat 18446744073709551619
+  340282366920938463481821351505477763090 true
+
+#guard natBinaryGuard ``Nat.xor Nat.xor multiLimbNat multiLimbNat 0 false
+
+#guard natBinaryGuard ``Nat.shiftLeft Nat.shiftLeft 9223372036854775807 1
+  18446744073709551614 true
+
+#guard natBinaryGuard ``Nat.shiftLeft Nat.shiftLeft multiLimbNat 65
+  12554203470773361527671578846415332832831900187434193780736 true
+
+#guard natBinaryGuard ``Nat.shiftRight Nat.shiftRight multiLimbNat 65
+  9223372036854775808 true
+
+#guard natBinaryGuard ``Nat.shiftRight Nat.shiftRight multiLimbNat 128 1 false
+
+#guard natBinaryGuard ``Nat.shiftRight Nat.shiftRight multiLimbNat 129 0 false
+
+#guard natBinaryGuard ``Nat.shiftRight Nat.shiftRight multiLimbNat multiLimbNat 0 false
 
 #guard natDecisionGuard ``Nat.decEq
   (fun left right => decide (left = right)) multiLimbNat multiLimbNat true
@@ -1471,6 +1516,16 @@ private def validationExternals : ExternalImpl where
       natDivExternal request runtime
     else if request.name == ``Nat.mod then
       natModExternal request runtime
+    else if request.name == ``Nat.land then
+      natLandExternal request runtime
+    else if request.name == ``Nat.lor then
+      natLorExternal request runtime
+    else if request.name == ``Nat.xor then
+      natXorExternal request runtime
+    else if request.name == ``Nat.shiftLeft then
+      natShiftLeftExternal request runtime
+    else if request.name == ``Nat.shiftRight then
+      natShiftRightExternal request runtime
     else if request.name == ``Nat.decEq then
       natDecEqExternal request runtime
     else if request.name == ``Nat.decLt then

@@ -16,6 +16,11 @@ const compare = validationExternalRegistry["String.compare"];
 const natMul = validationExternalRegistry["Nat.mul"];
 const natDiv = validationExternalRegistry["Nat.div"];
 const natMod = validationExternalRegistry["Nat.mod"];
+const natLand = validationExternalRegistry["Nat.land"];
+const natLor = validationExternalRegistry["Nat.lor"];
+const natXor = validationExternalRegistry["Nat.xor"];
+const natShiftLeft = validationExternalRegistry["Nat.shiftLeft"];
+const natShiftRight = validationExternalRegistry["Nat.shiftRight"];
 const intMul = validationExternalRegistry["Int.mul"];
 const intEDiv = validationExternalRegistry["Int.ediv"];
 const intEMod = validationExternalRegistry["Int.emod"];
@@ -31,6 +36,11 @@ assert.strictEqual(formatExternalRegistry["String.compare"], compare);
 assert.strictEqual(formatExternalRegistry["Nat.mul"], natMul);
 assert.strictEqual(formatExternalRegistry["Nat.div"], natDiv);
 assert.strictEqual(formatExternalRegistry["Nat.mod"], natMod);
+assert.strictEqual(formatExternalRegistry["Nat.land"], natLand);
+assert.strictEqual(formatExternalRegistry["Nat.lor"], natLor);
+assert.strictEqual(formatExternalRegistry["Nat.xor"], natXor);
+assert.strictEqual(formatExternalRegistry["Nat.shiftLeft"], natShiftLeft);
+assert.strictEqual(formatExternalRegistry["Nat.shiftRight"], natShiftRight);
 assert.strictEqual(formatExternalRegistry["Int.mul"], intMul);
 assert.strictEqual(formatExternalRegistry["Int.ediv"], intEDiv);
 assert.strictEqual(formatExternalRegistry["Int.emod"], intEMod);
@@ -140,6 +150,89 @@ for (const [handler, declaration, leftValue, rightValue, expected, allocates] of
     0n,
     340282366920938463463374607431768211473n,
     true,
+  ],
+]) {
+  const host = new SemanticHost();
+  const left = host.natural(leftValue);
+  const right = host.natural(rightValue);
+  const frontier = host.nextLocation;
+  const result = invoke(handler, host, [left, right]);
+  assert.equal(naturalValue(host, result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+  assert.equal(naturalValue(host, left, `${declaration} retained left`), leftValue);
+  assert.equal(naturalValue(host, right, `${declaration} retained right`), rightValue);
+}
+
+for (const [handler, declaration, leftValue, rightValue, expected, allocates] of [
+  [
+    natLand, "Nat.land",
+    340282366920938463463374607431768211473n,
+    18446744073709551619n,
+    1n,
+    false,
+  ],
+  [
+    natLor, "Nat.lor",
+    340282366920938463463374607431768211473n,
+    18446744073709551619n,
+    340282366920938463481821351505477763091n,
+    true,
+  ],
+  [
+    natXor, "Nat.xor",
+    340282366920938463463374607431768211473n,
+    18446744073709551619n,
+    340282366920938463481821351505477763090n,
+    true,
+  ],
+  [
+    natXor, "Nat.xor",
+    340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    0n,
+    false,
+  ],
+  [
+    natShiftLeft, "Nat.shiftLeft",
+    0x7fffffffffffffffn,
+    1n,
+    0xfffffffffffffffen,
+    true,
+  ],
+  [
+    natShiftLeft, "Nat.shiftLeft",
+    340282366920938463463374607431768211473n,
+    65n,
+    12554203470773361527671578846415332832831900187434193780736n,
+    true,
+  ],
+  [
+    natShiftRight, "Nat.shiftRight",
+    340282366920938463463374607431768211473n,
+    65n,
+    9223372036854775808n,
+    true,
+  ],
+  [
+    natShiftRight, "Nat.shiftRight",
+    340282366920938463463374607431768211473n,
+    128n,
+    1n,
+    false,
+  ],
+  [
+    natShiftRight, "Nat.shiftRight",
+    340282366920938463463374607431768211473n,
+    129n,
+    0n,
+    false,
+  ],
+  [
+    natShiftRight, "Nat.shiftRight",
+    340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    0n,
+    false,
   ],
 ]) {
   const host = new SemanticHost();
