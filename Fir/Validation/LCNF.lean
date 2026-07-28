@@ -330,56 +330,59 @@ private def externalByteArray (request : ExternalRequest) (runtime : RuntimeStat
   let (_, _, value) ← externalByteArrayCell request runtime value
   return value
 
-private structure FixedWidthScalarCodec (α : Type) where
+private structure FixedWidthValueCodec (α : Type) where
   name : String
-  decode? : ScalarValue → Option α
-  encode : α → ScalarValue
+  decode? : Value → Option α
+  encode : α → Value
 
-private def uint8Codec : FixedWidthScalarCodec UInt8 where
+private def uint8Codec : FixedWidthValueCodec UInt8 where
   name := "UInt8"
   decode?
-    | .uint8 value => some value
+    | .scalar (.uint8 value) => some value
     | _ => none
-  encode := .uint8
+  encode value := .scalar (.uint8 value)
 
-private def uint16Codec : FixedWidthScalarCodec UInt16 where
+private def uint16Codec : FixedWidthValueCodec UInt16 where
   name := "UInt16"
   decode?
-    | .uint16 value => some value
+    | .scalar (.uint16 value) => some value
     | _ => none
-  encode := .uint16
+  encode value := .scalar (.uint16 value)
 
-private def uint32Codec : FixedWidthScalarCodec UInt32 where
+private def uint32Codec : FixedWidthValueCodec UInt32 where
   name := "UInt32"
   decode?
-    | .uint32 value => some value
+    | .scalar (.uint32 value) => some value
     | _ => none
-  encode := .uint32
+  encode value := .scalar (.uint32 value)
 
-private def uint64Codec : FixedWidthScalarCodec UInt64 where
+private def uint64Codec : FixedWidthValueCodec UInt64 where
   name := "UInt64"
   decode?
-    | .uint64 value => some value
+    | .scalar (.uint64 value) => some value
     | _ => none
-  encode := .uint64
+  encode value := .scalar (.uint64 value)
 
-private def externalFixedWidthScalar (codec : FixedWidthScalarCodec α)
+private def usizeCodec : FixedWidthValueCodec USize where
+  name := "USize"
+  decode?
+    | .usize value => some value.toUSize
+    | _ => none
+  encode value := .usize value.toUInt64
+
+private def externalFixedWidthValue (codec : FixedWidthValueCodec α)
     (request : ExternalRequest) (value : Value) : Except RuntimeFault α :=
-  match value with
-  | .scalar value =>
-      match codec.decode? value with
-      | some value => .ok value
-      | none =>
-          .error (.externalFailure request.name s!"expected a {codec.name} scalar")
-  | _ => .error (.externalFailure request.name s!"expected a {codec.name} scalar")
+  match codec.decode? value with
+  | some value => .ok value
+  | none => .error (.externalFailure request.name s!"expected a {codec.name} value")
 
 private def externalUInt8 (request : ExternalRequest) (value : Value) :
     Except RuntimeFault UInt8 :=
-  externalFixedWidthScalar uint8Codec request value
+  externalFixedWidthValue uint8Codec request value
 
 private def externalUInt32 (request : ExternalRequest) (value : Value) :
     Except RuntimeFault UInt32 :=
-  externalFixedWidthScalar uint32Codec request value
+  externalFixedWidthValue uint32Codec request value
 
 private def natBinaryExternal (operation : Nat → Nat → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
@@ -1609,78 +1612,78 @@ private def intDecisionGuard (name : Name) (operation : Int → Int → Bool)
 #guard intDecisionGuard ``Int.decLe
   (fun left right => decide (left ≤ right)) multiLimbInt (-multiLimbInt) false
 
-private def fixedWidthBinaryExternal (codec : FixedWidthScalarCodec α)
+private def fixedWidthBinaryExternal (codec : FixedWidthValueCodec α)
     (operation : α → α → α) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
-  let left ← externalFixedWidthScalar codec request left
-  let right ← externalFixedWidthScalar codec request right
+  let left ← externalFixedWidthValue codec request left
+  let right ← externalFixedWidthValue codec request right
   return {
-    value := .scalar (codec.encode (operation left right))
+    value := codec.encode (operation left right)
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def fixedWidthUnaryExternal (codec : FixedWidthScalarCodec α)
+private def fixedWidthUnaryExternal (codec : FixedWidthValueCodec α)
     (operation : α → α) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [value] := request.args.toList
     | throw (.arityMismatch 1 request.args.size)
-  let value ← externalFixedWidthScalar codec request value
+  let value ← externalFixedWidthValue codec request value
   return {
-    value := .scalar (codec.encode (operation value))
+    value := codec.encode (operation value)
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def fixedWidthDecisionExternal (codec : FixedWidthScalarCodec α)
+private def fixedWidthDecisionExternal (codec : FixedWidthValueCodec α)
     (operation : α → α → Bool) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
-  let left ← externalFixedWidthScalar codec request left
-  let right ← externalFixedWidthScalar codec request right
+  let left ← externalFixedWidthValue codec request left
+  let right ← externalFixedWidthValue codec request right
   return {
     value := .scalar (.uint8 (if operation left right then 1 else 0))
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def fixedWidthBinaryGuard (codec : FixedWidthScalarCodec α) (name : Name)
+private def fixedWidthBinaryGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → α → α) (left right expected : α) : Bool :=
   let runtime : RuntimeState := {}
   let request := intBinaryRequest name
-    (.scalar (codec.encode left)) (.scalar (codec.encode right))
+    (codec.encode left) (codec.encode right)
   match fixedWidthBinaryExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
-      response.value == .scalar (codec.encode expected) &&
+      response.value == codec.encode expected &&
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
-private def fixedWidthUnaryGuard (codec : FixedWidthScalarCodec α) (name : Name)
+private def fixedWidthUnaryGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → α) (input expected : α) : Bool :=
   let runtime : RuntimeState := {}
   let request : ExternalRequest := {
     name
     paramTypes := #[]
     resultType := default
-    args := #[.scalar (codec.encode input)] }
+    args := #[codec.encode input] }
   match fixedWidthUnaryExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
-      response.value == .scalar (codec.encode expected) &&
+      response.value == codec.encode expected &&
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
-private def fixedWidthDecisionGuard (codec : FixedWidthScalarCodec α) (name : Name)
+private def fixedWidthDecisionGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → α → Bool) (left right : α) (expected : Bool) : Bool :=
   let runtime : RuntimeState := {}
   let request := intBinaryRequest name
-    (.scalar (codec.encode left)) (.scalar (codec.encode right))
+    (codec.encode left) (codec.encode right)
   match fixedWidthDecisionExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
@@ -1932,6 +1935,81 @@ private def uint64DecisionGuard (name : Name) (operation : UInt64 → UInt64 →
 #guard uint64DecisionGuard ``UInt64.decLe
   (fun left right => decide (left ≤ right)) 0xffffffffffffffff 0 false
 
+#guard System.Platform.numBits == 64
+
+private def usizeBinaryGuard (name : Name) (operation : USize → USize → USize)
+    (left right expected : USize) : Bool :=
+  fixedWidthBinaryGuard usizeCodec name operation left right expected
+
+private def usizeUnaryGuard (name : Name) (operation : USize → USize)
+    (input expected : USize) : Bool :=
+  fixedWidthUnaryGuard usizeCodec name operation input expected
+
+private def usizeDecisionGuard (name : Name) (operation : USize → USize → Bool)
+    (left right : USize) (expected : Bool) : Bool :=
+  fixedWidthDecisionGuard usizeCodec name operation left right expected
+
+#guard usizeBinaryGuard ``USize.add USize.add 0xffffffffffffffff 1 0
+
+#guard usizeBinaryGuard ``USize.sub USize.sub 0 1 0xffffffffffffffff
+
+#guard usizeBinaryGuard ``USize.mul USize.mul 0x8000000000000000 2 0
+
+#guard usizeBinaryGuard ``USize.div USize.div
+  0xffffffffffffffff 3 0x5555555555555555
+
+#guard usizeBinaryGuard ``USize.div USize.div 0xffffffffffffffff 0 0
+
+#guard usizeBinaryGuard ``USize.mod USize.mod 0xffffffffffffffff 16 15
+
+#guard usizeBinaryGuard ``USize.mod USize.mod
+  0xffffffffffffffff 0 0xffffffffffffffff
+
+#guard usizeBinaryGuard ``USize.land USize.land
+  0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0 0x00f000f000f000f0
+
+#guard usizeBinaryGuard ``USize.lor USize.lor
+  0xf00000000000000f 0x0ff00ff00ff00ff0 0xfff00ff00ff00fff
+
+#guard usizeBinaryGuard ``USize.xor USize.xor
+  0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0 0xff00ff00ff00ff00
+
+#guard usizeBinaryGuard ``USize.shiftLeft USize.shiftLeft
+  0x8000000000000001 64 0x8000000000000001
+
+#guard usizeBinaryGuard ``USize.shiftLeft USize.shiftLeft
+  0x8000000000000001 65 2
+
+#guard usizeBinaryGuard ``USize.shiftRight USize.shiftRight
+  0x8000000000000001 64 0x8000000000000001
+
+#guard usizeBinaryGuard ``USize.shiftRight USize.shiftRight
+  0x8000000000000001 65 0x4000000000000000
+
+#guard usizeUnaryGuard ``USize.complement USize.complement 0 0xffffffffffffffff
+
+#guard usizeUnaryGuard ``USize.neg USize.neg 1 0xffffffffffffffff
+
+#guard usizeDecisionGuard ``USize.decEq
+  (fun left right => decide (left = right))
+  0xffffffffffffffff 0xffffffffffffffff true
+
+#guard usizeDecisionGuard ``USize.decEq
+  (fun left right => decide (left = right)) 0xffffffffffffffff 0 false
+
+#guard usizeDecisionGuard ``USize.decLt
+  (fun left right => decide (left < right)) 0 0xffffffffffffffff true
+
+#guard usizeDecisionGuard ``USize.decLt
+  (fun left right => decide (left < right)) 0xffffffffffffffff 0 false
+
+#guard usizeDecisionGuard ``USize.decLe
+  (fun left right => decide (left ≤ right))
+  0xffffffffffffffff 0xffffffffffffffff true
+
+#guard usizeDecisionGuard ``USize.decLe
+  (fun left right => decide (left ≤ right)) 0xffffffffffffffff 0 false
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
@@ -2150,6 +2228,39 @@ private def validationExternals : ExternalImpl where
         (fun left right => decide (left < right)) request runtime
     else if request.name == ``UInt64.decLe then
       fixedWidthDecisionExternal uint64Codec
+        (fun left right => decide (left ≤ right)) request runtime
+    else if request.name == ``USize.add then
+      fixedWidthBinaryExternal usizeCodec USize.add request runtime
+    else if request.name == ``USize.sub then
+      fixedWidthBinaryExternal usizeCodec USize.sub request runtime
+    else if request.name == ``USize.mul then
+      fixedWidthBinaryExternal usizeCodec USize.mul request runtime
+    else if request.name == ``USize.div then
+      fixedWidthBinaryExternal usizeCodec USize.div request runtime
+    else if request.name == ``USize.mod then
+      fixedWidthBinaryExternal usizeCodec USize.mod request runtime
+    else if request.name == ``USize.land then
+      fixedWidthBinaryExternal usizeCodec USize.land request runtime
+    else if request.name == ``USize.lor then
+      fixedWidthBinaryExternal usizeCodec USize.lor request runtime
+    else if request.name == ``USize.xor then
+      fixedWidthBinaryExternal usizeCodec USize.xor request runtime
+    else if request.name == ``USize.shiftLeft then
+      fixedWidthBinaryExternal usizeCodec USize.shiftLeft request runtime
+    else if request.name == ``USize.shiftRight then
+      fixedWidthBinaryExternal usizeCodec USize.shiftRight request runtime
+    else if request.name == ``USize.complement then
+      fixedWidthUnaryExternal usizeCodec USize.complement request runtime
+    else if request.name == ``USize.neg then
+      fixedWidthUnaryExternal usizeCodec USize.neg request runtime
+    else if request.name == ``USize.decEq then
+      fixedWidthDecisionExternal usizeCodec
+        (fun left right => decide (left = right)) request runtime
+    else if request.name == ``USize.decLt then
+      fixedWidthDecisionExternal usizeCodec
+        (fun left right => decide (left < right)) request runtime
+    else if request.name == ``USize.decLe then
+      fixedWidthDecisionExternal usizeCodec
         (fun left right => decide (left ≤ right)) request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")

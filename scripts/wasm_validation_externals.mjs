@@ -72,6 +72,13 @@ export function scalarUInt64(value, context) {
   return fixedWidthScalar(value, "uint64", 64, context);
 }
 
+export function semanticUSize(value, context) {
+  assert.equal(value.kind, "usize", `${context} must be a USize`);
+  assert.ok(value.value >= 0n && value.value < (1n << 64n),
+    `${context} is out of USize range`);
+  return value.value;
+}
+
 function boolResult(value) {
   return { kind: "scalar", scalarKind: "uint8", value: value ? 1n : 0n };
 }
@@ -121,59 +128,63 @@ function integerDecision(declaration, operation) {
   };
 }
 
-function fixedWidthResult(scalarKind, width, value) {
+function scalarFixedWidthCodec(scalarKind, width) {
   return {
-    kind: "scalar",
-    scalarKind,
-    value: BigInt.asUintN(width, value),
+    decode: (value, context) =>
+      fixedWidthScalar(value, scalarKind, width, context),
+    encode: value => ({
+      kind: "scalar",
+      scalarKind,
+      value: BigInt.asUintN(width, value),
+    }),
   };
 }
 
-function fixedWidthBinary(declaration, scalarKind, width, operation) {
+const usizeFixedWidthCodec = {
+  decode: semanticUSize,
+  encode: value => ({ kind: "usize", value: BigInt.asUintN(64, value) }),
+};
+
+function fixedWidthBinary(declaration, codec, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
-    const left = fixedWidthScalar(
-      args[0], scalarKind, width, `${declaration} left operand`);
-    const right = fixedWidthScalar(
-      args[1], scalarKind, width, `${declaration} right operand`);
+    const left = codec.decode(args[0], `${declaration} left operand`);
+    const right = codec.decode(args[1], `${declaration} right operand`);
     return {
-      value: fixedWidthResult(scalarKind, width, operation(left, right)),
+      value: codec.encode(operation(left, right)),
       world,
     };
   };
 }
 
-function fixedWidthUnary(declaration, scalarKind, width, operation) {
+function fixedWidthUnary(declaration, codec, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
-    const value = fixedWidthScalar(
-      args[0], scalarKind, width, `${declaration} operand`);
+    const value = codec.decode(args[0], `${declaration} operand`);
     return {
-      value: fixedWidthResult(scalarKind, width, operation(value)),
+      value: codec.encode(operation(value)),
       world,
     };
   };
 }
 
-function fixedWidthDecision(declaration, scalarKind, width, operation) {
+function fixedWidthDecision(declaration, codec, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
-    const left = fixedWidthScalar(
-      args[0], scalarKind, width, `${declaration} left operand`);
-    const right = fixedWidthScalar(
-      args[1], scalarKind, width, `${declaration} right operand`);
+    const left = codec.decode(args[0], `${declaration} left operand`);
+    const right = codec.decode(args[1], `${declaration} right operand`);
     return { value: boolResult(operation(left, right)), world };
   };
 }
 
-function fixedWidthExternalFamily(typeName, scalarKind, width) {
+function fixedWidthExternalFamily(typeName, width, codec) {
   const declaration = suffix => `${typeName}.${suffix}`;
   const binary = (suffix, operation) =>
-    fixedWidthBinary(declaration(suffix), scalarKind, width, operation);
+    fixedWidthBinary(declaration(suffix), codec, operation);
   const unary = (suffix, operation) =>
-    fixedWidthUnary(declaration(suffix), scalarKind, width, operation);
+    fixedWidthUnary(declaration(suffix), codec, operation);
   const decision = (suffix, operation) =>
-    fixedWidthDecision(declaration(suffix), scalarKind, width, operation);
+    fixedWidthDecision(declaration(suffix), codec, operation);
   const shiftMask = BigInt(width - 1);
   return {
     [declaration("add")]: binary("add", (left, right) => left + right),
@@ -418,10 +429,11 @@ export const validationExternalRegistry = {
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
-  ...fixedWidthExternalFamily("UInt8", "uint8", 8),
-  ...fixedWidthExternalFamily("UInt16", "uint16", 16),
-  ...fixedWidthExternalFamily("UInt32", "uint32", 32),
-  ...fixedWidthExternalFamily("UInt64", "uint64", 64),
+  ...fixedWidthExternalFamily("UInt8", 8, scalarFixedWidthCodec("uint8", 8)),
+  ...fixedWidthExternalFamily("UInt16", 16, scalarFixedWidthCodec("uint16", 16)),
+  ...fixedWidthExternalFamily("UInt32", 32, scalarFixedWidthCodec("uint32", 32)),
+  ...fixedWidthExternalFamily("UInt64", 64, scalarFixedWidthCodec("uint64", 64)),
+  ...fixedWidthExternalFamily("USize", 64, usizeFixedWidthCodec),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");
