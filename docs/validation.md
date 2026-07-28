@@ -1456,17 +1456,17 @@ references. The V8 adapter materializes the same schema-directed datums at the
 Wasm import boundary and retains its own private event-time heap views.
 
 The validation backend's external implementation is reject-by-default.
-`Nat.add`, `Int.ofNat`, `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`,
+`Nat.add`, `Nat.sub`, `Int.ofNat`, `Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`,
 `ByteArray.size`, `ByteArray.get!`, `ByteArray.set!`, and the validation-owned
-Nat and ByteArray effect recorders are currently allowlisted.  Natural addition
-decodes tagged or heap operands, computes with Lean `Nat`, and re-encodes
-through the same tagged/heap boundary as the interpreter.  The integer
-primitives decode and re-encode both signed immediate and heap representations;
-`Int.add` and `Int.sub` share one exact binary-`Int` adapter, while `Int.decLt`
-returns the scalar `UInt8` discriminant consumed by lowered pattern matching.
-Byte-array size reads the
-packed heap object and returns a tagged natural; byte-array indexing returns
-the selected packed byte as a scalar `UInt8`.  Byte-array mutation consumes its
+Nat and ByteArray effect recorders are currently allowlisted. Natural addition
+and saturating subtraction share one exact binary-`Nat` adapter that decodes
+tagged or heap operands and re-encodes through the same tagged/heap boundary as
+the interpreter. The integer primitives decode and re-encode both signed
+immediate and heap representations; `Int.add` and `Int.sub` share one exact
+binary-`Int` adapter, while `Int.decLt` returns the scalar `UInt8` discriminant
+consumed by lowered pattern matching. Byte-array size reads the packed heap
+object and returns a tagged natural; byte-array indexing returns the selected
+packed byte as a scalar `UInt8`. Byte-array mutation consumes its
 array argument: unique cells update in place, while shared cells decrement the
 consumed reference and return a newly allocated copy.  Validation-only guards
 check both paths' locations, allocation counts, contents, and reference counts

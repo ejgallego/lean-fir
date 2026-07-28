@@ -64,6 +64,12 @@ export const validationExternalRegistry = {
     const right = naturalValue(host, args[1], "Nat.add right operand");
     return { value: host.natural(left + right), world };
   },
+  "Nat.sub": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Nat.sub external arity mismatch");
+    const left = naturalValue(host, args[0], "Nat.sub left operand");
+    const right = naturalValue(host, args[1], "Nat.sub right operand");
+    return { value: host.natural(left < right ? 0n : left - right), world };
+  },
   "Int.ofNat": ({ args, host, world }) => {
     assert.equal(args.length, 1, "Int.ofNat external arity mismatch");
     const value = naturalValue(host, args[0], "Int.ofNat operand");

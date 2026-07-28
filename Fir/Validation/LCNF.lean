@@ -321,18 +321,67 @@ private def externalUInt8 (request : ExternalRequest) (value : Value) : Except R
   | .scalar (.uint8 value) => .ok value
   | _ => .error (.externalFailure request.name "expected a UInt8 scalar")
 
-private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+private def natBinaryExternal (operation : Nat → Nat → Nat)
+    (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
   let left ← externalNat request runtime left
   let right ← externalNat request runtime right
-  let (runtime, value) := literal runtime (.nat (left + right))
+  let (runtime, value) := literal runtime (.nat (operation left right))
   return {
     value
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
+
+private def natAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal (· + ·) request runtime
+
+private def natSubExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  natBinaryExternal (· - ·) request runtime
+
+private def natBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
+  name
+  paramTypes := #[]
+  resultType := default
+  args := #[left, right] }
+
+private def natBinaryGuard (name : Name) (operation : Nat → Nat → Nat)
+    (left right expected : Nat) (allocates : Bool) : Bool :=
+  let (runtime, leftValue) := literal {} (.nat left)
+  let (runtime, rightValue) := literal runtime (.nat right)
+  let request := natBinaryRequest name leftValue rightValue
+  match natBinaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalNat request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.world == runtime.world &&
+          response.nextLocation ==
+            runtime.nextLocation + if allocates then 1 else 0
+
+private def multiLimbNat : Nat :=
+  340282366920938463463374607431768211473
+
+#guard natBinaryGuard ``Nat.add (· + ·) multiLimbNat multiLimbNat
+  680564733841876926926749214863536422946 true
+
+#guard natBinaryGuard ``Nat.sub (· - ·) multiLimbNat 17
+  340282366920938463463374607431768211456 true
+
+#guard natBinaryGuard ``Nat.sub (· - ·) multiLimbNat multiLimbNat 0 false
+
+#guard natBinaryGuard ``Nat.sub (· - ·) 17 multiLimbNat 0 false
 
 private def recordEffectExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -579,6 +628,8 @@ private def validationExternals : ExternalImpl where
   call request runtime :=
     if request.name == ``Nat.add then
       natAddExternal request runtime
+    else if request.name == ``Nat.sub then
+      natSubExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordImpl then
       recordEffectExternal request runtime
     else if request.name == ``Corpus.NativeEffects.recordByteArrayImpl then
