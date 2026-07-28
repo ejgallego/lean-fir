@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 192,
-        "minimumComparisons": 192,
+        "minimumCases": 202,
+        "minimumComparisons": 202,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 192,
-        "minimumComparisons": 384,
+        "minimumCases": 202,
+        "minimumComparisons": 404,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 197,
-      "minimumTierCases": 389,
-      "minimumComparisons": 581
+      "minimumUniqueCases": 207,
+      "minimumTierCases": 409,
+      "minimumComparisons": 611
     },
     "machine": {
-      "minimumCases": 197,
-      "minimumInterpreterSteps": 2373,
+      "minimumCases": 207,
+      "minimumInterpreterSteps": 2433,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -170,9 +170,14 @@
         "Nat.decLe",
         "Nat.decLt",
         "Nat.div",
+        "Nat.land",
+        "Nat.lor",
         "Nat.mod",
         "Nat.mul",
+        "Nat.shiftLeft",
+        "Nat.shiftRight",
         "Nat.sub",
+        "Nat.xor",
         "String.Internal.append",
         "String.Internal.extract",
         "String.Internal.length",

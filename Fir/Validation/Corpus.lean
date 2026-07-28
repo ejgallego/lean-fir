@@ -744,6 +744,26 @@ def divModNat (left right : Nat) : Nat × Nat :=
   (left / right, left % right)
 
 @[noinline]
+def landNat (left right : Nat) : Nat :=
+  Nat.land left right
+
+@[noinline]
+def lorNat (left right : Nat) : Nat :=
+  Nat.lor left right
+
+@[noinline]
+def xorNat (left right : Nat) : Nat :=
+  Nat.xor left right
+
+@[noinline]
+def shiftLeftNat (value count : Nat) : Nat :=
+  Nat.shiftLeft value count
+
+@[noinline]
+def shiftRightNat (value count : Nat) : Nat :=
+  Nat.shiftRight value count
+
+@[noinline]
 def decideNatEq (left right : Nat) : Bool :=
   decide (left = right)
 
@@ -1183,6 +1203,26 @@ private def intOfNatFormTrace : Array String :=
 
 private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
+
+private def exactNatBinaryExternalCase
+    (id : String) (entry : Lean.Name) (operation : Nat → Nat → Nat)
+    (external : Lean.Name) (left right : Nat) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  args := #[.nat left, .nat right]
+  argSchemas := #[.nat, .nat]
+  resultSchema := .nat
+  native := fun _ => .nat (operation left right)
+  tags
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
 
 private def pairedExternalCallFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "ctor", "return"]
@@ -3979,6 +4019,83 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Nat.div, ``Nat.mod]
     provenance := firProvenance
       "Pin Nat division by zero to zero and remainder by zero to the dividend" },
+  exactNatBinaryExternalCase
+    "nat-land-multi-limb-to-tagged" ``Source.landNat Source.landNat ``Nat.land
+    340282366920938463463374607431768211473
+    18446744073709551619
+    #["stress", "external", "pure", "nat", "bitwise", "and", "heap-input",
+      "multi-limb", "tagged-result", "normalization"]
+    "Intersect multi-limb heap naturals into the tagged value one",
+  exactNatBinaryExternalCase
+    "nat-lor-multi-limb-growth" ``Source.lorNat Source.lorNat ``Nat.lor
+    340282366920938463463374607431768211473
+    18446744073709551619
+    #["stress", "external", "pure", "nat", "bitwise", "or", "heap",
+      "multi-limb", "growth"]
+    "Union disjoint high limbs and overlapping low bits exactly",
+  exactNatBinaryExternalCase
+    "nat-xor-multi-limb-mixed" ``Source.xorNat Source.xorNat ``Nat.xor
+    340282366920938463463374607431768211473
+    18446744073709551619
+    #["stress", "external", "pure", "nat", "bitwise", "xor", "heap",
+      "multi-limb", "mixed-bits"]
+    "Exclusive-or heap naturals with high disjoint and low overlapping bits",
+  exactNatBinaryExternalCase
+    "nat-xor-multi-limb-cancellation" ``Source.xorNat Source.xorNat ``Nat.xor
+    340282366920938463463374607431768211473
+    340282366920938463463374607431768211473
+    #["stress", "external", "pure", "nat", "bitwise", "xor", "heap-input",
+      "multi-limb", "zero", "tagged-result", "normalization"]
+    "Cancel equal multi-limb heap naturals to tagged zero",
+  exactNatBinaryExternalCase
+    "nat-shift-left-tagged-to-heap" ``Source.shiftLeftNat Source.shiftLeftNat
+    ``Nat.shiftLeft
+    9223372036854775807
+    1
+    #["stress", "external", "pure", "nat", "bitwise", "shift-left",
+      "boundary", "tagged-input", "heap-result", "growth"]
+    "Shift the tagged maximum across the heap representation boundary",
+  exactNatBinaryExternalCase
+    "nat-shift-left-multi-limb-growth" ``Source.shiftLeftNat Source.shiftLeftNat
+    ``Nat.shiftLeft
+    340282366920938463463374607431768211473
+    65
+    #["stress", "external", "pure", "nat", "bitwise", "shift-left", "heap",
+      "multi-limb", "growth", "cross-limb"]
+    "Shift a multi-limb heap natural left across a limb boundary",
+  exactNatBinaryExternalCase
+    "nat-shift-right-first-heap" ``Source.shiftRightNat Source.shiftRightNat
+    ``Nat.shiftRight
+    340282366920938463463374607431768211473
+    65
+    #["stress", "external", "pure", "nat", "bitwise", "shift-right",
+      "heap", "multi-limb", "boundary", "heap-result", "cross-limb"]
+    "Shift a multi-limb natural down to the first heap value",
+  exactNatBinaryExternalCase
+    "nat-shift-right-heap-to-tagged" ``Source.shiftRightNat Source.shiftRightNat
+    ``Nat.shiftRight
+    340282366920938463463374607431768211473
+    128
+    #["stress", "external", "pure", "nat", "bitwise", "shift-right",
+      "heap-input", "multi-limb", "tagged-result", "normalization"]
+    "Shift a multi-limb heap natural down to tagged one",
+  exactNatBinaryExternalCase
+    "nat-shift-right-exhausted" ``Source.shiftRightNat Source.shiftRightNat
+    ``Nat.shiftRight
+    340282366920938463463374607431768211473
+    129
+    #["stress", "external", "pure", "nat", "bitwise", "shift-right",
+      "heap-input", "multi-limb", "zero", "tagged-result", "boundary"]
+    "Shift one bit past a multi-limb natural into tagged zero",
+  exactNatBinaryExternalCase
+    "nat-shift-right-multi-limb-count" ``Source.shiftRightNat Source.shiftRightNat
+    ``Nat.shiftRight
+    340282366920938463463374607431768211473
+    340282366920938463463374607431768211473
+    #["stress", "external", "pure", "nat", "bitwise", "shift-right",
+      "heap-input", "multi-limb", "multi-limb-count", "oversized-count",
+      "zero", "tagged-result"]
+    "Use a multi-limb shift count larger than the value bit width",
   { id := "nat-sub-multi-limb-preserves-heap"
     entry := ``Source.subNat
     args := #[
