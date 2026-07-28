@@ -84,6 +84,30 @@ function integerBinary(declaration, operation) {
   };
 }
 
+function naturalDivision(left, right) {
+  return right === 0n ? 0n : left / right;
+}
+
+function naturalRemainder(left, right) {
+  return right === 0n ? left : left % right;
+}
+
+function euclideanRemainder(left, right) {
+  if (right === 0n) {
+    return left;
+  }
+  const modulus = right < 0n ? -right : right;
+  const remainder = left % modulus;
+  return remainder < 0n ? remainder + modulus : remainder;
+}
+
+function euclideanDivision(left, right) {
+  if (right === 0n) {
+    return 0n;
+  }
+  return (left - euclideanRemainder(left, right)) / right;
+}
+
 function stringMeasurement(declaration, operation) {
   return ({ args, host, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
@@ -208,6 +232,8 @@ export const validationExternalRegistry = {
   "Nat.sub": naturalBinary(
     "Nat.sub", (left, right) => left < right ? 0n : left - right),
   "Nat.mul": naturalBinary("Nat.mul", (left, right) => left * right),
+  "Nat.div": naturalBinary("Nat.div", naturalDivision),
+  "Nat.mod": naturalBinary("Nat.mod", naturalRemainder),
   "Nat.decEq": naturalDecision("Nat.decEq", (left, right) => left === right),
   "Nat.decLt": naturalDecision("Nat.decLt", (left, right) => left < right),
   "Nat.decLe": naturalDecision("Nat.decLe", (left, right) => left <= right),
@@ -249,6 +275,8 @@ export const validationExternalRegistry = {
   "Int.add": integerBinary("Int.add", (left, right) => left + right),
   "Int.sub": integerBinary("Int.sub", (left, right) => left - right),
   "Int.mul": integerBinary("Int.mul", (left, right) => left * right),
+  "Int.ediv": integerBinary("Int.ediv", euclideanDivision),
+  "Int.emod": integerBinary("Int.emod", euclideanRemainder),
   "Int.decLt": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Int.decLt external arity mismatch");
     const left = integerValue(host, args[0], "Int.decLt left operand");

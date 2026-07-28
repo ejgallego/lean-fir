@@ -14,7 +14,11 @@ const decEq = validationExternalRegistry["String.decEq"];
 const decLt = validationExternalRegistry["String.decidableLT"];
 const compare = validationExternalRegistry["String.compare"];
 const natMul = validationExternalRegistry["Nat.mul"];
+const natDiv = validationExternalRegistry["Nat.div"];
+const natMod = validationExternalRegistry["Nat.mod"];
 const intMul = validationExternalRegistry["Int.mul"];
+const intEDiv = validationExternalRegistry["Int.ediv"];
+const intEMod = validationExternalRegistry["Int.emod"];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
 assert.strictEqual(formatExternalRegistry["String.Internal.pushn"], pushn);
@@ -22,7 +26,11 @@ assert.strictEqual(formatExternalRegistry["String.decEq"], decEq);
 assert.strictEqual(formatExternalRegistry["String.decidableLT"], decLt);
 assert.strictEqual(formatExternalRegistry["String.compare"], compare);
 assert.strictEqual(formatExternalRegistry["Nat.mul"], natMul);
+assert.strictEqual(formatExternalRegistry["Nat.div"], natDiv);
+assert.strictEqual(formatExternalRegistry["Nat.mod"], natMod);
 assert.strictEqual(formatExternalRegistry["Int.mul"], intMul);
+assert.strictEqual(formatExternalRegistry["Int.ediv"], intEDiv);
+assert.strictEqual(formatExternalRegistry["Int.emod"], intEMod);
 
 function invoke(handler, host, args) {
   const beforeWorld = host.world;
@@ -96,6 +104,90 @@ for (const [leftValue, rightValue, expected, allocates] of [
   assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
   assert.equal(integerValue(host, left, "Int.mul retained left"), leftValue);
   assert.equal(integerValue(host, right, "Int.mul retained right"), rightValue);
+}
+
+for (const [handler, declaration, leftValue, rightValue, expected, allocates] of [
+  [
+    natDiv, "Nat.div",
+    340282366920938463463374607431768211473n,
+    18446744073709551619n,
+    18446744073709551613n,
+    true,
+  ],
+  [
+    natDiv, "Nat.div",
+    340282366920938463463374607431768211473n,
+    0n,
+    0n,
+    false,
+  ],
+  [
+    natMod, "Nat.mod",
+    340282366920938463463374607431768211473n,
+    18446744073709551619n,
+    26n,
+    false,
+  ],
+  [
+    natMod, "Nat.mod",
+    340282366920938463463374607431768211473n,
+    0n,
+    340282366920938463463374607431768211473n,
+    true,
+  ],
+]) {
+  const host = new SemanticHost();
+  const left = host.natural(leftValue);
+  const right = host.natural(rightValue);
+  const frontier = host.nextLocation;
+  const result = invoke(handler, host, [left, right]);
+  assert.equal(naturalValue(host, result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+  assert.equal(naturalValue(host, left, `${declaration} retained left`), leftValue);
+  assert.equal(naturalValue(host, right, `${declaration} retained right`), rightValue);
+}
+
+for (const [handler, declaration, leftValue, rightValue, expected, allocates] of [
+  [
+    intEDiv, "Int.ediv",
+    -340282366920938463463374607431768211473n,
+    17n,
+    -20016609818878733144904388672456953617n,
+    true,
+  ],
+  [intEDiv, "Int.ediv", -12n, -7n, 2n, false],
+  [
+    intEDiv, "Int.ediv",
+    340282366920938463463374607431768211473n,
+    0n,
+    0n,
+    false,
+  ],
+  [
+    intEMod, "Int.emod",
+    -340282366920938463463374607431768211473n,
+    17n,
+    16n,
+    false,
+  ],
+  [intEMod, "Int.emod", -12n, -7n, 2n, false],
+  [
+    intEMod, "Int.emod",
+    -340282366920938463463374607431768211473n,
+    0n,
+    -340282366920938463463374607431768211473n,
+    true,
+  ],
+]) {
+  const host = new SemanticHost();
+  const left = host.integer(leftValue);
+  const right = host.integer(rightValue);
+  const frontier = host.nextLocation;
+  const result = invoke(handler, host, [left, right]);
+  assert.equal(integerValue(host, result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+  assert.equal(integerValue(host, left, `${declaration} retained left`), leftValue);
+  assert.equal(integerValue(host, right, `${declaration} retained right`), rightValue);
 }
 
 {
