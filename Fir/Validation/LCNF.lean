@@ -494,30 +494,40 @@ private def intNegExternal (request : ExternalRequest) (runtime : RuntimeState) 
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def intAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+private def intBinaryExternal (operation : Int → Int → Int)
+    (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
   let left ← externalInt request runtime left
   let right ← externalInt request runtime right
-  let (runtime, value) := encodeIntValue runtime (left + right)
+  let (runtime, value) := encodeIntValue runtime (operation left right)
   return {
     value
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def intAddRequest (left right : Value) : ExternalRequest := {
-  name := ``Int.add
+private def intAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intBinaryExternal (· + ·) request runtime
+
+private def intSubExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intBinaryExternal (· - ·) request runtime
+
+private def intBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
+  name
   paramTypes := #[]
   resultType := default
   args := #[left, right] }
 
-private def intAddGuard (left right expected : Int) (allocates : Bool) : Bool :=
+private def intBinaryGuard (name : Name) (operation : Int → Int → Int)
+    (left right expected : Int) (allocates : Bool) : Bool :=
   let (runtime, leftValue) := encodeIntValue {} left
   let (runtime, rightValue) := encodeIntValue runtime right
-  let request := intAddRequest leftValue rightValue
-  match intAddExternal request runtime with
+  let request := intBinaryRequest name leftValue rightValue
+  match intBinaryExternal operation request runtime with
   | .error _ => false
   | .ok response =>
       let after : RuntimeState := {
@@ -533,6 +543,12 @@ private def intAddGuard (left right expected : Int) (allocates : Bool) : Bool :=
           response.nextLocation ==
             runtime.nextLocation + if allocates then 1 else 0
 
+private def intAddGuard : Int → Int → Int → Bool → Bool :=
+  intBinaryGuard ``Int.add (· + ·)
+
+private def intSubGuard : Int → Int → Int → Bool → Bool :=
+  intBinaryGuard ``Int.sub (· - ·)
+
 private def multiLimbInt : Int :=
   340282366920938463463374607431768211473
 
@@ -540,6 +556,11 @@ private def multiLimbInt : Int :=
   (680564733841876926926749214863536422946 : Int) true
 
 #guard intAddGuard multiLimbInt (-multiLimbInt) 0 false
+
+#guard intSubGuard multiLimbInt (-multiLimbInt)
+  (680564733841876926926749214863536422946 : Int) true
+
+#guard intSubGuard multiLimbInt multiLimbInt 0 false
 
 private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -574,6 +595,8 @@ private def validationExternals : ExternalImpl where
       intNegExternal request runtime
     else if request.name == ``Int.add then
       intAddExternal request runtime
+    else if request.name == ``Int.sub then
+      intSubExternal request runtime
     else if request.name == ``Int.decLt then
       intDecLtExternal request runtime
     else
