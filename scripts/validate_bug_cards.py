@@ -39,7 +39,13 @@ REQUIRED_HEADINGS = (
     "## Resolution and regression",
 )
 STATUSES = {"candidate", "confirmed", "upstreamed", "fixed", "closed-not-a-bug"}
-CLASSIFICATIONS = {"compiler", "fir-semantics", "wasm-adapter", "upstream-drift"}
+CLASSIFICATIONS = {
+    "compiler",
+    "fir-semantics",
+    "validation-harness",
+    "wasm-adapter",
+    "upstream-drift",
+}
 ID_RE = re.compile(r"FIR-BUG-[A-Za-z0-9][A-Za-z0-9._-]*\Z")
 DATE_RE = re.compile(r"\d{4}-\d{2}-\d{2}\Z")
 

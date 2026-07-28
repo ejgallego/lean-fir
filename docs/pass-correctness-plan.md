@@ -242,9 +242,10 @@ Every new pass theorem begins with a compiler-generated corpus and records:
 
 When a mismatch could indicate a compiler or model bug, copy
 `bugs/_template.md` immediately and keep the card at `candidate` until it is
-minimized. Classify it as `compiler`, `fir-semantics`, `wasm-adapter`, or
-`upstream-drift`; link the eventual permanent regression before marking it
-fixed. Workarounds belong in the card rather than silently weakening a theorem.
+minimized. Classify it as `compiler`, `fir-semantics`,
+`validation-harness`, `wasm-adapter`, or `upstream-drift`; link the eventual
+permanent regression before marking it fixed. Workarounds belong in the card
+rather than silently weakening a theorem.
 
 ## Current `simpCase` proof
 

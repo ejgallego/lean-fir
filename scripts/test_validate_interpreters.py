@@ -3575,6 +3575,7 @@ class HarnessTests(unittest.TestCase):
                 "../products.json",
                 "/tmp/products.json",
                 "build/stdout.jsonl",
+                "execution-input.json",
             ):
                 value = dict(base)
                 value["productManifest"] = manifest_path
@@ -4584,10 +4585,13 @@ class HarnessTests(unittest.TestCase):
 
             adapter_path = root / "v8.json"
             consumer_program = (
-                "import json,os;"
+                "import json,os,pathlib;"
                 "backend=os.environ['FIR_VALIDATION_BACKEND'];"
-                "bundle=json.loads(os.environ['FIR_VALIDATION_PRODUCT_BUNDLE']);"
-                "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
+                "execution=json.loads(pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']).read_text());"
+                "assert execution['selectedCases']==['case'];"
+                "bundle=execution['productBundle'];"
+                "products=execution['products'];"
                 "assert len(products)==1 and products[0]['backend']=='fixture-wasm';"
                 "binding=bundle['cases'][0]['products'];"
                 "receipt={'provider':bundle['provider'],"
@@ -5338,7 +5342,10 @@ class HarnessTests(unittest.TestCase):
             )
             program = (
                 "import hashlib,json,os,pathlib;"
-                "products=json.loads(os.environ['FIR_VALIDATION_PRODUCTS']);"
+                "execution=json.loads(pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']).read_text());"
+                "assert execution['selectedCases']==['case'];"
+                "products=execution['products'];"
                 "tools=json.loads(os.environ['FIR_VALIDATION_TOOLS']);"
                 "assert len(products)==1;"
                 "assert [tool['kind'] for tool in tools]==['engine','runner'];"
@@ -5562,7 +5569,7 @@ class HarnessTests(unittest.TestCase):
                     "artifact": f"evidence/build-inputs/{material_sha256}",
                 },
             )
-            self.assertEqual(matrix["summary"]["artifactCount"], 18)
+            self.assertEqual(matrix["summary"]["artifactCount"], 19)
             self.assertEqual(
                 [(item["kind"], item["name"]) for item in matrix["artifacts"]],
                 [
@@ -5591,6 +5598,7 @@ class HarnessTests(unittest.TestCase):
                         "build-input-replay-trace",
                         "v8/build-input-replay/file-access.strace",
                     ),
+                    ("execution-input", "v8/execution-input.json"),
                     ("process-stderr", "v8/build-2/stderr.log"),
                     (
                         "process-stderr",
@@ -6207,8 +6215,13 @@ class HarnessTests(unittest.TestCase):
             harness.write_corpus_manifest(out_dir, descriptors)
             record = success("case", "v8")
             program = (
-                "import json,os;"
-                "assert json.loads(os.environ['FIR_VALIDATION_CASES']) == ['case'];"
+                "import json,os,pathlib;"
+                "execution=json.loads(pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']).read_text());"
+                "assert execution['selectedCases'] == ['case'];"
+                "assert 'FIR_VALIDATION_CASES' not in os.environ;"
+                "assert 'FIR_VALIDATION_PRODUCTS' not in os.environ;"
+                "assert 'FIR_VALIDATION_PRODUCT_BUNDLE' not in os.environ;"
                 "assert json.loads(os.environ['FIR_VALIDATION_TOOLS']) == [];"
                 "assert os.path.isfile(os.environ['FIR_VALIDATION_CORPUS']);"
                 "assert os.environ['FIR_VALIDATION_BACKEND'] == 'v8';"
@@ -6228,9 +6241,145 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(backend_run.results, {"case": record})
             self.assertEqual(
                 [artifact.name for artifact in backend_run.artifacts],
-                ["v8/stdout.jsonl", "v8/stderr.log"],
+                [
+                    "v8/execution-input.json",
+                    "v8/stdout.jsonl",
+                    "v8/stderr.log",
+                ],
             )
             self.assertTrue((out_dir / "v8" / "stdout.jsonl").is_file())
+
+    def test_external_execution_input_scales_beyond_execve_arg_max(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            contract = harness.ProductContract(
+                "wasm", "wasm32", "fixture", "fixture-v1"
+            )
+            products = tuple(
+                harness.ValidationProduct(
+                    "fixture-wasm",
+                    "wasm-module",
+                    f"modules/case-{index:05d}/module.wasm",
+                    harness.sha256_bytes(f"module {index}".encode("utf-8")),
+                )
+                for index in range(7000)
+            )
+            case_products = (("case", products),)
+            bundle = harness.ProductBundle(
+                "fixture-wasm",
+                contract,
+                core.product_bundle_sha256(
+                    "fixture-wasm",
+                    contract,
+                    products,
+                    case_products,
+                ),
+                products,
+                case_products,
+            )
+            record = success("case", "v8")
+            program = (
+                "import json,os,pathlib;"
+                "path=pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']);"
+                "execution=json.loads(path.read_text());"
+                "assert len(execution['products'])==7000;"
+                "assert len(execution['productBundle']['products'])==7000;"
+                "assert 'FIR_VALIDATION_PRODUCTS' not in os.environ;"
+                "assert 'FIR_VALIDATION_PRODUCT_BUNDLE' not in os.environ;"
+                f"print({json.dumps(json.dumps(record))})"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                name="v8",
+                run_command=[sys.executable, "-c", program],
+                result_domain="selected",
+                product_provider=harness.ProductProviderRequirement(
+                    bundle.provider, contract
+                ),
+            )
+            context = harness.RunContext(
+                root,
+                out_dir,
+                descriptors,
+                ["case"],
+                product_bundles={bundle.provider: bundle},
+            )
+            adapter.build(harness.BuildContext(root, out_dir, True, context))
+            with mock.patch.object(
+                core, "verify_product_bundle_files"
+            ):
+                backend_run = adapter.execute(context)
+            execution_artifact = next(
+                artifact
+                for artifact in backend_run.artifacts
+                if artifact.kind == "execution-input"
+            )
+            self.assertGreater(
+                len(execution_artifact.content),
+                os.sysconf("SC_ARG_MAX"),
+            )
+            self.assertEqual(backend_run.results, {"case": record})
+            self.assertEqual(
+                (out_dir / "v8" / "execution-input.json").stat().st_mode
+                & 0o777,
+                0o444,
+            )
+
+    def test_external_execution_input_rejects_tampering_and_symlinks(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            out_dir = root / "out"
+            descriptors = [descriptor("case")]
+            harness.write_corpus_manifest(out_dir, descriptors)
+            context = harness.RunContext(
+                root, out_dir, descriptors, ["case"]
+            )
+            mutate = (
+                "import os,pathlib;"
+                "path=pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']);"
+                "path.chmod(0o644);"
+                "path.write_bytes(b'mutated')"
+            )
+            adapter = harness.ExternalCommandAdapter(
+                "v8", [sys.executable, "-c", mutate], "selected"
+            )
+            adapter.build(harness.BuildContext(root, out_dir, True, context))
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "external execution input changed during execution",
+            ):
+                adapter.execute(context)
+
+            replace = (
+                "import os,pathlib;"
+                "path=pathlib.Path("
+                "os.environ['FIR_VALIDATION_EXECUTION_INPUT']);"
+                "content=path.read_bytes();"
+                "path.unlink();"
+                "path.write_bytes(content)"
+            )
+            adapter.run_command = [sys.executable, "-c", replace]
+            adapter.build(harness.BuildContext(root, out_dir, True, context))
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "external execution input was replaced during execution",
+            ):
+                adapter.execute(context)
+
+            execution_input = out_dir / "v8" / "execution-input.json"
+            execution_input.unlink()
+            target = root / "outside.json"
+            target.write_text("outside", encoding="utf-8")
+            execution_input.symlink_to(target)
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "execution input path is a symlink",
+            ):
+                adapter.execute(context)
 
     def test_external_adapter_binds_and_verifies_exact_declared_tools(self) -> None:
         with tempfile.TemporaryDirectory() as directory:

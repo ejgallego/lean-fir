@@ -46,6 +46,7 @@ O_ACCMODE = 0x3
 O_WRONLY = 0x1
 O_PATH = 0x200000
 RESERVED_PRODUCT_PATHS = {
+    "execution-input.json",
     "stdout.jsonl",
     "stderr.log",
     "build/stdout.jsonl",
@@ -300,6 +301,53 @@ class ValidationArtifact:
 
 
 @dataclass(frozen=True)
+class MaterializedExecutionInput:
+    path: Path
+    identity: tuple[int, int, int, int, int, int]
+    artifact: ValidationArtifact
+
+    def verify(self, phase: str) -> None:
+        context = f"{self.artifact.name} {phase}"
+        if self.path.is_symlink() or not self.path.is_file():
+            raise ValidationError(
+                f"external execution input is not a regular file {phase}"
+            )
+        try:
+            file_stat = self.path.stat()
+            content = regular_file_content_without_symlinks(
+                self.path, context
+            )
+        except OSError as error:
+            raise ValidationError(
+                f"cannot verify external execution input {phase}: {error}"
+            ) from error
+        if file_stat.st_nlink != 1:
+            raise ValidationError(
+                f"external execution input has multiple links {phase}"
+            )
+        if (file_stat.st_dev, file_stat.st_ino) != self.identity[:2]:
+            raise ValidationError(
+                f"external execution input was replaced {phase}"
+            )
+        if content != self.artifact.content:
+            raise ValidationError(
+                f"external execution input changed {phase}"
+            )
+        metadata = (
+            file_stat.st_dev,
+            file_stat.st_ino,
+            file_stat.st_ctime_ns,
+            file_stat.st_mtime_ns,
+            file_stat.st_size,
+            file_stat.st_mode & 0o7777,
+        )
+        if metadata != self.identity:
+            raise ValidationError(
+                f"external execution input was replaced {phase}"
+            )
+
+
+@dataclass(frozen=True)
 class VerifiedEvidence:
     manifest_path: Path
     report_root: Path
@@ -490,6 +538,194 @@ def canonical_json_bytes(value: object) -> bytes:
         separators=(",", ":"),
         sort_keys=True,
     ).encode("utf-8")
+
+
+def execution_input_value(
+    backend: str,
+    selected_cases: list[str],
+    products: tuple[ValidationProduct, ...],
+    bundle: ProductBundle | None,
+    out_dir: Path,
+) -> dict:
+    return {
+        "version": PROTOCOL_VERSION,
+        "backend": backend,
+        "selectedCases": list(selected_cases),
+        "products": [
+            {
+                **product.to_json(),
+                "path": str(
+                    (out_dir / product.backend / product.name).resolve()
+                ),
+            }
+            for product in products
+        ],
+        "productBundle": bundle.to_json() if bundle is not None else None,
+    }
+
+
+def checked_execution_input(
+    content: bytes,
+    backend: str,
+    selected_cases: list[str],
+    products: tuple[ValidationProduct, ...],
+    bundle: ProductBundle | None,
+    context: str,
+    out_dir: Path | None = None,
+) -> dict:
+    try:
+        value = json.loads(content.decode("utf-8"))
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"{context}: execution input is not JSON"
+        ) from error
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {
+            "version",
+            "backend",
+            "selectedCases",
+            "products",
+            "productBundle",
+        }
+        or value["version"] != PROTOCOL_VERSION
+        or isinstance(value["version"], bool)
+        or value["backend"] != backend
+        or value["selectedCases"] != selected_cases
+        or not isinstance(value["products"], list)
+        or value["productBundle"]
+        != (bundle.to_json() if bundle is not None else None)
+        or canonical_json_bytes(value) != content
+    ):
+        raise ValidationError(f"{context}: malformed execution input")
+    exposed: list[dict[str, str]] = []
+    for index, product in enumerate(value["products"]):
+        product_context = f"{context}: product {index}"
+        if (
+            not isinstance(product, dict)
+            or set(product) != {"backend", "kind", "name", "sha256", "path"}
+        ):
+            raise ValidationError(
+                f"{product_context} is malformed"
+            )
+        product_backend = validate_backend_name(
+            product["backend"], f"{product_context} backend"
+        )
+        product_kind = validate_backend_name(
+            product["kind"], f"{product_context} kind"
+        )
+        product_name = checked_relative_posix_path(
+            product["name"], f"{product_context} name"
+        )
+        product_sha256 = checked_sha256(
+            product["sha256"], product_context
+        )
+        product_path = product["path"]
+        if (
+            not isinstance(product_path, str)
+            or not os.path.isabs(product_path)
+            or os.path.normpath(product_path) != product_path
+        ):
+            raise ValidationError(
+                f"{product_context} path is malformed"
+            )
+        exposed.append(
+            {
+                "backend": product_backend,
+                "kind": product_kind,
+                "name": product_name,
+                "sha256": product_sha256,
+            }
+        )
+    expected = [product.to_json() for product in products]
+    if exposed != expected:
+        raise ValidationError(
+            f"{context}: products disagree with retained inventory"
+        )
+    if out_dir is not None:
+        expected_paths = [
+            str((out_dir / product.backend / product.name).resolve())
+            for product in products
+        ]
+        if [product["path"] for product in value["products"]] != expected_paths:
+            raise ValidationError(
+                f"{context}: product paths disagree with output inventory"
+            )
+    return value
+
+
+def materialize_execution_input(
+    out_dir: Path,
+    backend: str,
+    value: dict,
+) -> MaterializedExecutionInput:
+    destination = out_dir / backend
+    if destination.is_symlink() or not destination.is_dir():
+        raise ValidationError(
+            f"{backend} output is not a regular directory before execution"
+        )
+    path = destination / "execution-input.json"
+    if path.is_symlink():
+        raise ValidationError(
+            f"{backend} execution input path is a symlink"
+        )
+    if path.exists():
+        if not path.is_file():
+            raise ValidationError(
+                f"{backend} execution input path is not a regular file"
+            )
+        try:
+            path.unlink()
+        except OSError as error:
+            raise ValidationError(
+                f"cannot replace {backend} execution input: {error}"
+            ) from error
+    content = canonical_json_bytes(value)
+    descriptor = -1
+    flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+    if hasattr(os, "O_NOFOLLOW"):
+        flags |= os.O_NOFOLLOW
+    try:
+        descriptor = os.open(path, flags, 0o600)
+        remaining = memoryview(content)
+        while remaining:
+            written = os.write(descriptor, remaining)
+            if written <= 0:
+                raise OSError("short write")
+            remaining = remaining[written:]
+        os.fsync(descriptor)
+        os.fchmod(descriptor, 0o444)
+        file_stat = os.fstat(descriptor)
+        if file_stat.st_nlink != 1:
+            raise OSError("execution input has multiple links")
+    except OSError as error:
+        raise ValidationError(
+            f"cannot materialize {backend} execution input: {error}"
+        ) from error
+    finally:
+        if descriptor >= 0:
+            close_file_descriptor(descriptor)
+    artifact = ValidationArtifact(
+        "execution-input",
+        f"{backend}/execution-input.json",
+        sha256_bytes(content),
+        content,
+    )
+    materialized = MaterializedExecutionInput(
+        path,
+        (
+            file_stat.st_dev,
+            file_stat.st_ino,
+            file_stat.st_ctime_ns,
+            file_stat.st_mtime_ns,
+            file_stat.st_size,
+            file_stat.st_mode & 0o7777,
+        ),
+        artifact,
+    )
+    materialized.verify("before execution")
+    return materialized
 
 
 def sealed_snapshot_fd(
@@ -1975,6 +2211,7 @@ VALIDATION_ARTIFACT_KINDS = {
     "build-input-replay-trace",
     "execution-file-access",
     "execution-file-access-trace",
+    "execution-input",
     "process-stdout",
     "process-stderr",
 }
@@ -2070,6 +2307,12 @@ def validation_artifact_scope(
         ):
             raise ValidationError(
                 "execution-file-access-trace artifact has noncanonical name"
+            )
+        backend, scope = parts[0], "execute"
+    elif checked_kind == "execution-input":
+        if len(parts) != 2 or parts[1] != "execution-input.json":
+            raise ValidationError(
+                "execution-input artifact has noncanonical name"
             )
         backend, scope = parts[0], "execute"
     elif checked_kind == "build-determinism":
@@ -4411,25 +4654,33 @@ class ExternalCommandAdapter:
             verify_product_bundle_files(
                 context, bundle, f"before {self.name} execution"
             )
+        execution_input_value_ = execution_input_value(
+            self.name,
+            context.selected,
+            exposed_products,
+            bundle,
+            context.out_dir,
+        )
+        checked_execution_input(
+            canonical_json_bytes(execution_input_value_),
+            self.name,
+            context.selected,
+            exposed_products,
+            bundle,
+            f"{self.name} execution input",
+            context.out_dir,
+        )
+        execution_input = materialize_execution_input(
+            context.out_dir,
+            self.name,
+            execution_input_value_,
+        )
         environment = self.environment(context.out_dir, context)
+        environment.pop("FIR_VALIDATION_CASES", None)
         environment.update(
             {
-                "FIR_VALIDATION_PRODUCTS": json.dumps(
-                    [
-                        {
-                            **product.to_json(),
-                            "path": str(
-                                (
-                                    context.out_dir
-                                    / product.backend
-                                    / product.name
-                                ).resolve()
-                            ),
-                        }
-                        for product in exposed_products
-                    ],
-                    separators=(",", ":"),
-                    sort_keys=True,
+                "FIR_VALIDATION_EXECUTION_INPUT": str(
+                    execution_input.path.resolve()
                 ),
                 "FIR_VALIDATION_TOOLS": self.tool_environment_value(
                     self._built_tools
@@ -4439,13 +4690,10 @@ class ExternalCommandAdapter:
                 ),
             }
         )
-        if bundle is not None:
-            environment["FIR_VALIDATION_PRODUCT_BUNDLE"] = json.dumps(
-                bundle.to_json(), separators=(",", ":"), sort_keys=True
-            )
         completed, access_artifacts, recorded_access = self.run_execution(
             context, environment
         )
+        execution_input.verify("during execution")
         if bundle is not None:
             verify_product_bundle_files(
                 context, bundle, f"during {self.name} execution"
@@ -4493,6 +4741,7 @@ class ExternalCommandAdapter:
             build_inputs=list(self._built_build_inputs),
             artifacts=[
                 *self._build_artifacts,
+                execution_input.artifact,
                 *execution_artifacts,
                 *access_artifacts,
             ],
@@ -6178,7 +6427,7 @@ def write_matrix_artifact(
     ]
     if len(set(product_keys)) != len(product_keys):
         raise ValidationError("validation matrix contains duplicate backend products")
-    validate_control_plane_inputs(
+    retained_adapters = validate_control_plane_inputs(
         inputs,
         backend_names,
         [
@@ -6272,6 +6521,7 @@ def write_matrix_artifact(
     )
     coverage_results: dict[tuple[str, str], dict] = {}
     coverage_execution_access: dict[str, dict] = {}
+    execution_input_backends: set[str] = set()
     for artifact in sorted_artifacts:
         artifact_backend, artifact_case, _ = validation_artifact_scope(
             artifact.kind,
@@ -6309,11 +6559,59 @@ def write_matrix_artifact(
                     "execution-file-access artifact is malformed"
                 )
             coverage_execution_access[artifact_backend] = access_report
+        elif artifact.kind == "execution-input":
+            consumer = consumer_by_backend.get(artifact_backend)
+            bundle = (
+                bundle_by_provider.get(consumer.provider)
+                if consumer is not None
+                else None
+            )
+            exposed_products = (
+                bundle.products
+                if bundle is not None
+                else tuple(
+                    product
+                    for product in sorted_products
+                    if product.backend == artifact_backend
+                )
+            )
+            checked_execution_input(
+                artifact.content,
+                artifact_backend,
+                list(context.selected),
+                exposed_products,
+                bundle,
+                f"validation artifact {artifact.name}",
+                context.out_dir,
+            )
+            execution_input_backends.add(artifact_backend)
     artifact_keys = [
         (artifact.kind, artifact.name) for artifact in sorted_artifacts
     ]
     if len(set(artifact_keys)) != len(artifact_keys):
         raise ValidationError("validation matrix contains duplicate artifacts")
+    expected_execution_input_backends = {
+        backend
+        for artifact in sorted_artifacts
+        if artifact.kind == "process-stdout"
+        for backend, case_id, scope in [
+            validation_artifact_scope(
+                artifact.kind,
+                artifact.name,
+                component_names,
+                list(context.selected),
+            )
+        ]
+        if (
+            case_id is None
+            and scope == "execute"
+            and backend in retained_adapters
+        )
+    }
+    if not expected_execution_input_backends <= execution_input_backends:
+        raise ValidationError(
+            "external execution process has no retained execution input"
+        )
     retained_artifacts = retain_validation_artifacts(context, sorted_artifacts)
     pairs = []
     for result in pair_results:
@@ -6976,6 +7274,7 @@ def verify_matrix_artifact(
     ] = {}
     execution_access_reports: dict[str, dict] = {}
     execution_access_traces: dict[str, ValidationArtifact] = {}
+    execution_inputs: dict[str, dict] = {}
     replay_reports: dict[str, dict] = {}
     replay_traces: dict[str, ValidationArtifact] = {}
     replay_statuses: dict[str, ValidationArtifact] = {}
@@ -7179,6 +7478,34 @@ def verify_matrix_artifact(
                 )
             execution_access_traces[backend] = ValidationArtifact(
                 kind, name, digest, content
+            )
+        elif kind == "execution-input":
+            if backend in execution_inputs:
+                raise ValidationError(
+                    "validation matrix has duplicate execution inputs"
+                )
+            consumer = consumer_by_backend.get(backend)
+            bundle = (
+                bundle_by_provider.get(consumer.provider)
+                if consumer is not None
+                else None
+            )
+            exposed_products = (
+                bundle.products
+                if bundle is not None
+                else tuple(
+                    product
+                    for product in products
+                    if product.backend == backend
+                )
+            )
+            execution_inputs[backend] = checked_execution_input(
+                content,
+                backend,
+                selected_cases,
+                exposed_products,
+                bundle,
+                f"retained {backend} execution input",
             )
         elif kind == "build-input-replay":
             if backend in replay_reports:
@@ -8478,6 +8805,19 @@ def verify_matrix_artifact(
         bundles,
         product_consumers,
     )
+    expected_execution_input_backends = {
+        backend
+        for backend, case_id, scope in stdout_scopes
+        if (
+            case_id is None
+            and scope == "execute"
+            and backend in retained_adapters
+        )
+    }
+    if not expected_execution_input_backends <= set(execution_inputs):
+        raise ValidationError(
+            "external execution process has no retained execution input"
+        )
     verify_execution_file_access_evidence(
         execution_access_reports,
         execution_access_traces,

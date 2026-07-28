@@ -37,7 +37,18 @@ assert.equal(requiredEnvironment("FIR_VALIDATION_PROTOCOL_VERSION"),
   String(PROTOCOL_VERSION));
 assert.equal(requiredEnvironment("FIR_VALIDATION_BACKEND"), "v8");
 
-const selectedCases = JSON.parse(requiredEnvironment("FIR_VALIDATION_CASES"));
+const executionInput = JSON.parse(
+  await readFile(requiredEnvironment("FIR_VALIDATION_EXECUTION_INPUT"), "utf8"),
+);
+assert.deepStrictEqual(Object.keys(executionInput).sort(), [
+  "version", "backend", "selectedCases", "products", "productBundle",
+].sort(), "malformed V8 execution input");
+assert.equal(executionInput.version, PROTOCOL_VERSION,
+  "unsupported V8 execution-input version");
+assert.equal(executionInput.backend, "v8",
+  "the V8 execution input names the wrong backend");
+
+const selectedCases = executionInput.selectedCases;
 assert.ok(Array.isArray(selectedCases) && selectedCases.length > 0,
   "the V8 adapter selection must be a nonempty array");
 assert.equal(new Set(selectedCases).size, selectedCases.length,
@@ -49,13 +60,11 @@ const corpus = JSON.parse(
 assert.equal(corpus.version, PROTOCOL_VERSION, "unsupported validation corpus version");
 assert.ok(Array.isArray(corpus.cases), "validation corpus cases must be an array");
 
-const products = JSON.parse(requiredEnvironment("FIR_VALIDATION_PRODUCTS"));
+const products = executionInput.products;
 assert.ok(Array.isArray(products) && products.length > 0,
   "the V8 adapter requires a nonempty provider product inventory");
 
-const productBundle = JSON.parse(
-  requiredEnvironment("FIR_VALIDATION_PRODUCT_BUNDLE"),
-);
+const productBundle = executionInput.productBundle;
 assert.deepStrictEqual(Object.keys(productBundle).sort(), [
   "version", "provider", "contract", "bundleSha256", "products", "cases",
 ].sort(), "malformed semantic Wasm product bundle");

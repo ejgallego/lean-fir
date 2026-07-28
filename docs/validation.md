@@ -604,11 +604,15 @@ python3 scripts/validate_interpreters.py \
 `buildCommand` is optional.  `resultDomain` is `selected` when the command emits
 only requested cases and `corpus` when it emits the whole manifest.  Both
 commands receive `FIR_VALIDATION_BACKEND`, `FIR_VALIDATION_OUT_DIR`,
-`FIR_VALIDATION_PROTOCOL_VERSION`, `FIR_VALIDATION_CORPUS` (the absolute path
-of the canonical corpus JSON), and `FIR_VALIDATION_CASES` (a JSON array
-preserving the requested order).  Candidate builds therefore happen only
-after the native oracle has defined and selected the corpus.  The run command
-additionally receives the captured product and execution-tool inventories.
+`FIR_VALIDATION_PROTOCOL_VERSION`, and `FIR_VALIDATION_CORPUS` (the absolute
+path of the canonical corpus JSON).  The build command receives
+`FIR_VALIDATION_CASES`, a JSON array preserving the requested order. Candidate
+builds therefore happen only after the native oracle has defined and selected
+the corpus. The run command instead receives
+`FIR_VALIDATION_EXECUTION_INPUT`, the absolute path of a canonical JSON file
+containing the selected cases, captured products, and optional provider
+bundle. Large product inventories consequently do not consume the operating
+system's argument-and-environment budget.
 Both phases receive `FIR_VALIDATION_BUILD_TOOLS`, the captured build-tool
 inventory; the build can therefore record or check the exact launcher and
 driver paths and hashes under which it is running.  The run command writes
@@ -877,14 +881,19 @@ Before starting the engine and again after it exits, the harness verifies that
 every product still has the captured digest.  Missing or mutated products are
 structural validation errors rather than semantic mismatches.
 
-The run command receives `FIR_VALIDATION_PRODUCTS`, a compact JSON array with
-each verified product's backend, kind, stable output-relative name, SHA-256,
-and absolute local path.  `matrix.json` records the same entries without the
-machine-local path under `products`, sorted deterministically and counted as
-`productCount`. The semantic-Wasm provider owns the compiler-produced `.wasm`
-bytes and manifests; the V8 adapter executes the exact provider bundle selected
-for each case. This handoff does not assume one module per case, so later module
-sharing does not require another adapter contract.
+The run command's canonical `execution-input.json` contains a `products` array
+with each verified product's backend, kind, stable output-relative name,
+SHA-256, and absolute local path. The harness creates that file read-only,
+records its device/inode identity and exact bytes, rejects mutation,
+replacement, symlinks, and extra hard links, and retains it as an
+`execution-input` evidence artifact. `matrix.json` records the same product
+entries without the machine-local path under `products`, sorted
+deterministically and counted as `productCount`; offline verification
+cross-checks the execution input against that inventory. The semantic-Wasm
+provider owns the compiler-produced `.wasm` bytes and manifests; the V8 adapter
+executes the exact provider bundle selected for each case. This handoff does
+not assume one module per case, so later module sharing does not require
+another adapter contract.
 
 Handoff is not, by itself, consumption evidence. When an adapter owns products,
 each protocol result from the external engine must include exactly one
@@ -1009,11 +1018,13 @@ adapter-owned build or products:
 }
 ```
 
-Every consumer receives the whole verified inventory through
-`FIR_VALIDATION_PRODUCTS` and the contract, bundle identity, and exact case
-bindings through `FIR_VALIDATION_PRODUCT_BUNDLE`. Before and after each engine
-execution, the harness rehashes every exposed bundle product. The private
-provider manifest is retained and re-parsed when the evidence is published.
+Every consumer receives the whole verified inventory, contract, bundle
+identity, exact case bindings, and selected-case order through the single
+file named by `FIR_VALIDATION_EXECUTION_INPUT`. Before and after each engine
+execution, the harness rehashes every exposed bundle product and verifies that
+the execution-input file has the same identity and canonical bytes. The
+private provider manifest is retained and re-parsed when the evidence is
+published.
 The consumer returns one `validation-product-bundle` diagnostic per result. Its
 JSON value names the provider, `bundleSha256`, and the exact
 `kind`/`name`/`sha256` products bound to that case. A valid but wrong case's

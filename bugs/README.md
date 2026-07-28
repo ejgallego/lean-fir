@@ -3,8 +3,8 @@
 Create a card as soon as a proof failure, differential mismatch, or invariant
 violation indicates a possible semantic discrepancy. Do this before adding a
 workaround. A new report starts as `candidate`; minimization and triage may
-then classify it as a compiler, FIR-semantics, Wasm-adapter, or upstream-drift
-issue.
+then classify it as a compiler, FIR-semantics, validation-harness,
+Wasm-adapter, or upstream-drift issue.
 
 Copy `_template.md` to a collision-resistant name of the form:
 
@@ -25,9 +25,10 @@ must be able to create cards without coordination.
 - `fixed`: a fixing revision and permanent regression test are linked.
 - `closed-not-a-bug`: the behavior was shown to be intended; explain why.
 
-Allowed classifications are `compiler`, `fir-semantics`, `wasm-adapter`, and
-`upstream-drift`. A card remains in the repository after resolution so that
-the evidence and regression-test history are not lost.
+Allowed classifications are `compiler`, `fir-semantics`,
+`validation-harness`, `wasm-adapter`, and `upstream-drift`. A card remains in
+the repository after resolution so that the evidence and regression-test
+history are not lost.
 
 `make bug-cards` validates frontmatter, headings, IDs, filenames, and local
 reproduction/regression links. The template is validated structurally but is
