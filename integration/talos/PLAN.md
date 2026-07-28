@@ -3479,6 +3479,21 @@ certificate. Constructor/projection direct lets and the structural
 source-evaluation induction are next. No FIR semantic contract or executable
 ABI changed.
 
+W6.6eb extends the certificate-free direct-compiler path to constructor
+allocation with ordinary `fvar` fields. A new adapter inversion determines the
+numeric local-get prefix and constructor import directly from successful
+adaptation; `ConcreteSupportedExport.allocCtorCall` recovers the exact concrete
+resolver contract and arity. `constructorFVarLet_eq` and
+`codeWP_constructorFVarLet` then compose the compiler-selected argument slots,
+allocation, witness extension, destination write, and an arbitrary continuation
+correctness hypothesis. `correctConstructorFVarReturn` closes the corresponding
+finite exported execution, and the contract harness applies both public APIs
+without a caller-built translation simulation. This is deliberately the
+current all-`fvar` argument boundary: erased fields compile to constants and
+need the next generalized argument-prefix proof. Projections and the structural
+source-evaluation induction follow. No FIR semantic contract or executable ABI
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

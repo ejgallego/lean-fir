@@ -311,4 +311,194 @@ example
   spec.correctStringLiteralReturn valueEq valueKind localCompiled stateRelated
     parameterCount allocated localSetReady
 
+/--
+All-`fvar` constructor allocation exposes the same recursive certificate-free
+API. Static compiler/adaptor facts are derived internally; the caller supplies
+only successful source/concrete execution facts and the continuation
+induction hypothesis.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {info : LCNF.CtorInfo}
+    {args : Array (LCNF.Arg .impure)}
+    {fvarIds : List FVarId}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .ctor info args)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (fvarIds.map Fir.Wasm.Instruction.localGet, fieldKinds))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value}
+    {sourceValue : Value}
+    {word : Word32}
+    {witness nextWitness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (argumentsReady :
+      ∀ {indices},
+        List.Forall₂
+            (fun fvarId index =>
+              findFVar? (functionBindings sourceFunction) fvarId =
+                some index)
+            fvarIds indices →
+          List.Forall₂
+            (fun index physical => locals.get index = some physical)
+            indices physicalArgs)
+    (physicalArity : physicalArgs.length = fieldKinds.size)
+    (operation :
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated :
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (localSetReady :
+      ∀ {resultIndex},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest resultIndex updated},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+            some updated →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+            continuation targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q :=
+  spec.codeWP_constructorFVarLet valueEq fits valueKind argumentsCompiled
+    localCompiled evaluated semanticStep stateRelated argumentsReady
+    physicalArity operation extension nextRuntimeRelated failureClear
+    valueRelated localSetReady continued
+
+/--
+The finite constructor-return corollary also has no caller-supplied
+`ConcreteCodeSimulation` or translation certificate.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {info : LCNF.CtorInfo}
+    {args : Array (LCNF.Arg .impure)}
+    {fvarIds : List FVarId}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context
+        (.let decl (.return decl.fvarId)) sourceModule sourceFunction target
+        hosts exportName)
+    (valueEq : decl.value = .ctor info args)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (fvarIds.map Fir.Wasm.Instruction.localGet, fieldKinds))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host}
+    {parameters callerTail : List Wasm.Value}
+    {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value}
+    {sourceValue : Value}
+    {word : Word32}
+    {initialWitness nextWitness : RefinementWitness}
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams)
+    (argumentsReady :
+      ∀ {indices},
+        List.Forall₂
+            (fun fvarId index =>
+              findFVar? (functionBindings sourceFunction) fvarId =
+                some index)
+            fvarIds indices →
+          List.Forall₂
+            (fun index physical =>
+              (spec.targetFunction.toLocals parameters.reverse).get index =
+                some physical)
+            indices physicalArgs)
+    (physicalArity : physicalArgs.length = fieldKinds.size)
+    (operation :
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : initialWitness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated :
+      PhysicalValueRel nextWitness resultKind
+        (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (localSetReady :
+      ∀ {resultIndex},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            (spec.targetFunction.toLocals parameters.reverse).set? resultIndex
+                (.i32 (UInt32.ofNat word.value)) =
+              some updated) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.let decl (.return decl.fvarId)))
+        (ReturnedObservation nextRuntime sourceValue) ∧
+      ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+        initial (parameters ++ callerTail)
+        (RefinedReturnPost nextRuntime sourceValue resultKind callerTail) :=
+  spec.correctConstructorFVarReturn valueEq fits valueKind argumentsCompiled
+    localCompiled evaluated semanticStep stateRelated parameterCount
+    argumentsReady physicalArity operation extension nextRuntimeRelated
+    failureClear valueRelated localSetReady
+
 end FirTalos.Concrete.CompilerCorrectnessContract

@@ -118,9 +118,17 @@ continuation, not a caller-built translation certificate.
 recursive rule for exact UTF-8 String allocation in the `.object` lane.
 `correctStringLiteralReturn` also closes the finite whole-export String
 instance through the concrete resolver contract and heap-witness extension.
+`instructions_localGets_call_eq` supplies the reusable adapter inversion for
+an all-local argument prefix, and `constructorFVarLet_eq` uses it to recover
+the numeric constructor arguments, import, destination, and continuation from
+the executable pipeline. `codeWP_constructorFVarLet` composes the successful
+source/concrete allocation and witness growth with an arbitrary continuation;
+`correctConstructorFVarReturn` closes the finite export. The current
+constructor rule covers ordinary `fvar` fields; erased fields require the next
+argument-prefix rule for generated constants.
 `ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
-that the finite return/Nat/String export theorems and both literal recursive
-rules have no translation-certificate premise.
+that the finite return/Nat/String/constructor export theorems and the
+literal/constructor recursive rules have no translation-certificate premise.
 
 ### T3. Whole-export success
 
@@ -366,11 +374,12 @@ acceptance tests pass.
    target execution from a source return evaluation. Keep the
    certificate-free application in
    `ConcreteCompilerCorrectnessContract.lean`.
-3. Completed first compositional instance: a `tobject` natural-literal
-   `let; return` now uses the actual `compileCode_let` equation, resolver
-   alignment, concrete allocation refinement, checked local write, and return
-   continuation. Next generalize this into the recursive direct-`let` rule,
-   instantiate UTF-8 strings, then constructors/projections.
+3. Completed direct-value instances: natural and UTF-8 String literals plus
+   all-`fvar` constructor allocation now use the actual compiler/adaptor
+   equations, resolver alignment, concrete allocation refinement, checked
+   local writes, arbitrary continuations, and finite return corollaries.
+   Generalize constructor argument prefixes to erased constants, then cover
+   projections and assemble the structural direct-`let` induction.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

@@ -8,7 +8,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `RuntimeOp` | Concrete executable | Successful refinement | Structured failures | W6.6 composition/artifact |
 |---|---|---|---|---|
 | `literal` | Naturals and UTF-8 strings | Tagged encoder, large-natural heap theorem, and fresh-string `LiveHeapRel` theorem with exact UTF-8 object decoding | Partial | Natural and string concrete hosts plus generated literal-`let` WPs and compiler-local writes; string whole-module Talos/Node/browser execution |
-| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial; invalid-arity classification blocked by `FIR-BUG-wasm-none-constructor-arity-fault-classification` | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution |
+| `allocCtor` | Yes | Nonempty heap and tagged empty theorems | Partial; invalid-arity classification blocked by `FIR-BUG-wasm-none-constructor-arity-fault-classification` | Concrete Talos host plus arbitrary-arity generated constructor-`let` WP, certificate-free compiler/adaptor inversion and arbitrary-continuation/finite-export correctness for all-`fvar` fields, whole-module concrete Talos execution, and Node/V8 plus browser-Worker checked-header execution; erased-field constants remain the next compiler-argument prefix |
 | `objectProj` | Yes | Live and stale mapped-heap theorems | `expectedConstructor`, bounds, and dead-object source-address faults all exact | Concrete Talos host plus generated projection-`let` WP, exact source-classified constructor/bounds/stale-object traps with executable guards, whole-module concrete Talos execution, and successful/failing Node/V8 plus browser-Worker checked-slot execution |
 | `usizeProj` | Yes | Live and stale mapped-heap theorems | `expectedConstructor`, bounds, and dead-object source-address faults all exact | Concrete Talos host plus generated projection-`let` WP, exact source-classified constructor/bounds/stale-object traps with executable guards, whole-module concrete Talos execution, and compiler-shaped Node/V8 plus browser-Worker write/read execution |
 | `scalarProj` | Four integer widths | Live packed-field and stale mapped-heap theorems | `expectedConstructor` and dead-object source-address faults exact for all four widths; live uninitialized-coordinate correspondence blocked by `FIR-BUG-wasm-none-uninitialized-scalar-projection` | Integer concrete host plus generated projection-`let` WP, exact constructor-kind leaves, a four-width deleted-object trap guard, and compiler-shaped `UInt8`/`UInt16`/`UInt32`/`UInt64` whole-module, Node/V8, and browser-Worker write/read execution; invalid hand fixture retains its exact external-engine failure under `FIR-BUG-wasm-none-scalar-slot-layout-contract`; floats tracked by `FIR-BUG-wasm-none-float-runtime-gap` |
@@ -47,12 +47,17 @@ Cross-cutting W6.5 state:
   `stringLiteralLet_eq`, `codeWP_stringLiteralLet`, and
   `correctStringLiteralReturn` close the equivalent UTF-8 `.object` lane
   through concrete allocation, resolver alignment, witness growth, and finite
-  exported execution; and
+  exported execution.
+  `constructorFVarLet_eq`, `codeWP_constructorFVarLet`, and
+  `correctConstructorFVarReturn` now derive the numeric argument/import/local
+  layout and compose all-`fvar` constructor allocation with an arbitrary
+  continuation or finite export; erased argument constants remain the next
+  prefix case; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
   applications have no caller-supplied simulation premise.
-  Constructor/projection direct lets, the structural source-evaluation
-  induction, control-flow, calls, externals, caches, and faults remain to
-  migrate from the internal certificate-shaped scaffolding;
+  Projection direct lets, the structural source-evaluation induction,
+  control-flow, calls, externals, caches, and faults remain to migrate from the
+  internal certificate-shaped scaffolding;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

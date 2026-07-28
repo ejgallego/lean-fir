@@ -201,6 +201,48 @@ theorem ConcreteSupportedExport.stringLiteralCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment specializes to the exact concrete constructor
+allocation contract selected by its compiler-derived field and result kinds. -/
+theorem ConcreteSupportedExport.allocCtorCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {info : LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {id : Nat}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.allocCtor info fieldKinds resultKind)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (allocCtorContract info fieldKinds resultKind) ∧
+        imp.params.length = fieldKinds.size ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = allocCtorStep info fieldKinds resultKind initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, allocCtorFn]
+      using contracted
+  · change imp.params.length = fieldKinds.size at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- The syntax-directed proof for the statically selected generated function
 constructs T1's exact successful-declaration certificate. -/
 theorem ConcreteSupportedExport.toSuccessfulDeclaration
