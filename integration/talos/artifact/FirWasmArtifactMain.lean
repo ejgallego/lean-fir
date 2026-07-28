@@ -142,6 +142,20 @@ def emitResidentSetters (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-setters: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentTagSetter (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentMutation.residentTagExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident tag-setter encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentMutation.tagManifest.compress
+  IO.println
+    s!"resident-tag-setter: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentIncrements (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentReferenceCount.residentExampleModule
@@ -235,6 +249,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-literals <output.wasm>\n" ++
     "       fir-wasm-artifact resident-setters <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-tag-setter <output.wasm>\n" ++
     "       fir-wasm-artifact resident-increments <output.wasm>\n" ++
     "       fir-wasm-artifact resident-releases <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
@@ -274,6 +289,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-setters", output] =>
         emitResidentSetters output
+        return 0
+    | ["resident-tag-setter", output] =>
+        emitResidentTagSetter output
         return 0
     | ["resident-increments", output] =>
         emitResidentIncrements output

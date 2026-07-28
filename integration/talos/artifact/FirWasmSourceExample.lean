@@ -556,6 +556,9 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident release Format module: {repr error}"
+  unless (residentReleaseArtifact.module.runtimeOperations.filter
+      Fir.Wasm.Emit.ResidentMutation.isTagSetter).isEmpty do
+    throwError "text Format unexpectedly retained a constructor-tag setter"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

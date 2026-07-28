@@ -17,6 +17,7 @@ inductive LinkError where
   | unsupportedOperation
   | unsupportedScalarKind (kind : AbiKind)
   | offsetOverflow (value : Nat)
+  | tagOverflow (value : Nat)
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
@@ -33,8 +34,15 @@ def isSetter : RuntimeOp → Bool
   | .objectSet .. | .scalarSet .. => true
   | _ => false
 
+def isTagSetter : RuntimeOp → Bool
+  | .setTag .. => true
+  | _ => false
+
 def setterName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_setter_{ordinal}"
+
+def tagSetterName (ordinal : Nat) : Name :=
+  Name.mkSimple s!"fir_set_tag_{ordinal}"
 
 private def equalsConst (kind : AbiKind) (value : UInt32) :
     List Instruction :=
@@ -168,6 +176,26 @@ def setterFunction (ordinal : Nat) (operation : RuntimeOp) :
       scalarSetFunction ordinal width byteOffset field
   | _ => throw .unsupportedOperation
 
+def tagSetterFunction (ordinal : Nat) (operation : RuntimeOp) :
+    Except LinkError Function := do
+  unless operation.abiWellFormed do
+    throw .unsupportedOperation
+  let .setTag tag := operation | throw .unsupportedOperation
+  if tag ≥ UInt32.size then
+    throw (.tagOverflow tag)
+  return {
+    name := tagSetterName ordinal
+    params := #[(objectParam, .object)]
+    results := #[]
+    locals := #[
+      (addressLocal, .uint32),
+      (savedScratchLocal, .uint32)]
+    body := rawAddressPrefix ++ requireLiveConstructor
+      [.localGet addressLocal,
+        .i32Const .uint32 (u32 tag),
+        .i32Store .uint32 (u32 headerAux0Offset),
+        .ret] }
+
 private partial def rewriteInstruction (operation : RuntimeOp)
     (name : Name) : Instruction → Instruction
   | .call (.runtime candidate) =>
@@ -207,6 +235,26 @@ private def internalizeOne (ordinal : Nat) (operation : RuntimeOp)
     exports := Fir.Wasm.addUnique module.exports name
     runtimeOperations }
 
+private def internalizeTagSetterOne (ordinal : Nat) (operation : RuntimeOp)
+    (module : Module) : Except LinkError Module := do
+  let name := tagSetterName ordinal
+  if module.imports.any (·.declaration? == some name) ||
+      module.functions.any (·.name == name) ||
+      module.exports.contains name then
+    throw (.reservedDeclaration name)
+  let function ← tagSetterFunction ordinal operation
+  let functions :=
+    (module.functions.map (rewriteFunction operation name)).push function
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+  return {
+    module with
+    imports
+    functions
+    exports := Fir.Wasm.addUnique module.exports name
+    runtimeOperations }
+
 /--
 Internalize direct constructor object-slot and packed-scalar writes. The
 helpers validate the recognized live-constructor boundary and the exact W6
@@ -223,6 +271,25 @@ def internalizeSetters (module : Module) : Except LinkError Module := do
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
       internalizeOne ordinal operation result
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
+/--
+Internalize constructor-tag writes. Each helper accepts the physical `.object`
+word used by LCNF mutation calls, validates the aligned live-constructor
+boundary, and writes the operation's fixed tag to header `aux0`.
+-/
+def internalizeTagSetters (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  unless module.memory == some ResidentRuntime.residentMemory do
+    throw .incompatibleMemory
+  let operations := module.runtimeOperations.filter isTagSetter
+  let result ← operations.toList.zipIdx.foldlM (init := module)
+    fun result (operation, ordinal) =>
+      internalizeTagSetterOne ordinal operation result
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
@@ -265,6 +332,30 @@ def residentExampleModule : Except String Module :=
   internalizeSetters exampleModule
     |>.mapError fun error => s!"setters: {repr error}"
 
+def exampleTagOperation : RuntimeOp := .setTag 14
+
+def exampleTagCaller : Function := {
+  name := `resident_set_tag
+  params := #[(objectParam, .object)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet objectParam,
+    .call (.runtime exampleTagOperation),
+    .ret] }
+
+def tagExampleModule : Module := {
+  imports := #[Fir.Wasm.runtimeImport 0 exampleTagOperation]
+  functions := #[exampleTagCaller]
+  exports := #[exampleTagCaller.name]
+  initializers := #[]
+  runtimeOperations := #[exampleTagOperation]
+  memory := some ResidentRuntime.residentMemory }
+
+def residentTagExampleModule : Except String Module :=
+  internalizeTagSetters tagExampleModule
+    |>.mapError fun error => s!"tag setter: {repr error}"
+
 def manifest : Json :=
   Json.mkObj [
     ("entries", Json.arr #[
@@ -278,6 +369,12 @@ def manifest : Json :=
         ("scalarBytes", 2)]),
     ("status", "generation-only; W6 mutation contract proof pending")]
 
+def tagManifest : Json :=
+  Json.mkObj [
+    ("entry", exampleTagCaller.name.toString),
+    ("tag", 14),
+    ("status", "generation-only; W6 tag-mutation contract proof pending")]
+
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty &&
@@ -288,5 +385,20 @@ def manifest : Json :=
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
   | .error _ => false
+
+#guard match residentTagExampleModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.runtimeOperations.isEmpty &&
+      module.exports.contains exampleTagCaller.name &&
+      module.exports.contains (tagSetterName 0) &&
+      module.memory == some ResidentRuntime.residentMemory &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match tagSetterFunction 0 (.setTag UInt32.size) with
+  | .error (.tagOverflow value) => value == UInt32.size
+  | _ => false
 
 end Fir.Wasm.Emit.ResidentMutation

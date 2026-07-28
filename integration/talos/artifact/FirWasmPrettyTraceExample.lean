@@ -233,3 +233,33 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled release module: {repr error}"
+  let tagSetters := releaseArtifact.module.runtimeOperations.filter
+    Fir.Wasm.Emit.ResidentMutation.isTagSetter
+  unless tagSetters.size == 1 do
+    throwError "resident styled Format tag-setter inventory changed"
+  let tagSetterArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeTagSetters releaseArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled tag setter: {repr error}"
+  unless tagSetterArtifact.module.imports.size == 45 &&
+      tagSetterArtifact.module.runtimeOperations.all fun operation =>
+        !Fir.Wasm.Emit.ResidentMutation.isTagSetter operation do
+    throwError "resident styled Format tag-setter frontier changed"
+  unless tagSetterArtifact.module.imports.size + tagSetters.size ==
+      releaseArtifact.module.imports.size do
+    throwError "resident styled tag-setter import accounting changed"
+  unless tagSetterArtifact.module.closureDispatch ==
+      releaseArtifact.module.closureDispatch &&
+      tagSetterArtifact.module.closureDescriptors ==
+        releaseArtifact.module.closureDescriptors do
+    throwError "resident styled tag setter changed closure metadata"
+  unless (List.range tagSetters.size).all fun ordinal =>
+      tagSetterArtifact.module.exports.contains
+        (Fir.Wasm.Emit.ResidentMutation.tagSetterName ordinal) do
+    throwError "resident styled tag-setter helper exports changed"
+  match ← tagSetterArtifact.write
+      "_build/source-pretty-format-trace-resident-tag-setters.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled tag-setter module: {repr error}"

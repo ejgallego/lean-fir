@@ -96,6 +96,9 @@ node run-resident-literals.mjs _build/resident-literals.wasm
 lake exe fir-wasm-artifact resident-setters \
   _build/resident-setters.wasm
 node run-resident-setters.mjs _build/resident-setters.wasm
+lake exe fir-wasm-artifact resident-tag-setter \
+  _build/resident-tag-setter.wasm
+node run-resident-tag-setter.mjs _build/resident-tag-setter.wasm
 lake exe fir-wasm-artifact resident-increments \
   _build/resident-increments.wasm
 node run-resident-increments.mjs _build/resident-increments.wasm
@@ -174,6 +177,12 @@ and width-mismatched inputs, preserves the scratch word, and lets
 `ConcreteHost` independently project the written fields. These helpers perform
 only the requested direct write; the LCNF's separate `inc` and `dec` operations
 remain explicit.
+
+The 230-byte resident tag-setter module likewise has zero imports and owns its
+memory. Its fixed-tag helper validates an aligned live constructor, writes only
+header `aux0`, restores the scratch lane, and traps on zero, misaligned, dead,
+or non-constructor inputs. `ConcreteHost` independently reads the resulting
+tag. Tags outside the W6 `UInt32` header lane fail during generation.
 
 The 511-byte resident-increment module likewise has zero imports and owns its
 memory. It implements overflow-checked nonrecursive increments, including
@@ -378,7 +387,9 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-partial-applications.wasm \
   _build/source-pretty-format-resident-setters.wasm \
   _build/source-pretty-format-resident-increments.wasm \
-  _build/source-pretty-format-resident-releases.wasm
+  _build/source-pretty-format-resident-releases.wasm \
+  _build/source-pretty-format-trace-resident-releases.wasm \
+  _build/source-pretty-format-trace-resident-tag-setters.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -590,6 +601,12 @@ Text `prettyM` advances from 50 to 44 imports, while styled `prettyM` advances
 from 52 to 46. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44`.
 
+The next checkpoint is deliberately styling-only. Plain-text `prettyM` has no
+constructor-tag write and remains at 44 imports. Exact-event `prettyM` has one
+fixed `setTag 1` operation; the guarded resident helper removes it, preserves
+final LCNF and both closure tables, and advances the styled facade from 46 to
+45 imports.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -604,7 +621,7 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 46 function imports: two more than
+memory and allocator and currently has 45 function imports: one more than
 the text-only 44-import checkpoint in order to preserve the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and

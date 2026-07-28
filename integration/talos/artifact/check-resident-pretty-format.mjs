@@ -14,17 +14,21 @@ const residentPartialApplicationPath = process.argv[11];
 const residentSetterPath = process.argv[12];
 const residentIncrementPath = process.argv[13];
 const residentReleasePath = process.argv[14];
+const styledReleasePath = process.argv[15];
+const styledTagSetterPath = process.argv[16];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
   residentAllocatorPath && residentConstructorPath && residentNaturalPath &&
   residentPartialApplicationPath && residentSetterPath &&
-  residentIncrementPath && residentReleasePath,
+  residentIncrementPath && residentReleasePath && styledReleasePath &&
+  styledTagSetterPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
   "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm " +
   "RESIDENT_CONSTRUCTORS.wasm RESIDENT_NATURALS.wasm " +
   "RESIDENT_PARTIAL_APPLICATIONS.wasm RESIDENT_SETTERS.wasm " +
-  "RESIDENT_INCREMENTS.wasm RESIDENT_RELEASES.wasm");
+  "RESIDENT_INCREMENTS.wasm RESIDENT_RELEASES.wasm " +
+  "STYLED_RELEASES.wasm STYLED_TAG_SETTERS.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -53,6 +57,8 @@ const residentPartialApplications =
 const residentSetters = readArtifact(residentSetterPath);
 const residentIncrements = readArtifact(residentIncrementPath);
 const residentReleases = readArtifact(residentReleasePath);
+const styledReleases = readArtifact(styledReleasePath);
+const styledTagSetters = readArtifact(styledTagSetterPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -130,6 +136,10 @@ assert.equal(operationCount(residentReleases, "dec"), 0,
   "resident release prettyM retained decrements");
 assert.equal(operationCount(residentReleases, "delete"), 0,
   "resident release prettyM retained delete");
+assert.equal(operationCount(styledReleases, "setTag"), 1,
+  "resident styled release prettyM tag-setter inventory changed");
+assert.equal(operationCount(styledTagSetters, "setTag"), 0,
+  "resident styled tag-setter prettyM retained setTag");
 assert.equal(functionImportCount(getTagResident) + 1, functionImportCount(baseline),
   "getTag-only prettyM did not remove exactly one function import");
 assert.equal(
@@ -250,6 +260,20 @@ assert.equal(
   functionImportCount(residentReleases),
   "resident release prettyM descriptor and Wasm imports disagree",
 );
+assert.equal(functionImportCount(styledReleases), 46,
+  "resident styled release prettyM frontier changed");
+assert.equal(
+  functionImportCount(styledTagSetters) + 1,
+  functionImportCount(styledReleases),
+  "resident styled tag setters did not remove exactly one function import",
+);
+assert.equal(functionImportCount(styledTagSetters), 45,
+  "resident styled tag-setter prettyM frontier changed");
+assert.equal(
+  styledTagSetters.manifest.imports.length,
+  functionImportCount(styledTagSetters),
+  "resident styled tag-setter descriptor and Wasm imports disagree",
+);
 assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
@@ -307,6 +331,11 @@ assert.equal(
   0,
   "resident release prettyM imports memory",
 );
+assert.equal(
+  styledTagSetters.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident styled tag-setter prettyM imports memory",
+);
 for (const artifact of [
   getTagResident,
   residentRuntime,
@@ -332,6 +361,16 @@ for (const artifact of [
     "resident linking changed the stable closure-descriptor table",
   );
 }
+assert.deepStrictEqual(
+  styledTagSetters.manifest.closureDispatch,
+  styledReleases.manifest.closureDispatch,
+  "resident styled tag linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  styledTagSetters.manifest.closureDescriptors,
+  styledReleases.manifest.closureDescriptors,
+  "resident styled tag linking changed the closure-descriptor table",
+);
 assert.ok(residentRuntime.exports.some(({ name, kind }) =>
   name === residentRuntime.manifest.entry && kind === "function"),
 "resident-runtime prettyM entry export is missing");
@@ -497,11 +536,21 @@ for (let ordinal = 0; ordinal < 6; ordinal += 1) {
     entry.name === name && entry.kind === "function"),
   `resident release prettyM helper export ${name} is missing`);
 }
+assert.ok(styledTagSetters.exports.some(({ name, kind }) =>
+  name === styledTagSetters.manifest.entry && kind === "function"),
+"resident styled tag-setter prettyM entry export is missing");
+assert.ok(styledTagSetters.exports.some(({ name, kind }) =>
+  name === "memory" && kind === "memory"),
+"resident styled tag-setter prettyM memory export is missing");
+assert.ok(styledTagSetters.exports.some(({ name, kind }) =>
+  name === "fir_set_tag_0" && kind === "function"),
+"resident styled tag-setter helper export is missing");
 
 console.log(
   `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
   `then installed its allocator and internalized constructors, immediate Naturals, ` +
-  `closure allocations, setters, increments, and recursive releases ` +
+  `closure allocations, setters, increments, recursive releases, and the ` +
+  `styled constructor-tag write ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
@@ -513,5 +562,7 @@ console.log(
   `${functionImportCount(residentPartialApplications)} → ` +
   `${functionImportCount(residentSetters)} → ` +
   `${functionImportCount(residentIncrements)} → ` +
-  `${functionImportCount(residentReleases)} function imports)`,
+  `${functionImportCount(residentReleases)} function imports; styled ` +
+  `${functionImportCount(styledReleases)} → ` +
+  `${functionImportCount(styledTagSetters)})`,
 );

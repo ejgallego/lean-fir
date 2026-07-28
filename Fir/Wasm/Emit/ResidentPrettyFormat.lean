@@ -99,6 +99,20 @@ def internalizeSetters (artifact : Source.ModuleArtifact) :
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
 
+def internalizeTagSetters (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentMutation.internalizeTagSetters artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident tag setters: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
 def internalizeIncrements (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact := do
   let module ←
@@ -267,9 +281,19 @@ def compileReleaseModule (entry : Name) :
   let result ← compileIncrementModule entry
   return result.bind internalizeReleases
 
+/--
+Continue from recursive release and internalize constructor-tag writes. The
+plain-text `prettyM` facade currently has no such operation; the
+styling-preserving facade has one fixed tag write.
+-/
+def compileTagSetterModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileReleaseModule entry
+  return result.bind internalizeTagSetters
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileReleaseModule entry
+  compileTagSetterModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

@@ -28,6 +28,9 @@ node run-resident-literals.mjs _build/resident-literals.wasm
 lake exe fir-wasm-artifact resident-setters \
   _build/resident-setters.wasm
 node run-resident-setters.mjs _build/resident-setters.wasm
+lake exe fir-wasm-artifact resident-tag-setter \
+  _build/resident-tag-setter.wasm
+node run-resident-tag-setter.mjs _build/resident-tag-setter.wasm
 lake exe fir-wasm-artifact resident-increments \
   _build/resident-increments.wasm
 node run-resident-increments.mjs _build/resident-increments.wasm
@@ -88,6 +91,7 @@ resident_pretties=(
   "source-pretty-format-trace-resident-setters"
   "source-pretty-format-trace-resident-increments"
   "source-pretty-format-trace-resident-releases"
+  "source-pretty-format-trace-resident-tag-setters"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -143,6 +147,8 @@ cmp _build/source-pretty-format-trace-resident-setters.wasm.lcnf \
   _build/source-pretty-format-trace-resident-increments.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-increments.wasm.lcnf \
   _build/source-pretty-format-trace-resident-releases.wasm.lcnf
+cmp _build/source-pretty-format-trace-resident-releases.wasm.lcnf \
+  _build/source-pretty-format-trace-resident-tag-setters.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
@@ -156,7 +162,9 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-partial-applications.wasm \
   _build/source-pretty-format-resident-setters.wasm \
   _build/source-pretty-format-resident-increments.wasm \
-  _build/source-pretty-format-resident-releases.wasm
+  _build/source-pretty-format-resident-releases.wasm \
+  _build/source-pretty-format-trace-resident-releases.wasm \
+  _build/source-pretty-format-trace-resident-tag-setters.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -363,6 +371,13 @@ lake exe fir-wasm-artifact resident-setters \
 cmp "$first/resident/setters.wasm" "$second/resident/setters.wasm"
 cmp "$first/resident/setters.wasm.json" \
   "$second/resident/setters.wasm.json"
+lake exe fir-wasm-artifact resident-tag-setter \
+  "$first/resident/tag-setter.wasm"
+lake exe fir-wasm-artifact resident-tag-setter \
+  "$second/resident/tag-setter.wasm"
+cmp "$first/resident/tag-setter.wasm" "$second/resident/tag-setter.wasm"
+cmp "$first/resident/tag-setter.wasm.json" \
+  "$second/resident/tag-setter.wasm.json"
 lake exe fir-wasm-artifact resident-increments \
   "$first/resident/increments.wasm"
 lake exe fir-wasm-artifact resident-increments \

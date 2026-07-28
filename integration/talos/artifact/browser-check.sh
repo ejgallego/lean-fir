@@ -29,6 +29,8 @@ test -s "$here/_build/resident-literals.wasm"
 test -s "$here/_build/resident-literals.wasm.json"
 test -s "$here/_build/resident-setters.wasm"
 test -s "$here/_build/resident-setters.wasm.json"
+test -s "$here/_build/resident-tag-setter.wasm"
+test -s "$here/_build/resident-tag-setter.wasm.json"
 test -s "$here/_build/resident-increments.wasm"
 test -s "$here/_build/resident-increments.wasm.json"
 test -s "$here/_build/resident-releases.wasm"
@@ -67,6 +69,8 @@ test -s "$here/_build/source-pretty-format-trace-resident-increments.wasm"
 test -s "$here/_build/source-pretty-format-trace-resident-increments.wasm.json"
 test -s "$here/_build/source-pretty-format-trace-resident-releases.wasm"
 test -s "$here/_build/source-pretty-format-trace-resident-releases.wasm.json"
+test -s "$here/_build/source-pretty-format-trace-resident-tag-setters.wasm"
+test -s "$here/_build/source-pretty-format-trace-resident-tag-setters.wasm.json"
 
 python3 -m http.server "$port" --bind 127.0.0.1 --directory "$root" \
   >/dev/null 2>&1 &
