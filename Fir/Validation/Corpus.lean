@@ -687,6 +687,10 @@ def mulInt (left right : Int) : Int :=
   left * right
 
 @[noinline]
+def divModInt (left right : Int) : Int × Int :=
+  (left / right, left % right)
+
+@[noinline]
 def natAbsInt (value : Int) : Nat :=
   value.natAbs
 
@@ -722,6 +726,10 @@ def subNat (left right : Nat) : Nat :=
 @[noinline]
 def mulNat (left right : Nat) : Nat :=
   left * right
+
+@[noinline]
+def divModNat (left right : Nat) : Nat × Nat :=
+  (left / right, left % right)
 
 @[noinline]
 def decideNatEq (left right : Nat) : Bool :=
@@ -954,6 +962,12 @@ private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatu
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
+private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
+
+private def intPairDatum (value : Int × Int) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.int value.1, .int value.2]
+
 private def bmpPrivateUseString : String :=
   String.ofList [Char.ofNat 0xe000]
 
@@ -1157,6 +1171,9 @@ private def intOfNatFormTrace : Array String :=
 
 private def externalCallFormTrace : Array String :=
   #["fap", "extern", "return"]
+
+private def pairedExternalCallFormTrace : Array String :=
+  #["fap", "extern", "fap", "extern", "ctor", "return"]
 
 private def sharedStringAppendFormTrace : Array String :=
   #["inc", "fap", "extern", "ctor", "return"]
@@ -3253,6 +3270,145 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.mul]
     provenance := firProvenance
       "Collapse a heap multi-limb Int times zero to the immediate representation" },
+  { id := "int-divmod-positive-positive"
+    entry := ``Source.divModInt
+    args := #[.int 12, .int 7]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt 12 7)
+    tags := #["quick", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "positive", "sign-matrix"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Pin positive/positive Euclidean Int quotient and remainder together" },
+  { id := "int-divmod-positive-negative"
+    entry := ``Source.divModInt
+    args := #[.int 12, .int (-7)]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt 12 (-7))
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "positive", "negative",
+      "sign-matrix"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Pin positive/negative Euclidean Int quotient and nonnegative remainder" },
+  { id := "int-divmod-negative-positive"
+    entry := ``Source.divModInt
+    args := #[.int (-12), .int 7]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt (-12) 7)
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "negative", "positive",
+      "sign-matrix", "rounding"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Distinguish Euclidean floor division from truncation for a negative dividend" },
+  { id := "int-divmod-negative-negative"
+    entry := ``Source.divModInt
+    args := #[.int (-12), .int (-7)]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt (-12) (-7))
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "negative", "sign-matrix",
+      "rounding"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Pin negative/negative Euclidean Int quotient and nonnegative remainder" },
+  { id := "int-divmod-multi-limb-negative"
+    entry := ``Source.divModInt
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int 17]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt
+      (-340282366920938463463374607431768211473)
+      17)
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "negative", "multi-limb",
+      "heap", "exact", "rounding"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Retain exact multi-limb Euclidean quotient and adjusted remainder" },
+  { id := "int-divmod-zero-divisor"
+    entry := ``Source.divModInt
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int 0]
+    argSchemas := #[.int, .int]
+    resultSchema := .ctor "Prod.mk" 0 #[.int, .int]
+    native := fun _ => intPairDatum (Source.divModInt
+      (-340282366920938463463374607431768211473)
+      0)
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "division", "remainder", "euclidean", "negative", "multi-limb",
+      "heap", "zero-divisor", "boundary"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternals := #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.ediv, ``Int.emod]
+    requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
+    provenance := firProvenance
+      "Pin Int division by zero to zero and remainder by zero to the dividend" },
   { id := "int-nat-abs-multi-limb-positive"
     entry := ``Source.natAbsInt
     args := #[.int 340282366920938463463374607431768211473]
@@ -3604,6 +3760,78 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Nat.mul]
     provenance := firProvenance
       "Collapse a heap multi-limb natural times zero to a tagged result" },
+  { id := "nat-divmod-small"
+    entry := ``Source.divModNat
+    args := #[.nat 43, .nat 7]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .ctor "Prod.mk" 0 #[.nat, .nat]
+    native := fun _ => natPairDatum (Source.divModNat 43 7)
+    tags := #["quick", "external", "pure", "nat", "arithmetic",
+      "division", "remainder", "euclidean", "tagged"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalTrace := some #[``Nat.div, ``Nat.mod]
+    provenance := firProvenance
+      "Return tagged natural quotient and remainder from one input pair" },
+  { id := "nat-divmod-multi-limb"
+    entry := ``Source.divModNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 18446744073709551619]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .ctor "Prod.mk" 0 #[.nat, .nat]
+    native := fun _ => natPairDatum (Source.divModNat
+      340282366920938463463374607431768211473
+      18446744073709551619)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "division", "remainder", "euclidean", "heap", "multi-limb", "exact"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalTrace := some #[``Nat.div, ``Nat.mod]
+    provenance := firProvenance
+      "Retain exact multi-limb natural quotient and tagged remainder together" },
+  { id := "nat-divmod-zero-divisor"
+    entry := ``Source.divModNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 0]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .ctor "Prod.mk" 0 #[.nat, .nat]
+    native := fun _ => natPairDatum (Source.divModNat
+      340282366920938463463374607431768211473
+      0)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "division", "remainder", "euclidean", "heap", "multi-limb",
+      "zero-divisor", "boundary"]
+    requiredLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfForms := #["ctor", "extern", "fap", "return"]
+    requiredExecutedLcnfFormTrace := some pairedExternalCallFormTrace
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "extern", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 2, maximum := some 2 }]
+    requiredExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternals := #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.div, ``Nat.mod]
+    requiredExecutedExternalTrace := some #[``Nat.div, ``Nat.mod]
+    provenance := firProvenance
+      "Pin Nat division by zero to zero and remainder by zero to the dividend" },
   { id := "nat-sub-multi-limb-preserves-heap"
     entry := ``Source.subNat
     args := #[
