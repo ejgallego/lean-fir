@@ -39,12 +39,16 @@ Cross-cutting W6.5 state:
   `ConcreteSupportedExport.correctReturn` proves the certificate-free return
   base, while `correctNaturalLiteralReturn` proves the first allocating
   `let; return` composition through the exact generated four-instruction body,
-  concrete heap/witness growth, and checked destination write; and
+  concrete heap/witness growth, and checked destination write.
+  `CodeAdapted.let_eq` now inverts arbitrary direct-`let` compilation and
+  adaptation into value/continuation fragments and the destination slot;
+  `codeWP_naturalLiteralLet` uses that inversion to compose the same concrete
+  literal step with an arbitrary verified compiler-selected continuation; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
-  applications have no caller-supplied simulation premise. General
-  continuations, string/constructor/projection direct lets, control-flow,
-  calls, externals, caches, and faults remain to migrate from the internal
-  certificate-shaped scaffolding;
+  applications have no caller-supplied simulation premise. UTF-8
+  string/constructor/projection direct lets, the structural source-evaluation
+  induction, control-flow, calls, externals, caches, and faults remain to
+  migrate from the internal certificate-shaped scaffolding;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

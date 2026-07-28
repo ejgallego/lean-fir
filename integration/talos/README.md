@@ -150,8 +150,14 @@ execution. `correctNaturalLiteralReturn` adds the first compositional
 `let; return` case: the exact generated call/local-write/read/return body,
 concrete allocation, witness extension, and resolved host contract are joined
 without a caller-supplied simulation certificate.
-`ConcreteCompilerCorrectnessContract.lean` keeps both applications on that
-public boundary under `make talos-check`.
+The same module now inverts any successful direct-`let` compilation into its
+separately compiled/adapted value and continuation. Its natural-literal
+specialization composes allocation and the generated destination write with
+an arbitrary continuation correctness hypothesis selected by the compiler,
+which is the recursive rule needed by the structural proof.
+`ConcreteCompilerCorrectnessContract.lean` keeps the finite export
+applications and that recursive API on the certificate-free boundary under
+`make talos-check`.
 Existing certificate-shaped modules are retained only as internal sources of
 operation and invariant lemmas while general continuations, remaining direct
 `let` operations, control-flow, calls, externals, caches, and faults are

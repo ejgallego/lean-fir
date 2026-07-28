@@ -54,6 +54,75 @@ example
   spec.correctReturn sourceEvaluation stateRelated parameterCount
 
 /--
+The recursive direct-`let` API is likewise certificate-free: its only
+recursive premise is correctness of the compiler-selected continuation.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {value : Nat}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .lit (.nat value))
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .tobject))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    {heap : MemoryState}
+    {word : Word32}
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (allocated :
+      allocateNatural initial.host.runtime.heap value = .ok (heap, word))
+    (localSetReady :
+      ∀ {resultIndex},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest resultIndex updated nextWitness},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated →
+          witness.Extends nextWitness →
+          ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+              (literal sourceRuntime (.nat value)).1 →
+          PhysicalValueRel nextWitness .tobject
+              (.i32 (UInt32.ofNat word.value))
+              (literal sourceRuntime (.nat value)).2 →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2)
+            continuation targetRest (replaceHeap initial heap) updated
+            nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q :=
+  spec.codeWP_naturalLiteralLet valueEq valueKind localCompiled stateRelated
+    allocated localSetReady continued
+
+/--
 The first compositional API check. A natural literal and its return require
 only static pipeline facts plus concrete allocation/local capacity; no
 syntax-directed simulation object is accepted from the caller.

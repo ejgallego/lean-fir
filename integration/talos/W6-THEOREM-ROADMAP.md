@@ -106,8 +106,17 @@ contract, executes concrete allocation, extends the heap witness, and proves
 the source and exported target return the related result. Its only dynamic
 side conditions are allocation success and capacity for the checked local
 write.
+`CodeAdapted.let_eq` now supplies the reusable inverse compiler/adaptor rule
+for every direct `let`: successful whole-body compilation is split into the
+separately compiled and adapted value and continuation plus the numeric
+destination local. `naturalLiteralLet_eq` specializes that rule, and
+`ConcreteSupportedExport.codeWP_naturalLiteralLet` composes the concrete
+literal step with an arbitrary compiler-selected continuation. Its recursive
+premise is the semantic correctness induction hypothesis for that
+continuation, not a caller-built translation certificate.
 `ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
-that both public theorems have no translation-certificate premise.
+that the two finite export theorems and the recursive direct-`let` rule have
+no translation-certificate premise.
 
 ### T3. Whole-export success
 

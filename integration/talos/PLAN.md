@@ -3449,6 +3449,22 @@ generalizes the immediate-return continuation, adds UTF-8 strings, and then
 moves to constructor/projection lets. No FIR semantic contract or executable
 ABI changed.
 
+W6.6dz generalizes the immediate-return continuation. `CodeAdapted.let_eq`
+inverts every successful direct `let` through both executable compilation
+stages, recovering separately compiled/adapted value and continuation
+fragments plus the adapter-selected destination slot.
+`CodeAdapted.naturalLiteralLet_eq` resolves the literal prefix and local kind,
+and `ConcreteSupportedExport.codeWP_naturalLiteralLet` composes allocation,
+witness extension, the checked destination write, and an arbitrary
+compiler-selected continuation correctness hypothesis. That hypothesis is
+the recursive semantic induction hypothesis, not a translation certificate.
+The earlier immediate-return inversion is now a corollary of the general
+split, and the compile-time contract harness applies the recursive API
+without `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation`. UTF-8
+strings are the next direct-let instance, followed by the structural
+source-evaluation induction and constructor/projection lets. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

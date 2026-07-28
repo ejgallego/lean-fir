@@ -81,6 +81,213 @@ theorem CodeAdapted.return_eq
       exact ⟨kind, alignedIndex, localCompiled, alignedFound, kindAt, rfl⟩
 
 /--
+Inversion of the real two-stage compiler at an arbitrary direct `let`.
+
+Successful whole-body compilation determines separately compiled and adapted
+value and continuation fragments, together with the adapter-selected numeric
+destination local. This is the inverse of `codeAdapted_let`; it exposes facts
+computed by the executable compiler and adapter rather than asking clients for
+a syntax-directed translation certificate.
+-/
+theorem CodeAdapted.let_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ valueCode restCode targetValue targetRest resultIndex,
+      Fir.Wasm.compileLetValue context decl = .ok valueCode ∧
+        Fir.Wasm.compileCode context continuation = .ok restCode ∧
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue ∧
+        instructions sourceModule sourceFunction labels restCode =
+          .ok targetRest ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        target = targetValue ++ .localSet resultIndex :: targetRest := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases valueResult : Fir.Wasm.compileLetValue context decl with
+  | error error =>
+      rw [valueResult] at core
+      change some (Except.error error) = some (Except.ok symbolic) at core
+      have impossible :
+          Except.error error = Except.ok symbolic :=
+        Option.some.inj core
+      cases impossible
+  | ok valueCode =>
+      rw [valueResult] at core
+      cases restResult :
+          Fir.Wasm.compileCodeCore context continuation with
+      | none =>
+          rw [restResult] at core
+          change none = some (Except.ok symbolic) at core
+          cases core
+      | some result =>
+          cases result with
+          | error error =>
+              rw [restResult] at core
+              change
+                some (Except.error error) = some (Except.ok symbolic) at core
+              have impossible :
+                  Except.error error = Except.ok symbolic :=
+                Option.some.inj core
+              cases impossible
+          | ok restCode =>
+              rw [restResult] at core
+              change
+                some (Except.ok
+                  (valueCode ++ [.localSet decl.fvarId] ++ restCode)) =
+                    some (Except.ok symbolic) at core
+              injection core with symbolicEq
+              injection symbolicEq with symbolicEq
+              subst symbolic
+              have restCompiled :
+                  Fir.Wasm.compileCode context continuation =
+                    .ok restCode :=
+                Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+              simp only [List.append_assoc] at targetCompiled
+              cases valueAdapted :
+                  instructions sourceModule sourceFunction labels valueCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append,
+                    valueAdapted] at targetCompiled
+                  change Except.error error = Except.ok target at targetCompiled
+                  cases targetCompiled
+              | ok targetValue =>
+                  rw [FirTalos.Correctness.instructions_append,
+                    valueAdapted] at targetCompiled
+                  cases resultFound :
+                      findFVar? (functionBindings sourceFunction) decl.fvarId with
+                  | none =>
+                      change
+                        findFVar?
+                            (sourceFunction.params.toList ++
+                              sourceFunction.locals.toList)
+                            decl.fvarId = none at resultFound
+                      simp [instructions, instruction, resultFound]
+                        at targetCompiled
+                      change
+                        Except.error (AdapterError.unknownLocal decl.fvarId) =
+                          Except.ok target at targetCompiled
+                      cases targetCompiled
+                  | some resultIndex =>
+                      change
+                        findFVar?
+                            (sourceFunction.params.toList ++
+                              sourceFunction.locals.toList)
+                            decl.fvarId = some resultIndex at resultFound
+                      cases restAdapted :
+                          instructions sourceModule sourceFunction labels
+                            restCode with
+                      | error error =>
+                          simp [instructions, instruction, resultFound,
+                            restAdapted] at targetCompiled
+                          change
+                            Except.error error = Except.ok target
+                              at targetCompiled
+                          cases targetCompiled
+                      | ok targetRest =>
+                          have targetEq :
+                              targetValue ++ .localSet resultIndex :: targetRest =
+                                target := by
+                            simp [instructions, instruction, resultFound,
+                              restAdapted] at targetCompiled
+                            change
+                              Except.ok
+                                  (targetValue ++
+                                    .localSet resultIndex :: targetRest) =
+                                Except.ok target at targetCompiled
+                            exact Except.ok.inj targetCompiled
+                          exact ⟨valueCode, restCode, targetValue, targetRest,
+                            resultIndex, rfl, restCompiled, valueAdapted,
+                            restAdapted, rfl, targetEq.symm⟩
+
+/--
+Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
+continuation.
+
+Besides splitting the continuation out of the real compiler output, this
+specialization resolves the literal host call and proves that the adapter's
+numeric destination has the expected `tobject` kind.
+-/
+theorem CodeAdapted.naturalLiteralLet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {value : Nat}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (valueEq : decl.value = .lit (.nat value))
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .tobject))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ callIndex resultIndex targetRest,
+      Fir.Wasm.compileLetValue context decl =
+          .ok [.call (.runtime (.literal (.nat value) .tobject))] ∧
+        callIndex? sourceModule
+            (.runtime (.literal (.nat value) .tobject)) =
+          some callIndex ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some .tobject ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target = .call callIndex :: .localSet resultIndex :: targetRest := by
+  have literalCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.call (.runtime (.literal (.nat value) .tobject))] :=
+    compileLetValue_naturalLiteral valueEq valueKind
+  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+      targetEq⟩ :=
+    CodeAdapted.let_eq adapted
+  rw [literalCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨alignedIndex, alignedFound, resultKindAt⟩ :=
+    localsAligned localCompiled
+  rw [resultFound] at alignedFound
+  injection alignedFound with indexEq
+  subst alignedIndex
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.literal (.nat value) .tobject)) with
+  | none =>
+      simp [instructions, instruction, callFound] at valueAdapted
+      change
+        Except.error AdapterError.unknownCallTarget =
+          Except.ok targetValue at valueAdapted
+      cases valueAdapted
+  | some callIndex =>
+      have targetValueEq : [.call callIndex] = targetValue := by
+        simp [instructions, instruction, callFound] at valueAdapted
+        exact Except.ok.inj valueAdapted
+      subst targetValue
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      exact ⟨callIndex, resultIndex, targetRest, literalCompiled, rfl,
+        resultFound, resultKindAt, continuationAdapted, by
+          simpa using targetEq⟩
+
+/--
 Inversion of the real compiler and adapter for a natural-literal binding that
 is returned immediately.
 
@@ -120,52 +327,110 @@ theorem CodeAdapted.naturalLiteralReturn_eq
           .localSet resultIndex,
           .localGet resultIndex,
           .ret] := by
-  have valueCompiled :
-      Fir.Wasm.compileLetValue context decl =
-        .ok [.call (.runtime (.literal (.nat value) .tobject))] :=
-    compileLetValue_naturalLiteral valueEq valueKind
-  have restCompiled :
-      Fir.Wasm.compileCode context (.return decl.fvarId) =
-        .ok [.localGet decl.fvarId, .ret] :=
-    Fir.Wasm.compileCode_return localCompiled
-  have codeCompiled :
-      Fir.Wasm.compileCode context (.let decl (.return decl.fvarId)) =
-        .ok [
-          .call (.runtime (.literal (.nat value) .tobject)),
-          .localSet decl.fvarId,
-          .localGet decl.fvarId,
-          .ret] := by
-    simpa using Fir.Wasm.compileCode_let valueCompiled restCompiled
-  obtain ⟨resultIndex, resultFound, resultKindAt⟩ :=
-    localsAligned localCompiled
-  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
-  rw [codeCompiled] at compiled
-  injection compiled with symbolicEq
-  subst symbolic
-  simp only [instructions, instruction] at targetCompiled
-  change
-    findFVar?
-        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
-        decl.fvarId =
-      some resultIndex at resultFound
-  cases callFound :
-      callIndex? sourceModule
-        (.runtime (.literal (.nat value) .tobject)) with
-  | none =>
-      rw [callFound] at targetCompiled
-      simp [Bind.bind, Except.bind] at targetCompiled
-  | some callIndex =>
-      rw [callFound, resultFound] at targetCompiled
-      simp at targetCompiled
-      have targetEq : [
-          .call callIndex,
-          .localSet resultIndex,
-          .localGet resultIndex,
-          .ret] = target :=
-        Except.ok.inj targetCompiled
-      subst target
-      exact ⟨callIndex, resultIndex, valueCompiled, rfl, resultFound,
-        resultKindAt, rfl⟩
+  obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
+      resultFound, resultKindAt, continuationAdapted, targetEq⟩ :=
+    CodeAdapted.naturalLiteralLet_eq localsAligned valueEq valueKind
+      localCompiled adapted
+  obtain ⟨returnKind, returnIndex, returnCompiled, returnFound, _,
+      returnEq⟩ :=
+    CodeAdapted.return_eq localsAligned continuationAdapted
+  rw [localCompiled] at returnCompiled
+  injection returnCompiled with kindEq
+  injection kindEq with kindEq
+  subst returnKind
+  rw [resultFound] at returnFound
+  injection returnFound with indexEq
+  subst returnIndex
+  rw [returnEq] at targetEq
+  exact ⟨callIndex, resultIndex, valueCompiled, callFound, resultFound,
+    resultKindAt, by simpa using targetEq⟩
+
+/--
+Certificate-free recursive correctness rule for a natural-literal `let` with
+an arbitrary continuation.
+
+The `continued` premise is the semantic induction hypothesis for the
+continuation selected by the executable compiler/adaptor equation. It is not a
+translation witness: this theorem derives the literal instruction, import
+index, destination local, target split, and concrete host contract from
+`ConcreteSupportedExport`.
+-/
+theorem ConcreteSupportedExport.codeWP_naturalLiteralLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {value : Nat}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .lit (.nat value))
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .tobject))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    {heap : MemoryState}
+    {word : Word32}
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (allocated :
+      allocateNatural initial.host.runtime.heap value = .ok (heap, word))
+    (localSetReady :
+      ∀ {resultIndex},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest resultIndex updated nextWitness},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated →
+          witness.Extends nextWitness →
+          ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+              (literal sourceRuntime (.nat value)).1 →
+          PhysicalValueRel nextWitness .tobject
+              (.i32 (UInt32.ofNat word.value))
+              (literal sourceRuntime (.nat value)).2 →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2)
+            continuation targetRest (replaceHeap initial heap) updated
+            nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
+      resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
+    CodeAdapted.naturalLiteralLet_eq spec.localsAligned valueEq valueKind
+      localCompiled spec.bodyAdapted
+  obtain ⟨updated, targetSet⟩ := localSetReady resultFound
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.naturalLiteralCall callFound
+  rw [bodyEq]
+  apply codeWP_naturalLiteral_let valueEq valueCompiled callFound stateRelated
+    resultFound resultKindAt allocated imported spec.hostsSatisfy inBounds
+    contracted params results targetSet
+  intro nextWitness extension nextRuntimeRelated valueRelated
+  exact continued continuationAdapted resultFound targetSet extension
+    nextRuntimeRelated valueRelated
 
 /--
 Certificate-free partial compiler correctness for the base return case.
