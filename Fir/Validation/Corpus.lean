@@ -652,6 +652,18 @@ def addNat (left right : Nat) : Nat :=
 def subNat (left right : Nat) : Nat :=
   left - right
 
+@[noinline]
+def decideNatEq (left right : Nat) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideNatLt (left right : Nat) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideNatLe (left right : Nat) : Bool :=
+  decide (left ≤ right)
+
 @[implemented_by NativeEffects.recordImpl]
 def record (value : Nat) : Nat :=
   value + 1
@@ -2709,6 +2721,129 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Nat.sub]
     provenance := firProvenance
       "Saturate tagged-minus-multi-limb Nat subtraction at immediate zero" },
+  { id := "nat-dec-eq-multi-limb-true"
+    entry := ``Source.decideNatEq
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatEq
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "external", "pure", "nat", "decision", "equality",
+      "true", "heap", "multi-limb"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decEq]
+    requiredExecutedExternals := #[``Nat.decEq]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decEq]
+    requiredExecutedExternalTrace := some #[``Nat.decEq]
+    provenance := firProvenance
+      "Decide equality of identical multi-limb heap naturals" },
+  { id := "nat-dec-eq-tagged-heap-false"
+    entry := ``Source.decideNatEq
+    args := #[.nat 9223372036854775807, .nat 9223372036854775808]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatEq
+      9223372036854775807 9223372036854775808)
+    tags := #["stress", "external", "pure", "nat", "decision", "equality",
+      "false", "boundary", "immediate", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decEq]
+    requiredExecutedExternals := #[``Nat.decEq]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decEq]
+    requiredExecutedExternalTrace := some #[``Nat.decEq]
+    provenance := firProvenance
+      "Reject equality across the tagged-to-heap Nat boundary" },
+  { id := "nat-dec-lt-tagged-heap-true"
+    entry := ``Source.decideNatLt
+    args := #[.nat 9223372036854775807, .nat 9223372036854775808]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatLt
+      9223372036854775807 9223372036854775808)
+    tags := #["stress", "external", "pure", "nat", "decision", "ordering",
+      "less-than", "true", "boundary", "immediate", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decLt]
+    requiredExecutedExternals := #[``Nat.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decLt]
+    requiredExecutedExternalTrace := some #[``Nat.decLt]
+    provenance := firProvenance
+      "Decide strict ordering across the tagged-to-heap Nat boundary" },
+  { id := "nat-dec-lt-multi-limb-equality-false"
+    entry := ``Source.decideNatLt
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatLt
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "external", "pure", "nat", "decision", "ordering",
+      "less-than", "false", "equality", "heap", "multi-limb"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decLt]
+    requiredExecutedExternals := #[``Nat.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decLt]
+    requiredExecutedExternalTrace := some #[``Nat.decLt]
+    provenance := firProvenance
+      "Reject strict ordering for equal multi-limb heap naturals" },
+  { id := "nat-dec-le-multi-limb-equality-true"
+    entry := ``Source.decideNatLe
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatLe
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "external", "pure", "nat", "decision", "ordering",
+      "less-or-equal", "true", "equality", "heap", "multi-limb"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decLe]
+    requiredExecutedExternals := #[``Nat.decLe]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decLe]
+    requiredExecutedExternalTrace := some #[``Nat.decLe]
+    provenance := firProvenance
+      "Accept non-strict ordering for equal multi-limb heap naturals" },
+  { id := "nat-dec-le-heap-tagged-false"
+    entry := ``Source.decideNatLe
+    args := #[.nat 9223372036854775808, .nat 9223372036854775807]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideNatLe
+      9223372036854775808 9223372036854775807)
+    tags := #["stress", "external", "pure", "nat", "decision", "ordering",
+      "less-or-equal", "false", "boundary", "immediate", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.decLe]
+    requiredExecutedExternals := #[``Nat.decLe]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.decLe]
+    requiredExecutedExternalTrace := some #[``Nat.decLe]
+    provenance := firProvenance
+      "Reject non-strict ordering from the first heap Nat to tagged maximum" },
   { id := "effect-record-nat"
     entry := ``Source.recordOnce
     args := #[.nat 7]
