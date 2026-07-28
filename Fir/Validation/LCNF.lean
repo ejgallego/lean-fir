@@ -342,6 +342,13 @@ private def uint8Codec : FixedWidthValueCodec UInt8 where
     | _ => none
   encode value := .scalar (.uint8 value)
 
+private def int8Codec : FixedWidthValueCodec Int8 where
+  name := "Int8"
+  decode?
+    | .scalar (.uint8 value) => some ⟨value⟩
+    | _ => none
+  encode value := .scalar (.uint8 value.toUInt8)
+
 private def uint16Codec : FixedWidthValueCodec UInt16 where
   name := "UInt16"
   decode?
@@ -1662,6 +1669,18 @@ private def natToFixedWidthExternal (codec : FixedWidthValueCodec α)
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def intToFixedWidthExternal (codec : FixedWidthValueCodec α)
+    (operation : Int → α) (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalInt request runtime value
+  return {
+    value := codec.encode (operation value)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def fixedWidthToNatExternal (codec : FixedWidthValueCodec α)
     (operation : α → Nat) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -1669,6 +1688,19 @@ private def fixedWidthToNatExternal (codec : FixedWidthValueCodec α)
     | throw (.arityMismatch 1 request.args.size)
   let value ← externalFixedWidthValue codec request value
   let (runtime, result) := literal runtime (.nat (operation value))
+  return {
+    value := result
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def fixedWidthToIntExternal (codec : FixedWidthValueCodec α)
+    (operation : α → Int) (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalFixedWidthValue codec request value
+  let (runtime, result) := encodeIntValue runtime (operation value)
   return {
     value := result
     heap := runtime.heap
@@ -1746,6 +1778,22 @@ private def natToFixedWidthGuard (codec : FixedWidthValueCodec α) (name : Name)
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
+private def intToFixedWidthGuard (codec : FixedWidthValueCodec α) (name : Name)
+    (operation : Int → α) (input : Int) (expected : α) : Bool :=
+  let (runtime, inputValue) := encodeIntValue {} input
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[inputValue] }
+  match intToFixedWidthExternal codec operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == codec.encode expected &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
 private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → Nat) (input : α) (expected : Nat) : Bool :=
   let runtime : RuntimeState := {}
@@ -1756,6 +1804,23 @@ private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
     args := #[codec.encode input] }
   let (expectedRuntime, expectedValue) := literal runtime (.nat expected)
   match fixedWidthToNatExternal codec operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == expectedValue &&
+      response.heap == expectedRuntime.heap &&
+      response.nextLocation == expectedRuntime.nextLocation &&
+      response.world == expectedRuntime.world
+
+private def fixedWidthToIntGuard (codec : FixedWidthValueCodec α) (name : Name)
+    (operation : α → Int) (input : α) (expected : Int) : Bool :=
+  let runtime : RuntimeState := {}
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[codec.encode input] }
+  let (expectedRuntime, expectedValue) := encodeIntValue runtime expected
+  match fixedWidthToIntExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
       response.value == expectedValue &&
@@ -1779,6 +1844,128 @@ private def fixedWidthConversionGuard (sourceCodec : FixedWidthValueCodec α)
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
+
+private def int8 (value : Int) : Int8 :=
+  Int8.ofInt value
+
+#guard int8Codec.decode? (.scalar (.uint16 1)) |>.isNone
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.add Int8.add
+  (int8 127) (int8 1) (int8 (-128))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.sub Int8.sub
+  (int8 (-128)) (int8 1) (int8 127)
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.mul Int8.mul
+  (int8 64) (int8 2) (int8 (-128))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.div Int8.div
+  (int8 (-7)) (int8 3) (int8 (-2))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.div Int8.div
+  (int8 (-128)) (int8 (-1)) (int8 (-128))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.div Int8.div
+  (int8 (-7)) (int8 0) (int8 0)
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.mod Int8.mod
+  (int8 (-7)) (int8 3) (int8 (-1))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.mod Int8.mod
+  (int8 7) (int8 (-3)) (int8 1)
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.mod Int8.mod
+  (int8 (-7)) (int8 0) (int8 (-7))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.land Int8.land
+  (int8 (-16)) (int8 60) (int8 48)
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.lor Int8.lor
+  (int8 (-64)) (int8 60) (int8 (-4))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.xor Int8.xor
+  (int8 (-16)) (int8 60) (int8 (-52))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftLeft Int8.shiftLeft
+  (int8 (-127)) (int8 (-8)) (int8 (-127))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftLeft Int8.shiftLeft
+  (int8 (-127)) (int8 (-1)) (int8 (-128))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftLeft Int8.shiftLeft
+  (int8 (-127)) (int8 9) (int8 2)
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftRight Int8.shiftRight
+  (int8 (-127)) (int8 (-8)) (int8 (-127))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftRight Int8.shiftRight
+  (int8 (-127)) (int8 (-1)) (int8 (-1))
+
+#guard fixedWidthBinaryGuard int8Codec ``Int8.shiftRight Int8.shiftRight
+  (int8 (-127)) (int8 9) (int8 (-64))
+
+#guard fixedWidthUnaryGuard int8Codec ``Int8.complement Int8.complement
+  (int8 0) (int8 (-1))
+
+#guard fixedWidthUnaryGuard int8Codec ``Int8.neg Int8.neg
+  (int8 (-128)) (int8 (-128))
+
+#guard fixedWidthUnaryGuard int8Codec ``Int8.abs Int8.abs
+  (int8 (-7)) (int8 7)
+
+#guard fixedWidthUnaryGuard int8Codec ``Int8.abs Int8.abs
+  (int8 (-128)) (int8 (-128))
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decEq
+  (fun left right => decide (left = right))
+  (int8 (-1)) (int8 (-1)) true
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decEq
+  (fun left right => decide (left = right))
+  (int8 (-1)) (int8 1) false
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decLt
+  (fun left right => decide (left < right))
+  (int8 (-1)) (int8 0) true
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decLt
+  (fun left right => decide (left < right))
+  (int8 127) (int8 (-128)) false
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decLe
+  (fun left right => decide (left ≤ right))
+  (int8 (-128)) (int8 (-128)) true
+
+#guard fixedWidthDecisionGuard int8Codec ``Int8.decLe
+  (fun left right => decide (left ≤ right))
+  (int8 0) (int8 (-1)) false
+
+#guard natToFixedWidthGuard int8Codec ``Int8.ofNat
+  Int8.ofNat 255 (int8 (-1))
+
+#guard natToFixedWidthGuard int8Codec ``Int8.ofNat
+  Int8.ofNat 256 (int8 0)
+
+#guard natToFixedWidthGuard int8Codec ``Int8.ofNat
+  Int8.ofNat multiLimbNat (int8 17)
+
+#guard intToFixedWidthGuard int8Codec ``Int8.ofInt
+  Int8.ofInt 128 (int8 (-128))
+
+#guard intToFixedWidthGuard int8Codec ``Int8.ofInt
+  Int8.ofInt (-129) (int8 127)
+
+#guard intToFixedWidthGuard int8Codec ``Int8.ofInt
+  Int8.ofInt multiLimbInt (int8 17)
+
+#guard intToFixedWidthGuard int8Codec ``Int8.ofInt
+  Int8.ofInt (-multiLimbInt) (int8 (-17))
+
+#guard fixedWidthToIntGuard int8Codec ``Int8.toInt
+  Int8.toInt (int8 (-128)) (-128)
+
+#guard fixedWidthToIntGuard int8Codec ``Int8.toInt
+  Int8.toInt (int8 127) 127
 
 #guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
   UInt64.ofNat 0 0
@@ -2267,14 +2454,47 @@ private def natToFixedWidthHandler (name : Name) (codec : FixedWidthValueCodec �
     (operation : Nat → α) : NamedExternalHandler :=
   { name, call := natToFixedWidthExternal codec operation }
 
+private def intToFixedWidthHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : Int → α) : NamedExternalHandler :=
+  { name, call := intToFixedWidthExternal codec operation }
+
 private def fixedWidthToNatHandler (name : Name) (codec : FixedWidthValueCodec α)
     (operation : α → Nat) : NamedExternalHandler :=
   { name, call := fixedWidthToNatExternal codec operation }
+
+private def fixedWidthToIntHandler (name : Name) (codec : FixedWidthValueCodec α)
+    (operation : α → Int) : NamedExternalHandler :=
+  { name, call := fixedWidthToIntExternal codec operation }
 
 private def fixedWidthConversionHandler (name : Name)
     (sourceCodec : FixedWidthValueCodec α) (targetCodec : FixedWidthValueCodec β)
     (operation : α → β) : NamedExternalHandler :=
   { name, call := fixedWidthConversionExternal sourceCodec targetCodec operation }
+
+private def int8ExternalHandlers : List NamedExternalHandler := [
+  fixedWidthBinaryHandler ``Int8.add int8Codec Int8.add,
+  fixedWidthBinaryHandler ``Int8.sub int8Codec Int8.sub,
+  fixedWidthBinaryHandler ``Int8.mul int8Codec Int8.mul,
+  fixedWidthBinaryHandler ``Int8.div int8Codec Int8.div,
+  fixedWidthBinaryHandler ``Int8.mod int8Codec Int8.mod,
+  fixedWidthBinaryHandler ``Int8.land int8Codec Int8.land,
+  fixedWidthBinaryHandler ``Int8.lor int8Codec Int8.lor,
+  fixedWidthBinaryHandler ``Int8.xor int8Codec Int8.xor,
+  fixedWidthBinaryHandler ``Int8.shiftLeft int8Codec Int8.shiftLeft,
+  fixedWidthBinaryHandler ``Int8.shiftRight int8Codec Int8.shiftRight,
+  fixedWidthUnaryHandler ``Int8.complement int8Codec Int8.complement,
+  fixedWidthUnaryHandler ``Int8.neg int8Codec Int8.neg,
+  fixedWidthUnaryHandler ``Int8.abs int8Codec Int8.abs,
+  fixedWidthDecisionHandler ``Int8.decEq int8Codec
+    (fun left right => decide (left = right)),
+  fixedWidthDecisionHandler ``Int8.decLt int8Codec
+    (fun left right => decide (left < right)),
+  fixedWidthDecisionHandler ``Int8.decLe int8Codec
+    (fun left right => decide (left ≤ right)),
+  natToFixedWidthHandler ``Int8.ofNat int8Codec Int8.ofNat,
+  intToFixedWidthHandler ``Int8.ofInt int8Codec Int8.ofInt,
+  fixedWidthToIntHandler ``Int8.toInt int8Codec Int8.toInt
+]
 
 private def uint8ExternalHandlers : List NamedExternalHandler := [
   fixedWidthBinaryHandler ``UInt8.add uint8Codec UInt8.add,
@@ -2412,10 +2632,10 @@ private def usizeExternalHandlers : List NamedExternalHandler := [
 ]
 
 private def fixedWidthExternalHandlers : List NamedExternalHandler :=
-  uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
+  int8ExternalHandlers ++ uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
     uint64ExternalHandlers ++ usizeExternalHandlers
 
-#guard fixedWidthExternalHandlers.length == 105
+#guard fixedWidthExternalHandlers.length == 124
 
 #guard fixedWidthExternalHandlers.all fun handler =>
   (fixedWidthExternalHandlers.filter fun candidate =>

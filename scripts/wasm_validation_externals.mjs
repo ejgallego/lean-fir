@@ -140,6 +140,15 @@ function scalarFixedWidthCodec(scalarKind, width) {
   };
 }
 
+function signedScalarFixedWidthCodec(scalarKind, width) {
+  const unsigned = scalarFixedWidthCodec(scalarKind, width);
+  return {
+    decode: (value, context) =>
+      BigInt.asIntN(width, unsigned.decode(value, context)),
+    encode: value => unsigned.encode(BigInt.asUintN(width, value)),
+  };
+}
+
 const usizeFixedWidthCodec = {
   decode: semanticUSize,
   encode: value => ({ kind: "usize", value: BigInt.asUintN(64, value) }),
@@ -151,6 +160,10 @@ const fixedWidthCodecs = {
   UInt32: scalarFixedWidthCodec("uint32", 32),
   UInt64: scalarFixedWidthCodec("uint64", 64),
   USize: usizeFixedWidthCodec,
+};
+
+const signedFixedWidthCodecs = {
+  Int8: signedScalarFixedWidthCodec("uint8", 8),
 };
 
 function fixedWidthBinary(declaration, codec, operation) {
@@ -193,11 +206,27 @@ function naturalToFixedWidth(declaration, codec) {
   };
 }
 
+function integerToFixedWidth(declaration, codec) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = integerValue(host, args[0], `${declaration} operand`);
+    return { value: codec.encode(value), world };
+  };
+}
+
 function fixedWidthToNatural(declaration, codec) {
   return ({ args, host, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
     const value = codec.decode(args[0], `${declaration} operand`);
     return { value: host.natural(value), world };
+  };
+}
+
+function fixedWidthToInteger(declaration, codec) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = codec.decode(args[0], `${declaration} operand`);
+    return { value: host.integer(value), world };
   };
 }
 
@@ -253,6 +282,15 @@ function fixedWidthExternalFamily(typeName, width, codec) {
       "decEq", (left, right) => left === right),
     [declaration("decLt")]: decision("decLt", (left, right) => left < right),
     [declaration("decLe")]: decision("decLe", (left, right) => left <= right),
+  };
+}
+
+function signedFixedWidthExternalFamily(typeName, width, codec) {
+  const declaration = suffix => `${typeName}.${suffix}`;
+  return {
+    ...fixedWidthExternalFamily(typeName, width, codec),
+    [declaration("abs")]: fixedWidthUnary(
+      declaration("abs"), codec, value => value < 0n ? -value : value),
   };
 }
 
@@ -475,6 +513,13 @@ export const validationExternalRegistry = {
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
+  ...signedFixedWidthExternalFamily("Int8", 8, signedFixedWidthCodecs.Int8),
+  "Int8.ofNat": naturalToFixedWidth(
+    "Int8.ofNat", signedFixedWidthCodecs.Int8),
+  "Int8.ofInt": integerToFixedWidth(
+    "Int8.ofInt", signedFixedWidthCodecs.Int8),
+  "Int8.toInt": fixedWidthToInteger(
+    "Int8.toInt", signedFixedWidthCodecs.Int8),
   ...fixedWidthExternalFamily("UInt8", 8, fixedWidthCodecs.UInt8),
   "UInt8.ofNat": naturalToFixedWidth(
     "UInt8.ofNat", fixedWidthCodecs.UInt8),

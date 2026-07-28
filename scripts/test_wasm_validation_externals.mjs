@@ -88,6 +88,18 @@ const fixedWidthFamilies = [
     wrongValue: fixedWidthScalarValue("uint64", 1n),
   },
 ];
+const signedFixedWidthSuffixes = [...fixedWidthSuffixes, "abs"];
+const signedFixedWidthFamilies = [
+  {
+    typeName: "Int8",
+    width: 8,
+    decode: (value, context) =>
+      BigInt.asIntN(8, scalarUInt8(value, context)),
+    encode: value =>
+      fixedWidthScalarValue("uint8", BigInt.asUintN(8, value)),
+    wrongValue: fixedWidthScalarValue("uint16", 1n),
+  },
+];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
 assert.strictEqual(formatExternalRegistry["String.Internal.pushn"], pushn);
@@ -112,6 +124,20 @@ assert.strictEqual(formatExternalRegistry["Int.decLt"], intDecLt);
 assert.strictEqual(formatExternalRegistry["Int.decLe"], intDecLe);
 for (const { typeName } of fixedWidthFamilies) {
   for (const suffix of fixedWidthSuffixes) {
+    const declaration = `${typeName}.${suffix}`;
+    assert.strictEqual(
+      formatExternalRegistry[declaration],
+      validationExternalRegistry[declaration]);
+  }
+}
+for (const { typeName } of signedFixedWidthFamilies) {
+  for (const suffix of signedFixedWidthSuffixes) {
+    const declaration = `${typeName}.${suffix}`;
+    assert.strictEqual(
+      formatExternalRegistry[declaration],
+      validationExternalRegistry[declaration]);
+  }
+  for (const suffix of ["ofNat", "ofInt", "toInt"]) {
     const declaration = `${typeName}.${suffix}`;
     assert.strictEqual(
       formatExternalRegistry[declaration],
@@ -316,6 +342,149 @@ for (const source of fixedWidthFamilies) {
   }
 }
 assert.equal(fixedWidthConversionCount, 20);
+
+for (const { typeName, decode, encode, wrongValue } of signedFixedWidthFamilies) {
+  const declaration = suffix => `${typeName}.${suffix}`;
+  for (const [suffix, left, right, expected] of [
+    ["add", 127n, 1n, -128n],
+    ["sub", -128n, 1n, 127n],
+    ["mul", 64n, 2n, -128n],
+    ["div", -7n, 3n, -2n],
+    ["div", -128n, -1n, -128n],
+    ["div", -7n, 0n, 0n],
+    ["mod", -7n, 3n, -1n],
+    ["mod", 7n, -3n, 1n],
+    ["mod", -7n, 0n, -7n],
+    ["land", -16n, 60n, 48n],
+    ["lor", -64n, 60n, -4n],
+    ["xor", -16n, 60n, -52n],
+    ["shiftLeft", -127n, -8n, -127n],
+    ["shiftLeft", -127n, -1n, -128n],
+    ["shiftLeft", -127n, 9n, 2n],
+    ["shiftRight", -127n, -8n, -127n],
+    ["shiftRight", -127n, -1n, -1n],
+    ["shiftRight", -127n, 9n, -64n],
+  ]) {
+    const name = declaration(suffix);
+    const host = new SemanticHost();
+    const leftValue = encode(left);
+    const rightValue = encode(right);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [leftValue, rightValue]);
+    assert.equal(decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.deepStrictEqual(leftValue, encode(left));
+    assert.deepStrictEqual(rightValue, encode(right));
+  }
+  for (const [suffix, input, expected] of [
+    ["complement", 0n, -1n],
+    ["neg", -128n, -128n],
+    ["abs", -7n, 7n],
+    ["abs", -128n, -128n],
+  ]) {
+    const name = declaration(suffix);
+    const host = new SemanticHost();
+    const inputValue = encode(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.deepStrictEqual(inputValue, encode(input));
+  }
+  for (const [suffix, left, right, expected] of [
+    ["decEq", -1n, -1n, 1n],
+    ["decEq", -1n, 1n, 0n],
+    ["decLt", -1n, 0n, 1n],
+    ["decLt", 127n, -128n, 0n],
+    ["decLe", -128n, -128n, 1n],
+    ["decLe", 0n, -1n, 0n],
+  ]) {
+    const name = declaration(suffix);
+    const host = new SemanticHost();
+    const leftValue = encode(left);
+    const rightValue = encode(right);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [leftValue, rightValue]);
+    assert.deepStrictEqual(result, {
+      kind: "scalar",
+      scalarKind: "uint8",
+      value: expected,
+    });
+    assert.equal(host.nextLocation, frontier);
+    assert.deepStrictEqual(leftValue, encode(left));
+    assert.deepStrictEqual(rightValue, encode(right));
+  }
+
+  for (const [input, expected] of [
+    [255n, -1n],
+    [256n, 0n],
+    [0x100000000000000000000000000000011n, 17n],
+  ]) {
+    const name = declaration("ofNat");
+    const host = new SemanticHost();
+    const inputValue = host.natural(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(naturalValue(host, inputValue, `${name} retained input`), input);
+  }
+
+  for (const [input, expected] of [
+    [128n, -128n],
+    [-129n, 127n],
+    [0x100000000000000000000000000000011n, 17n],
+    [-0x100000000000000000000000000000011n, -17n],
+  ]) {
+    const name = declaration("ofInt");
+    const host = new SemanticHost();
+    const inputValue = host.integer(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(integerValue(host, inputValue, `${name} retained input`), input);
+  }
+
+  for (const input of [-128n, 127n]) {
+    const name = declaration("toInt");
+    const host = new SemanticHost();
+    const inputValue = encode(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(integerValue(host, result, `${name} result`), input);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(decode(inputValue, `${name} retained input`), input);
+  }
+
+  for (const suffix of signedFixedWidthSuffixes) {
+    const args = ["complement", "neg", "abs"].includes(suffix)
+      ? [wrongValue]
+      : [wrongValue, encode(1n)];
+    assert.throws(() => invoke(
+      validationExternalRegistry[declaration(suffix)],
+      new SemanticHost(),
+      args));
+  }
+  assert.throws(() => invoke(
+    validationExternalRegistry[declaration("ofNat")],
+    new SemanticHost(),
+    [encode(1n)]));
+  assert.throws(() => invoke(
+    validationExternalRegistry[declaration("ofInt")],
+    new SemanticHost(),
+    [encode(1n)]));
+  assert.throws(() => invoke(
+    validationExternalRegistry[declaration("toInt")],
+    new SemanticHost(),
+    [wrongValue]));
+}
 
 for (const [leftValue, rightValue, expected, allocates] of [
   [6n, 7n, 42n, false],
