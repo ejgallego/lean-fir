@@ -330,22 +330,56 @@ private def externalByteArray (request : ExternalRequest) (runtime : RuntimeStat
   let (_, _, value) ← externalByteArrayCell request runtime value
   return value
 
-private def externalUInt8 (request : ExternalRequest) (value : Value) : Except RuntimeFault UInt8 :=
+private structure FixedWidthScalarCodec (α : Type) where
+  name : String
+  decode? : ScalarValue → Option α
+  encode : α → ScalarValue
+
+private def uint8Codec : FixedWidthScalarCodec UInt8 where
+  name := "UInt8"
+  decode?
+    | .uint8 value => some value
+    | _ => none
+  encode := .uint8
+
+private def uint16Codec : FixedWidthScalarCodec UInt16 where
+  name := "UInt16"
+  decode?
+    | .uint16 value => some value
+    | _ => none
+  encode := .uint16
+
+private def uint32Codec : FixedWidthScalarCodec UInt32 where
+  name := "UInt32"
+  decode?
+    | .uint32 value => some value
+    | _ => none
+  encode := .uint32
+
+private def uint64Codec : FixedWidthScalarCodec UInt64 where
+  name := "UInt64"
+  decode?
+    | .uint64 value => some value
+    | _ => none
+  encode := .uint64
+
+private def externalFixedWidthScalar (codec : FixedWidthScalarCodec α)
+    (request : ExternalRequest) (value : Value) : Except RuntimeFault α :=
   match value with
-  | .scalar (.uint8 value) => .ok value
-  | _ => .error (.externalFailure request.name "expected a UInt8 scalar")
+  | .scalar value =>
+      match codec.decode? value with
+      | some value => .ok value
+      | none =>
+          .error (.externalFailure request.name s!"expected a {codec.name} scalar")
+  | _ => .error (.externalFailure request.name s!"expected a {codec.name} scalar")
+
+private def externalUInt8 (request : ExternalRequest) (value : Value) :
+    Except RuntimeFault UInt8 :=
+  externalFixedWidthScalar uint8Codec request value
 
 private def externalUInt32 (request : ExternalRequest) (value : Value) :
     Except RuntimeFault UInt32 :=
-  match value with
-  | .scalar (.uint32 value) => .ok value
-  | _ => .error (.externalFailure request.name "expected a UInt32 scalar")
-
-private def externalUInt64 (request : ExternalRequest) (value : Value) :
-    Except RuntimeFault UInt64 :=
-  match value with
-  | .scalar (.uint64 value) => .ok value
-  | _ => .error (.externalFailure request.name "expected a UInt64 scalar")
+  externalFixedWidthScalar uint32Codec request value
 
 private def natBinaryExternal (operation : Nat → Nat → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
@@ -1575,85 +1609,205 @@ private def intDecisionGuard (name : Name) (operation : Int → Int → Bool)
 #guard intDecisionGuard ``Int.decLe
   (fun left right => decide (left ≤ right)) multiLimbInt (-multiLimbInt) false
 
-private def uint32BinaryExternal (operation : UInt32 → UInt32 → UInt32)
-    (request : ExternalRequest) (runtime : RuntimeState) :
+private def fixedWidthBinaryExternal (codec : FixedWidthScalarCodec α)
+    (operation : α → α → α) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
-  let left ← externalUInt32 request left
-  let right ← externalUInt32 request right
+  let left ← externalFixedWidthScalar codec request left
+  let right ← externalFixedWidthScalar codec request right
   return {
-    value := .scalar (.uint32 (operation left right))
+    value := .scalar (codec.encode (operation left right))
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def uint32UnaryExternal (operation : UInt32 → UInt32)
-    (request : ExternalRequest) (runtime : RuntimeState) :
+private def fixedWidthUnaryExternal (codec : FixedWidthScalarCodec α)
+    (operation : α → α) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [value] := request.args.toList
     | throw (.arityMismatch 1 request.args.size)
-  let value ← externalUInt32 request value
+  let value ← externalFixedWidthScalar codec request value
   return {
-    value := .scalar (.uint32 (operation value))
+    value := .scalar (codec.encode (operation value))
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def uint32DecisionExternal (operation : UInt32 → UInt32 → Bool)
-    (request : ExternalRequest) (runtime : RuntimeState) :
+private def fixedWidthDecisionExternal (codec : FixedWidthScalarCodec α)
+    (operation : α → α → Bool) (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
-  let left ← externalUInt32 request left
-  let right ← externalUInt32 request right
+  let left ← externalFixedWidthScalar codec request left
+  let right ← externalFixedWidthScalar codec request right
   return {
     value := .scalar (.uint8 (if operation left right then 1 else 0))
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
-private def uint32BinaryGuard (name : Name) (operation : UInt32 → UInt32 → UInt32)
-    (left right expected : UInt32) : Bool :=
+private def fixedWidthBinaryGuard (codec : FixedWidthScalarCodec α) (name : Name)
+    (operation : α → α → α) (left right expected : α) : Bool :=
   let runtime : RuntimeState := {}
   let request := intBinaryRequest name
-    (.scalar (.uint32 left)) (.scalar (.uint32 right))
-  match uint32BinaryExternal operation request runtime with
+    (.scalar (codec.encode left)) (.scalar (codec.encode right))
+  match fixedWidthBinaryExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
-      response.value == .scalar (.uint32 expected) &&
+      response.value == .scalar (codec.encode expected) &&
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
-private def uint32UnaryGuard (name : Name) (operation : UInt32 → UInt32)
-    (input expected : UInt32) : Bool :=
+private def fixedWidthUnaryGuard (codec : FixedWidthScalarCodec α) (name : Name)
+    (operation : α → α) (input expected : α) : Bool :=
   let runtime : RuntimeState := {}
   let request : ExternalRequest := {
     name
     paramTypes := #[]
     resultType := default
-    args := #[.scalar (.uint32 input)] }
-  match uint32UnaryExternal operation request runtime with
+    args := #[.scalar (codec.encode input)] }
+  match fixedWidthUnaryExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
-      response.value == .scalar (.uint32 expected) &&
+      response.value == .scalar (codec.encode expected) &&
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
 
-private def uint32DecisionGuard (name : Name) (operation : UInt32 → UInt32 → Bool)
-    (left right : UInt32) (expected : Bool) : Bool :=
+private def fixedWidthDecisionGuard (codec : FixedWidthScalarCodec α) (name : Name)
+    (operation : α → α → Bool) (left right : α) (expected : Bool) : Bool :=
   let runtime : RuntimeState := {}
   let request := intBinaryRequest name
-    (.scalar (.uint32 left)) (.scalar (.uint32 right))
-  match uint32DecisionExternal operation request runtime with
+    (.scalar (codec.encode left)) (.scalar (codec.encode right))
+  match fixedWidthDecisionExternal codec operation request runtime with
   | .error _ => false
   | .ok response =>
       response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.add UInt8.add 255 1 0
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.sub UInt8.sub 0 1 255
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.mul UInt8.mul 128 2 0
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.div UInt8.div 255 3 85
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.div UInt8.div 255 0 0
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.mod UInt8.mod 255 16 15
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.mod UInt8.mod 255 0 255
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.land UInt8.land 0xf0 0x3c 0x30
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.lor UInt8.lor 0xc0 0x3c 0xfc
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.xor UInt8.xor 0xf0 0x3c 0xcc
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.shiftLeft UInt8.shiftLeft 0x81 8 0x81
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.shiftLeft UInt8.shiftLeft 0x81 9 2
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.shiftRight UInt8.shiftRight 0x81 8 0x81
+
+#guard fixedWidthBinaryGuard uint8Codec ``UInt8.shiftRight UInt8.shiftRight 0x81 9 0x40
+
+#guard fixedWidthUnaryGuard uint8Codec ``UInt8.complement UInt8.complement 0 255
+
+#guard fixedWidthUnaryGuard uint8Codec ``UInt8.neg UInt8.neg 1 255
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decEq
+  (fun left right => decide (left = right)) 255 255 true
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decEq
+  (fun left right => decide (left = right)) 255 0 false
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decLt
+  (fun left right => decide (left < right)) 0 255 true
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decLt
+  (fun left right => decide (left < right)) 255 0 false
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decLe
+  (fun left right => decide (left ≤ right)) 255 255 true
+
+#guard fixedWidthDecisionGuard uint8Codec ``UInt8.decLe
+  (fun left right => decide (left ≤ right)) 255 0 false
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.add UInt16.add 0xffff 1 0
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.sub UInt16.sub 0 1 0xffff
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.mul UInt16.mul 0x8000 2 0
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.div UInt16.div 0xffff 3 0x5555
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.div UInt16.div 0xffff 0 0
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.mod UInt16.mod 0xffff 16 15
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.mod UInt16.mod 0xffff 0 0xffff
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.land UInt16.land
+  0xf0f0 0x0ff0 0x00f0
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.lor UInt16.lor
+  0xf00f 0x0ff0 0xffff
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.xor UInt16.xor
+  0xf0f0 0x0ff0 0xff00
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.shiftLeft UInt16.shiftLeft
+  0x8001 16 0x8001
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.shiftLeft UInt16.shiftLeft
+  0x8001 17 2
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.shiftRight UInt16.shiftRight
+  0x8001 16 0x8001
+
+#guard fixedWidthBinaryGuard uint16Codec ``UInt16.shiftRight UInt16.shiftRight
+  0x8001 17 0x4000
+
+#guard fixedWidthUnaryGuard uint16Codec ``UInt16.complement UInt16.complement
+  0 0xffff
+
+#guard fixedWidthUnaryGuard uint16Codec ``UInt16.neg UInt16.neg 1 0xffff
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decEq
+  (fun left right => decide (left = right)) 0xffff 0xffff true
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decEq
+  (fun left right => decide (left = right)) 0xffff 0 false
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decLt
+  (fun left right => decide (left < right)) 0 0xffff true
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decLt
+  (fun left right => decide (left < right)) 0xffff 0 false
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decLe
+  (fun left right => decide (left ≤ right)) 0xffff 0xffff true
+
+#guard fixedWidthDecisionGuard uint16Codec ``UInt16.decLe
+  (fun left right => decide (left ≤ right)) 0xffff 0 false
+
+private def uint32BinaryGuard (name : Name) (operation : UInt32 → UInt32 → UInt32)
+    (left right expected : UInt32) : Bool :=
+  fixedWidthBinaryGuard uint32Codec name operation left right expected
+
+private def uint32UnaryGuard (name : Name) (operation : UInt32 → UInt32)
+    (input expected : UInt32) : Bool :=
+  fixedWidthUnaryGuard uint32Codec name operation input expected
+
+private def uint32DecisionGuard (name : Name) (operation : UInt32 → UInt32 → Bool)
+    (left right : UInt32) (expected : Bool) : Bool :=
+  fixedWidthDecisionGuard uint32Codec name operation left right expected
 
 #guard uint32BinaryGuard ``UInt32.add UInt32.add 4294967295 1 0
 
@@ -1705,85 +1859,17 @@ private def uint32DecisionGuard (name : Name) (operation : UInt32 → UInt32 →
 #guard uint32DecisionGuard ``UInt32.decLe
   (fun left right => decide (left ≤ right)) 4294967295 0 false
 
-private def uint64BinaryExternal (operation : UInt64 → UInt64 → UInt64)
-    (request : ExternalRequest) (runtime : RuntimeState) :
-    Except RuntimeFault ExternalResponse := do
-  let [left, right] := request.args.toList
-    | throw (.arityMismatch 2 request.args.size)
-  let left ← externalUInt64 request left
-  let right ← externalUInt64 request right
-  return {
-    value := .scalar (.uint64 (operation left right))
-    heap := runtime.heap
-    nextLocation := runtime.nextLocation
-    world := runtime.world }
-
-private def uint64UnaryExternal (operation : UInt64 → UInt64)
-    (request : ExternalRequest) (runtime : RuntimeState) :
-    Except RuntimeFault ExternalResponse := do
-  let [value] := request.args.toList
-    | throw (.arityMismatch 1 request.args.size)
-  let value ← externalUInt64 request value
-  return {
-    value := .scalar (.uint64 (operation value))
-    heap := runtime.heap
-    nextLocation := runtime.nextLocation
-    world := runtime.world }
-
-private def uint64DecisionExternal (operation : UInt64 → UInt64 → Bool)
-    (request : ExternalRequest) (runtime : RuntimeState) :
-    Except RuntimeFault ExternalResponse := do
-  let [left, right] := request.args.toList
-    | throw (.arityMismatch 2 request.args.size)
-  let left ← externalUInt64 request left
-  let right ← externalUInt64 request right
-  return {
-    value := .scalar (.uint8 (if operation left right then 1 else 0))
-    heap := runtime.heap
-    nextLocation := runtime.nextLocation
-    world := runtime.world }
-
 private def uint64BinaryGuard (name : Name) (operation : UInt64 → UInt64 → UInt64)
     (left right expected : UInt64) : Bool :=
-  let runtime : RuntimeState := {}
-  let request := intBinaryRequest name
-    (.scalar (.uint64 left)) (.scalar (.uint64 right))
-  match uint64BinaryExternal operation request runtime with
-  | .error _ => false
-  | .ok response =>
-      response.value == .scalar (.uint64 expected) &&
-      response.heap == runtime.heap &&
-      response.nextLocation == runtime.nextLocation &&
-      response.world == runtime.world
+  fixedWidthBinaryGuard uint64Codec name operation left right expected
 
 private def uint64UnaryGuard (name : Name) (operation : UInt64 → UInt64)
     (input expected : UInt64) : Bool :=
-  let runtime : RuntimeState := {}
-  let request : ExternalRequest := {
-    name
-    paramTypes := #[]
-    resultType := default
-    args := #[.scalar (.uint64 input)] }
-  match uint64UnaryExternal operation request runtime with
-  | .error _ => false
-  | .ok response =>
-      response.value == .scalar (.uint64 expected) &&
-      response.heap == runtime.heap &&
-      response.nextLocation == runtime.nextLocation &&
-      response.world == runtime.world
+  fixedWidthUnaryGuard uint64Codec name operation input expected
 
 private def uint64DecisionGuard (name : Name) (operation : UInt64 → UInt64 → Bool)
     (left right : UInt64) (expected : Bool) : Bool :=
-  let runtime : RuntimeState := {}
-  let request := intBinaryRequest name
-    (.scalar (.uint64 left)) (.scalar (.uint64 right))
-  match uint64DecisionExternal operation request runtime with
-  | .error _ => false
-  | .ok response =>
-      response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
-      response.heap == runtime.heap &&
-      response.nextLocation == runtime.nextLocation &&
-      response.world == runtime.world
+  fixedWidthDecisionGuard uint64Codec name operation left right expected
 
 #guard uint64BinaryGuard ``UInt64.add UInt64.add 0xffffffffffffffff 1 0
 
@@ -1933,66 +2019,138 @@ private def validationExternals : ExternalImpl where
       intDecLtExternal request runtime
     else if request.name == ``Int.decLe then
       intDecLeExternal request runtime
+    else if request.name == ``UInt8.add then
+      fixedWidthBinaryExternal uint8Codec UInt8.add request runtime
+    else if request.name == ``UInt8.sub then
+      fixedWidthBinaryExternal uint8Codec UInt8.sub request runtime
+    else if request.name == ``UInt8.mul then
+      fixedWidthBinaryExternal uint8Codec UInt8.mul request runtime
+    else if request.name == ``UInt8.div then
+      fixedWidthBinaryExternal uint8Codec UInt8.div request runtime
+    else if request.name == ``UInt8.mod then
+      fixedWidthBinaryExternal uint8Codec UInt8.mod request runtime
+    else if request.name == ``UInt8.land then
+      fixedWidthBinaryExternal uint8Codec UInt8.land request runtime
+    else if request.name == ``UInt8.lor then
+      fixedWidthBinaryExternal uint8Codec UInt8.lor request runtime
+    else if request.name == ``UInt8.xor then
+      fixedWidthBinaryExternal uint8Codec UInt8.xor request runtime
+    else if request.name == ``UInt8.shiftLeft then
+      fixedWidthBinaryExternal uint8Codec UInt8.shiftLeft request runtime
+    else if request.name == ``UInt8.shiftRight then
+      fixedWidthBinaryExternal uint8Codec UInt8.shiftRight request runtime
+    else if request.name == ``UInt8.complement then
+      fixedWidthUnaryExternal uint8Codec UInt8.complement request runtime
+    else if request.name == ``UInt8.neg then
+      fixedWidthUnaryExternal uint8Codec UInt8.neg request runtime
+    else if request.name == ``UInt8.decEq then
+      fixedWidthDecisionExternal uint8Codec
+        (fun left right => decide (left = right)) request runtime
+    else if request.name == ``UInt8.decLt then
+      fixedWidthDecisionExternal uint8Codec
+        (fun left right => decide (left < right)) request runtime
+    else if request.name == ``UInt8.decLe then
+      fixedWidthDecisionExternal uint8Codec
+        (fun left right => decide (left ≤ right)) request runtime
+    else if request.name == ``UInt16.add then
+      fixedWidthBinaryExternal uint16Codec UInt16.add request runtime
+    else if request.name == ``UInt16.sub then
+      fixedWidthBinaryExternal uint16Codec UInt16.sub request runtime
+    else if request.name == ``UInt16.mul then
+      fixedWidthBinaryExternal uint16Codec UInt16.mul request runtime
+    else if request.name == ``UInt16.div then
+      fixedWidthBinaryExternal uint16Codec UInt16.div request runtime
+    else if request.name == ``UInt16.mod then
+      fixedWidthBinaryExternal uint16Codec UInt16.mod request runtime
+    else if request.name == ``UInt16.land then
+      fixedWidthBinaryExternal uint16Codec UInt16.land request runtime
+    else if request.name == ``UInt16.lor then
+      fixedWidthBinaryExternal uint16Codec UInt16.lor request runtime
+    else if request.name == ``UInt16.xor then
+      fixedWidthBinaryExternal uint16Codec UInt16.xor request runtime
+    else if request.name == ``UInt16.shiftLeft then
+      fixedWidthBinaryExternal uint16Codec UInt16.shiftLeft request runtime
+    else if request.name == ``UInt16.shiftRight then
+      fixedWidthBinaryExternal uint16Codec UInt16.shiftRight request runtime
+    else if request.name == ``UInt16.complement then
+      fixedWidthUnaryExternal uint16Codec UInt16.complement request runtime
+    else if request.name == ``UInt16.neg then
+      fixedWidthUnaryExternal uint16Codec UInt16.neg request runtime
+    else if request.name == ``UInt16.decEq then
+      fixedWidthDecisionExternal uint16Codec
+        (fun left right => decide (left = right)) request runtime
+    else if request.name == ``UInt16.decLt then
+      fixedWidthDecisionExternal uint16Codec
+        (fun left right => decide (left < right)) request runtime
+    else if request.name == ``UInt16.decLe then
+      fixedWidthDecisionExternal uint16Codec
+        (fun left right => decide (left ≤ right)) request runtime
     else if request.name == ``UInt32.add then
-      uint32BinaryExternal UInt32.add request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.add request runtime
     else if request.name == ``UInt32.sub then
-      uint32BinaryExternal UInt32.sub request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.sub request runtime
     else if request.name == ``UInt32.mul then
-      uint32BinaryExternal UInt32.mul request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.mul request runtime
     else if request.name == ``UInt32.div then
-      uint32BinaryExternal UInt32.div request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.div request runtime
     else if request.name == ``UInt32.mod then
-      uint32BinaryExternal UInt32.mod request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.mod request runtime
     else if request.name == ``UInt32.land then
-      uint32BinaryExternal UInt32.land request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.land request runtime
     else if request.name == ``UInt32.lor then
-      uint32BinaryExternal UInt32.lor request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.lor request runtime
     else if request.name == ``UInt32.xor then
-      uint32BinaryExternal UInt32.xor request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.xor request runtime
     else if request.name == ``UInt32.shiftLeft then
-      uint32BinaryExternal UInt32.shiftLeft request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.shiftLeft request runtime
     else if request.name == ``UInt32.shiftRight then
-      uint32BinaryExternal UInt32.shiftRight request runtime
+      fixedWidthBinaryExternal uint32Codec UInt32.shiftRight request runtime
     else if request.name == ``UInt32.complement then
-      uint32UnaryExternal UInt32.complement request runtime
+      fixedWidthUnaryExternal uint32Codec UInt32.complement request runtime
     else if request.name == ``UInt32.neg then
-      uint32UnaryExternal UInt32.neg request runtime
+      fixedWidthUnaryExternal uint32Codec UInt32.neg request runtime
     else if request.name == ``UInt32.decEq then
-      uint32DecisionExternal (fun left right => decide (left = right)) request runtime
+      fixedWidthDecisionExternal uint32Codec
+        (fun left right => decide (left = right)) request runtime
     else if request.name == ``UInt32.decLt then
-      uint32DecisionExternal (fun left right => decide (left < right)) request runtime
+      fixedWidthDecisionExternal uint32Codec
+        (fun left right => decide (left < right)) request runtime
     else if request.name == ``UInt32.decLe then
-      uint32DecisionExternal (fun left right => decide (left ≤ right)) request runtime
+      fixedWidthDecisionExternal uint32Codec
+        (fun left right => decide (left ≤ right)) request runtime
     else if request.name == ``UInt64.add then
-      uint64BinaryExternal UInt64.add request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.add request runtime
     else if request.name == ``UInt64.sub then
-      uint64BinaryExternal UInt64.sub request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.sub request runtime
     else if request.name == ``UInt64.mul then
-      uint64BinaryExternal UInt64.mul request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.mul request runtime
     else if request.name == ``UInt64.div then
-      uint64BinaryExternal UInt64.div request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.div request runtime
     else if request.name == ``UInt64.mod then
-      uint64BinaryExternal UInt64.mod request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.mod request runtime
     else if request.name == ``UInt64.land then
-      uint64BinaryExternal UInt64.land request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.land request runtime
     else if request.name == ``UInt64.lor then
-      uint64BinaryExternal UInt64.lor request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.lor request runtime
     else if request.name == ``UInt64.xor then
-      uint64BinaryExternal UInt64.xor request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.xor request runtime
     else if request.name == ``UInt64.shiftLeft then
-      uint64BinaryExternal UInt64.shiftLeft request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.shiftLeft request runtime
     else if request.name == ``UInt64.shiftRight then
-      uint64BinaryExternal UInt64.shiftRight request runtime
+      fixedWidthBinaryExternal uint64Codec UInt64.shiftRight request runtime
     else if request.name == ``UInt64.complement then
-      uint64UnaryExternal UInt64.complement request runtime
+      fixedWidthUnaryExternal uint64Codec UInt64.complement request runtime
     else if request.name == ``UInt64.neg then
-      uint64UnaryExternal UInt64.neg request runtime
+      fixedWidthUnaryExternal uint64Codec UInt64.neg request runtime
     else if request.name == ``UInt64.decEq then
-      uint64DecisionExternal (fun left right => decide (left = right)) request runtime
+      fixedWidthDecisionExternal uint64Codec
+        (fun left right => decide (left = right)) request runtime
     else if request.name == ``UInt64.decLt then
-      uint64DecisionExternal (fun left right => decide (left < right)) request runtime
+      fixedWidthDecisionExternal uint64Codec
+        (fun left right => decide (left < right)) request runtime
     else if request.name == ``UInt64.decLe then
-      uint64DecisionExternal (fun left right => decide (left ≤ right)) request runtime
+      fixedWidthDecisionExternal uint64Codec
+        (fun left right => decide (left ≤ right)) request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 
