@@ -3494,6 +3494,19 @@ need the next generalized argument-prefix proof. Projections and the structural
 source-evaluation induction follow. No FIR semantic contract or executable ABI
 changed.
 
+W6.6ec removes that all-`fvar` boundary. `ConstructorArgsCompiled` now
+characterizes the executable `compileArgs` fold itself, including both local
+reads and erased-field constants. Successful source evaluation, real
+adaptation, `LocalLayoutAligned`, and `StateRelated` derive a
+`ConstructorArgsReady` target prefix and its physical arity; callers no longer
+supply argument indices, local-read evidence, or a translation witness.
+`constructorLet_eq`, `codeWP_constructorLet`, and
+`correctConstructorReturn` lift the mixed prefix through arbitrary
+continuations and finite exported execution. The concrete allocation boundary
+remains intentionally operation-polymorphic: it is invoked at the physical
+operands produced by the compiler/evaluator proof. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

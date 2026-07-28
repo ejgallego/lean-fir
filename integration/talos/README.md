@@ -158,12 +158,15 @@ which is the recursive rule needed by the structural proof.
 The UTF-8 String specialization mirrors that boundary in the `.object` lane,
 including a finite exported `String; return` theorem derived from the real
 compiler, adapter, concrete resolver, allocator, and return suffix.
-The constructor specialization now covers arbitrary lists of ordinary `fvar`
-fields: successful adaptation determines every numeric argument local and the
-constructor import, `codeWP_constructorFVarLet` composes an arbitrary
-continuation, and `correctConstructorFVarReturn` closes the finite export.
-Erased constructor fields remain the next argument-prefix case because their
-generated code contains constants instead of only local reads.
+The constructor specialization now covers the complete current `compileArg`
+language: ordinary `fvar` fields become compiler-resolved numeric local reads,
+while erased fields become canonical `i32.const 0` operands.
+`ConstructorArgsCompiled` characterizes the production `compileArgs` fold,
+and source evaluation plus `StateRelated` derives the exact physical operand
+prefix without a caller-supplied readiness witness. `codeWP_constructorLet`
+composes an arbitrary continuation, and `correctConstructorReturn` closes the
+finite export. The earlier all-`fvar` theorems remain compatibility
+specializations.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor recursive APIs on the
 certificate-free boundary under `make talos-check`.

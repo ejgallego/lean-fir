@@ -6416,6 +6416,66 @@ theorem wp_localGets
       apply ih (tail := value :: tail)
       simpa [List.reverse_cons, List.append_assoc] using continued
 
+/--
+The target operand prefix emitted for constructor fields, together with the
+physical operands that it places on the Wasm stack in source order.
+
+This relation deliberately has only the two instruction shapes produced by
+`compileArg`: a compiler-resolved local read and the canonical zero word for
+an erased field.  It is an execution fact about compiler-derived code, not a
+translation certificate.
+-/
+inductive ConstructorArgsReady (locals : Wasm.Locals) :
+    Wasm.Program → List Wasm.Value → Prop where
+  | nil : ConstructorArgsReady locals [] []
+  | localGet
+      {index : Nat} {physical : Wasm.Value}
+      {target : Wasm.Program} {physicalArgs : List Wasm.Value}
+      (found : locals.get index = some physical)
+      (rest : ConstructorArgsReady locals target physicalArgs) :
+      ConstructorArgsReady locals
+        (.localGet index :: target) (physical :: physicalArgs)
+  | erased
+      {target : Wasm.Program} {physicalArgs : List Wasm.Value}
+      (rest : ConstructorArgsReady locals target physicalArgs) :
+      ConstructorArgsReady locals
+        (.const 0 :: target) (.i32 0 :: physicalArgs)
+
+/--
+Every ready constructor-argument prefix pushes exactly its source-order
+physical operands (reversed by the Wasm operand stack convention), preserves
+the caller tail, and then hands control to an arbitrary continuation.
+-/
+theorem ConstructorArgsReady.wp
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {argumentCode rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {physicalArgs tail : List Wasm.Value}
+    (ready : ConstructorArgsReady locals argumentCode physicalArgs)
+    (continued :
+      Wasm.wp module rest Q store
+        { locals with values := physicalArgs.reverse ++ tail } env) :
+    Wasm.wp module (argumentCode ++ rest) Q store
+      { locals with values := tail } env := by
+  induction ready generalizing tail with
+  | nil =>
+      simpa using continued
+  | localGet found ready ih =>
+      rename_i index physical targetArgs remainingPhysical
+      simp only [List.cons_append, Wasm.wp_localGet_cons]
+      have foundNext :
+          ({ locals with values := tail } : Wasm.Locals).get index =
+            some physical := by
+        simpa [Wasm.Locals.get] using found
+      rw [foundNext]
+      apply ih (tail := physical :: tail)
+      simpa [List.reverse_cons, List.append_assoc] using continued
+  | erased ready ih =>
+      simp only [List.cons_append]
+      rw [Wasm.wp_const_cons]
+      apply ih (tail := .i32 0 :: tail)
+      simpa [List.reverse_cons, List.append_assoc] using continued
+
 /-- Host-polymorphic generated no-result effect prefix. Source-order local
 loads are reversed into Wasm operand order, consumed by one exact-contract
 host call, and the original operand tail is restored. -/
@@ -8455,6 +8515,43 @@ theorem wp_allocCtor_let
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
 
+/-- Concrete-host WP for the full mixed local/erased constructor prefix. -/
+theorem wp_allocCtor_ready_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest targetArguments : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind} {word : Word32}
+    (tail : List Wasm.Value)
+    (ready : ConstructorArgsReady locals targetArguments physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (hSet : locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+      some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module
+      (targetArguments ++ .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply ready.wp
+  apply wp_exact_host_call_of_return
+    (step := allocCtorStep info fieldKinds resultKind)
+    (physicalArgs := physicalArgs)
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
 /-- Concrete-host WP for the exact generated external-call sequence: load
 every physical argument, invoke the resolved concrete foreign function, bind
 its singleton result, and restore the caller's operand tail. -/
@@ -10293,6 +10390,161 @@ theorem letStepSimulates_constructor
     simpa [List.append_assoc] using
       wp_allocCtor_let tail hGets hImp hSat hi hContract hParams hResults
         operation targetSet continued
+
+/--
+Constructor-allocation simulation for the complete mixed local/erased
+argument prefix emitted by `compileArgs`.
+-/
+theorem letStepSimulates_constructorArgs
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {targetArguments : Wasm.Program} {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value} {sourceRuntime nextRuntime : RuntimeState}
+    {sourceValue : Value} {resultIndex : Nat} {word : Word32}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .ctor info args)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (ready : ConstructorArgsReady locals targetArguments physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      (targetArguments ++ [.call id])
+      sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+      locals updated resultIndex witness nextWitness := by
+  refine ⟨?_, initialRelated,
+    initialRelated.bindAfter extension nextRuntimeRelated failureClear
+      resultFound resultKindAt valueRelated targetSet,
+    ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq, evaluated]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        allocCtor sourceRuntime info semanticArgs) =
+      .ok (nextRuntime, .value sourceValue)
+    rw [semanticStep]
+    rfl
+  · intro rest Q tail continued
+    simpa [List.append_assoc] using
+      wp_allocCtor_ready_let tail ready hImp hSat hi hContract hParams hResults
+        operation targetSet continued
+
+/-- Recursive source/compiler/Talos rule for arbitrary compiled constructor
+arguments, including erased fields. -/
+theorem codeWP_constructorArgs_let
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)} {sourceEnv : Env}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {targetArguments : Wasm.Program} {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceValue : Value}
+    {resultIndex : Nat}
+    {word : Word32} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {witness nextWitness : RefinementWitness}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (valueEq : decl.value = .ctor info args)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl =
+      .ok (argumentCode ++
+        [.call (.runtime (.allocCtor info fieldKinds resultKind))]))
+    (argumentsAdapted :
+      instructions sourceModule sourceFunction labels argumentCode =
+        .ok targetArguments)
+    (callFound : callIndex? sourceModule
+      (.runtime (.allocCtor info fieldKinds resultKind)) = some id)
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep : allocCtor sourceRuntime info semanticArgs =
+      .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (ready : ConstructorArgsReady locals targetArguments physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (allocCtorContract info fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : allocCtorStep info fieldKinds resultKind initial physicalArgs =
+      .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (extension : witness.Extends nextWitness)
+    (nextRuntimeRelated :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated)
+    (continued : CodeWP context sourceModule sourceFunction labels module hostEnv
+      nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+      targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv (.let decl continuation)
+      (targetArguments ++
+        .call id :: .localSet resultIndex :: targetRest)
+      initial locals witness tail Q := by
+  have valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (argumentCode ++
+            [.call (.runtime (.allocCtor info fieldKinds resultKind))]) =
+        .ok (targetArguments ++ [.call id]) := by
+    rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+    simp [instructions, instruction, callFound]
+  have step := letStepSimulates_constructorArgs (context := context) valueEq
+    evaluated semanticStep initialRelated resultFound resultKindAt ready hImp
+    hSat hi hContract hParams hResults operation extension nextRuntimeRelated
+    failureClear valueRelated targetSet
+  rcases step with ⟨_, stepInitial, _, stepWP⟩
+  rcases continued with ⟨continuationAdapted, _, continuedWP⟩
+  have adapted := codeAdapted_let valueCompiled valueAdapted resultFound
+    continuationAdapted
+  refine ⟨?_, stepInitial, ?_⟩
+  · simpa only [List.append_assoc, List.singleton_append] using adapted
+  · simpa only [List.append_assoc, List.singleton_append] using
+      stepWP targetRest Q tail continuedWP
 
 /-- Recursive source/compiler/Talos rule for a concrete constructor `let`. -/
 theorem codeWP_constructor_let

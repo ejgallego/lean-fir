@@ -118,14 +118,15 @@ continuation, not a caller-built translation certificate.
 recursive rule for exact UTF-8 String allocation in the `.object` lane.
 `correctStringLiteralReturn` also closes the finite whole-export String
 instance through the concrete resolver contract and heap-witness extension.
-`instructions_localGets_call_eq` supplies the reusable adapter inversion for
-an all-local argument prefix, and `constructorFVarLet_eq` uses it to recover
-the numeric constructor arguments, import, destination, and continuation from
-the executable pipeline. `codeWP_constructorFVarLet` composes the successful
-source/concrete allocation and witness growth with an arbitrary continuation;
-`correctConstructorFVarReturn` closes the finite export. The current
-constructor rule covers ordinary `fvar` fields; erased fields require the next
-argument-prefix rule for generated constants.
+`ConstructorArgsCompiled` is a syntax-directed characterization proved from
+the production `compileArgs` fold. Combined with successful source evaluation,
+real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
+`constructorArgsReady_of_compileArgs` derives the exact physical prefix:
+numeric local reads for ordinary fields and canonical zero constants for
+erased fields. `constructorLet_eq` recovers the import, destination, and
+continuation; `codeWP_constructorLet` composes an arbitrary continuation; and
+`correctConstructorReturn` closes the finite export. The earlier all-local
+rules remain compatibility corollaries, not the public proof boundary.
 `ConcreteCompilerCorrectnessContract.lean` is a compile-time harness ensuring
 that the finite return/Nat/String/constructor export theorems and the
 literal/constructor recursive rules have no translation-certificate premise.
