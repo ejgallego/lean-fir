@@ -74,6 +74,12 @@ export const validationExternalRegistry = {
     const value = integerValue(host, args[0], "Int.neg operand");
     return { value: host.integer(-value), world };
   },
+  "Int.add": ({ args, host, world }) => {
+    assert.equal(args.length, 2, "Int.add external arity mismatch");
+    const left = integerValue(host, args[0], "Int.add left operand");
+    const right = integerValue(host, args[1], "Int.add right operand");
+    return { value: host.integer(left + right), world };
+  },
   "Int.decLt": ({ args, host, world }) => {
     assert.equal(args.length, 2, "Int.decLt external arity mismatch");
     const left = integerValue(host, args[0], "Int.decLt left operand");

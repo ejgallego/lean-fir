@@ -494,6 +494,53 @@ private def intNegExternal (request : ExternalRequest) (runtime : RuntimeState) 
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def intAddExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalInt request runtime left
+  let right ← externalInt request runtime right
+  let (runtime, value) := encodeIntValue runtime (left + right)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def intAddRequest (left right : Value) : ExternalRequest := {
+  name := ``Int.add
+  paramTypes := #[]
+  resultType := default
+  args := #[left, right] }
+
+private def intAddGuard (left right expected : Int) (allocates : Bool) : Bool :=
+  let (runtime, leftValue) := encodeIntValue {} left
+  let (runtime, rightValue) := encodeIntValue runtime right
+  let request := intAddRequest leftValue rightValue
+  match intAddExternal request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalInt request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.world == runtime.world &&
+          response.nextLocation ==
+            runtime.nextLocation + if allocates then 1 else 0
+
+private def multiLimbInt : Int :=
+  340282366920938463463374607431768211473
+
+#guard intAddGuard multiLimbInt multiLimbInt
+  (680564733841876926926749214863536422946 : Int) true
+
+#guard intAddGuard multiLimbInt (-multiLimbInt) 0 false
+
 private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
@@ -525,6 +572,8 @@ private def validationExternals : ExternalImpl where
       intOfNatExternal request runtime
     else if request.name == ``Int.neg then
       intNegExternal request runtime
+    else if request.name == ``Int.add then
+      intAddExternal request runtime
     else if request.name == ``Int.decLt then
       intDecLtExternal request runtime
     else
