@@ -183,6 +183,66 @@ def idUInt16 (value : UInt16) : UInt16 :=
 def idUInt32 (value : UInt32) : UInt32 :=
   value
 
+@[noinline]
+def addUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.add left right
+
+@[noinline]
+def subUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.sub left right
+
+@[noinline]
+def mulUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.mul left right
+
+@[noinline]
+def divUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.div left right
+
+@[noinline]
+def modUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.mod left right
+
+@[noinline]
+def landUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.land left right
+
+@[noinline]
+def lorUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.lor left right
+
+@[noinline]
+def xorUInt32 (left right : UInt32) : UInt32 :=
+  UInt32.xor left right
+
+@[noinline]
+def shiftLeftUInt32 (value count : UInt32) : UInt32 :=
+  UInt32.shiftLeft value count
+
+@[noinline]
+def shiftRightUInt32 (value count : UInt32) : UInt32 :=
+  UInt32.shiftRight value count
+
+@[noinline]
+def complementUInt32 (value : UInt32) : UInt32 :=
+  UInt32.complement value
+
+@[noinline]
+def negUInt32 (value : UInt32) : UInt32 :=
+  UInt32.neg value
+
+@[noinline]
+def decideUInt32Eq (left right : UInt32) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideUInt32Lt (left right : UInt32) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideUInt32Le (left right : UInt32) : Bool :=
+  decide (left ≤ right)
+
 def idUInt64 (value : UInt64) : UInt64 :=
   value
 
@@ -1252,6 +1312,69 @@ private def exactIntNatExternalCase
   requiredExecutedExternalTrace := some #[external]
   provenance := firProvenance note }
 
+private def uint32Datum (value : UInt32) : ValidationDatum :=
+  .bits 32 (UInt64.ofNat value.toNat)
+
+private def exactUInt32BinaryExternalCase
+    (id : String) (entry : Lean.Name) (operation : UInt32 → UInt32 → UInt32)
+    (external : Lean.Name) (left right : UInt32) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  args := #[uint32Datum left, uint32Datum right]
+  argSchemas := #[.bits 32, .bits 32]
+  resultSchema := .bits 32
+  native := fun _ => uint32Datum (operation left right)
+  tags
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactUInt32UnaryExternalCase
+    (id : String) (entry : Lean.Name) (operation : UInt32 → UInt32)
+    (external : Lean.Name) (input : UInt32) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  args := #[uint32Datum input]
+  argSchemas := #[.bits 32]
+  resultSchema := .bits 32
+  native := fun _ => uint32Datum (operation input)
+  tags
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
+private def exactUInt32DecisionExternalCase
+    (id : String) (entry : Lean.Name) (operation : UInt32 → UInt32 → Bool)
+    (external : Lean.Name) (left right : UInt32) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  args := #[uint32Datum left, uint32Datum right]
+  argSchemas := #[.bits 32, .bits 32]
+  resultSchema := .bool
+  native := fun _ => .bool (operation left right)
+  tags
+  requiredLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfForms := #["fap", "extern", "return"]
+  requiredExecutedLcnfFormTrace := some externalCallFormTrace
+  requiredExternals := #[external]
+  requiredExecutedExternals := #[external]
+  requiredExecutedExternalCounts := exactlyOnceExternalCounts #[external]
+  requiredExecutedExternalTrace := some #[external]
+  provenance := firProvenance note }
+
 private def pairedExternalCallFormTrace : Array String :=
   #["fap", "extern", "fap", "extern", "ctor", "return"]
 
@@ -2218,6 +2341,134 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.compare]
     provenance := firProvenance
       "Take the Ordering.lt branch when equal bytes end at the shorter prefix" },
+  exactUInt32BinaryExternalCase
+    "uint32-add-overflow" ``Source.addUInt32 Source.addUInt32 ``UInt32.add
+    4294967295 1
+    #["stress", "scalar", "uint32", "external", "arithmetic", "addition",
+      "overflow", "wraparound", "boundary"]
+    "Wrap maximum UInt32 plus one to zero through the native runtime external",
+  exactUInt32BinaryExternalCase
+    "uint32-sub-underflow" ``Source.subUInt32 Source.subUInt32 ``UInt32.sub
+    0 1
+    #["stress", "scalar", "uint32", "external", "arithmetic", "subtraction",
+      "underflow", "wraparound", "boundary"]
+    "Wrap UInt32 zero minus one to the maximum value",
+  exactUInt32BinaryExternalCase
+    "uint32-mul-overflow" ``Source.mulUInt32 Source.mulUInt32 ``UInt32.mul
+    2147483648 2
+    #["stress", "scalar", "uint32", "external", "arithmetic", "multiplication",
+      "overflow", "wraparound", "boundary"]
+    "Discard the high multiplication bit at the exact UInt32 width",
+  exactUInt32BinaryExternalCase
+    "uint32-div-floor" ``Source.divUInt32 Source.divUInt32 ``UInt32.div
+    4294967295 3
+    #["stress", "scalar", "uint32", "external", "arithmetic", "division",
+      "floor", "boundary"]
+    "Compute unsigned floor division at the UInt32 maximum",
+  exactUInt32BinaryExternalCase
+    "uint32-div-zero" ``Source.divUInt32 Source.divUInt32 ``UInt32.div
+    4294967295 0
+    #["stress", "scalar", "uint32", "external", "arithmetic", "division",
+      "zero-divisor", "boundary"]
+    "Pin total UInt32 division by zero to zero",
+  exactUInt32BinaryExternalCase
+    "uint32-mod-remainder" ``Source.modUInt32 Source.modUInt32 ``UInt32.mod
+    4294967295 16
+    #["stress", "scalar", "uint32", "external", "arithmetic", "remainder",
+      "boundary"]
+    "Retain the low four bits as the UInt32 remainder",
+  exactUInt32BinaryExternalCase
+    "uint32-mod-zero" ``Source.modUInt32 Source.modUInt32 ``UInt32.mod
+    4294967295 0
+    #["stress", "scalar", "uint32", "external", "arithmetic", "remainder",
+      "zero-divisor", "boundary"]
+    "Pin UInt32 remainder by zero to the dividend",
+  exactUInt32BinaryExternalCase
+    "uint32-land-mixed" ``Source.landUInt32 Source.landUInt32 ``UInt32.land
+    0xf0f0f0f0 0x0ff00ff0
+    #["stress", "scalar", "uint32", "external", "bitwise", "and", "mixed-bits"]
+    "Intersect alternating UInt32 bit groups exactly",
+  exactUInt32BinaryExternalCase
+    "uint32-lor-mixed" ``Source.lorUInt32 Source.lorUInt32 ``UInt32.lor
+    0xf000000f 0x0ff00ff0
+    #["stress", "scalar", "uint32", "external", "bitwise", "or", "mixed-bits"]
+    "Union separated UInt32 bit groups across the high and low boundaries",
+  exactUInt32BinaryExternalCase
+    "uint32-xor-mixed" ``Source.xorUInt32 Source.xorUInt32 ``UInt32.xor
+    0xf0f0f0f0 0x0ff00ff0
+    #["stress", "scalar", "uint32", "external", "bitwise", "xor", "mixed-bits"]
+    "Exclusive-or alternating UInt32 bit groups exactly",
+  exactUInt32BinaryExternalCase
+    "uint32-shift-left-count-32" ``Source.shiftLeftUInt32 Source.shiftLeftUInt32
+    ``UInt32.shiftLeft 0x80000001 32
+    #["stress", "scalar", "uint32", "external", "bitwise", "shift-left",
+      "masked-count", "boundary"]
+    "Mask a UInt32 left-shift count of 32 to zero",
+  exactUInt32BinaryExternalCase
+    "uint32-shift-left-count-33" ``Source.shiftLeftUInt32 Source.shiftLeftUInt32
+    ``UInt32.shiftLeft 0x80000001 33
+    #["stress", "scalar", "uint32", "external", "bitwise", "shift-left",
+      "masked-count", "overflow", "boundary"]
+    "Mask a UInt32 left-shift count of 33 to one and discard the high bit",
+  exactUInt32BinaryExternalCase
+    "uint32-shift-right-count-32" ``Source.shiftRightUInt32 Source.shiftRightUInt32
+    ``UInt32.shiftRight 0x80000001 32
+    #["stress", "scalar", "uint32", "external", "bitwise", "shift-right",
+      "masked-count", "boundary"]
+    "Mask a UInt32 right-shift count of 32 to zero",
+  exactUInt32BinaryExternalCase
+    "uint32-shift-right-count-33" ``Source.shiftRightUInt32 Source.shiftRightUInt32
+    ``UInt32.shiftRight 0x80000001 33
+    #["stress", "scalar", "uint32", "external", "bitwise", "shift-right",
+      "masked-count", "logical", "boundary"]
+    "Mask a UInt32 right-shift count of 33 to one and shift logically",
+  exactUInt32UnaryExternalCase
+    "uint32-complement-zero" ``Source.complementUInt32 Source.complementUInt32
+    ``UInt32.complement 0
+    #["stress", "scalar", "uint32", "external", "bitwise", "complement",
+      "boundary"]
+    "Complement UInt32 zero to the exact 32-bit maximum",
+  exactUInt32UnaryExternalCase
+    "uint32-neg-one" ``Source.negUInt32 Source.negUInt32 ``UInt32.neg 1
+    #["stress", "scalar", "uint32", "external", "arithmetic", "negation",
+      "wraparound", "boundary"]
+    "Negate UInt32 one modulo 2^32",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-eq-max-true" ``Source.decideUInt32Eq Source.decideUInt32Eq
+    ``UInt32.decEq 4294967295 4294967295
+    #["stress", "scalar", "uint32", "external", "decision", "equality",
+      "true", "boundary"]
+    "Decide equality of two maximum UInt32 values",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-eq-max-zero-false" ``Source.decideUInt32Eq Source.decideUInt32Eq
+    ``UInt32.decEq 4294967295 0
+    #["stress", "scalar", "uint32", "external", "decision", "equality",
+      "false", "boundary"]
+    "Reject equality of maximum and zero UInt32 values",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-lt-zero-max-true" ``Source.decideUInt32Lt Source.decideUInt32Lt
+    ``UInt32.decLt 0 4294967295
+    #["stress", "scalar", "uint32", "external", "decision", "ordering",
+      "less-than", "true", "boundary"]
+    "Order UInt32 zero strictly before the maximum",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-lt-max-zero-false" ``Source.decideUInt32Lt Source.decideUInt32Lt
+    ``UInt32.decLt 4294967295 0
+    #["stress", "scalar", "uint32", "external", "decision", "ordering",
+      "less-than", "false", "boundary"]
+    "Reject strict unsigned ordering from maximum UInt32 to zero",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-le-max-max-true" ``Source.decideUInt32Le Source.decideUInt32Le
+    ``UInt32.decLe 4294967295 4294967295
+    #["stress", "scalar", "uint32", "external", "decision", "ordering",
+      "less-or-equal", "true", "equality", "boundary"]
+    "Accept non-strict ordering at the UInt32 maximum",
+  exactUInt32DecisionExternalCase
+    "uint32-dec-le-max-zero-false" ``Source.decideUInt32Le Source.decideUInt32Le
+    ``UInt32.decLe 4294967295 0
+    #["stress", "scalar", "uint32", "external", "decision", "ordering",
+      "less-or-equal", "false", "boundary"]
+    "Reject non-strict unsigned ordering from maximum UInt32 to zero",
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8

@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 211,
-        "minimumComparisons": 211,
+        "minimumCases": 233,
+        "minimumComparisons": 233,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 211,
-        "minimumComparisons": 422,
+        "minimumCases": 233,
+        "minimumComparisons": 466,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 216,
-      "minimumTierCases": 427,
-      "minimumComparisons": 638
+      "minimumUniqueCases": 238,
+      "minimumTierCases": 471,
+      "minimumComparisons": 704
     },
     "machine": {
-      "minimumCases": 216,
-      "minimumInterpreterSteps": 2487,
+      "minimumCases": 238,
+      "minimumInterpreterSteps": 2619,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -190,7 +190,22 @@
         "String.compare",
         "String.decEq",
         "String.decidableLT",
-        "String.utf8ByteSize"
+        "String.utf8ByteSize",
+        "UInt32.add",
+        "UInt32.complement",
+        "UInt32.decEq",
+        "UInt32.decLe",
+        "UInt32.decLt",
+        "UInt32.div",
+        "UInt32.land",
+        "UInt32.lor",
+        "UInt32.mod",
+        "UInt32.mul",
+        "UInt32.neg",
+        "UInt32.shiftLeft",
+        "UInt32.shiftRight",
+        "UInt32.sub",
+        "UInt32.xor"
       ]
     }
   }
