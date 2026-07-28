@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 169 cases. Required oracle edges must share one matrix
+edges over at least 177 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,12 +469,12 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 169 source cases are shared by the source-LCNF and V8
+current baseline, the 177 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 13 static forms, 13 executed forms, and all 27 interpreter
+contributes 13 static forms, 13 executed forms, and all 29 interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -1274,7 +1274,7 @@ sequence.
 `{external, minimum, maximum}` obligations, and the coverage report retains
 both per-case bound violations and corpus-wide required and observed totals.
 When `requiredExecutedExternalTrace` is non-null, the observed sequence must
-also match it element for element. All 27 current fixtures that retain an
+also match it element for element. All 29 current fixtures that retain an
 external pin an exact trace: the skipped conditional pins `[]`, repeated
 effects pin both occurrences, and the signed-integer fixtures pin construction
 before negation or comparison.
@@ -1320,7 +1320,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 169 cases. Direct identity cases
+The compiler-generated corpus currently has 177 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
@@ -1331,12 +1331,20 @@ Three addition cases grow positive and negative multi-limb magnitudes and cancel
 opposite heap values to immediate zero through one exact `Int.add` dispatch.
 Three subtraction cases mirror those growth directions and cancel equal heap
 values to immediate zero through one exact `Int.sub` dispatch.
+Four multiplication cases cross the positive immediate-to-heap boundary,
+flip the negative immediate minimum to a positive heap value, grow a
+multi-limb magnitude through a negative factor, and collapse a multi-limb
+operand to immediate zero through one exact `Int.mul` dispatch.
 Four natural-magnitude cases cross from signed `Int` inputs to `Nat` results
 through one exact `Int.natAbs` dispatch: positive and negative multi-limb heap
 inputs retain the full `2^128 + 17` magnitude, while the negative immediate
 boundary and first negative heap input both return tagged naturals.
 Natural subtraction preserves a multi-limb result at `2^128`, returns immediate
 zero for equal heap operands, and saturates tagged-minus-multi-limb underflow.
+Four natural multiplication cases retain a tagged product, cross the
+tagged-to-heap result boundary, multiply two multi-limb heap values without
+precision loss, and collapse a heap operand times zero to a tagged result
+through one exact `Nat.mul` dispatch.
 Six natural-decision cases give `Nat.decEq`, `Nat.decLt`, and `Nat.decLe` both
 Boolean outcomes. They cross the `2^63 - 1` tagged maximum and first heap value,
 and pin strict versus non-strict equality at `2^128 + 17`, with one exact
@@ -1506,16 +1514,17 @@ references. The V8 adapter materializes the same schema-directed datums at the
 Wasm import boundary and retains its own private event-time heap views.
 
 The validation backend's external implementation is reject-by-default.
-`Nat.add`, `Nat.sub`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`, `Int.ofNat`,
-`Int.neg`, `Int.add`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
+`Nat.add`, `Nat.mul`, `Nat.sub`, `Nat.decEq`, `Nat.decLt`, `Nat.decLe`,
+`Int.ofNat`, `Int.neg`, `Int.add`, `Int.mul`, `Int.sub`, `Int.decLt`,
+`Int.natAbs`, `ByteArray.size`,
 `ByteArray.get!`, `ByteArray.set!`, `String.Internal.extract`,
 `String.Internal.append`, `String.Internal.pushn`,
 `String.decEq`, `String.decidableLT`, `String.compare`,
 `String.Internal.length`,
 `String.utf8ByteSize`, `String.Internal.posOf`,
 `String.Internal.offsetOfPos`, `String.Internal.next`, and the validation-owned
-Nat and ByteArray effect recorders are currently allowlisted. Natural addition
-and saturating subtraction share one exact binary-`Nat` adapter that decodes
+Nat and ByteArray effect recorders are currently allowlisted. Natural addition,
+multiplication, and saturating subtraction share one exact binary-`Nat` adapter that decodes
 tagged or heap operands and re-encodes through the same tagged/heap boundary as
 the interpreter. The three natural decisions share an exact comparison adapter,
 preserve heap and world, and return the scalar `UInt8` discriminant consumed by
@@ -1545,8 +1554,8 @@ return the exact scalar `UInt8` ABI (`false`/`true` as zero/one and
 `Ordering.lt`/`eq`/`gt` as zero/one/two). Guards include a BMP/non-BMP pair whose
 UTF-8 ordering is the reverse of JavaScript's default UTF-16 code-unit order.
 The integer primitives decode and
-re-encode both signed immediate and heap representations; `Int.add` and
-`Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
+re-encode both signed immediate and heap representations; `Int.add`, `Int.mul`,
+and `Int.sub` share one exact binary-`Int` adapter, `Int.natAbs` crosses from exact
 signed input to an exact natural result, and `Int.decLt` returns the scalar
 `UInt8` discriminant consumed by lowered pattern matching. Byte-array size
 reads the packed heap object and returns a tagged natural; byte-array indexing
@@ -1616,13 +1625,15 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 169 corpus cases, including a natural
+The default native-to-V8 matrix covers all 177 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
-`Nat.add`, heap-input `Nat.add`, multi-limb and saturating `Nat.sub`, all three
+`Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
+and saturating `Nat.sub`, all three
 natural-decision primitives across tagged/heap and multi-limb boundaries,
 Unicode measurements, raw UTF-8 String navigation, extraction, and
 ownership-sensitive String construction, exact UTF-8 String equality and ordering,
-multi-limb `Int.add`/`Int.sub` growth and cancellation, cross-domain
+multi-limb `Int.add`/`Int.mul`/`Int.sub` growth, sign changes, and cancellation,
+cross-domain
 `Int.natAbs` signs and representation boundaries, all three
 controlled-effect programs, and all five mixed-layout projections.
 `make validate-v8` delegates whole-corpus selection to the plan rather than

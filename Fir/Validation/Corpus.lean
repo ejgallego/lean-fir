@@ -683,6 +683,10 @@ def subInt (left right : Int) : Int :=
   left - right
 
 @[noinline]
+def mulInt (left right : Int) : Int :=
+  left * right
+
+@[noinline]
 def natAbsInt (value : Int) : Nat :=
   value.natAbs
 
@@ -714,6 +718,10 @@ def addNat (left right : Nat) : Nat :=
 @[noinline]
 def subNat (left right : Nat) : Nat :=
   left - right
+
+@[noinline]
+def mulNat (left right : Nat) : Nat :=
+  left * right
 
 @[noinline]
 def decideNatEq (left right : Nat) : Bool :=
@@ -3165,6 +3173,86 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.sub]
     provenance := firProvenance
       "Subtract equal multi-limb heap Int values to immediate zero" },
+  { id := "int-mul-immediate-overflow-positive"
+    entry := ``Source.mulInt
+    args := #[.int 2147483647, .int 2]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.mulInt 2147483647 2)
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "multiplication", "boundary", "heap", "overflow"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.mul]
+    requiredExecutedExternals := #[``Int.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.mul]
+    requiredExecutedExternalTrace := some #[``Int.mul]
+    provenance := firProvenance
+      "Multiply immediate Int operands across the positive heap boundary" },
+  { id := "int-mul-immediate-min-sign-flip"
+    entry := ``Source.mulInt
+    args := #[.int (-2147483648), .int (-1)]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.mulInt (-2147483648) (-1))
+    tags := #["stress", "int", "signed", "negative", "external",
+      "arithmetic", "multiplication", "boundary", "heap", "sign"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.mul]
+    requiredExecutedExternals := #[``Int.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.mul]
+    requiredExecutedExternalTrace := some #[``Int.mul]
+    provenance := firProvenance
+      "Negate the immediate Int minimum through multiplication and return a heap positive" },
+  { id := "int-mul-multi-limb-negative"
+    entry := ``Source.mulInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int (-17)]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.mulInt
+      340282366920938463463374607431768211473
+      (-17))
+    tags := #["stress", "int", "signed", "negative", "external",
+      "arithmetic", "multiplication", "heap", "multi-limb", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.mul]
+    requiredExecutedExternals := #[``Int.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.mul]
+    requiredExecutedExternalTrace := some #[``Int.mul]
+    provenance := firProvenance
+      "Multiply a positive multi-limb Int by a negative immediate operand" },
+  { id := "int-mul-multi-limb-zero"
+    entry := ``Source.mulInt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int 0]
+    argSchemas := #[.int, .int]
+    resultSchema := .int
+    native := fun _ => .int (Source.mulInt
+      340282366920938463463374607431768211473
+      0)
+    tags := #["stress", "int", "signed", "external", "arithmetic",
+      "multiplication", "heap-input", "multi-limb", "zero", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.mul]
+    requiredExecutedExternals := #[``Int.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.mul]
+    requiredExecutedExternalTrace := some #[``Int.mul]
+    provenance := firProvenance
+      "Collapse a heap multi-limb Int times zero to the immediate representation" },
   { id := "int-nat-abs-multi-limb-positive"
     entry := ``Source.natAbsInt
     args := #[.int 340282366920938463463374607431768211473]
@@ -3436,6 +3524,86 @@ def cases : Array Case := #[
       exactlyOnceExternalCounts #[``Nat.add]
     requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
+  { id := "nat-mul-small"
+    entry := ``Source.mulNat
+    args := #[.nat 6, .nat 7]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.mulNat 6 7)
+    tags := #["quick", "external", "pure", "nat", "arithmetic",
+      "multiplication", "tagged"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.mul]
+    requiredExecutedExternals := #[``Nat.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.mul]
+    requiredExecutedExternalTrace := some #[``Nat.mul]
+    provenance := firProvenance
+      "Multiply two tagged naturals and retain an immediate result" },
+  { id := "nat-mul-tagged-to-heap"
+    entry := ``Source.mulNat
+    args := #[.nat 9223372036854775807, .nat 2]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.mulNat 9223372036854775807 2)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "multiplication", "boundary", "heap", "overflow"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.mul]
+    requiredExecutedExternals := #[``Nat.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.mul]
+    requiredExecutedExternalTrace := some #[``Nat.mul]
+    provenance := firProvenance
+      "Multiply tagged naturals across the tagged-to-heap result boundary" },
+  { id := "nat-mul-multi-limb-growth"
+    entry := ``Source.mulNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 18446744073709551619]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.mulNat
+      340282366920938463463374607431768211473
+      18446744073709551619)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "multiplication", "heap", "multi-limb", "growth"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.mul]
+    requiredExecutedExternals := #[``Nat.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.mul]
+    requiredExecutedExternalTrace := some #[``Nat.mul]
+    provenance := firProvenance
+      "Multiply two heap naturals into an exact larger multi-limb result" },
+  { id := "nat-mul-multi-limb-zero"
+    entry := ``Source.mulNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 0]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.mulNat
+      340282366920938463463374607431768211473
+      0)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "multiplication", "heap-input", "multi-limb", "zero", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Nat.mul]
+    requiredExecutedExternals := #[``Nat.mul]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.mul]
+    requiredExecutedExternalTrace := some #[``Nat.mul]
+    provenance := firProvenance
+      "Collapse a heap multi-limb natural times zero to a tagged result" },
   { id := "nat-sub-multi-limb-preserves-heap"
     entry := ``Source.subNat
     args := #[
