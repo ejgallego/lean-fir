@@ -1650,6 +1650,31 @@ private def fixedWidthDecisionExternal (codec : FixedWidthValueCodec α)
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def natToFixedWidthExternal (codec : FixedWidthValueCodec α)
+    (operation : Nat → α) (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalNat request runtime value
+  return {
+    value := codec.encode (operation value)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def fixedWidthToNatExternal (codec : FixedWidthValueCodec α)
+    (operation : α → Nat) (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalFixedWidthValue codec request value
+  let (runtime, result) := literal runtime (.nat (operation value))
+  return {
+    value := result
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def fixedWidthBinaryGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → α → α) (left right expected : α) : Bool :=
   let runtime : RuntimeState := {}
@@ -1691,6 +1716,89 @@ private def fixedWidthDecisionGuard (codec : FixedWidthValueCodec α) (name : Na
       response.heap == runtime.heap &&
       response.nextLocation == runtime.nextLocation &&
       response.world == runtime.world
+
+private def natToFixedWidthGuard (codec : FixedWidthValueCodec α) (name : Name)
+    (operation : Nat → α) (input : Nat) (expected : α) : Bool :=
+  let (runtime, inputValue) := literal {} (.nat input)
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[inputValue] }
+  match natToFixedWidthExternal codec operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == codec.encode expected &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
+    (operation : α → Nat) (input : α) (expected : Nat) : Bool :=
+  let runtime : RuntimeState := {}
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[codec.encode input] }
+  let (expectedRuntime, expectedValue) := literal runtime (.nat expected)
+  match fixedWidthToNatExternal codec operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == expectedValue &&
+      response.heap == expectedRuntime.heap &&
+      response.nextLocation == expectedRuntime.nextLocation &&
+      response.world == expectedRuntime.world
+
+#guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
+  UInt64.ofNat 0 0
+
+#guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
+  UInt64.ofNat 18446744073709551615 0xffffffffffffffff
+
+#guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
+  UInt64.ofNat 18446744073709551616 0
+
+#guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
+  UInt64.ofNat multiLimbNat 17
+
+#guard fixedWidthToNatGuard uint64Codec ``UInt64.toNat
+  UInt64.toNat 0 0
+
+#guard fixedWidthToNatGuard uint64Codec ``UInt64.toNat
+  UInt64.toNat 0x7fffffffffffffff 9223372036854775807
+
+#guard fixedWidthToNatGuard uint64Codec ``UInt64.toNat
+  UInt64.toNat 0x8000000000000000 9223372036854775808
+
+#guard fixedWidthToNatGuard uint64Codec ``UInt64.toNat
+  UInt64.toNat 0xffffffffffffffff 18446744073709551615
+
+#guard System.Platform.numBits == 64
+
+#guard natToFixedWidthGuard usizeCodec ``USize.ofNat
+  USize.ofNat 0 0
+
+#guard natToFixedWidthGuard usizeCodec ``USize.ofNat
+  USize.ofNat 18446744073709551615 0xffffffffffffffff
+
+#guard natToFixedWidthGuard usizeCodec ``USize.ofNat
+  USize.ofNat 18446744073709551616 0
+
+#guard natToFixedWidthGuard usizeCodec ``USize.ofNat
+  USize.ofNat multiLimbNat 17
+
+#guard fixedWidthToNatGuard usizeCodec ``USize.toNat
+  USize.toNat 0 0
+
+#guard fixedWidthToNatGuard usizeCodec ``USize.toNat
+  USize.toNat 0x7fffffffffffffff 9223372036854775807
+
+#guard fixedWidthToNatGuard usizeCodec ``USize.toNat
+  USize.toNat 0x8000000000000000 9223372036854775808
+
+#guard fixedWidthToNatGuard usizeCodec ``USize.toNat
+  USize.toNat 0xffffffffffffffff 18446744073709551615
 
 #guard fixedWidthBinaryGuard uint8Codec ``UInt8.add UInt8.add 255 1 0
 
@@ -2229,6 +2337,10 @@ private def validationExternals : ExternalImpl where
     else if request.name == ``UInt64.decLe then
       fixedWidthDecisionExternal uint64Codec
         (fun left right => decide (left ≤ right)) request runtime
+    else if request.name == ``UInt64.ofNat then
+      natToFixedWidthExternal uint64Codec UInt64.ofNat request runtime
+    else if request.name == ``UInt64.toNat then
+      fixedWidthToNatExternal uint64Codec UInt64.toNat request runtime
     else if request.name == ``USize.add then
       fixedWidthBinaryExternal usizeCodec USize.add request runtime
     else if request.name == ``USize.sub then
@@ -2262,6 +2374,10 @@ private def validationExternals : ExternalImpl where
     else if request.name == ``USize.decLe then
       fixedWidthDecisionExternal usizeCodec
         (fun left right => decide (left ≤ right)) request runtime
+    else if request.name == ``USize.ofNat then
+      natToFixedWidthExternal usizeCodec USize.ofNat request runtime
+    else if request.name == ``USize.toNat then
+      fixedWidthToNatExternal usizeCodec USize.toNat request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 

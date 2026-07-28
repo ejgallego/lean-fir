@@ -177,6 +177,22 @@ function fixedWidthDecision(declaration, codec, operation) {
   };
 }
 
+function naturalToFixedWidth(declaration, codec) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = naturalValue(host, args[0], `${declaration} operand`);
+    return { value: codec.encode(value), world };
+  };
+}
+
+function fixedWidthToNatural(declaration, codec) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = codec.decode(args[0], `${declaration} operand`);
+    return { value: host.natural(value), world };
+  };
+}
+
 function fixedWidthExternalFamily(typeName, width, codec) {
   const declaration = suffix => `${typeName}.${suffix}`;
   const binary = (suffix, operation) =>
@@ -433,7 +449,13 @@ export const validationExternalRegistry = {
   ...fixedWidthExternalFamily("UInt16", 16, scalarFixedWidthCodec("uint16", 16)),
   ...fixedWidthExternalFamily("UInt32", 32, scalarFixedWidthCodec("uint32", 32)),
   ...fixedWidthExternalFamily("UInt64", 64, scalarFixedWidthCodec("uint64", 64)),
+  "UInt64.ofNat": naturalToFixedWidth(
+    "UInt64.ofNat", scalarFixedWidthCodec("uint64", 64)),
+  "UInt64.toNat": fixedWidthToNatural(
+    "UInt64.toNat", scalarFixedWidthCodec("uint64", 64)),
   ...fixedWidthExternalFamily("USize", 64, usizeFixedWidthCodec),
+  "USize.ofNat": naturalToFixedWidth("USize.ofNat", usizeFixedWidthCodec),
+  "USize.toNat": fixedWidthToNatural("USize.toNat", usizeFixedWidthCodec),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");

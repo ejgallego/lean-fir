@@ -229,6 +229,60 @@ for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies
   assert.throws(() => decode(encode(max + 1n), `${typeName} out-of-range`));
 }
 
+for (const { typeName, decode, encode, wrongValue } of fixedWidthFamilies.filter(
+  ({ typeName }) => typeName === "UInt64" || typeName === "USize")) {
+  const ofNatName = `${typeName}.ofNat`;
+  const toNatName = `${typeName}.toNat`;
+  assert.strictEqual(
+    formatExternalRegistry[ofNatName],
+    validationExternalRegistry[ofNatName]);
+  assert.strictEqual(
+    formatExternalRegistry[toNatName],
+    validationExternalRegistry[toNatName]);
+
+  for (const [input, expected] of [
+    [0n, 0n],
+    [0x7fffffffffffffffn, 0x7fffffffffffffffn],
+    [0xffffffffffffffffn, 0xffffffffffffffffn],
+    [0x10000000000000000n, 0n],
+    [0x100000000000000000000000000000011n, 17n],
+  ]) {
+    const host = new SemanticHost();
+    const inputValue = host.natural(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[ofNatName], host, [inputValue]);
+    assert.equal(decode(result, `${ofNatName} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(naturalValue(host, inputValue, `${ofNatName} retained input`), input);
+  }
+
+  for (const [input, allocates] of [
+    [0n, false],
+    [0x7fffffffffffffffn, false],
+    [0x8000000000000000n, true],
+    [0xffffffffffffffffn, true],
+  ]) {
+    const host = new SemanticHost();
+    const inputValue = encode(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[toNatName], host, [inputValue]);
+    assert.equal(naturalValue(host, result, `${toNatName} result`), input);
+    assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+    assert.equal(decode(inputValue, `${toNatName} retained input`), input);
+  }
+
+  assert.throws(() => invoke(
+    validationExternalRegistry[ofNatName],
+    new SemanticHost(),
+    [encode(1n)]));
+  assert.throws(() => invoke(
+    validationExternalRegistry[toNatName],
+    new SemanticHost(),
+    [wrongValue]));
+}
+
 for (const [leftValue, rightValue, expected, allocates] of [
   [6n, 7n, 42n, false],
   [0x7fffffffffffffffn, 2n, 0xfffffffffffffffen, true],
