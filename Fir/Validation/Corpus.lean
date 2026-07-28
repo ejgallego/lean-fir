@@ -119,6 +119,18 @@ def stringLength (value : String) : Nat :=
 def stringUtf8ByteSize (value : String) : Nat :=
   value.utf8ByteSize
 
+@[noinline]
+def stringPosOfNonBmp (value : String) : Nat :=
+  (String.Internal.posOf value '😀').byteIdx
+
+@[noinline]
+def stringOffsetOfPos (value : String) (position : Nat) : Nat :=
+  String.Internal.offsetOfPos value ⟨position⟩
+
+@[noinline]
+def stringNext (value : String) (position : Nat) : Nat :=
+  (String.Internal.next value ⟨position⟩).byteIdx
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1447,6 +1459,150 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``String.utf8ByteSize]
     provenance := firProvenance
       "Measure NUL, BMP, and non-BMP UTF-8 widths as one, two, and four bytes" },
+  { id := "string-pos-of-nonbmp-found"
+    entry := ``Source.stringPosOfNonBmp
+    args := #[.string "Aé😀Z"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringPosOfNonBmp "Aé😀Z")
+    tags := #["stress", "string", "unicode", "navigation", "search", "non-bmp",
+      "found", "byte-position", "external", "boundary"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some #["lit", "fap", "extern", "return"]
+    requiredExternals := #[``String.Internal.posOf]
+    requiredExecutedExternals := #[``String.Internal.posOf]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.posOf]
+    requiredExecutedExternalTrace := some #[``String.Internal.posOf]
+    provenance := firProvenance
+      "Find a non-BMP scalar at its raw UTF-8 byte position" },
+  { id := "string-pos-of-nonbmp-missing"
+    entry := ``Source.stringPosOfNonBmp
+    args := #[.string "AéZ"]
+    argSchemas := #[.string]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringPosOfNonBmp "AéZ")
+    tags := #["stress", "string", "unicode", "navigation", "search", "non-bmp",
+      "missing", "end-position", "external", "boundary"]
+    requiredLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some #["lit", "fap", "extern", "return"]
+    requiredExternals := #[``String.Internal.posOf]
+    requiredExecutedExternals := #[``String.Internal.posOf]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.posOf]
+    requiredExecutedExternalTrace := some #[``String.Internal.posOf]
+    provenance := firProvenance
+      "Return the UTF-8 end position when a non-BMP scalar is absent" },
+  { id := "string-offset-of-pos-scalar-boundary"
+    entry := ``Source.stringOffsetOfPos
+    args := #[.string "Aé😀Z", .nat 3]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringOffsetOfPos "Aé😀Z" 3)
+    tags := #["stress", "string", "unicode", "navigation", "offset",
+      "scalar-boundary", "byte-position", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalTrace := some #[``String.Internal.offsetOfPos]
+    provenance := firProvenance
+      "Convert the non-BMP scalar's exact UTF-8 boundary to character offset" },
+  { id := "string-offset-of-pos-inside-nonbmp"
+    entry := ``Source.stringOffsetOfPos
+    args := #[.string "Aé😀Z", .nat 4]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringOffsetOfPos "Aé😀Z" 4)
+    tags := #["stress", "string", "unicode", "navigation", "offset", "non-bmp",
+      "continuation-byte", "round-forward", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalTrace := some #[``String.Internal.offsetOfPos]
+    provenance := firProvenance
+      "Round a position inside a four-byte scalar to the following offset" },
+  { id := "string-offset-of-pos-past-end"
+    entry := ``Source.stringOffsetOfPos
+    args := #[.string "Aé😀Z", .nat 50]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringOffsetOfPos "Aé😀Z" 50)
+    tags := #["stress", "string", "unicode", "navigation", "offset", "past-end",
+      "character-length", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternals := #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.offsetOfPos]
+    requiredExecutedExternalTrace := some #[``String.Internal.offsetOfPos]
+    provenance := firProvenance
+      "Clamp a far past-end byte position to the String character length" },
+  { id := "string-next-nonbmp-leader"
+    entry := ``Source.stringNext
+    args := #[.string "Aé😀Z", .nat 3]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringNext "Aé😀Z" 3)
+    tags := #["stress", "string", "unicode", "navigation", "next", "non-bmp",
+      "leading-byte", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.next]
+    requiredExecutedExternals := #[``String.Internal.next]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.next]
+    requiredExecutedExternalTrace := some #[``String.Internal.next]
+    provenance := firProvenance
+      "Advance over all four UTF-8 bytes from a non-BMP leading byte" },
+  { id := "string-next-continuation-byte"
+    entry := ``Source.stringNext
+    args := #[.string "Aé😀Z", .nat 4]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringNext "Aé😀Z" 4)
+    tags := #["stress", "string", "unicode", "navigation", "next", "non-bmp",
+      "continuation-byte", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.next]
+    requiredExecutedExternals := #[``String.Internal.next]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.next]
+    requiredExecutedExternalTrace := some #[``String.Internal.next]
+    provenance := firProvenance
+      "Advance exactly one byte from inside a non-BMP UTF-8 scalar" },
+  { id := "string-next-end"
+    entry := ``Source.stringNext
+    args := #[.string "Aé😀Z", .nat 8]
+    argSchemas := #[.string, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.stringNext "Aé😀Z" 8)
+    tags := #["stress", "string", "unicode", "navigation", "next", "end",
+      "past-end", "external", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``String.Internal.next]
+    requiredExecutedExternals := #[``String.Internal.next]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``String.Internal.next]
+    requiredExecutedExternalTrace := some #[``String.Internal.next]
+    provenance := firProvenance
+      "Advance one byte beyond the exact UTF-8 end position" },
   { id := "uint8-max"
     entry := ``Source.maxUInt8
     resultSchema := .bits 8

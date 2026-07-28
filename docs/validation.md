@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 136 cases. Required oracle edges must share one matrix
+edges over at least 144 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,12 +469,12 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 136 source cases are shared by the source-LCNF and V8
+current baseline, the 144 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 13 static forms, 13 executed forms, and all 18 interpreter
+contributes 13 static forms, 13 executed forms, and all 21 interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -1309,7 +1309,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 136 cases. Direct identity cases
+The compiler-generated corpus currently has 144 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
@@ -1334,6 +1334,11 @@ Six String-measurement cases compare Unicode scalar length and UTF-8 byte size
 for empty, ASCII, and embedded-NUL/BMP/non-BMP inputs. The non-ASCII boundary
 pins the intentional distinction between three characters and seven encoded
 bytes, with one exact external dispatch and no result allocation.
+Eight String-navigation cases pin raw UTF-8 positions through exact
+`String.Internal.posOf`, `String.Internal.offsetOfPos`, and
+`String.Internal.next` dispatch. They distinguish found and missing non-BMP
+searches, scalar boundaries from continuation-byte positions, clamped
+past-end offsets, and one-byte advancement at a continuation or exact end.
 Empty `String` and `ByteArray` values exercise zero-length heap representations,
 while a string containing an embedded NUL, a multibyte BMP character, and a
 non-BMP character exercises the full JSON/native/interpreter text path. None can
@@ -1562,11 +1567,11 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 136 corpus cases, including a natural
+The default native-to-V8 matrix covers all 144 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, multi-limb and saturating `Nat.sub`, all three
 natural-decision primitives across tagged/heap and multi-limb boundaries,
-Unicode character-length and UTF-8-byte-size measurements,
+Unicode measurements and raw UTF-8 String navigation,
 multi-limb `Int.add`/`Int.sub` growth and cancellation, cross-domain
 `Int.natAbs` signs and representation boundaries, all three
 controlled-effect programs, and all five mixed-layout projections.
