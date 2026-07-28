@@ -1370,6 +1370,28 @@ private def intEModExternal (request : ExternalRequest) (runtime : RuntimeState)
     Except RuntimeFault ExternalResponse :=
   intBinaryExternal (· % ·) request runtime
 
+private def intNatBinaryExternal (operation : Int → Nat → Int)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value, count] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let value ← externalInt request runtime value
+  let count ← externalNat request runtime count
+  let (runtime, value) := encodeIntValue runtime (operation value count)
+  return {
+    value
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def intShiftLeftExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intNatBinaryExternal Int.shiftLeft request runtime
+
+private def intShiftRightExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intNatBinaryExternal Int.shiftRight request runtime
+
 private def intBinaryRequest (name : Name) (left right : Value) : ExternalRequest := {
   name
   paramTypes := #[]
@@ -1382,6 +1404,27 @@ private def intBinaryGuard (name : Name) (operation : Int → Int → Int)
   let (runtime, rightValue) := encodeIntValue runtime right
   let request := intBinaryRequest name leftValue rightValue
   match intBinaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      let after : RuntimeState := {
+        runtime with
+        heap := response.heap
+        nextLocation := response.nextLocation
+        world := response.world }
+      match externalInt request after response.value with
+      | .error _ => false
+      | .ok actual =>
+          actual == expected &&
+          response.world == runtime.world &&
+          response.nextLocation ==
+            runtime.nextLocation + if allocates then 1 else 0
+
+private def intNatBinaryGuard (name : Name) (operation : Int → Nat → Int)
+    (input expected : Int) (count : Nat) (allocates : Bool) : Bool :=
+  let (runtime, inputValue) := encodeIntValue {} input
+  let (runtime, countValue) := literal runtime (.nat count)
+  let request := intBinaryRequest name inputValue countValue
+  match intNatBinaryExternal operation request runtime with
   | .error _ => false
   | .ok response =>
       let after : RuntimeState := {
@@ -1438,6 +1481,29 @@ private def multiLimbInt : Int :=
 
 #guard intBinaryGuard ``Int.emod (· % ·) (-multiLimbInt) 0
   (-multiLimbInt) true
+
+#guard intNatBinaryGuard ``Int.shiftLeft Int.shiftLeft 2147483647 4294967294 1 true
+
+#guard intNatBinaryGuard ``Int.shiftLeft Int.shiftLeft (-2147483648) (-4294967296) 1 true
+
+#guard intNatBinaryGuard ``Int.shiftLeft Int.shiftLeft multiLimbInt
+  12554203470773361527671578846415332832831900187434193780736 65 true
+
+#guard intNatBinaryGuard ``Int.shiftLeft Int.shiftLeft (-multiLimbInt)
+  (-12554203470773361527671578846415332832831900187434193780736) 65 true
+
+#guard intNatBinaryGuard ``Int.shiftRight Int.shiftRight multiLimbInt
+  9223372036854775808 65 true
+
+#guard intNatBinaryGuard ``Int.shiftRight Int.shiftRight (-multiLimbInt)
+  (-9223372036854775809) 65 true
+
+#guard intNatBinaryGuard ``Int.shiftRight Int.shiftRight multiLimbInt 1 128 false
+
+#guard intNatBinaryGuard ``Int.shiftRight Int.shiftRight (-multiLimbInt) (-1) 129 false
+
+#guard intNatBinaryGuard ``Int.shiftRight Int.shiftRight (-multiLimbInt) (-1)
+  multiLimbNat false
 
 #guard intNatAbsGuard multiLimbInt multiLimbNat true
 
@@ -1580,6 +1646,10 @@ private def validationExternals : ExternalImpl where
       intEDivExternal request runtime
     else if request.name == ``Int.emod then
       intEModExternal request runtime
+    else if request.name == ``Int.shiftLeft then
+      intShiftLeftExternal request runtime
+    else if request.name == ``Int.shiftRight then
+      intShiftRightExternal request runtime
     else if request.name == ``Int.decEq then
       intDecEqExternal request runtime
     else if request.name == ``Int.decLt then

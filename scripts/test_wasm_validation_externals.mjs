@@ -24,6 +24,8 @@ const natShiftRight = validationExternalRegistry["Nat.shiftRight"];
 const intMul = validationExternalRegistry["Int.mul"];
 const intEDiv = validationExternalRegistry["Int.ediv"];
 const intEMod = validationExternalRegistry["Int.emod"];
+const intShiftLeft = validationExternalRegistry["Int.shiftLeft"];
+const intShiftRight = validationExternalRegistry["Int.shiftRight"];
 const intDecEq = validationExternalRegistry["Int.decEq"];
 const intDecLt = validationExternalRegistry["Int.decLt"];
 const intDecLe = validationExternalRegistry["Int.decLe"];
@@ -44,6 +46,8 @@ assert.strictEqual(formatExternalRegistry["Nat.shiftRight"], natShiftRight);
 assert.strictEqual(formatExternalRegistry["Int.mul"], intMul);
 assert.strictEqual(formatExternalRegistry["Int.ediv"], intEDiv);
 assert.strictEqual(formatExternalRegistry["Int.emod"], intEMod);
+assert.strictEqual(formatExternalRegistry["Int.shiftLeft"], intShiftLeft);
+assert.strictEqual(formatExternalRegistry["Int.shiftRight"], intShiftRight);
 assert.strictEqual(formatExternalRegistry["Int.decEq"], intDecEq);
 assert.strictEqual(formatExternalRegistry["Int.decLt"], intDecLt);
 assert.strictEqual(formatExternalRegistry["Int.decLe"], intDecLe);
@@ -120,6 +124,71 @@ for (const [leftValue, rightValue, expected, allocates] of [
   assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
   assert.equal(integerValue(host, left, "Int.mul retained left"), leftValue);
   assert.equal(integerValue(host, right, "Int.mul retained right"), rightValue);
+}
+
+for (const [handler, declaration, value, count, expected, allocates] of [
+  [intShiftLeft, "Int.shiftLeft", 2147483647n, 1n, 4294967294n, true],
+  [intShiftLeft, "Int.shiftLeft", -2147483648n, 1n, -4294967296n, true],
+  [
+    intShiftLeft, "Int.shiftLeft",
+    340282366920938463463374607431768211473n,
+    65n,
+    12554203470773361527671578846415332832831900187434193780736n,
+    true,
+  ],
+  [
+    intShiftLeft, "Int.shiftLeft",
+    -340282366920938463463374607431768211473n,
+    65n,
+    -12554203470773361527671578846415332832831900187434193780736n,
+    true,
+  ],
+  [
+    intShiftRight, "Int.shiftRight",
+    340282366920938463463374607431768211473n,
+    65n,
+    9223372036854775808n,
+    true,
+  ],
+  [
+    intShiftRight, "Int.shiftRight",
+    -340282366920938463463374607431768211473n,
+    65n,
+    -9223372036854775809n,
+    true,
+  ],
+  [
+    intShiftRight, "Int.shiftRight",
+    340282366920938463463374607431768211473n,
+    128n,
+    1n,
+    false,
+  ],
+  [
+    intShiftRight, "Int.shiftRight",
+    -340282366920938463463374607431768211473n,
+    129n,
+    -1n,
+    false,
+  ],
+  [
+    intShiftRight, "Int.shiftRight",
+    -340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    -1n,
+    false,
+  ],
+]) {
+  const host = new SemanticHost();
+  const input = host.integer(value);
+  const shiftCount = host.natural(count);
+  const frontier = host.nextLocation;
+  const result = invoke(handler, host, [input, shiftCount]);
+  assert.equal(integerValue(host, result, `${declaration} result`), expected);
+  assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+  assert.equal(integerValue(host, input, `${declaration} retained value`), value);
+  assert.equal(
+    naturalValue(host, shiftCount, `${declaration} retained count`), count);
 }
 
 for (const [handler, declaration, leftValue, rightValue, expected, allocates] of [

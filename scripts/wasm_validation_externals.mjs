@@ -84,6 +84,15 @@ function integerBinary(declaration, operation) {
   };
 }
 
+function integerNaturalBinary(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const value = integerValue(host, args[0], `${declaration} value`);
+    const count = naturalValue(host, args[1], `${declaration} count`);
+    return { value: host.integer(operation(value, count)), world };
+  };
+}
+
 function integerDecision(declaration, operation) {
   return ({ args, host, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
@@ -106,6 +115,13 @@ function naturalShiftRight(value, count) {
     return 0n;
   }
   return value >> count;
+}
+
+function integerShiftRight(value, count) {
+  if (value >= 0n) {
+    return naturalShiftRight(value, count);
+  }
+  return -1n - naturalShiftRight(-1n - value, count);
 }
 
 function euclideanRemainder(left, right) {
@@ -299,6 +315,9 @@ export const validationExternalRegistry = {
   "Int.mul": integerBinary("Int.mul", (left, right) => left * right),
   "Int.ediv": integerBinary("Int.ediv", euclideanDivision),
   "Int.emod": integerBinary("Int.emod", euclideanRemainder),
+  "Int.shiftLeft": integerNaturalBinary(
+    "Int.shiftLeft", (value, count) => value << count),
+  "Int.shiftRight": integerNaturalBinary("Int.shiftRight", integerShiftRight),
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
