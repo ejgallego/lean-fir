@@ -145,6 +145,14 @@ const usizeFixedWidthCodec = {
   encode: value => ({ kind: "usize", value: BigInt.asUintN(64, value) }),
 };
 
+const fixedWidthCodecs = {
+  UInt8: scalarFixedWidthCodec("uint8", 8),
+  UInt16: scalarFixedWidthCodec("uint16", 16),
+  UInt32: scalarFixedWidthCodec("uint32", 32),
+  UInt64: scalarFixedWidthCodec("uint64", 64),
+  USize: usizeFixedWidthCodec,
+};
+
 function fixedWidthBinary(declaration, codec, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
@@ -191,6 +199,28 @@ function fixedWidthToNatural(declaration, codec) {
     const value = codec.decode(args[0], `${declaration} operand`);
     return { value: host.natural(value), world };
   };
+}
+
+function fixedWidthConversion(declaration, sourceCodec, targetCodec) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = sourceCodec.decode(args[0], `${declaration} operand`);
+    return { value: targetCodec.encode(value), world };
+  };
+}
+
+function fixedWidthConversionFamily(sourceTypeName) {
+  const sourceCodec = fixedWidthCodecs[sourceTypeName];
+  return Object.fromEntries(
+    Object.entries(fixedWidthCodecs)
+      .filter(([targetTypeName]) => targetTypeName !== sourceTypeName)
+      .map(([targetTypeName, targetCodec]) => {
+        const declaration = `${sourceTypeName}.to${targetTypeName}`;
+        return [
+          declaration,
+          fixedWidthConversion(declaration, sourceCodec, targetCodec),
+        ];
+      }));
 }
 
 function fixedWidthExternalFamily(typeName, width, codec) {
@@ -445,29 +475,34 @@ export const validationExternalRegistry = {
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
-  ...fixedWidthExternalFamily("UInt8", 8, scalarFixedWidthCodec("uint8", 8)),
+  ...fixedWidthExternalFamily("UInt8", 8, fixedWidthCodecs.UInt8),
   "UInt8.ofNat": naturalToFixedWidth(
-    "UInt8.ofNat", scalarFixedWidthCodec("uint8", 8)),
+    "UInt8.ofNat", fixedWidthCodecs.UInt8),
   "UInt8.toNat": fixedWidthToNatural(
-    "UInt8.toNat", scalarFixedWidthCodec("uint8", 8)),
-  ...fixedWidthExternalFamily("UInt16", 16, scalarFixedWidthCodec("uint16", 16)),
+    "UInt8.toNat", fixedWidthCodecs.UInt8),
+  ...fixedWidthConversionFamily("UInt8"),
+  ...fixedWidthExternalFamily("UInt16", 16, fixedWidthCodecs.UInt16),
   "UInt16.ofNat": naturalToFixedWidth(
-    "UInt16.ofNat", scalarFixedWidthCodec("uint16", 16)),
+    "UInt16.ofNat", fixedWidthCodecs.UInt16),
   "UInt16.toNat": fixedWidthToNatural(
-    "UInt16.toNat", scalarFixedWidthCodec("uint16", 16)),
-  ...fixedWidthExternalFamily("UInt32", 32, scalarFixedWidthCodec("uint32", 32)),
+    "UInt16.toNat", fixedWidthCodecs.UInt16),
+  ...fixedWidthConversionFamily("UInt16"),
+  ...fixedWidthExternalFamily("UInt32", 32, fixedWidthCodecs.UInt32),
   "UInt32.ofNat": naturalToFixedWidth(
-    "UInt32.ofNat", scalarFixedWidthCodec("uint32", 32)),
+    "UInt32.ofNat", fixedWidthCodecs.UInt32),
   "UInt32.toNat": fixedWidthToNatural(
-    "UInt32.toNat", scalarFixedWidthCodec("uint32", 32)),
-  ...fixedWidthExternalFamily("UInt64", 64, scalarFixedWidthCodec("uint64", 64)),
+    "UInt32.toNat", fixedWidthCodecs.UInt32),
+  ...fixedWidthConversionFamily("UInt32"),
+  ...fixedWidthExternalFamily("UInt64", 64, fixedWidthCodecs.UInt64),
   "UInt64.ofNat": naturalToFixedWidth(
-    "UInt64.ofNat", scalarFixedWidthCodec("uint64", 64)),
+    "UInt64.ofNat", fixedWidthCodecs.UInt64),
   "UInt64.toNat": fixedWidthToNatural(
-    "UInt64.toNat", scalarFixedWidthCodec("uint64", 64)),
+    "UInt64.toNat", fixedWidthCodecs.UInt64),
+  ...fixedWidthConversionFamily("UInt64"),
   ...fixedWidthExternalFamily("USize", 64, usizeFixedWidthCodec),
   "USize.ofNat": naturalToFixedWidth("USize.ofNat", usizeFixedWidthCodec),
   "USize.toNat": fixedWidthToNatural("USize.toNat", usizeFixedWidthCodec),
+  ...fixedWidthConversionFamily("USize"),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");

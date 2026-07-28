@@ -286,6 +286,37 @@ for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies
     [wrongValue]));
 }
 
+let fixedWidthConversionCount = 0;
+for (const source of fixedWidthFamilies) {
+  for (const target of fixedWidthFamilies) {
+    if (source.typeName === target.typeName) {
+      continue;
+    }
+    fixedWidthConversionCount += 1;
+    const name = `${source.typeName}.to${target.typeName}`;
+    const input = (1n << BigInt(source.width)) - 1n;
+    const expected = BigInt.asUintN(target.width, input);
+    assert.strictEqual(
+      formatExternalRegistry[name],
+      validationExternalRegistry[name]);
+    const host = new SemanticHost();
+    const inputValue = source.encode(input);
+    const frontier = host.nextLocation;
+    const result = invoke(
+      validationExternalRegistry[name], host, [inputValue]);
+    assert.equal(target.decode(result, `${name} result`), expected);
+    assert.equal(host.nextLocation, frontier);
+    assert.equal(
+      source.decode(inputValue, `${name} retained input`),
+      input);
+    assert.throws(() => invoke(
+      validationExternalRegistry[name],
+      new SemanticHost(),
+      [source.wrongValue]));
+  }
+}
+assert.equal(fixedWidthConversionCount, 20);
+
 for (const [leftValue, rightValue, expected, allocates] of [
   [6n, 7n, 42n, false],
   [0x7fffffffffffffffn, 2n, 0xfffffffffffffffen, true],

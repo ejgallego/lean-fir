@@ -1675,6 +1675,19 @@ private def fixedWidthToNatExternal (codec : FixedWidthValueCodec α)
     nextLocation := runtime.nextLocation
     world := runtime.world }
 
+private def fixedWidthConversionExternal (sourceCodec : FixedWidthValueCodec α)
+    (targetCodec : FixedWidthValueCodec β) (operation : α → β)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalFixedWidthValue sourceCodec request value
+  return {
+    value := targetCodec.encode (operation value)
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
 private def fixedWidthBinaryGuard (codec : FixedWidthValueCodec α) (name : Name)
     (operation : α → α → α) (left right expected : α) : Bool :=
   let runtime : RuntimeState := {}
@@ -1749,6 +1762,23 @@ private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
       response.heap == expectedRuntime.heap &&
       response.nextLocation == expectedRuntime.nextLocation &&
       response.world == expectedRuntime.world
+
+private def fixedWidthConversionGuard (sourceCodec : FixedWidthValueCodec α)
+    (targetCodec : FixedWidthValueCodec β) (name : Name)
+    (operation : α → β) (input : α) (expected : β) : Bool :=
+  let runtime : RuntimeState := {}
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[sourceCodec.encode input] }
+  match fixedWidthConversionExternal sourceCodec targetCodec operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == targetCodec.encode expected &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
 
 #guard natToFixedWidthGuard uint64Codec ``UInt64.ofNat
   UInt64.ofNat 0 0
@@ -1835,6 +1865,66 @@ private def fixedWidthToNatGuard (codec : FixedWidthValueCodec α) (name : Name)
 
 #guard fixedWidthToNatGuard uint32Codec ``UInt32.toNat
   UInt32.toNat 4294967295 4294967295
+
+#guard fixedWidthConversionGuard uint8Codec uint16Codec ``UInt8.toUInt16
+  UInt8.toUInt16 255 255
+
+#guard fixedWidthConversionGuard uint8Codec uint32Codec ``UInt8.toUInt32
+  UInt8.toUInt32 255 255
+
+#guard fixedWidthConversionGuard uint8Codec uint64Codec ``UInt8.toUInt64
+  UInt8.toUInt64 255 255
+
+#guard fixedWidthConversionGuard uint8Codec usizeCodec ``UInt8.toUSize
+  UInt8.toUSize 255 255
+
+#guard fixedWidthConversionGuard uint16Codec uint8Codec ``UInt16.toUInt8
+  UInt16.toUInt8 65535 255
+
+#guard fixedWidthConversionGuard uint16Codec uint32Codec ``UInt16.toUInt32
+  UInt16.toUInt32 65535 65535
+
+#guard fixedWidthConversionGuard uint16Codec uint64Codec ``UInt16.toUInt64
+  UInt16.toUInt64 65535 65535
+
+#guard fixedWidthConversionGuard uint16Codec usizeCodec ``UInt16.toUSize
+  UInt16.toUSize 65535 65535
+
+#guard fixedWidthConversionGuard uint32Codec uint8Codec ``UInt32.toUInt8
+  UInt32.toUInt8 4294967295 255
+
+#guard fixedWidthConversionGuard uint32Codec uint16Codec ``UInt32.toUInt16
+  UInt32.toUInt16 4294967295 65535
+
+#guard fixedWidthConversionGuard uint32Codec uint64Codec ``UInt32.toUInt64
+  UInt32.toUInt64 4294967295 4294967295
+
+#guard fixedWidthConversionGuard uint32Codec usizeCodec ``UInt32.toUSize
+  UInt32.toUSize 4294967295 4294967295
+
+#guard fixedWidthConversionGuard uint64Codec uint8Codec ``UInt64.toUInt8
+  UInt64.toUInt8 0xffffffffffffffff 255
+
+#guard fixedWidthConversionGuard uint64Codec uint16Codec ``UInt64.toUInt16
+  UInt64.toUInt16 0xffffffffffffffff 65535
+
+#guard fixedWidthConversionGuard uint64Codec uint32Codec ``UInt64.toUInt32
+  UInt64.toUInt32 0xffffffffffffffff 4294967295
+
+#guard fixedWidthConversionGuard uint64Codec usizeCodec ``UInt64.toUSize
+  UInt64.toUSize 0xffffffffffffffff 0xffffffffffffffff
+
+#guard fixedWidthConversionGuard usizeCodec uint8Codec ``USize.toUInt8
+  USize.toUInt8 0xffffffffffffffff 255
+
+#guard fixedWidthConversionGuard usizeCodec uint16Codec ``USize.toUInt16
+  USize.toUInt16 0xffffffffffffffff 65535
+
+#guard fixedWidthConversionGuard usizeCodec uint32Codec ``USize.toUInt32
+  USize.toUInt32 0xffffffffffffffff 4294967295
+
+#guard fixedWidthConversionGuard usizeCodec uint64Codec ``USize.toUInt64
+  USize.toUInt64 0xffffffffffffffff 0xffffffffffffffff
 
 #guard fixedWidthBinaryGuard uint8Codec ``UInt8.add UInt8.add 255 1 0
 
@@ -2181,6 +2271,11 @@ private def fixedWidthToNatHandler (name : Name) (codec : FixedWidthValueCodec �
     (operation : α → Nat) : NamedExternalHandler :=
   { name, call := fixedWidthToNatExternal codec operation }
 
+private def fixedWidthConversionHandler (name : Name)
+    (sourceCodec : FixedWidthValueCodec α) (targetCodec : FixedWidthValueCodec β)
+    (operation : α → β) : NamedExternalHandler :=
+  { name, call := fixedWidthConversionExternal sourceCodec targetCodec operation }
+
 private def uint8ExternalHandlers : List NamedExternalHandler := [
   fixedWidthBinaryHandler ``UInt8.add uint8Codec UInt8.add,
   fixedWidthBinaryHandler ``UInt8.sub uint8Codec UInt8.sub,
@@ -2201,7 +2296,11 @@ private def uint8ExternalHandlers : List NamedExternalHandler := [
   fixedWidthDecisionHandler ``UInt8.decLe uint8Codec
     (fun left right => decide (left ≤ right)),
   natToFixedWidthHandler ``UInt8.ofNat uint8Codec UInt8.ofNat,
-  fixedWidthToNatHandler ``UInt8.toNat uint8Codec UInt8.toNat
+  fixedWidthToNatHandler ``UInt8.toNat uint8Codec UInt8.toNat,
+  fixedWidthConversionHandler ``UInt8.toUInt16 uint8Codec uint16Codec UInt8.toUInt16,
+  fixedWidthConversionHandler ``UInt8.toUInt32 uint8Codec uint32Codec UInt8.toUInt32,
+  fixedWidthConversionHandler ``UInt8.toUInt64 uint8Codec uint64Codec UInt8.toUInt64,
+  fixedWidthConversionHandler ``UInt8.toUSize uint8Codec usizeCodec UInt8.toUSize
 ]
 
 private def uint16ExternalHandlers : List NamedExternalHandler := [
@@ -2224,7 +2323,11 @@ private def uint16ExternalHandlers : List NamedExternalHandler := [
   fixedWidthDecisionHandler ``UInt16.decLe uint16Codec
     (fun left right => decide (left ≤ right)),
   natToFixedWidthHandler ``UInt16.ofNat uint16Codec UInt16.ofNat,
-  fixedWidthToNatHandler ``UInt16.toNat uint16Codec UInt16.toNat
+  fixedWidthToNatHandler ``UInt16.toNat uint16Codec UInt16.toNat,
+  fixedWidthConversionHandler ``UInt16.toUInt8 uint16Codec uint8Codec UInt16.toUInt8,
+  fixedWidthConversionHandler ``UInt16.toUInt32 uint16Codec uint32Codec UInt16.toUInt32,
+  fixedWidthConversionHandler ``UInt16.toUInt64 uint16Codec uint64Codec UInt16.toUInt64,
+  fixedWidthConversionHandler ``UInt16.toUSize uint16Codec usizeCodec UInt16.toUSize
 ]
 
 private def uint32ExternalHandlers : List NamedExternalHandler := [
@@ -2247,7 +2350,11 @@ private def uint32ExternalHandlers : List NamedExternalHandler := [
   fixedWidthDecisionHandler ``UInt32.decLe uint32Codec
     (fun left right => decide (left ≤ right)),
   natToFixedWidthHandler ``UInt32.ofNat uint32Codec UInt32.ofNat,
-  fixedWidthToNatHandler ``UInt32.toNat uint32Codec UInt32.toNat
+  fixedWidthToNatHandler ``UInt32.toNat uint32Codec UInt32.toNat,
+  fixedWidthConversionHandler ``UInt32.toUInt8 uint32Codec uint8Codec UInt32.toUInt8,
+  fixedWidthConversionHandler ``UInt32.toUInt16 uint32Codec uint16Codec UInt32.toUInt16,
+  fixedWidthConversionHandler ``UInt32.toUInt64 uint32Codec uint64Codec UInt32.toUInt64,
+  fixedWidthConversionHandler ``UInt32.toUSize uint32Codec usizeCodec UInt32.toUSize
 ]
 
 private def uint64ExternalHandlers : List NamedExternalHandler := [
@@ -2270,7 +2377,11 @@ private def uint64ExternalHandlers : List NamedExternalHandler := [
   fixedWidthDecisionHandler ``UInt64.decLe uint64Codec
     (fun left right => decide (left ≤ right)),
   natToFixedWidthHandler ``UInt64.ofNat uint64Codec UInt64.ofNat,
-  fixedWidthToNatHandler ``UInt64.toNat uint64Codec UInt64.toNat
+  fixedWidthToNatHandler ``UInt64.toNat uint64Codec UInt64.toNat,
+  fixedWidthConversionHandler ``UInt64.toUInt8 uint64Codec uint8Codec UInt64.toUInt8,
+  fixedWidthConversionHandler ``UInt64.toUInt16 uint64Codec uint16Codec UInt64.toUInt16,
+  fixedWidthConversionHandler ``UInt64.toUInt32 uint64Codec uint32Codec UInt64.toUInt32,
+  fixedWidthConversionHandler ``UInt64.toUSize uint64Codec usizeCodec UInt64.toUSize
 ]
 
 private def usizeExternalHandlers : List NamedExternalHandler := [
@@ -2293,14 +2404,18 @@ private def usizeExternalHandlers : List NamedExternalHandler := [
   fixedWidthDecisionHandler ``USize.decLe usizeCodec
     (fun left right => decide (left ≤ right)),
   natToFixedWidthHandler ``USize.ofNat usizeCodec USize.ofNat,
-  fixedWidthToNatHandler ``USize.toNat usizeCodec USize.toNat
+  fixedWidthToNatHandler ``USize.toNat usizeCodec USize.toNat,
+  fixedWidthConversionHandler ``USize.toUInt8 usizeCodec uint8Codec USize.toUInt8,
+  fixedWidthConversionHandler ``USize.toUInt16 usizeCodec uint16Codec USize.toUInt16,
+  fixedWidthConversionHandler ``USize.toUInt32 usizeCodec uint32Codec USize.toUInt32,
+  fixedWidthConversionHandler ``USize.toUInt64 usizeCodec uint64Codec USize.toUInt64
 ]
 
 private def fixedWidthExternalHandlers : List NamedExternalHandler :=
   uint8ExternalHandlers ++ uint16ExternalHandlers ++ uint32ExternalHandlers ++
     uint64ExternalHandlers ++ usizeExternalHandlers
 
-#guard fixedWidthExternalHandlers.length == 85
+#guard fixedWidthExternalHandlers.length == 105
 
 #guard fixedWidthExternalHandlers.all fun handler =>
   (fixedWidthExternalHandlers.filter fun candidate =>
