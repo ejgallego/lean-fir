@@ -644,6 +644,10 @@ def classifyInt : Int → Nat
 def addNat (left right : Nat) : Nat :=
   left + right
 
+@[noinline]
+def subNat (left right : Nat) : Nat :=
+  left - right
+
 @[implemented_by NativeEffects.recordImpl]
 def record (value : Nat) : Nat :=
   value + 1
@@ -1055,7 +1059,7 @@ private def intClassifyFormTrace : Array String :=
 private def intOfNatFormTrace : Array String :=
   #["fap", "extern", "return"]
 
-private def intBinaryFormTrace : Array String :=
+private def binaryExternalFormTrace : Array String :=
   #["fap", "extern", "return"]
 
 private def negIntOfNatFormTrace : Array String :=
@@ -2245,7 +2249,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2267,7 +2271,7 @@ def cases : Array Case := #[
       "external", "arithmetic", "addition", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2289,7 +2293,7 @@ def cases : Array Case := #[
       "arithmetic", "addition", "cancellation", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.add]
     requiredExecutedExternals := #[``Int.add]
     requiredExecutedExternalCounts :=
@@ -2311,7 +2315,7 @@ def cases : Array Case := #[
       "arithmetic", "subtraction", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2333,7 +2337,7 @@ def cases : Array Case := #[
       "external", "arithmetic", "subtraction", "growth"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2355,7 +2359,7 @@ def cases : Array Case := #[
       "arithmetic", "subtraction", "cancellation", "boundary"]
     requiredLcnfForms := #["fap", "extern", "return"]
     requiredExecutedLcnfForms := #["fap", "extern", "return"]
-    requiredExecutedLcnfFormTrace := some intBinaryFormTrace
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
     requiredExternals := #[``Int.sub]
     requiredExecutedExternals := #[``Int.sub]
     requiredExecutedExternalCounts :=
@@ -2560,6 +2564,73 @@ def cases : Array Case := #[
       exactlyOnceExternalCounts #[``Nat.add]
     requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance "Nat.add decoding and returning heap natural values" },
+  { id := "nat-sub-multi-limb-preserves-heap"
+    entry := ``Source.subNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 17]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.subNat
+      340282366920938463463374607431768211473
+      17)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "subtraction", "heap", "multi-limb"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExternals := #[``Nat.sub]
+    requiredExecutedExternals := #[``Nat.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.sub]
+    requiredExecutedExternalTrace := some #[``Nat.sub]
+    provenance := firProvenance
+      "Subtract 17 from 2^128 + 17 and retain a multi-limb heap result" },
+  { id := "nat-sub-multi-limb-equality"
+    entry := ``Source.subNat
+    args := #[
+      .nat 340282366920938463463374607431768211473,
+      .nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.subNat
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "subtraction", "heap", "multi-limb", "equality", "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExternals := #[``Nat.sub]
+    requiredExecutedExternals := #[``Nat.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.sub]
+    requiredExecutedExternalTrace := some #[``Nat.sub]
+    provenance := firProvenance
+      "Subtract equal multi-limb heap naturals to immediate zero" },
+  { id := "nat-sub-multi-limb-underflow"
+    entry := ``Source.subNat
+    args := #[
+      .nat 17,
+      .nat 340282366920938463463374607431768211473]
+    argSchemas := #[.nat, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.subNat
+      17
+      340282366920938463463374607431768211473)
+    tags := #["stress", "external", "pure", "nat", "arithmetic",
+      "subtraction", "heap", "multi-limb", "saturation", "underflow",
+      "boundary"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some binaryExternalFormTrace
+    requiredExternals := #[``Nat.sub]
+    requiredExecutedExternals := #[``Nat.sub]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Nat.sub]
+    requiredExecutedExternalTrace := some #[``Nat.sub]
+    provenance := firProvenance
+      "Saturate tagged-minus-multi-limb Nat subtraction at immediate zero" },
   { id := "effect-record-nat"
     entry := ``Source.recordOnce
     args := #[.nat 7]
