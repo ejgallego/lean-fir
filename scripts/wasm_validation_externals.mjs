@@ -47,12 +47,21 @@ export function stringValue(host, value, context) {
   return object.value;
 }
 
-export function scalarUInt32(value, context) {
+function fixedWidthScalar(value, scalarKind, width, context) {
   assert.equal(value.kind, "scalar", `${context} must be a scalar`);
-  assert.equal(value.scalarKind, "uint32", `${context} must use UInt32`);
-  assert.ok(value.value >= 0n && value.value <= 0xffffffffn,
-    `${context} is out of UInt32 range`);
+  assert.equal(value.scalarKind, scalarKind,
+    `${context} must use ${scalarKind}`);
+  assert.ok(value.value >= 0n && value.value < (1n << BigInt(width)),
+    `${context} is out of ${scalarKind} range`);
   return value.value;
+}
+
+export function scalarUInt32(value, context) {
+  return fixedWidthScalar(value, "uint32", 32, context);
+}
+
+export function scalarUInt64(value, context) {
+  return fixedWidthScalar(value, "uint64", 64, context);
 }
 
 function boolResult(value) {
@@ -104,36 +113,47 @@ function integerDecision(declaration, operation) {
   };
 }
 
-function uint32Result(value) {
+function fixedWidthResult(scalarKind, width, value) {
   return {
     kind: "scalar",
-    scalarKind: "uint32",
-    value: BigInt.asUintN(32, value),
+    scalarKind,
+    value: BigInt.asUintN(width, value),
   };
 }
 
-function uint32Binary(declaration, operation) {
+function fixedWidthBinary(declaration, scalarKind, width, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
-    const left = scalarUInt32(args[0], `${declaration} left operand`);
-    const right = scalarUInt32(args[1], `${declaration} right operand`);
-    return { value: uint32Result(operation(left, right)), world };
+    const left = fixedWidthScalar(
+      args[0], scalarKind, width, `${declaration} left operand`);
+    const right = fixedWidthScalar(
+      args[1], scalarKind, width, `${declaration} right operand`);
+    return {
+      value: fixedWidthResult(scalarKind, width, operation(left, right)),
+      world,
+    };
   };
 }
 
-function uint32Unary(declaration, operation) {
+function fixedWidthUnary(declaration, scalarKind, width, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
-    const value = scalarUInt32(args[0], `${declaration} operand`);
-    return { value: uint32Result(operation(value)), world };
+    const value = fixedWidthScalar(
+      args[0], scalarKind, width, `${declaration} operand`);
+    return {
+      value: fixedWidthResult(scalarKind, width, operation(value)),
+      world,
+    };
   };
 }
 
-function uint32Decision(declaration, operation) {
+function fixedWidthDecision(declaration, scalarKind, width, operation) {
   return ({ args, world }) => {
     assert.equal(args.length, 2, `${declaration} external arity mismatch`);
-    const left = scalarUInt32(args[0], `${declaration} left operand`);
-    const right = scalarUInt32(args[1], `${declaration} right operand`);
+    const left = fixedWidthScalar(
+      args[0], scalarKind, width, `${declaration} left operand`);
+    const right = fixedWidthScalar(
+      args[1], scalarKind, width, `${declaration} right operand`);
     return { value: boolResult(operation(left, right)), world };
   };
 }
@@ -357,28 +377,74 @@ export const validationExternalRegistry = {
   "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
   "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
   "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
-  "UInt32.add": uint32Binary("UInt32.add", (left, right) => left + right),
-  "UInt32.sub": uint32Binary("UInt32.sub", (left, right) => left - right),
-  "UInt32.mul": uint32Binary("UInt32.mul", (left, right) => left * right),
-  "UInt32.div": uint32Binary(
-    "UInt32.div", (left, right) => right === 0n ? 0n : left / right),
-  "UInt32.mod": uint32Binary(
-    "UInt32.mod", (left, right) => right === 0n ? left : left % right),
-  "UInt32.land": uint32Binary("UInt32.land", (left, right) => left & right),
-  "UInt32.lor": uint32Binary("UInt32.lor", (left, right) => left | right),
-  "UInt32.xor": uint32Binary("UInt32.xor", (left, right) => left ^ right),
-  "UInt32.shiftLeft": uint32Binary(
-    "UInt32.shiftLeft", (value, count) => value << (count & 31n)),
-  "UInt32.shiftRight": uint32Binary(
-    "UInt32.shiftRight", (value, count) => value >> (count & 31n)),
-  "UInt32.complement": uint32Unary("UInt32.complement", value => ~value),
-  "UInt32.neg": uint32Unary("UInt32.neg", value => -value),
-  "UInt32.decEq": uint32Decision(
-    "UInt32.decEq", (left, right) => left === right),
-  "UInt32.decLt": uint32Decision(
-    "UInt32.decLt", (left, right) => left < right),
-  "UInt32.decLe": uint32Decision(
-    "UInt32.decLe", (left, right) => left <= right),
+  "UInt32.add": fixedWidthBinary(
+    "UInt32.add", "uint32", 32, (left, right) => left + right),
+  "UInt32.sub": fixedWidthBinary(
+    "UInt32.sub", "uint32", 32, (left, right) => left - right),
+  "UInt32.mul": fixedWidthBinary(
+    "UInt32.mul", "uint32", 32, (left, right) => left * right),
+  "UInt32.div": fixedWidthBinary(
+    "UInt32.div", "uint32", 32,
+    (left, right) => right === 0n ? 0n : left / right),
+  "UInt32.mod": fixedWidthBinary(
+    "UInt32.mod", "uint32", 32,
+    (left, right) => right === 0n ? left : left % right),
+  "UInt32.land": fixedWidthBinary(
+    "UInt32.land", "uint32", 32, (left, right) => left & right),
+  "UInt32.lor": fixedWidthBinary(
+    "UInt32.lor", "uint32", 32, (left, right) => left | right),
+  "UInt32.xor": fixedWidthBinary(
+    "UInt32.xor", "uint32", 32, (left, right) => left ^ right),
+  "UInt32.shiftLeft": fixedWidthBinary(
+    "UInt32.shiftLeft", "uint32", 32,
+    (value, count) => value << (count & 31n)),
+  "UInt32.shiftRight": fixedWidthBinary(
+    "UInt32.shiftRight", "uint32", 32,
+    (value, count) => value >> (count & 31n)),
+  "UInt32.complement": fixedWidthUnary(
+    "UInt32.complement", "uint32", 32, value => ~value),
+  "UInt32.neg": fixedWidthUnary(
+    "UInt32.neg", "uint32", 32, value => -value),
+  "UInt32.decEq": fixedWidthDecision(
+    "UInt32.decEq", "uint32", 32, (left, right) => left === right),
+  "UInt32.decLt": fixedWidthDecision(
+    "UInt32.decLt", "uint32", 32, (left, right) => left < right),
+  "UInt32.decLe": fixedWidthDecision(
+    "UInt32.decLe", "uint32", 32, (left, right) => left <= right),
+  "UInt64.add": fixedWidthBinary(
+    "UInt64.add", "uint64", 64, (left, right) => left + right),
+  "UInt64.sub": fixedWidthBinary(
+    "UInt64.sub", "uint64", 64, (left, right) => left - right),
+  "UInt64.mul": fixedWidthBinary(
+    "UInt64.mul", "uint64", 64, (left, right) => left * right),
+  "UInt64.div": fixedWidthBinary(
+    "UInt64.div", "uint64", 64,
+    (left, right) => right === 0n ? 0n : left / right),
+  "UInt64.mod": fixedWidthBinary(
+    "UInt64.mod", "uint64", 64,
+    (left, right) => right === 0n ? left : left % right),
+  "UInt64.land": fixedWidthBinary(
+    "UInt64.land", "uint64", 64, (left, right) => left & right),
+  "UInt64.lor": fixedWidthBinary(
+    "UInt64.lor", "uint64", 64, (left, right) => left | right),
+  "UInt64.xor": fixedWidthBinary(
+    "UInt64.xor", "uint64", 64, (left, right) => left ^ right),
+  "UInt64.shiftLeft": fixedWidthBinary(
+    "UInt64.shiftLeft", "uint64", 64,
+    (value, count) => value << (count & 63n)),
+  "UInt64.shiftRight": fixedWidthBinary(
+    "UInt64.shiftRight", "uint64", 64,
+    (value, count) => value >> (count & 63n)),
+  "UInt64.complement": fixedWidthUnary(
+    "UInt64.complement", "uint64", 64, value => ~value),
+  "UInt64.neg": fixedWidthUnary(
+    "UInt64.neg", "uint64", 64, value => -value),
+  "UInt64.decEq": fixedWidthDecision(
+    "UInt64.decEq", "uint64", 64, (left, right) => left === right),
+  "UInt64.decLt": fixedWidthDecision(
+    "UInt64.decLt", "uint64", 64, (left, right) => left < right),
+  "UInt64.decLe": fixedWidthDecision(
+    "UInt64.decLe", "uint64", 64, (left, right) => left <= right),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");

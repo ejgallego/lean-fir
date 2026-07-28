@@ -341,6 +341,12 @@ private def externalUInt32 (request : ExternalRequest) (value : Value) :
   | .scalar (.uint32 value) => .ok value
   | _ => .error (.externalFailure request.name "expected a UInt32 scalar")
 
+private def externalUInt64 (request : ExternalRequest) (value : Value) :
+    Except RuntimeFault UInt64 :=
+  match value with
+  | .scalar (.uint64 value) => .ok value
+  | _ => .error (.externalFailure request.name "expected a UInt64 scalar")
+
 private def natBinaryExternal (operation : Nat → Nat → Nat)
     (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
@@ -1699,6 +1705,147 @@ private def uint32DecisionGuard (name : Name) (operation : UInt32 → UInt32 →
 #guard uint32DecisionGuard ``UInt32.decLe
   (fun left right => decide (left ≤ right)) 4294967295 0 false
 
+private def uint64BinaryExternal (operation : UInt64 → UInt64 → UInt64)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalUInt64 request left
+  let right ← externalUInt64 request right
+  return {
+    value := .scalar (.uint64 (operation left right))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint64UnaryExternal (operation : UInt64 → UInt64)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [value] := request.args.toList
+    | throw (.arityMismatch 1 request.args.size)
+  let value ← externalUInt64 request value
+  return {
+    value := .scalar (.uint64 (operation value))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint64DecisionExternal (operation : UInt64 → UInt64 → Bool)
+    (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse := do
+  let [left, right] := request.args.toList
+    | throw (.arityMismatch 2 request.args.size)
+  let left ← externalUInt64 request left
+  let right ← externalUInt64 request right
+  return {
+    value := .scalar (.uint8 (if operation left right then 1 else 0))
+    heap := runtime.heap
+    nextLocation := runtime.nextLocation
+    world := runtime.world }
+
+private def uint64BinaryGuard (name : Name) (operation : UInt64 → UInt64 → UInt64)
+    (left right expected : UInt64) : Bool :=
+  let runtime : RuntimeState := {}
+  let request := intBinaryRequest name
+    (.scalar (.uint64 left)) (.scalar (.uint64 right))
+  match uint64BinaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint64 expected) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+private def uint64UnaryGuard (name : Name) (operation : UInt64 → UInt64)
+    (input expected : UInt64) : Bool :=
+  let runtime : RuntimeState := {}
+  let request : ExternalRequest := {
+    name
+    paramTypes := #[]
+    resultType := default
+    args := #[.scalar (.uint64 input)] }
+  match uint64UnaryExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint64 expected) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+private def uint64DecisionGuard (name : Name) (operation : UInt64 → UInt64 → Bool)
+    (left right : UInt64) (expected : Bool) : Bool :=
+  let runtime : RuntimeState := {}
+  let request := intBinaryRequest name
+    (.scalar (.uint64 left)) (.scalar (.uint64 right))
+  match uint64DecisionExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+#guard uint64BinaryGuard ``UInt64.add UInt64.add 0xffffffffffffffff 1 0
+
+#guard uint64BinaryGuard ``UInt64.sub UInt64.sub 0 1 0xffffffffffffffff
+
+#guard uint64BinaryGuard ``UInt64.mul UInt64.mul 0x8000000000000000 2 0
+
+#guard uint64BinaryGuard ``UInt64.div UInt64.div
+  0xffffffffffffffff 3 0x5555555555555555
+
+#guard uint64BinaryGuard ``UInt64.div UInt64.div 0xffffffffffffffff 0 0
+
+#guard uint64BinaryGuard ``UInt64.mod UInt64.mod 0xffffffffffffffff 16 15
+
+#guard uint64BinaryGuard ``UInt64.mod UInt64.mod
+  0xffffffffffffffff 0 0xffffffffffffffff
+
+#guard uint64BinaryGuard ``UInt64.land UInt64.land
+  0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0 0x00f000f000f000f0
+
+#guard uint64BinaryGuard ``UInt64.lor UInt64.lor
+  0xf00000000000000f 0x0ff00ff00ff00ff0 0xfff00ff00ff00fff
+
+#guard uint64BinaryGuard ``UInt64.xor UInt64.xor
+  0xf0f0f0f0f0f0f0f0 0x0ff00ff00ff00ff0 0xff00ff00ff00ff00
+
+#guard uint64BinaryGuard ``UInt64.shiftLeft UInt64.shiftLeft
+  0x8000000000000001 64 0x8000000000000001
+
+#guard uint64BinaryGuard ``UInt64.shiftLeft UInt64.shiftLeft
+  0x8000000000000001 65 2
+
+#guard uint64BinaryGuard ``UInt64.shiftRight UInt64.shiftRight
+  0x8000000000000001 64 0x8000000000000001
+
+#guard uint64BinaryGuard ``UInt64.shiftRight UInt64.shiftRight
+  0x8000000000000001 65 0x4000000000000000
+
+#guard uint64UnaryGuard ``UInt64.complement UInt64.complement 0 0xffffffffffffffff
+
+#guard uint64UnaryGuard ``UInt64.neg UInt64.neg 1 0xffffffffffffffff
+
+#guard uint64DecisionGuard ``UInt64.decEq
+  (fun left right => decide (left = right))
+  0xffffffffffffffff 0xffffffffffffffff true
+
+#guard uint64DecisionGuard ``UInt64.decEq
+  (fun left right => decide (left = right)) 0xffffffffffffffff 0 false
+
+#guard uint64DecisionGuard ``UInt64.decLt
+  (fun left right => decide (left < right)) 0 0xffffffffffffffff true
+
+#guard uint64DecisionGuard ``UInt64.decLt
+  (fun left right => decide (left < right)) 0xffffffffffffffff 0 false
+
+#guard uint64DecisionGuard ``UInt64.decLe
+  (fun left right => decide (left ≤ right))
+  0xffffffffffffffff 0xffffffffffffffff true
+
+#guard uint64DecisionGuard ``UInt64.decLe
+  (fun left right => decide (left ≤ right)) 0xffffffffffffffff 0 false
+
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
   call request runtime :=
@@ -1816,6 +1963,36 @@ private def validationExternals : ExternalImpl where
       uint32DecisionExternal (fun left right => decide (left < right)) request runtime
     else if request.name == ``UInt32.decLe then
       uint32DecisionExternal (fun left right => decide (left ≤ right)) request runtime
+    else if request.name == ``UInt64.add then
+      uint64BinaryExternal UInt64.add request runtime
+    else if request.name == ``UInt64.sub then
+      uint64BinaryExternal UInt64.sub request runtime
+    else if request.name == ``UInt64.mul then
+      uint64BinaryExternal UInt64.mul request runtime
+    else if request.name == ``UInt64.div then
+      uint64BinaryExternal UInt64.div request runtime
+    else if request.name == ``UInt64.mod then
+      uint64BinaryExternal UInt64.mod request runtime
+    else if request.name == ``UInt64.land then
+      uint64BinaryExternal UInt64.land request runtime
+    else if request.name == ``UInt64.lor then
+      uint64BinaryExternal UInt64.lor request runtime
+    else if request.name == ``UInt64.xor then
+      uint64BinaryExternal UInt64.xor request runtime
+    else if request.name == ``UInt64.shiftLeft then
+      uint64BinaryExternal UInt64.shiftLeft request runtime
+    else if request.name == ``UInt64.shiftRight then
+      uint64BinaryExternal UInt64.shiftRight request runtime
+    else if request.name == ``UInt64.complement then
+      uint64UnaryExternal UInt64.complement request runtime
+    else if request.name == ``UInt64.neg then
+      uint64UnaryExternal UInt64.neg request runtime
+    else if request.name == ``UInt64.decEq then
+      uint64DecisionExternal (fun left right => decide (left = right)) request runtime
+    else if request.name == ``UInt64.decLt then
+      uint64DecisionExternal (fun left right => decide (left < right)) request runtime
+    else if request.name == ``UInt64.decLe then
+      uint64DecisionExternal (fun left right => decide (left ≤ right)) request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 
