@@ -691,6 +691,18 @@ def divModInt (left right : Int) : Int × Int :=
   (left / right, left % right)
 
 @[noinline]
+def decideIntEq (left right : Int) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideIntLt (left right : Int) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideIntLe (left right : Int) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
 def natAbsInt (value : Int) : Nat :=
   value.natAbs
 
@@ -3409,6 +3421,141 @@ def cases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Int.ediv, ``Int.emod]
     provenance := firProvenance
       "Pin Int division by zero to zero and remainder by zero to the dividend" },
+  { id := "int-dec-eq-multi-limb-true"
+    entry := ``Source.decideIntEq
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntEq
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "external", "decision",
+      "equality", "true", "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decEq]
+    requiredExecutedExternals := #[``Int.decEq]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decEq]
+    requiredExecutedExternalTrace := some #[``Int.decEq]
+    provenance := firProvenance
+      "Accept equality of two identical positive multi-limb Int values" },
+  { id := "int-dec-eq-opposite-sign-false"
+    entry := ``Source.decideIntEq
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntEq
+      (-340282366920938463463374607431768211473)
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "external", "decision",
+      "equality", "false", "negative", "positive", "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decEq]
+    requiredExecutedExternals := #[``Int.decEq]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decEq]
+    requiredExecutedExternalTrace := some #[``Int.decEq]
+    provenance := firProvenance
+      "Reject equality of opposite-sign multi-limb Int values" },
+  { id := "int-dec-lt-opposite-sign-true"
+    entry := ``Source.decideIntLt
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntLt
+      (-340282366920938463463374607431768211473)
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "external", "decision",
+      "ordering", "less-than", "true", "negative", "positive",
+      "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decLt]
+    requiredExecutedExternals := #[``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.decLt]
+    provenance := firProvenance
+      "Order a negative multi-limb Int below its positive magnitude" },
+  { id := "int-dec-lt-multi-limb-equality-false"
+    entry := ``Source.decideIntLt
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int 340282366920938463463374607431768211473]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntLt
+      340282366920938463463374607431768211473
+      340282366920938463463374607431768211473)
+    tags := #["stress", "int", "signed", "external", "decision",
+      "ordering", "less-than", "false", "equality", "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decLt]
+    requiredExecutedExternals := #[``Int.decLt]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decLt]
+    requiredExecutedExternalTrace := some #[``Int.decLt]
+    provenance := firProvenance
+      "Reject strict ordering of equal positive multi-limb Int values" },
+  { id := "int-dec-le-multi-limb-equality-true"
+    entry := ``Source.decideIntLe
+    args := #[
+      .int (-340282366920938463463374607431768211473),
+      .int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntLe
+      (-340282366920938463463374607431768211473)
+      (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "external", "decision",
+      "ordering", "less-or-equal", "true", "equality", "negative",
+      "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decLe]
+    requiredExecutedExternals := #[``Int.decLe]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decLe]
+    requiredExecutedExternalTrace := some #[``Int.decLe]
+    provenance := firProvenance
+      "Accept non-strict ordering of equal negative multi-limb Int values" },
+  { id := "int-dec-le-opposite-sign-false"
+    entry := ``Source.decideIntLe
+    args := #[
+      .int 340282366920938463463374607431768211473,
+      .int (-340282366920938463463374607431768211473)]
+    argSchemas := #[.int, .int]
+    resultSchema := .bool
+    native := fun _ => .bool (Source.decideIntLe
+      340282366920938463463374607431768211473
+      (-340282366920938463463374607431768211473))
+    tags := #["stress", "int", "signed", "external", "decision",
+      "ordering", "less-or-equal", "false", "positive", "negative",
+      "multi-limb", "heap"]
+    requiredLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfForms := #["fap", "extern", "return"]
+    requiredExecutedLcnfFormTrace := some externalCallFormTrace
+    requiredExternals := #[``Int.decLe]
+    requiredExecutedExternals := #[``Int.decLe]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``Int.decLe]
+    requiredExecutedExternalTrace := some #[``Int.decLe]
+    provenance := firProvenance
+      "Reject non-strict ordering of a positive multi-limb Int below a negative one" },
   { id := "int-nat-abs-multi-limb-positive"
     entry := ``Source.natAbsInt
     args := #[.int 340282366920938463463374607431768211473]

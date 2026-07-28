@@ -387,7 +387,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 186 cases. Required oracle edges must share one matrix
+edges over at least 192 cases. Required oracle edges must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
@@ -469,12 +469,12 @@ and executed external together with the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 186 source cases are shared by the source-LCNF and V8
+current baseline, the 192 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 13 static forms, 13 executed forms, and all 33 interpreter
+contributes 13 static forms, 13 executed forms, and all 35 interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -1274,7 +1274,7 @@ sequence.
 `{external, minimum, maximum}` obligations, and the coverage report retains
 both per-case bound violations and corpus-wide required and observed totals.
 When `requiredExecutedExternalTrace` is non-null, the observed sequence must
-also match it element for element. All 108 current fixtures that retain an
+also match it element for element. All 114 current fixtures that retain an
 external pin an exact trace: the skipped conditional pins `[]`, repeated
 effects pin both occurrences, and the signed-integer fixtures pin construction
 before negation or comparison.
@@ -1320,7 +1320,7 @@ from the same run.
 
 ## Current corpus
 
-The compiler-generated corpus currently has 186 cases. Direct identity cases
+The compiler-generated corpus currently has 192 cases. Direct identity cases
 pin the 64-bit tagged-`Nat` boundary at `2^63 - 1` and `2^63`, then extend the
 same check to the multi-limb value `2^128 + 17`. Positive and negative
 multi-limb `Int` identities exercise both heap magnitude and the negative
@@ -1340,6 +1340,10 @@ sign quadrants, a negative multi-limb dividend, and a zero divisor. Each pins
 `Int.ediv` followed by `Int.emod` exactly once, returns both results together,
 distinguishes Euclidean rounding from JavaScript-style truncation, and requires
 a nonnegative remainder below the divisor magnitude when it is nonzero.
+Six signed-decision cases give `Int.decEq`, `Int.decLt`, and `Int.decLe` both
+Boolean outcomes. Equal multi-limb heap values pin strict versus non-strict
+ordering, while opposite-sign magnitudes independently validate sign handling
+without passing through arithmetic normalization.
 Four natural-magnitude cases cross from signed `Int` inputs to `Nat` results
 through one exact `Int.natAbs` dispatch: positive and negative multi-limb heap
 inputs retain the full `2^128 + 17` magnitude, while the negative immediate
@@ -1477,7 +1481,8 @@ hand-written LCNF: the native and FIR paths consume the same Lean source
 declarations.  Signed-`Int` fixtures cover both signs on either side of the
 immediate 32-bit ABI boundary.  The boundary matrix independently validates
 runner-supplied identity, compiler-built literals through `Int.ofNat` and
-`Int.neg`, and constructor classification through `Int.decLt`, so tagged/heap
+`Int.neg`, constructor classification through `Int.decLt`, and direct
+`Int.decEq`/`Int.decLt`/`Int.decLe` outcomes, so tagged/heap
 codec behavior, external results, and scalar-driven control flow cannot mask
 one another. Controlled `Nat.add` cases execute a real imported runtime
 primitive with tagged inputs, a tagged-to-heap result transition, and a
@@ -1525,7 +1530,8 @@ Wasm import boundary and retains its own private event-time heap views.
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Nat.div`, `Nat.mod`, `Nat.mul`, `Nat.sub`, `Nat.decEq`,
 `Nat.decLt`, `Nat.decLe`, `Int.ofNat`, `Int.neg`, `Int.add`, `Int.ediv`,
-`Int.emod`, `Int.mul`, `Int.sub`, `Int.decLt`, `Int.natAbs`, `ByteArray.size`,
+`Int.emod`, `Int.mul`, `Int.sub`, `Int.decEq`, `Int.decLt`, `Int.decLe`,
+`Int.natAbs`, `ByteArray.size`,
 `ByteArray.get!`, `ByteArray.set!`, `String.Internal.extract`,
 `String.Internal.append`, `String.Internal.pushn`,
 `String.decEq`, `String.decidableLT`, `String.compare`,
@@ -1568,8 +1574,9 @@ re-encode both signed immediate and heap representations; `Int.add`, `Int.ediv`,
 `Int.emod`, `Int.mul`, and `Int.sub` share one exact binary-`Int` adapter.
 Division and remainder use Euclidean rounding, including the nonnegative
 remainder and zero-divisor conventions. `Int.natAbs` crosses from exact
-signed input to an exact natural result, and `Int.decLt` returns the scalar
-`UInt8` discriminant consumed by lowered pattern matching. Byte-array size
+signed input to an exact natural result. `Int.decEq`, `Int.decLt`, and
+`Int.decLe` share an exact comparison adapter and return the scalar `UInt8`
+discriminant consumed by lowered pattern matching. Byte-array size
 reads the packed heap object and returns a tagged natural; byte-array indexing
 returns the selected packed byte as a scalar `UInt8`. Byte-array mutation
 consumes its array argument: unique cells update in place, while shared cells
@@ -1646,7 +1653,8 @@ Unicode measurements, raw UTF-8 String navigation, extraction, and
 ownership-sensitive String construction, exact UTF-8 String equality and ordering,
 multi-limb `Int.add`/`Int.mul`/`Int.sub` growth, sign changes, and cancellation,
 all Euclidean `Int.ediv`/`Int.emod` sign quadrants and zero, cross-domain
-`Int.natAbs` signs and representation boundaries, all three
+`Int.natAbs` signs and representation boundaries, signed equality and
+strict/non-strict ordering, all three
 controlled-effect programs, and all five mixed-layout projections.
 `make validate-v8` delegates whole-corpus selection to the plan rather than
 maintaining a second case allowlist, so every new shared fixture enters the
