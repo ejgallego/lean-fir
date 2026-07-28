@@ -19,6 +19,9 @@ const natMod = validationExternalRegistry["Nat.mod"];
 const intMul = validationExternalRegistry["Int.mul"];
 const intEDiv = validationExternalRegistry["Int.ediv"];
 const intEMod = validationExternalRegistry["Int.emod"];
+const intDecEq = validationExternalRegistry["Int.decEq"];
+const intDecLt = validationExternalRegistry["Int.decLt"];
+const intDecLe = validationExternalRegistry["Int.decLe"];
 
 assert.strictEqual(formatExternalRegistry["String.Internal.append"], append);
 assert.strictEqual(formatExternalRegistry["String.Internal.pushn"], pushn);
@@ -31,6 +34,9 @@ assert.strictEqual(formatExternalRegistry["Nat.mod"], natMod);
 assert.strictEqual(formatExternalRegistry["Int.mul"], intMul);
 assert.strictEqual(formatExternalRegistry["Int.ediv"], intEDiv);
 assert.strictEqual(formatExternalRegistry["Int.emod"], intEMod);
+assert.strictEqual(formatExternalRegistry["Int.decEq"], intDecEq);
+assert.strictEqual(formatExternalRegistry["Int.decLt"], intDecLt);
+assert.strictEqual(formatExternalRegistry["Int.decLe"], intDecLe);
 
 function invoke(handler, host, args) {
   const beforeWorld = host.world;
@@ -186,6 +192,59 @@ for (const [handler, declaration, leftValue, rightValue, expected, allocates] of
   const result = invoke(handler, host, [left, right]);
   assert.equal(integerValue(host, result, `${declaration} result`), expected);
   assert.equal(host.nextLocation, frontier + (allocates ? 1 : 0));
+  assert.equal(integerValue(host, left, `${declaration} retained left`), leftValue);
+  assert.equal(integerValue(host, right, `${declaration} retained right`), rightValue);
+}
+
+for (const [handler, declaration, leftValue, rightValue, expected] of [
+  [
+    intDecEq, "Int.decEq",
+    340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    1n,
+  ],
+  [
+    intDecEq, "Int.decEq",
+    -340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    0n,
+  ],
+  [
+    intDecLt, "Int.decLt",
+    -340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    1n,
+  ],
+  [
+    intDecLt, "Int.decLt",
+    340282366920938463463374607431768211473n,
+    340282366920938463463374607431768211473n,
+    0n,
+  ],
+  [
+    intDecLe, "Int.decLe",
+    -340282366920938463463374607431768211473n,
+    -340282366920938463463374607431768211473n,
+    1n,
+  ],
+  [
+    intDecLe, "Int.decLe",
+    340282366920938463463374607431768211473n,
+    -340282366920938463463374607431768211473n,
+    0n,
+  ],
+]) {
+  const host = new SemanticHost();
+  const left = host.integer(leftValue);
+  const right = host.integer(rightValue);
+  const frontier = host.nextLocation;
+  const result = invoke(handler, host, [left, right]);
+  assert.deepStrictEqual(result, {
+    kind: "scalar",
+    scalarKind: "uint8",
+    value: expected,
+  });
+  assert.equal(host.nextLocation, frontier);
   assert.equal(integerValue(host, left, `${declaration} retained left`), leftValue);
   assert.equal(integerValue(host, right, `${declaration} retained right`), rightValue);
 }

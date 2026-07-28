@@ -1402,17 +1402,61 @@ private def multiLimbInt : Int :=
 
 #guard intNatAbsGuard (-2147483649) 2147483649 false
 
-private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
+private def intDecisionExternal (operation : Int → Int → Bool)
+    (request : ExternalRequest) (runtime : RuntimeState) :
     Except RuntimeFault ExternalResponse := do
   let [left, right] := request.args.toList
     | throw (.arityMismatch 2 request.args.size)
   let left ← externalInt request runtime left
   let right ← externalInt request runtime right
   return {
-    value := .scalar (.uint8 (if left < right then 1 else 0))
+    value := .scalar (.uint8 (if operation left right then 1 else 0))
     heap := runtime.heap
     nextLocation := runtime.nextLocation
     world := runtime.world }
+
+private def intDecEqExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intDecisionExternal (fun left right => decide (left = right)) request runtime
+
+private def intDecLtExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intDecisionExternal (fun left right => decide (left < right)) request runtime
+
+private def intDecLeExternal (request : ExternalRequest) (runtime : RuntimeState) :
+    Except RuntimeFault ExternalResponse :=
+  intDecisionExternal (fun left right => decide (left ≤ right)) request runtime
+
+private def intDecisionGuard (name : Name) (operation : Int → Int → Bool)
+    (left right : Int) (expected : Bool) : Bool :=
+  let (runtime, leftValue) := encodeIntValue {} left
+  let (runtime, rightValue) := encodeIntValue runtime right
+  let request := intBinaryRequest name leftValue rightValue
+  match intDecisionExternal operation request runtime with
+  | .error _ => false
+  | .ok response =>
+      response.value == .scalar (.uint8 (if expected then 1 else 0)) &&
+      response.heap == runtime.heap &&
+      response.nextLocation == runtime.nextLocation &&
+      response.world == runtime.world
+
+#guard intDecisionGuard ``Int.decEq
+  (fun left right => decide (left = right)) multiLimbInt multiLimbInt true
+
+#guard intDecisionGuard ``Int.decEq
+  (fun left right => decide (left = right)) (-multiLimbInt) multiLimbInt false
+
+#guard intDecisionGuard ``Int.decLt
+  (fun left right => decide (left < right)) (-multiLimbInt) multiLimbInt true
+
+#guard intDecisionGuard ``Int.decLt
+  (fun left right => decide (left < right)) multiLimbInt multiLimbInt false
+
+#guard intDecisionGuard ``Int.decLe
+  (fun left right => decide (left ≤ right)) (-multiLimbInt) (-multiLimbInt) true
+
+#guard intDecisionGuard ``Int.decLe
+  (fun left right => decide (left ≤ right)) multiLimbInt (-multiLimbInt) false
 
 /-- Pure runtime primitives explicitly modeled by the validation backend. -/
 private def validationExternals : ExternalImpl where
@@ -1481,8 +1525,12 @@ private def validationExternals : ExternalImpl where
       intEDivExternal request runtime
     else if request.name == ``Int.emod then
       intEModExternal request runtime
+    else if request.name == ``Int.decEq then
+      intDecEqExternal request runtime
     else if request.name == ``Int.decLt then
       intDecLtExternal request runtime
+    else if request.name == ``Int.decLe then
+      intDecLeExternal request runtime
     else
       .error (.externalFailure request.name "external is not in the validation allowlist")
 

@@ -84,6 +84,15 @@ function integerBinary(declaration, operation) {
   };
 }
 
+function integerDecision(declaration, operation) {
+  return ({ args, host, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = integerValue(host, args[0], `${declaration} left operand`);
+    const right = integerValue(host, args[1], `${declaration} right operand`);
+    return { value: boolResult(operation(left, right)), world };
+  };
+}
+
 function naturalDivision(left, right) {
   return right === 0n ? 0n : left / right;
 }
@@ -277,19 +286,9 @@ export const validationExternalRegistry = {
   "Int.mul": integerBinary("Int.mul", (left, right) => left * right),
   "Int.ediv": integerBinary("Int.ediv", euclideanDivision),
   "Int.emod": integerBinary("Int.emod", euclideanRemainder),
-  "Int.decLt": ({ args, host, world }) => {
-    assert.equal(args.length, 2, "Int.decLt external arity mismatch");
-    const left = integerValue(host, args[0], "Int.decLt left operand");
-    const right = integerValue(host, args[1], "Int.decLt right operand");
-    return {
-      value: {
-        kind: "scalar",
-        scalarKind: "uint8",
-        value: left < right ? 1n : 0n,
-      },
-      world,
-    };
-  },
+  "Int.decEq": integerDecision("Int.decEq", (left, right) => left === right),
+  "Int.decLt": integerDecision("Int.decLt", (left, right) => left < right),
+  "Int.decLe": integerDecision("Int.decLe", (left, right) => left <= right),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");
