@@ -759,6 +759,15 @@ well-formedness, and the exact contract. Its public `LoweringCorrect` theorem
 therefore uses the strict compiler-facing endpoint rather than the older
 reachability-quantified helper.
 
+The reset/reuse fixtures now use the same strict composition. The one-cell
+fixture has been migrated from a bespoke hereditary invariant to
+`closedConcreteReuseExactOwnershipContract`; it and the owned-child fixture
+both expose checked whole-program equations and
+`ElimDeadCompilerAdmissibleRun` packages. Their public `LoweringCorrect`
+theorems therefore consume the conservative compiler policy together with the
+exact finite-graph ownership proof, rather than stopping at the older semantic
+admissibility endpoint.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -853,11 +862,11 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Derive the unmapped/source-only location premise from an auditable static
-   compiler ownership invariant, rather than an empty-target fixture shape.
-2. Route the closed reset/reuse and owned-child reset/reuse programs through
-   checked `ElimDeadCompilerAdmissibleRun` packages, reusing their existing
-   exact ownership contracts.
+1. Introduce an auditable source-only location invariant whose preservation
+   implies `rho.forward location = none`, then connect it to the existing
+   root-independent operation certificates.
+2. Exercise that invariant on a non-empty-target fixture so the compiler
+   ownership bridge no longer depends on an empty target frontier.
 3. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
