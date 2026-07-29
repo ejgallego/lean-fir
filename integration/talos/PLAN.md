@@ -3879,6 +3879,28 @@ arbitrary direct and pure-Int steps can use `correctBudgetedSpine` together.
 These proof-facing admission and layout surfaces remain deliberately
 unstable. No FIR semantic contract or executable ABI changed.
 
+W6.6ez closes that mixed-spine composition boundary.
+`DirectLetRuntimeRefinesWithCost` now requires every admitted direct helper to
+preserve the installed `Host.externals` field as well as the semantic state,
+local frame, and exact residual budget. The eight current direct families
+discharge the stronger law from their concrete `targetStore`,
+`clearFailure`, or `replaceHeap` result. A generic
+`preservingExternalInvariant` theorem then lifts any such direct family
+through a property of the installed concrete implementation.
+
+`directLetRuntimeRefines_budgetedDirect_integerExternal` applies that lift to
+`IntegerResultRefines`, and
+`correctBudgetedIntegerExternalSpine` combines it with the compiler-shaped
+external theorem. The resulting public theorem accepts an arbitrary finite
+source evaluation interleaving the full current direct family with
+`Int.ofNat`/`Int.neg`, one exact path budget, and the initially installed
+integer-handler family law. It derives all target steps and returns exact
+source execution plus fuel-free named-export termination; callers provide no
+runtime-law arguments or per-node target witnesses. The next external slice
+can enlarge the source-facing integer operation family without changing this
+structural theorem. These proof-facing laws remain deliberately unstable. No
+FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

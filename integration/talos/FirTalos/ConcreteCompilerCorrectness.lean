@@ -2348,6 +2348,7 @@ theorem constructorNonemptyStep_of_budget
         (nextWitness : RefinementWitness),
       allocCtorStep info fieldKinds resultKind initial physicalArgs =
           .Return [.i32 (UInt32.ofNat word.value)] nextStore ∧
+        nextStore.host.externals = initial.host.externals ∧
         witness.Extends nextWitness ∧
         ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime ∧
         nextStore.host.failure? = none ∧
@@ -2387,8 +2388,9 @@ theorem constructorNonemptyStep_of_budget
   subst sourceValue
   let nextWitness :=
     witness.bindConstructor sourceRuntime.nextLocation address info fieldKinds
-  refine ⟨replaceHeap initial heap, address, nextWitness, operation, extension,
-    nextRuntimeRelated, ?_, physicalRelated, ?_⟩
+  refine ⟨replaceHeap initial heap, address, nextWitness, operation, ?_,
+    extension, nextRuntimeRelated, ?_, physicalRelated, ?_⟩
+  · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using remainingBudget
 
@@ -3800,9 +3802,10 @@ Resource-indexed direct-`let` runtime law.
 `letCost` assigns a source-level cost to each admitted declaration.
 `Invariant remainingBytes ...` describes the concrete resources available
 before a step. The runtime implementation consumes exactly the declaration's
-cost and establishes the invariant at the residual index. This is the
-before/after form needed by allocating structural proofs; it remains entirely
-independent of target-program certificates.
+cost, preserves the installed external implementation, and establishes the
+invariant at the residual index. External-implementation preservation is a
+property of the generated direct helper, not a source/target certificate; it
+lets later external calls rely on one stable concrete handler family.
 -/
 def DirectLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
@@ -3843,9 +3846,10 @@ def DirectLetRuntimeRefinesWithCost
         LetStepSimulates context sourceFunction module hostEnv decl targetValue
           sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
           targetLocals nextLocals resultIndex witness nextWitness ∧
-        Invariant (remainingBytes - letCost decl) nextRuntime
-          (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
-          nextWitness
+        nextStore.host.externals = targetStore.host.externals ∧
+          Invariant (remainingBytes - letCost decl) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness
 
 /--
 Resource-indexed external-`let` runtime law.
@@ -4186,6 +4190,46 @@ theorem DirectLetRuntimeRefinesWithCost.or
         valueCompiled valueAdapted resultFound
 
 /--
+A costed direct runtime law lifts through any invariant of the installed
+concrete external implementation. The strengthened direct-step boundary
+supplies the only needed fact: direct generated helpers leave
+`Host.externals` unchanged.
+-/
+theorem DirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv Supported letCost Invariant) :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      module hostEnv Supported letCost
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep stateRelated valueCompiled
+    valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, step, externalsPreserved,
+      nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant.1 sourceStep stateRelated
+      valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, step, externalsPreserved,
+    nextInvariant, by simpa [externalsPreserved] using invariant.2⟩
+
+/--
 One compiler-produced immediate literal is simulated by its generated
 constant and destination write. No host call, heap transition, or witness
 extension is involved.
@@ -4500,7 +4544,7 @@ theorem directLetRuntimeRefinesWithCost_localAlias
   exact ⟨targetStore, updated, witness,
     letStepSimulates_localAlias valueEq sourceLookup stateRelated resultFound
       resultKindAt sourcePhysical physicalRelated targetSet,
-    nextFrameAligned, by simpa [costZero] using budgeted.2⟩
+    rfl, nextFrameAligned, by simpa [costZero] using budgeted.2⟩
 
 /--
 Uniform runtime-law instance for every nonallocating integer or `USize`
@@ -4624,7 +4668,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_immediateLiteral
   exact ⟨targetStore, updated, witness,
     letStepSimulates_immediateLiteral shape sourceStep stateRelated resultFound
       resultKindAt targetSet,
-    nextFrameAligned, by simpa [costZero] using budgeted.2⟩
+    rfl, nextFrameAligned, by simpa [costZero] using budgeted.2⟩
 
 /--
 Cost-indexed runtime-law instance for representation-polymorphic natural
@@ -4721,7 +4765,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_naturalLiteral
             (remainingBytes - naturalAllocationBytes value) := by
         simpa [replaceHeap, clearFailure] using remainingBudget
       exact ⟨replaceHeap targetStore heap, updated, nextWitness, step,
-        nextFrame, by
+        by simp [replaceHeap, clearFailure], nextFrame, by
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
 /--
@@ -4820,7 +4864,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_stringLiteral
                 (headerBytes + (stringUtf8Bytes value).length)) := by
         simpa [replaceHeap, clearFailure] using remainingBudget
       exact ⟨replaceHeap targetStore heap, updated, nextWitness, step,
-        nextFrame, by
+        by simp [replaceHeap, clearFailure], nextFrame, by
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
 /--
@@ -4891,8 +4935,9 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
   rw [resultFound] at alignedResultFound
   injection alignedResultFound with resultIndexEq
   subst alignedResultIndex
-  obtain ⟨nextStore, word, nextWitness, operation, extension,
-      nextRuntimeRelated, failureClear, valueRelated, remainingBudget⟩ :=
+  obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
+      extension, nextRuntimeRelated, failureClear, valueRelated,
+      remainingBudget⟩ :=
     constructorNonemptyStep_of_budget stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -4915,7 +4960,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
         (bind sourceEnv decl.fvarId sourceValue) nextStore updated
         nextWitness :=
     ⟨lengths.1.trans budgeted.1.1, lengths.2.trans budgeted.1.2⟩
-  exact ⟨nextStore, updated, nextWitness, step, nextFrame, by
+  exact ⟨nextStore, updated, nextWitness, step, externalsPreserved, nextFrame, by
     simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
 
 /--
@@ -5084,7 +5129,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_usizeProjection
               stateRelated resultFound resultKindAt hObject objectRelated
               descriptor imported spec.hostsSatisfy inBounds contracted params
               results targetSet,
-            nextFrameAligned, by
+            by simp [clearFailure], nextFrameAligned, by
               simpa [directLetAllocationCost, valueEq, clearFailure] using
                 budgeted.2⟩
       | word64 valueRelated => cases valueRelated
@@ -5267,7 +5312,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_objectProjection
               stateRelated resultFound resultKindAt hObject objectRelated
               descriptor fieldKind concreteRead imported spec.hostsSatisfy
               inBounds contracted params results targetSet,
-            nextFrameAligned, by
+            by simp [clearFailure], nextFrameAligned, by
               simpa [directLetAllocationCost, valueEq, clearFailure] using
                 budgeted.2⟩
       | word64 valueRelated => cases valueRelated
@@ -5446,7 +5491,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
               stateRelated resultFound resultKindAt hObject resultRelated
               imported spec.hostsSatisfy inBounds contracted params results
               operation targetSet,
-            nextFrameAligned, by
+            by simp [clearFailure], nextFrameAligned, by
               simpa [directLetAllocationCost, valueEq, clearFailure] using
                 budgeted.2⟩
       | word64 valueRelated => cases valueRelated
@@ -5521,6 +5566,44 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
             · apply DirectLetRuntimeRefinesWithCost.or
               · exact spec.directLetRuntimeRefines_stringLiteral
               · exact spec.directLetRuntimeRefines_nonemptyConstructor
+
+/--
+The complete current direct family preserves the frame used by pure integer
+external calls. Thus aliases, literals, projections, constructors, and
+`Int.ofNat`/`Int.neg` calls may share one budgeted structural induction.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_integerExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+            sourceEnv targetStore targetLocals witness ∧
+          targetStore.host.externals.IntegerResultRefines externals)
+  exact
+    DirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+      (ExternalInvariant :=
+        fun concrete => concrete.IntegerResultRefines externals)
+      spec.directLetRuntimeRefines_budgetedDirect
 
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without
@@ -5749,7 +5832,8 @@ theorem codeWP_of_directValueEvaluates_withCost
           letCost decl ≤
             DirectValuePathCost letCost (.let decl continuation) := by
         simp [DirectValuePathCost]
-      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+      obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
+          nextInvariant⟩ :=
         runtimeRefines supported stepFits invariant sourceStep stateRelated
           valueCompiled valueAdapted resultFound
       have continuationInvariant :
@@ -5859,7 +5943,8 @@ theorem codeWP_of_budgetedSpineEvaluates
       have stepFits :
           directCost decl ≤ directCost decl + continuationCost :=
         Nat.le_add_right _ _
-      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+      obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
+          nextInvariant⟩ :=
         directRuntimeRefines supported stepFits invariant sourceStep stateRelated
           valueCompiled valueAdapted resultFound
       have continuationInvariant :
@@ -5976,6 +6061,95 @@ theorem ConcreteSupportedExport.correctBudgetedSpine
       (parameters := parameters) (callerTail := callerTail)
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨frameAligned, budget⟩ directRuntimeRefines externalRuntimeRefines
+      parameterCount spec.singleResult
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultRuntimeRelated, failureClear, valueRelated, rfl⟩
+
+/--
+Concrete whole-export partial correctness for spines that interleave every
+currently admitted direct operation with pure `Int.ofNat`/`Int.neg` external
+calls.
+
+The caller supplies source evaluation, the initial representation/frame
+relation, one exact path budget, and the installed external implementation's
+integer-result family law. The direct and external runtime laws are derived
+from the supported export rather than passed as program-specific evidence.
+-/
+theorem ConcreteSupportedExport.correctBudgetedIntegerExternalSpine
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureIntegerExternalSupported context externals)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (implementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+      resultRuntimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedSpineEvaluates
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned stateRelated
+      ⟨⟨frameAligned, budget⟩, implementation⟩
+      (spec.directLetRuntimeRefines_budgetedDirect_integerExternal externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureInteger externals)
       parameterCount spec.singleResult
   have parameterPrefix :
       (parameters ++ callerTail).take spec.targetFunction.numParams =

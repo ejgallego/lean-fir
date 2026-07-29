@@ -170,8 +170,13 @@ exactly `Int.ofNat` and `Int.neg`; argument decoding, named-call inversion,
 static external resolver alignment, and
 `externalLetRuntimeRefinesWithCost_pureInteger` derive their complete
 compiler-shaped external step without target witnesses. Lifting the existing
-direct-operation laws through the installed-handler invariant is next, after
-which the mixed whole-export theorem can consume both families together.
+direct-operation laws through the installed-handler invariant is complete:
+the strengthened costed direct law preserves `Host.externals`, the generic
+lift threads `IntegerResultRefines`, and
+`correctBudgetedIntegerExternalSpine` consumes both direct and pure-Int
+families in one finite whole-export proof. The next external slice can widen
+the source-facing integer operation family without changing this structural
+theorem.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

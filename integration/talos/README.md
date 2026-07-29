@@ -278,9 +278,15 @@ target witnesses. `PureIntegerExternalSupported` admits compiler-shaped
 `externalLetRuntimeRefinesWithCost_pureInteger` reconstructs their argument
 prefix, external import, host contract, allocation, local write, exact source
 trace, and residual budget from production compilation and static resolver
-alignment. Existing direct laws still need the small installed-handler
-invariant lift before arbitrary mixed spines use both families together. This
-proof-facing surface is intentionally unstable.
+alignment. Costed direct runtime laws now also prove that they preserve the
+installed concrete external implementation. The generic lift
+`preservingExternalInvariant` carries the integer-handler family law through
+all current direct operations, and
+`correctBudgetedIntegerExternalSpine` proves a named export correct for
+arbitrary finite interleavings of those direct operations with
+`Int.ofNat`/`Int.neg`. Its caller supplies only source evaluation, the initial
+state/frame relation, one exact path budget, and the initially installed
+handler law. This proof-facing surface is intentionally unstable.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

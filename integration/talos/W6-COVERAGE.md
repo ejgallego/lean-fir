@@ -92,8 +92,12 @@ Cross-cutting W6.5 state:
   `externalLetRuntimeRefinesWithCost_pureInteger` now derive compiler-shaped
   `Int.ofNat` and `Int.neg` calls through real argument compilation,
   adaptation, static external resolution, destination binding, exact source
-  traces, and residual budget. Direct/external mixed-spine use awaits the
-  generic installed-handler invariant lift for existing direct laws.
+  traces, and residual budget. `DirectLetRuntimeRefinesWithCost` now preserves
+  the installed concrete external implementation; its generic invariant lift
+  carries `IntegerResultRefines` across every current direct family.
+  `correctBudgetedIntegerExternalSpine` therefore closes arbitrary finite
+  direct/`Int.ofNat`/`Int.neg` interleavings at the named-export boundary
+  without caller-supplied runtime laws or target witnesses.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
