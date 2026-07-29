@@ -7604,6 +7604,160 @@ noncomputable def LedgerShadowRuntimeRel.allocBoth
     }
   }
 
+/-- Proof-relevant result of evaluating one literal on both related
+runtimes. Immediate literals retain the current renaming and ledger;
+heap-backed literals return the extended pair selected by `allocBoth`. -/
+structure LedgerLiteralBothResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (literalValue : LCNF.LitValue) : Type where
+  larger : AddressRenaming
+  extension : RenamingExtends rho larger
+  values :
+    ValueRel larger (literal left literalValue).2
+      (literal right literalValue).2
+  runtime :
+    LedgerShadowRuntimeRel larger
+      (literal left literalValue).1 (literal right literalValue).1
+      ((literal left literalValue).2 :: leftExtra)
+      ((literal right literalValue).2 :: rightExtra)
+
+/-- Literal evaluation preserves target-allocation history exactly:
+non-heap literals reuse the current ledger, while heap-backed naturals and
+strings append the fresh paired allocation returned by `allocBoth`. -/
+noncomputable def LedgerShadowRuntimeRel.literalBoth
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (literalValue : LCNF.LitValue) :
+    LedgerLiteralBothResult rho left right leftExtra rightExtra
+      literalValue := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · exact {
+          larger := rho
+          extension := RenamingExtends.refl rho
+          values := by
+            simpa [literal, small] using
+              (ValueRel.tagged (rho := rho) (UInt64.ofNat value))
+          runtime := {
+            runtime := by
+              simpa [literal, small] using
+                related.runtime.prependNonHeap
+                  (ValueRel.tagged (rho := rho) (UInt64.ofNat value))
+                  (by intro location; simp)
+                  (by intro location; simp)
+            ledger := by
+              simpa [literal, small] using related.ledger
+          }
+        }
+      · let allocated := related.allocBoth
+          (HeapObjectRel.natural value)
+          (by simp [RootSubset, HeapObject.ownedValues])
+          (by simp [RootSubset, HeapObject.ownedValues]) false
+        exact {
+          larger := allocated.larger
+          extension := allocated.extension
+          values := by
+            simpa [literal, small] using allocated.values
+          runtime := by
+            simpa [literal, small] using allocated.runtime
+        }
+  | str value =>
+      let allocated := related.allocBoth
+        (HeapObjectRel.string value)
+        (by simp [RootSubset, HeapObject.ownedValues])
+        (by simp [RootSubset, HeapObject.ownedValues]) false
+      exact {
+        larger := allocated.larger
+        extension := allocated.extension
+        values := by
+          simpa [literal] using allocated.values
+        runtime := by
+          simpa [literal] using allocated.runtime
+      }
+  | uint8 value =>
+      exact {
+        larger := rho
+        extension := RenamingExtends.refl rho
+        values := ValueRel.scalar (.uint8 value)
+        runtime := {
+          runtime := by
+            simpa [literal] using related.runtime.prependNonHeap
+              (ValueRel.scalar (rho := rho) (.uint8 value))
+              (by intro location; simp)
+              (by intro location; simp)
+          ledger := by simpa [literal] using related.ledger
+        }
+      }
+  | uint16 value =>
+      exact {
+        larger := rho
+        extension := RenamingExtends.refl rho
+        values := ValueRel.scalar (.uint16 value)
+        runtime := {
+          runtime := by
+            simpa [literal] using related.runtime.prependNonHeap
+              (ValueRel.scalar (rho := rho) (.uint16 value))
+              (by intro location; simp)
+              (by intro location; simp)
+          ledger := by simpa [literal] using related.ledger
+        }
+      }
+  | uint32 value =>
+      exact {
+        larger := rho
+        extension := RenamingExtends.refl rho
+        values := ValueRel.scalar (.uint32 value)
+        runtime := {
+          runtime := by
+            simpa [literal] using related.runtime.prependNonHeap
+              (ValueRel.scalar (rho := rho) (.uint32 value))
+              (by intro location; simp)
+              (by intro location; simp)
+          ledger := by simpa [literal] using related.ledger
+        }
+      }
+  | uint64 value =>
+      exact {
+        larger := rho
+        extension := RenamingExtends.refl rho
+        values := ValueRel.scalar (.uint64 value)
+        runtime := {
+          runtime := by
+            simpa [literal] using related.runtime.prependNonHeap
+              (ValueRel.scalar (rho := rho) (.uint64 value))
+              (by intro location; simp)
+              (by intro location; simp)
+          ledger := by simpa [literal] using related.ledger
+        }
+      }
+  | usize value =>
+      exact {
+        larger := rho
+        extension := RenamingExtends.refl rho
+        values := ValueRel.usize value
+        runtime := {
+          runtime := by
+            simpa [literal] using related.runtime.prependNonHeap
+              (ValueRel.usize (rho := rho) value)
+              (by intro location; simp)
+              (by intro location; simp)
+          ledger := by simpa [literal] using related.ledger
+        }
+      }
+
+/-- A deleted literal may allocate only on the source. Its target runtime,
+renaming, and allocation ledger are unchanged. -/
+def LedgerShadowRuntimeRel.literalLeftGarbage
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (literalValue : LCNF.LitValue) :
+    LedgerShadowRuntimeRel rho (literal left literalValue).1 right
+      leftExtra rightExtra where
+  runtime := related.runtime.literalLeftGarbage literalValue
+  ledger := related.ledger
+
 /-- Hereditary exact machine correspondence equipped with the target
 allocation history for its exact address renaming. This is the machine-level
 surface on which write/reset/reuse clients can select ledger-based readiness
@@ -11484,6 +11638,136 @@ theorem match_deletedLiteralLetStep_binderReady
     ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
   exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying hereditary matcher for a retained literal. This is the
+first allocation-changing non-lockstep branch whose post-state retains both
+the exact compiler provenance and the target-allocation history selected by
+the actual paired allocation. -/
+theorem match_retainedLiteralLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .lit literalValue
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  rcases runtime.literalBoth literalValue with
+    ⟨larger, extension, values, allocatedRuntime⟩
+  let sourceRuntime := (literal sourceState.runtime literalValue).1
+  let targetRuntime := (literal targetState.runtime literalValue).1
+  let sourceValue := (literal sourceState.runtime literalValue).2
+  let targetValue := (literal targetState.runtime literalValue).2
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .lit literalValue
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .lit literalValue
+    } targetContinuation) }
+  let sourceExpected := {
+    sourceState with
+    runtime := sourceRuntime
+    env := bind sourceState.env fvarId sourceValue
+    control := .code sourceContinuation }
+  let targetExpected := {
+    targetState with
+    runtime := targetRuntime
+    env := bind targetState.env fvarId targetValue
+    control := .code targetContinuation }
+  have sourceTransition :
+      coreStep sourceCurrent = .next sourceExpected := by
+    simp [sourceCurrent, sourceExpected, sourceRuntime, sourceValue,
+      coreStep, evalLetValue, Pure.pure, Except.pure]
+  have targetTransition :
+      coreStep targetCurrent = .next targetExpected := by
+    simp [targetCurrent, targetExpected, targetRuntime, targetValue,
+      coreStep, evalLetValue, Pure.pure, Except.pure]
+  have afterRelated :
+      BinderReadyReachableMachineRelated fuel larger
+        sourceExpected targetExpected := by
+    exact retainedLetValue_binderReadyReachableRelated
+      sourceState targetState sourceRuntime targetRuntime programs
+      (frames.monoRenaming extension) continuation joins
+      (envRelOn_monoRenaming extension env) values
+      (by
+        simpa [sourceRuntime, targetRuntime, sourceValue, targetValue] using
+          allocatedRuntime.runtime)
+  have afterLedger :
+      TargetAllocationLedger larger targetExpected.runtime.nextLocation := by
+    simpa [targetExpected, targetRuntime] using allocatedRuntime.ledger
+  rcases match_internalCoreSteps_binderReady
+      sourceTransition targetTransition afterRelated
+      (by simpa [sourceCurrent] using step) with
+    ⟨targetPath, relatedAfter⟩
+  exact ⟨larger, targetExpected, extension, targetPath,
+    afterLedger, relatedAfter⟩
+
+/-- Ledger-carrying hereditary matcher for a deleted literal. The source may
+allocate unreachable garbage, but the reflexive target match leaves the
+target runtime and its ledger unchanged. -/
+theorem match_deletedLiteralLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_deletedLiteral_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env absent
+      runtime.runtime with
+    ⟨nextRuntime, value, transition, afterRelated⟩
+  rcases match_sourceOnlyCoreStep_binderReady
+      transition afterRelated step with
+    ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+  subst targetAfter
+  exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+
 /-- Exact retained-literal provenance supplies its hereditary continuation
 graph; literal evaluation itself determines whether the address renaming
 stays fixed or grows by one paired heap allocation. -/
@@ -11589,6 +11873,118 @@ theorem ExactShadowCodeBinderReady.match_deletedLiteralLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedLiteralLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime step
+
+/-- Exact retained-literal provenance consumed through the ledger-carrying
+non-lockstep matcher. This exposes the post-allocation ledger at the same
+compiler-facing boundary as the established hereditary theorem. -/
+theorem ExactShadowCodeBinderReady.match_retainedLiteralLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {literalValue : LCNF.LitValue}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.lit literalValue :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .lit literalValue
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.lit literalValue : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .lit literalValue
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  exact match_retainedLiteralLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env runtime step
+
+/-- Exact deleted-literal provenance consumed through the ledger-carrying
+source-only matcher. The target stutters and retains the incoming ledger
+verbatim. -/
+theorem ExactShadowCodeBinderReady.match_deletedLiteralLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {literalValue : LCNF.LitValue}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.lit literalValue :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .lit literalValue
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedLiteralLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime step

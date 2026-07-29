@@ -3663,6 +3663,127 @@ theorem nonemptyTargetAllocationLedger_objectSetReady :
       |>.deletedReadyAt_of_targetAllocationLedger
         related sourceOnlyRuntime.ledger sourceOnly
 
+/-- A retained large natural forces the paired-allocation branch of the
+ledger-aware literal matcher. -/
+def retainedLargeNatDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.lit (.nat 9223372036854775808))
+
+def retainedLargeNatCode : LCNF.Code .impure :=
+  .let retainedLargeNatDecl (.return live)
+
+theorem retainedLargeNatShadowRun :
+    shadowCode? 2 {} retainedLargeNatCode =
+      some (retainedLargeNatCode, neutralUsed) := by
+  simp [retainedLargeNatCode, retainedLargeNatDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, collectLetValue, live]
+
+def retainedLargeNatExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      retainedLargeNatCode retainedLargeNatCode :=
+  ExactShadowCodeGraph.ofResult retainedLargeNatShadowRun
+
+theorem retainedLargeNatExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      retainedLargeNatExactGraph.view := by
+  apply retainedLargeNatExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [retainedLargeNatCode, retainedLargeNatDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live]
+
+/-- The exact one-layer view used by the ledger matcher, with the
+continuation seed and liveness output exposed definitionally. -/
+def retainedLargeNatContinuationRun :
+    ExactShadowCodeRun 1 {} neutralUsed
+      (.return live) (.return live) where
+  result := by
+    simp [shadowCode?, neutralUsed]
+
+theorem retainedLargeNatStepBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedLargeNatDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedLargeNatDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+def retainedLargeNatState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedLargeNatCode }
+
+/-- Compiler-facing regression for the paired branch: one concrete
+heap-backed retained literal takes one source and one target step and returns
+a post-state carrying the enlarged target-allocation ledger. -/
+theorem retainedLargeNatExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedLargeNatState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedLargeNatState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedLargeNatState.program retainedLargeNatState.program := by
+    simpa [retainedLargeNatState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedLargeNatState.frames retainedLargeNatState.frames [] [] := by
+    simpa [retainedLargeNatState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedLargeNatState.joins retainedLargeNatState.joins := by
+    simpa [retainedLargeNatState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedLargeNatState.env retainedLargeNatState.env := by
+    simpa [retainedLargeNatState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedLargeNatState.runtime retainedLargeNatState.runtime
+        (envRootsOn neutralUsed retainedLargeNatState.env ++ [])
+        (envRootsOn neutralUsed retainedLargeNatState.env ++ []) := by
+    have emptyRoots (used : UsedLocals) :
+        envRootsOn used ([] : Env) = [] := by
+      unfold envRootsOn
+      induction used.toList with
+      | nil => rfl
+      | cons head tail ih =>
+          simp [lookup]
+    simpa [retainedLargeNatState, emptyRoots] using
+      LedgerShadowRuntimeRel.empty
+  simpa [retainedLargeNatState, retainedLargeNatCode,
+    retainedLargeNatDecl, letDecl] using
+    retainedLargeNatStepBinderReady.match_retainedLiteralLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      (usedBound := UsedSubset.refl neutralUsed)
+      retainedLargeNatState retainedLargeNatState programs frames joins env
+      runtime step
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
