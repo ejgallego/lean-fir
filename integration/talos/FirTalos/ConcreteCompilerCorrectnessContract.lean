@@ -198,6 +198,29 @@ example
   spec.directLetRuntimeRefines_scalarProjection
 
 /--
+Successful `isShared` observations satisfy the indexed direct runtime law
+without target indices, a concrete object word, or an operation witness.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (IsSharedSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) :=
+  spec.directLetRuntimeRefinesWithCost_isShared
+
+/--
 All nonallocating integer and `USize` literals obtain their constant/write
 runtime law from the same source classification.
 -/
@@ -685,8 +708,8 @@ example
 
 /--
 The mixed indexed fragment interleaves cost-zero aliases, immediate literals,
-and successful object/`USize`/packed-scalar projections with allocating
-Strings and nonempty constructors under one source path cost.
+successful object/`USize`/packed-scalar projections, and sharing observations
+with allocating Strings and nonempty constructors under one source path cost.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}

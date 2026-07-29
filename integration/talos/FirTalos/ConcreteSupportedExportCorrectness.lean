@@ -445,6 +445,42 @@ theorem ConcreteSupportedExport.scalarProjectionCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment for the concrete sharing observation. -/
+theorem ConcreteSupportedExport.isSharedCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime .isShared) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some isSharedContract ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = isSharedStep initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, isSharedFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- The syntax-directed proof for the statically selected generated function
 constructs T1's exact successful-declaration certificate. -/
 theorem ConcreteSupportedExport.toSuccessfulDeclaration

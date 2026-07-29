@@ -6145,6 +6145,28 @@ inductive ScalarProjectionSupported (context : Fir.Wasm.Context) :
               ScalarValueKind scalar resultKind) :
       ScalarProjectionSupported context decl
 
+/--
+Static admission for a successful `isShared` observation.
+
+The predicate contains only the source declaration and compiler-local typing
+facts. Numeric locals/imports, the concrete object word, and target execution
+are reconstructed from production output and `StateRelated`.
+-/
+inductive IsSharedSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (objectId : FVarId) (objectKind : AbiKind)
+      (valueEq : decl.value = .isShared objectId)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .uint8)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .uint8)) :
+      IsSharedSupported context decl
+
 /-- Direct source `let` evaluation is deterministic at fixed source state,
 environment, and declaration. -/
 theorem SourceLetResult.deterministic
@@ -6434,6 +6456,87 @@ theorem sourceLetResult_scalarProjection_eq
             getScalarField_ok_eq_scalar projected
           subst projectedValue
           exact ⟨sourceObject, scalar, runtimeEq.symm, rfl, rfl, projected⟩
+
+/-- Every successful sharing observation returns the direct `UInt8` lane. -/
+theorem isShared_ok_eq_uint8
+    {runtime : RuntimeState} {object result : Value}
+    (evaluated : isShared runtime object = .ok result) :
+    ∃ shared, result = .scalar (.uint8 shared) := by
+  cases object with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [isShared] at evaluated
+          exact ⟨1, evaluated.symm⟩
+      | heap location =>
+          simp only [isShared, Bind.bind, Except.bind] at evaluated
+          cases liveResult : getLiveCell runtime location with
+          | error fault =>
+              rw [liveResult] at evaluated
+              contradiction
+          | ok cell =>
+              rw [liveResult] at evaluated
+              injection evaluated with resultEq
+              exact ⟨if cell.persistent || cell.rc != 1 then 1 else 0,
+                resultEq.symm⟩
+  | _ =>
+      simp [isShared] at evaluated
+
+/--
+Invert a successful source `isShared` declaration without introducing an
+operation certificate.
+-/
+theorem sourceLetResult_isShared_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {objectId : FVarId}
+    (valueEq : decl.value = .isShared objectId)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject shared,
+      nextRuntime = sourceRuntime ∧
+        sourceValue = .scalar (.uint8 shared) ∧
+        lookup sourceEnv objectId = some sourceObject ∧
+        isShared sourceRuntime sourceObject =
+          .ok (.scalar (.uint8 shared)) := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases evaluated : isShared sourceRuntime sourceObject with
+      | error fault =>
+          rw [evaluated] at sourceStep
+          contradiction
+      | ok actualValue =>
+          rw [evaluated] at sourceStep
+          have pairEq :
+              (sourceRuntime, LetAction.value actualValue) =
+                (nextRuntime, LetAction.value sourceValue) :=
+            Except.ok.inj sourceStep
+          have runtimeEq : sourceRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : actualValue = sourceValue :=
+            LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst sourceValue
+          obtain ⟨shared, resultEq⟩ :=
+            isShared_ok_eq_uint8 evaluated
+          subst actualValue
+          exact ⟨sourceObject, shared, runtimeEq.symm, rfl, rfl, evaluated⟩
 
 /--
 Invert a successful nonallocating literal source step. The literal
@@ -11760,10 +11863,97 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Cost-indexed runtime-law instance for successful sharing observations.
+
+Production lowering and adaptation determine the object local and concrete
+host call. `StateRelated` supplies the physical object representation, while
+the source result fixes the direct `UInt8` destination. The read-only helper
+preserves the heap frontier, installed external implementation, and closure
+descriptor tables.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_isShared
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (IsSharedSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨objectId, objectKind, valueEq, valueKind, objectCompiled, objectRefines,
+      resultCompiled⟩
+  obtain ⟨sourceObject, shared, rfl, rfl, sourceLookup, evaluated⟩ :=
+    sourceLetResult_isShared_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime .isShared)] :=
+    compileLetValue_isShared valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId]) (operation := .isShared) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv :=
+                bind sourceEnv decl.fvarId (.scalar (.uint8 shared)))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i32 (UInt32.ofNat shared.toNat)) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.isSharedCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_isShared valueEq sourceLookup evaluated
+              stateRelated resultFound resultKindAt hObject objectRelated
+              imported spec.hostsSatisfy inBounds contracted params results
+              targetSet,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            nextFrameAligned, by
+              simpa [directLetAllocationCost, valueEq, clearFailure] using
+                budgeted.2⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 Current mixed allocating structural fragment: local aliases, immediate
 integer/`USize` literals, representation-polymorphic natural literals,
-successful object/`USize`/packed-scalar projections, UTF-8 String literals,
-and nonempty constructors.
+successful object/`USize`/packed-scalar projections and sharing observations,
+UTF-8 String literals, and nonempty constructors.
 -/
 def BudgetedDirectSupported (context : Fir.Wasm.Context)
     (decl : LCNF.LetDecl .impure) : Prop :=
@@ -11773,8 +11963,9 @@ def BudgetedDirectSupported (context : Fir.Wasm.Context)
         USizeProjectionSupported context decl ∨
           ObjectProjectionSupported context decl ∨
             ScalarProjectionSupported context decl ∨
-              StringLiteralSupported context decl ∨
-                NonemptyConstructorSupported context decl
+              IsSharedSupported context decl ∨
+                StringLiteralSupported context decl ∨
+                  NonemptyConstructorSupported context decl
 
 /--
 The cost-indexed runtime law composes natural/String/constructor allocation
@@ -11809,8 +12000,9 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
                 (USizeProjectionSupported context decl ∨
                   (ObjectProjectionSupported context decl ∨
                     (ScalarProjectionSupported context decl ∨
-                      (StringLiteralSupported context decl ∨
-                        NonemptyConstructorSupported context decl)))))))
+                      (IsSharedSupported context decl ∨
+                        (StringLiteralSupported context decl ∨
+                          NonemptyConstructorSupported context decl))))))))
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
   apply DirectLetRuntimeRefinesWithCost.or
   · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
@@ -11825,8 +12017,10 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
           · apply DirectLetRuntimeRefinesWithCost.or
             · exact spec.directLetRuntimeRefinesWithCost_scalarProjection
             · apply DirectLetRuntimeRefinesWithCost.or
-              · exact spec.directLetRuntimeRefines_stringLiteral
-              · exact spec.directLetRuntimeRefines_nonemptyConstructor
+              · exact spec.directLetRuntimeRefinesWithCost_isShared
+              · apply DirectLetRuntimeRefinesWithCost.or
+                · exact spec.directLetRuntimeRefines_stringLiteral
+                · exact spec.directLetRuntimeRefines_nonemptyConstructor
 
 /--
 The complete current direct family preserves the frame used by pure integer

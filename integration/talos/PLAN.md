@@ -4330,6 +4330,26 @@ Floating-point scalar setters remain outside the concrete resolver/runtime
 fragment. No FIR semantic contract, concrete layout, executable ABI, or W7
 helper signature changed.
 
+W6.6fu adds successful `isShared` observations to the certificate-free
+budgeted direct family. `IsSharedSupported` retains only the source
+declaration, compiler-selected object/result kinds, local compiler equations,
+and the target-independent `.tobject` refinement fact. It carries no numeric
+local/import, concrete word, target syntax, runtime read, or simulation
+certificate.
+
+The source-step inversion proves that every successful observation is a
+direct `UInt8`; production lowering/adaptation recovers the exact
+`local.get; call` prefix, and `ConcreteSupportedExport.isSharedCall` recovers
+the installed unary concrete contract. `StateRelated` supplies the tagged,
+promoted, or ordinary heap representation consumed by the existing
+`isSharedStep_of_refines` theorem.
+`directLetRuntimeRefinesWithCost_isShared` then writes the generated result
+local and preserves the heap frontier, address-space budget, installed
+external implementation, and both closure-descriptor tables. Extending
+`BudgetedDirectSupported` makes `isShared` available immediately in every
+existing mixed whole-export theorem. No FIR semantic contract, concrete
+layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

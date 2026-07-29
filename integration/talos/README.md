@@ -240,9 +240,12 @@ physical arguments and every concrete allocation internally.
 `BudgetedDirectSupported` now permits arbitrary interleavings of these two
 allocating families with cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar
-projections under one source path budget. The projection laws expose exact
-heap preservation across their generated readers, so the complete residual
-budget reaches the continuation.
+projections and `isShared` observations under one source path budget. The
+read-only laws expose exact heap preservation across their generated helpers,
+so the complete residual budget reaches the continuation. `IsSharedSupported`
+contains only source/compiler local typing; production adaptation, resolver
+alignment, and `StateRelated` reconstruct the numeric call and physical
+object representation.
 Natural literals now join the same indexed fragment across their three
 wasm32 representations. `naturalAllocationBytes` assigns zero bytes to
 immediates, an aligned one-slot object to promoted source tags, and the exact
