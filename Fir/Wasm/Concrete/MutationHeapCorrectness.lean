@@ -825,7 +825,8 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines_with_capacity
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint64 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -882,7 +883,7 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           targetFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -926,7 +927,7 @@ theorem LiveHeapRel.writeScalarUInt64Field_refines
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint64 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeScalarUInt64Field_refines_with_capacity mapped found live
       objectEq descriptorFound slotIndex byteOffset value retainedDisjoint
       slotIndexEq fieldFits
@@ -958,7 +959,8 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines_with_capacity
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint32 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1015,7 +1017,7 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           targetFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1059,7 +1061,7 @@ theorem LiveHeapRel.writeScalarUInt32Field_refines
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint32 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeScalarUInt32Field_refines_with_capacity mapped found live
       objectEq descriptorFound slotIndex byteOffset value retainedDisjoint
       slotIndexEq fieldFits
@@ -1091,7 +1093,8 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines_with_capacity
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint16 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1148,7 +1151,7 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           targetFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1192,7 +1195,7 @@ theorem LiveHeapRel.writeScalarUInt16Field_refines
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint16 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeScalarUInt16Field_refines_with_capacity mapped found live
       objectEq descriptorFound slotIndex byteOffset value retainedDisjoint
       slotIndexEq fieldFits
@@ -1224,7 +1227,8 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines_with_capacity
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint8 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -1281,7 +1285,7 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           targetFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1325,7 +1329,7 @@ theorem LiveHeapRel.writeScalarUInt8Field_refines
       Fir.LeanIR.Impure.setScalarField runtime (.object (.heap location))
         slotIndex byteOffset (.scalar (.uint8 value)) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeScalarUInt8Field_refines_with_capacity mapped found live objectEq
       descriptorFound slotIndex byteOffset value retainedDisjoint slotIndexEq
       fieldFits

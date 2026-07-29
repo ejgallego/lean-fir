@@ -423,8 +423,16 @@ the production `USize` setter prefix and installed host contract.
 concrete boundary preserves the heap frontier exactly.
 `FieldMutationEffectSupported` and
 `OwnershipTagAndFieldMutationEffectSupported` compose object and `USize`
-mutation into the mixed whole-export theorem. Packed-scalar mutation is the
-next structural field family.
+mutation into the mixed whole-export theorem.
+Packed `UInt8`/`UInt16`/`UInt32`/`UInt64` writes now cross the same boundary:
+`CodeAdapted.scalarSet_eq` and the resolver theorem recover the exact
+kind-indexed binary call, while `ScalarFieldEffectSupported` carries only
+source/compiler facts and a universal compiler-shaped layout judgment.
+The concrete writer preserves the heap frontier exactly.
+`AllFieldMutationEffectSupported` and
+`OwnershipTagAndAllFieldMutationEffectSupported` therefore extend the mixed
+whole-export theorem across every integer field setter implemented by the W6
+runtime. Float setters remain an explicit resolver/runtime fragment gate.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

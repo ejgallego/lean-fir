@@ -6172,21 +6172,22 @@ theorem scalarSetStep_uint64_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases fieldRelated
   cases objectRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
           obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated, capacity⟩ :=
+              semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
             runtimeRelated.heap.writeScalarUInt64Field_refines_with_capacity
               mapped found live objectEq descriptorFound slotIndex byteOffset
               field retainedDisjoint slotIndexEq fieldFits
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
-          refine ⟨heap, ?_, ?_, capacity⟩
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
           · simp [scalarSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
               concreteOperation, replaceHeap]
           · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -6225,7 +6226,7 @@ theorem scalarSetStep_uint64_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     scalarSetStep_uint64_of_refines_with_capacity runtimeRelated objectRelated
       fieldRelated found live objectEq descriptorFound retainedDisjoint
       slotIndexEq fieldFits updated
@@ -6264,7 +6265,8 @@ theorem scalarSetStep_uint32_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases fieldRelated with
   | uint32 encoded =>
       cases objectRelated with
@@ -6272,14 +6274,14 @@ theorem scalarSetStep_uint32_of_refines_with_capacity
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                  semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
                 runtimeRelated.heap.writeScalarUInt32Field_refines_with_capacity
                   mapped found live objectEq descriptorFound slotIndex byteOffset
                   field retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, capacity, cursor⟩
               · simp [scalarSetStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
                   replaceHeap]
@@ -6321,7 +6323,7 @@ theorem scalarSetStep_uint32_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     scalarSetStep_uint32_of_refines_with_capacity runtimeRelated objectRelated
       fieldRelated found live objectEq descriptorFound retainedDisjoint
       slotIndexEq fieldFits updated
@@ -6360,7 +6362,8 @@ theorem scalarSetStep_uint16_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases fieldRelated with
   | uint16 encoded =>
       cases objectRelated with
@@ -6368,14 +6371,14 @@ theorem scalarSetStep_uint16_of_refines_with_capacity
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                  semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
                 runtimeRelated.heap.writeScalarUInt16Field_refines_with_capacity
                   mapped found live objectEq descriptorFound slotIndex byteOffset
                   field retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, capacity, cursor⟩
               · simp [scalarSetStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
                   replaceHeap]
@@ -6417,7 +6420,7 @@ theorem scalarSetStep_uint16_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     scalarSetStep_uint16_of_refines_with_capacity runtimeRelated objectRelated
       fieldRelated found live objectEq descriptorFound retainedDisjoint
       slotIndexEq fieldFits updated
@@ -6456,7 +6459,8 @@ theorem scalarSetStep_uint8_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases fieldRelated with
   | uint8 encoded =>
       cases objectRelated with
@@ -6464,14 +6468,14 @@ theorem scalarSetStep_uint8_of_refines_with_capacity
           cases heapRelated with
           | mapped mapped =>
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                  semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
                 runtimeRelated.heap.writeScalarUInt8Field_refines_with_capacity
                   mapped found live objectEq descriptorFound slotIndex byteOffset
                   field retainedDisjoint slotIndexEq fieldFits
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, capacity, cursor⟩
               · simp [scalarSetStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, encoded, concreteOperation,
                   replaceHeap]
@@ -6513,7 +6517,7 @@ theorem scalarSetStep_uint8_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     scalarSetStep_uint8_of_refines_with_capacity runtimeRelated objectRelated
       fieldRelated found live objectEq descriptorFound retainedDisjoint
       slotIndexEq fieldFits updated
@@ -8695,7 +8699,8 @@ theorem effectStepSimulates_scalarSet_with_capacity
         continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   have fieldSourceLookup : lookup sourceEnv fieldId = some (.scalar field) := by
     unfold lookupValue at fieldLookup
     split at fieldLookup
@@ -8710,12 +8715,12 @@ theorem effectStepSimulates_scalarSet_with_capacity
   | word32 fieldRelated =>
       cases fieldRelated with
       | uint8 encoded =>
-          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
             scalarSetStep_uint8_of_refines_with_capacity initialRelated.1
               objectRelated (.uint8 encoded) found live objectEq descriptorFound
               (by simpa using historySafe) slotIndexEq
               (by simpa using fieldFits) updated
-          refine ⟨heap, ?_, capacity⟩
+          refine ⟨heap, ?_, capacity, cursor⟩
           apply effectStepSimulates_binaryHost
             (step := scalarSetStep slotIndex byteOffset .uint8)
           · intro externals
@@ -8735,12 +8740,12 @@ theorem effectStepSimulates_scalarSet_with_capacity
           · exact hResults
           · exact operation
       | uint16 encoded =>
-          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
             scalarSetStep_uint16_of_refines_with_capacity initialRelated.1
               objectRelated (.uint16 encoded) found live objectEq descriptorFound
               (by simpa using historySafe) slotIndexEq
               (by simpa using fieldFits) updated
-          refine ⟨heap, ?_, capacity⟩
+          refine ⟨heap, ?_, capacity, cursor⟩
           apply effectStepSimulates_binaryHost
             (step := scalarSetStep slotIndex byteOffset .uint16)
           · intro externals
@@ -8760,12 +8765,12 @@ theorem effectStepSimulates_scalarSet_with_capacity
           · exact hResults
           · exact operation
       | uint32 encoded =>
-          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
             scalarSetStep_uint32_of_refines_with_capacity initialRelated.1
               objectRelated (.uint32 encoded) found live objectEq descriptorFound
               (by simpa using historySafe) slotIndexEq
               (by simpa using fieldFits) updated
-          refine ⟨heap, ?_, capacity⟩
+          refine ⟨heap, ?_, capacity, cursor⟩
           apply effectStepSimulates_binaryHost
             (step := scalarSetStep slotIndex byteOffset .uint32)
           · intro externals
@@ -8787,12 +8792,12 @@ theorem effectStepSimulates_scalarSet_with_capacity
   | word64 fieldRelated =>
       cases fieldRelated with
       | uint64 =>
-          obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
             scalarSetStep_uint64_of_refines_with_capacity initialRelated.1
               objectRelated .uint64 found live objectEq descriptorFound
               (by simpa using historySafe) slotIndexEq
               (by simpa using fieldFits) updated
-          refine ⟨heap, ?_, capacity⟩
+          refine ⟨heap, ?_, capacity, cursor⟩
           apply effectStepSimulates_binaryHost
             (step := scalarSetStep slotIndex byteOffset .uint64)
           · intro externals
@@ -8899,7 +8904,7 @@ theorem effectStepSimulates_scalarSet
         continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_scalarSet_with_capacity objectLookup fieldLookup updated
       initialRelated hObject objectRelated objectCompiled fieldCompiled
       objectFound fieldFound fieldKindAt callFound continuationAdapted hImp hSat

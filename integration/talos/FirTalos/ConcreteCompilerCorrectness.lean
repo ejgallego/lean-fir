@@ -2596,6 +2596,134 @@ theorem CodeAdapted.usizeSet_eq
                           exact targetEq.symm
 
 /--
+Production compiler/adaptor inversion for packed-scalar field mutation.
+
+The two source-local compiler equations and successful whole-node adaptation
+determine both numeric local slots, the kind-indexed scalar-set import, the
+exact generated binary prefix, and the independently adapted continuation.
+-/
+theorem CodeAdapted.scalarSet_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId fieldId : FVarId}
+    {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {fieldKind : AbiKind}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, .object))
+    (fieldCompiled :
+      Fir.Wasm.getLocal context fieldId =
+        .ok (.localGet fieldId, fieldKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.sset objectId slotIndex byteOffset fieldId type continuation) target) :
+    ∃ objectIndex fieldIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        findFVar? (functionBindings sourceFunction) fieldId =
+          some fieldIndex ∧
+        (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd =
+          some fieldKind ∧
+        callIndex? sourceModule
+            (.runtime (.scalarSet slotIndex byteOffset fieldKind)) =
+          some callIndex ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          [.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+            targetRest := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases restResult :
+      Fir.Wasm.compileCodeCore context continuation with
+  | none =>
+      rw [objectCompiled, fieldCompiled, restResult] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some result =>
+      cases result with
+      | error error =>
+          rw [objectCompiled, fieldCompiled, restResult] at core
+          change
+            some (Except.error error) = some (Except.ok symbolic) at core
+          have impossible :
+              Except.error error = Except.ok symbolic :=
+            Option.some.inj core
+          cases impossible
+      | ok restCode =>
+          rw [objectCompiled, fieldCompiled, restResult] at core
+          change
+            some (Except.ok
+              ([.localGet objectId, .localGet fieldId,
+                .call (.runtime
+                  (.scalarSet slotIndex byteOffset fieldKind))] ++ restCode)) =
+              some (Except.ok symbolic) at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have restCompiled :
+              Fir.Wasm.compileCode context continuation = .ok restCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+          cases prefixAdapted :
+              instructions sourceModule sourceFunction labels
+                [.localGet objectId, .localGet fieldId,
+                  .call (.runtime
+                    (.scalarSet slotIndex byteOffset fieldKind))] with
+          | error error =>
+              rw [FirTalos.Correctness.instructions_append, prefixAdapted]
+                at targetCompiled
+              contradiction
+          | ok targetPrefix =>
+              cases restAdapted :
+                  instructions sourceModule sourceFunction labels restCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+                    restAdapted] at targetCompiled
+                  contradiction
+              | ok targetRest =>
+                  have targetEq : targetPrefix ++ targetRest = target := by
+                    rw [FirTalos.Correctness.instructions_append,
+                      prefixAdapted, restAdapted] at targetCompiled
+                    exact Except.ok.inj targetCompiled
+                  obtain ⟨indices, callIndex, found, callFound, prefixEq⟩ :=
+                    instructions_localGets_call_eq
+                      (fvarIds := [objectId, fieldId])
+                      (operation := .scalarSet slotIndex byteOffset fieldKind)
+                      prefixAdapted
+                  cases found with
+                  | cons objectFound found =>
+                      cases found with
+                      | cons fieldFound noMore =>
+                          cases noMore
+                          obtain ⟨alignedObjectIndex, alignedObjectFound,
+                              objectKindAt⟩ :=
+                            localsAligned objectCompiled
+                          rw [objectFound] at alignedObjectFound
+                          injection alignedObjectFound with objectIndexEq
+                          subst alignedObjectIndex
+                          obtain ⟨alignedFieldIndex, alignedFieldFound,
+                              fieldKindAt⟩ :=
+                            localsAligned fieldCompiled
+                          rw [fieldFound] at alignedFieldFound
+                          injection alignedFieldFound with fieldIndexEq
+                          subst alignedFieldIndex
+                          refine ⟨_, _, callIndex, targetRest, objectFound,
+                            objectKindAt, fieldFound, fieldKindAt, callFound,
+                            ⟨restCode, restCompiled, restAdapted⟩, ?_⟩
+                          rw [prefixEq] at targetEq
+                          exact targetEq.symm
+
+/--
 Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
 continuation.
 
@@ -4963,6 +5091,101 @@ inductive USizeFieldEffectSupported
       USizeFieldEffectSupported context sourceRuntime sourceEnv
         (.uset objectId index fieldId continuation) continuation nextRuntime
 
+/-- The four packed-integer ABI kinds implemented by the concrete scalar
+setter. Float and non-scalar kinds remain outside this fragment. -/
+def PackedIntegerAbiKind : AbiKind → Prop
+  | .uint8 | .uint16 | .uint32 | .uint64 => True
+  | _ => False
+
+/--
+The source typing/layout condition needed by one packed-integer field write.
+
+The width-indexed separation premise preserves every retained scalar field;
+the descriptor coordinates identify the packed region and prove the selected
+write fits. Unsupported ABI kinds reduce the final conjunct to `False`.
+-/
+def ScalarFieldMutationSafe
+    (semantic : ConstructorObject) (slotIndex byteOffset : Nat)
+    (fieldKind : AbiKind) (info : LCNF.CtorInfo) : Prop :=
+  (match fieldKind with
+    | .uint8 => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 1 ≤ old.offset
+    | .uint16 => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 2 ≤ old.offset
+    | .uint32 => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 4 ≤ old.offset
+    | .uint64 => ∀ old ∈ semantic.scalarFields,
+        old.width ≠ slotIndex ∨ old.offset ≠ byteOffset →
+        old.offset + scalarValueByteSize old.value ≤ byteOffset ∨
+          byteOffset + 8 ≤ old.offset
+    | _ => semantic.scalarFields.filter (fun old =>
+        old.width != slotIndex || old.offset != byteOffset) = []) ∧
+  slotIndex = info.size + info.usize ∧
+  match fieldKind with
+    | .uint8 => byteOffset + 1 ≤ info.ssize
+    | .uint16 => byteOffset + 2 ≤ info.ssize
+    | .uint32 => byteOffset + 4 ≤ info.ssize
+    | .uint64 => byteOffset + 8 ≤ info.ssize
+    | _ => False
+
+/--
+Source/compiler-facing admission for successful packed-integer field mutation.
+
+The universally quantified layout premise is the source typing judgment
+connecting any refined constructor descriptor to the supported packed
+coordinate. It chooses no witness, physical word, descriptor, numeric target
+index, target syntax, or execution proof.
+-/
+inductive ScalarFieldEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate where
+  | sset
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId fieldId : FVarId)
+      (slotIndex byteOffset : Nat)
+      (type : Lean.Expr)
+      (continuation : LCNF.Code .impure)
+      (location : Location)
+      (cell : HeapCell)
+      (semantic : ConstructorObject)
+      (field : ScalarValue)
+      (fieldKind : AbiKind)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object))
+      (fieldCompiled :
+        Fir.Wasm.getLocal context fieldId =
+          .ok (.localGet fieldId, fieldKind))
+      (objectLookup :
+        lookupValue sourceEnv objectId =
+          .ok (.object (.heap location)))
+      (fieldLookup : lookupValue sourceEnv fieldId = .ok (.scalar field))
+      (updated :
+        setScalarField sourceRuntime (.object (.heap location)) slotIndex
+            byteOffset (.scalar field) =
+          .ok nextRuntime)
+      (found : findCell? sourceRuntime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor semantic)
+      (layoutSafe :
+        ∀ {witness : RefinementWitness} {objectWord : Word32}
+            {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind},
+          ValueRel witness .tobject (.word32 objectWord)
+              (.object (.heap location)) →
+            witness.descriptors.lookup? objectWord =
+                some (.constructor info fieldKinds) →
+              ScalarFieldMutationSafe semantic slotIndex byteOffset fieldKind
+                info) :
+      ScalarFieldEffectSupported context sourceRuntime sourceEnv
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        continuation nextRuntime
+
 /--
 Disjoint union of two source-facing effect families.
 
@@ -5055,6 +5278,23 @@ abbrev OwnershipTagAndFieldMutationEffectSupported
     (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
   EffectSupportedOr (OwnershipAndTagEffectSupported context)
     (FieldMutationEffectSupported context)
+
+/--
+Object, `USize`, and supported packed-integer field mutations.
+-/
+abbrev AllFieldMutationEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr (FieldMutationEffectSupported context)
+    (ScalarFieldEffectSupported context)
+
+/--
+The ownership/tag family extended with object, `USize`, and supported
+packed-integer field mutations.
+-/
+abbrev OwnershipTagAndAllFieldMutationEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr (OwnershipAndTagEffectSupported context)
+    (AllFieldMutationEffectSupported context)
 
 /--
 Budgeted successful source evaluation for mixed direct/external code with
@@ -6890,6 +7130,58 @@ theorem ConcreteSupportedExport.usizeSetCall
     exact results
 
 /--
+Resolver/adaptor alignment specialized to the kind-indexed concrete packed
+scalar setter selected by the compiler-derived runtime-call slot.
+-/
+theorem ConcreteSupportedExport.scalarSetCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {slotIndex byteOffset id : Nat}
+    {fieldKind : AbiKind}
+    (found :
+      callIndex? sourceModule
+          (.runtime (.scalarSet slotIndex byteOffset fieldKind)) =
+        some id)
+    (supportedKind : PackedIntegerAbiKind fieldKind) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (scalarSetContract slotIndex byteOffset fieldKind) ∧
+        imp.params.length = 2 ∧
+        imp.results.length = 0 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    supportedExport.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result =
+            scalarSetStep slotIndex byteOffset fieldKind initial args)
+    have supported :
+        fieldKind = .uint8 ∨ fieldKind = .uint16 ∨
+          fieldKind = .uint32 ∨ fieldKind = .uint64 := by
+      cases fieldKind <;> simp [PackedIntegerAbiKind] at supportedKind ⊢
+    have resolved :=
+      hostFn?_scalarSet_of_packedInteger
+        (slotIndex := slotIndex) (byteOffset := byteOffset) supported
+    simpa only [resolvedContract?, resolved, Option.map_some, scalarSetFn]
+      using contracted
+  · change imp.params.length = 2 at params
+    exact params
+  · change imp.results.length = 0 at results
+    exact results
+
+/--
 The compiler-erased persistent ownership family implements the generic effect
 condition for every invariant.
 
@@ -7667,6 +7959,125 @@ theorem
         continuationAdapted, step, nextInvariant⟩
 
 /--
+Successful packed-integer field mutation implements the generic effect
+condition for the ownership-aware pure-external frame.
+
+Production inversion recovers both numeric locals and the kind-indexed runtime
+call. State refinement recovers the physical object and constructor
+descriptor; the universal source layout premise supplies width separation and
+descriptor coordinates. The checked payload write preserves the exact heap
+frontier and every nonheap invariant.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_scalarField
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ScalarFieldEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | sset sourceRuntime nextRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq layoutSafe =>
+      obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
+          objectKindAt, fieldFound, fieldKindAt, callFound,
+          continuationAdapted, targetEq⟩ :=
+        CodeAdapted.scalarSet_eq supportedExport.localsAligned objectCompiled
+          fieldCompiled adapted
+      subst targetCode
+      have objectSourceLookup :
+          lookup sourceEnv objectId = some (.object (.heap location)) := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value foundLookup
+          injection objectLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      obtain ⟨physicalObject, hObject, physicalObjectRelated⟩ :=
+        stateRelated.resolve objectSourceLookup objectFound objectKindAt
+      cases physicalObjectRelated with
+      | word32 objectRelated =>
+          have decoded :
+              getConstructor sourceRuntime (.object (.heap location)) =
+                .ok (location, cell, semantic) := by
+            unfold getConstructor
+            simp only [getLiveCell, found, live, if_true, Bind.bind,
+              Except.bind]
+            rw [objectEq]
+            rfl
+          have tobjectRelated := objectRelated.object_to_tobject
+          obtain ⟨info, fieldKinds, descriptorFound⟩ :=
+            ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+              stateRelated.1 tobjectRelated decoded
+          obtain ⟨historySafe, slotIndexEq, fieldFits⟩ :=
+            layoutSafe tobjectRelated descriptorFound
+          have fieldSupported : PackedIntegerAbiKind fieldKind := by
+            cases fieldKind <;>
+              simp [PackedIntegerAbiKind] at fieldFits ⊢
+          cases fieldKind <;>
+            simp [PackedIntegerAbiKind] at fieldSupported
+          all_goals
+            obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+              supportedExport.scalarSetCall callFound (by trivial)
+            obtain ⟨heap, step, _capacity, cursor⟩ :=
+              effectStepSimulates_scalarSet_with_capacity objectLookup
+                fieldLookup updated stateRelated hObject objectRelated
+                objectCompiled fieldCompiled objectFound fieldFound fieldKindAt
+                callFound continuationAdapted imported
+                supportedExport.hostsSatisfy inBounds contracted params results
+                found live objectEq descriptorFound historySafe slotIndexEq
+                fieldFits
+            rcases invariant.1 with
+              ⟨⟨frameAligned, budget⟩, integerImplementation,
+                naturalImplementation, scalarImplementation⟩
+            have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+              constructor
+              · simpa [cursor] using budget.cursorPositive
+              · simpa [cursor] using budget.endWithinAddressSpace
+            have nextBaseInvariant :
+                ConcreteBudgetedPureExternalFrame sourceFunction externals
+                  remainingBytes nextRuntime sourceEnv
+                  (replaceHeap targetStore heap) targetLocals witness := by
+              have externalsEq :
+                  (replaceHeap targetStore heap).host.externals =
+                    targetStore.host.externals := by
+                simp [replaceHeap, clearFailure]
+              refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+              · rw [externalsEq]
+                exact integerImplementation
+              · rw [externalsEq]
+                exact naturalImplementation
+              · rw [externalsEq]
+                exact scalarImplementation
+            have nextInvariant :
+                ConcreteBudgetedPureExternalOwnershipFrame sourceFunction
+                  externals remainingBytes nextRuntime sourceEnv
+                  (replaceHeap targetStore heap) targetLocals witness := by
+              exact ⟨nextBaseInvariant, by
+                simpa [replaceHeap, clearFailure] using invariant.2⟩
+            exact ⟨targetRest, replaceHeap targetStore heap, witness,
+              continuationAdapted, step, nextInvariant⟩
+      | word64 objectRelated => cases objectRelated
+      | float32Bits objectRelated => cases objectRelated
+      | float64Bits objectRelated => cases objectRelated
+
+/--
 One uniform runtime law for every currently proved successful ownership effect.
 
 The theorem is assembled solely with `EffectRuntimeRefines.or`: persistent
@@ -7891,6 +8302,63 @@ theorem
   · exact supportedExport.effectRuntimeRefines_ownershipAndTag
       (externals := externals)
   · exact supportedExport.effectRuntimeRefines_fieldMutation
+      (externals := externals)
+
+/--
+One uniform runtime law for object, `USize`, and supported packed-integer field
+mutations.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_allFieldMutation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (AllFieldMutationEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  apply EffectRuntimeRefines.or
+  · exact supportedExport.effectRuntimeRefines_fieldMutation
+      (externals := externals)
+  · exact supportedExport.effectRuntimeRefines_scalarField
+      (externals := externals)
+
+/--
+One uniform runtime law for ownership, tag mutation, and object, `USize`, and
+supported packed-integer field mutations.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ownershipTagAndAllFieldMutation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  apply EffectRuntimeRefines.or
+  · exact supportedExport.effectRuntimeRefines_ownershipAndTag
+      (externals := externals)
+  · exact supportedExport.effectRuntimeRefines_allFieldMutation
       (externals := externals)
 
 /--
@@ -13689,6 +14157,79 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_ownership externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ownershipTagAndFieldMutation
+      (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of the
+ownership family, constructor-tag mutation, all supported successful field
+mutations, default-only cases, and the direct/pure-external family.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOwnershipTagAndAllFieldMutation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
       (externals := externals))
     parameterCount
 

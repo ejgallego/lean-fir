@@ -601,7 +601,14 @@ acceptance tests pass.
    source admission carries only lookups/update, live bounds, and compiler
    equations, and exact frontier preservation retains the indexed budget.
    `FieldMutationEffectSupported` combines object and `USize` setters in the
-   mixed whole-export theorem. Packed-scalar mutation is next.
+   mixed whole-export theorem. Packed `UInt8`/`UInt16`/`UInt32`/`UInt64`
+   mutation now completes that field family: production inversion and a
+   narrow resolver theorem recover the kind-indexed binary call, while the
+   source-only admission supplies retained-field separation, the
+   compiler-shaped `size + usize` coordinate, and width-specific bounds.
+   Exact frontier preservation retains the indexed budget, and the mixed
+   whole-export theorem admits all integer setters. Float setters remain an
+   explicit unsupported runtime fragment.
    Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

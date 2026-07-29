@@ -4302,6 +4302,34 @@ whole-export endpoint across object and `USize` mutation. Packed-scalar
 mutation is the next adjacent successful field family. No FIR semantic
 contract, concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6ft completes successful constructor-field mutation for every packed
+integer width implemented by the concrete resolver. The four concrete
+`writeScalarUInt*Field`, Talos operation, and generic effect theorems now
+expose exact `heapCursor` preservation from their existing whole-heap frames.
+`CodeAdapted.scalarSet_eq` derives both numeric locals, the kind-indexed
+`scalarSet` call, exact binary prefix, and continuation from production
+compiler/adaptor output. A narrow public resolver theorem exposes that the
+four packed integer kinds select `scalarSetFn` without exposing the private
+kind classifier; `ConcreteSupportedExport.scalarSetCall` then recovers the
+installed concrete contract.
+
+`ScalarFieldEffectSupported` contains source lookups/update, live-constructor
+facts, the two source-local compiler equations, and a universal
+compiler-shaped layout judgment. The judgment proves retained-field
+separation, the `size + usize` scalar coordinate, and width-specific `ssize`
+fit. It carries no numeric target slot, target syntax, physical word,
+descriptor, witness, or simulation certificate.
+`effectRuntimeRefines_scalarField` reconstructs all concrete evidence from
+production output and `StateRelated`; its four supported width cases preserve
+the ownership-aware address-space budget and descriptor agreement.
+`AllFieldMutationEffectSupported`,
+`OwnershipTagAndAllFieldMutationEffectSupported`, and
+`correctBudgetedPureExternalOwnershipTagAndAllFieldMutation` extend the mixed
+whole-export endpoint across object, `USize`, and packed-integer writes.
+Floating-point scalar setters remain outside the concrete resolver/runtime
+fragment. No FIR semantic contract, concrete layout, executable ABI, or W7
+helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

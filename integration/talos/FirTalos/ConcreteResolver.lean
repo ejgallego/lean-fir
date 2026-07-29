@@ -69,6 +69,17 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .delete => some deleteFn
   | .getTag => some getTagFn
 
+/-- The concrete resolver implements exactly the four packed-integer scalar
+setter kinds used by the W6 scalar-mutation refinement theorem. This public
+boundary keeps the resolver's classification function private. -/
+theorem hostFn?_scalarSet_of_packedInteger
+    {slotIndex byteOffset : Nat} {kind : AbiKind}
+    (supported :
+      kind = .uint8 ∨ kind = .uint16 ∨ kind = .uint32 ∨ kind = .uint64) :
+    hostFn? (.scalarSet slotIndex byteOffset kind) =
+      some (scalarSetFn slotIndex byteOffset kind) := by
+  rcases supported with rfl | rfl | rfl | rfl <;> rfl
+
 inductive ResolverError where
   | invalidModule (error : SymbolicError)
   | malformedRuntimeImport (index : Nat)
