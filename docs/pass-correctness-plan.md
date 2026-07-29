@@ -931,6 +931,18 @@ preserve the exact target frontier. Their deleted exact branches use the
 generic runtime-neutral source-step/target-stutter rule. All four exact
 retained/deleted wrappers are integrated at `3a12fe31`.
 
+Internal named invocation now carries the ledger through its complete
+`CoreResult.next` classification. Fully applied internal declarations enter
+the exact related bodies while retaining the current target frontier; empty
+cache hits publish an already-related global without changing either
+runtime. Under-application allocates one paired closure and returns the actual
+larger renaming and extended allocation ledger selected by that fresh pair.
+`SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameNext` combines
+the three outcomes and rules out unknown declarations, binding faults, and
+external declarations for an assumed internal transition. This slice is
+integrated at `dc4bea88`; external requests remain separate because their
+responses may allocate.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -1011,8 +1023,8 @@ matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer, plus retained/deleted local-value
 applications, all three layout-field projection families, unboxing, and
 ownership queries. It still has to be threaded through the remaining
-invocation steps, existing-address mutations, and allocation-capable external
-responses, then assembled into the unified
+closure/value invocation steps, existing-address mutations, and
+allocation-capable external responses, then assembled into the unified
 non-lockstep dispatcher and compiler-client invariant so arbitrary selected
 edges receive that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
@@ -1055,7 +1067,7 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through the remaining invocation steps and the
+1. Preserve the ledger through closure/value invocation and the
    existing-address matcher families. Strengthen the foreign-response boundary
    when an external response allocates, then assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
