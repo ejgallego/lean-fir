@@ -187,12 +187,10 @@ def invokeDecl (state : MachineState) (name : Name) (args : Array Value) : CoreR
 def invokeClosure (state : MachineState) (function : Value) (args : Array Value) : CoreResult :=
   match function with
   | .object (.heap location) =>
-      match getLiveCell state.runtime location with
+      match takeClosureApplication state.runtime location with
       | .error fault => fail state fault
-      | .ok cell =>
-          match cell.object with
-          | .closure name _ fixed => invokeDecl state name (fixed ++ args)
-          | _ => fail state .expectedClosure
+      | .ok (runtime, name, _, fixed) =>
+          invokeDecl { state with runtime } name (fixed ++ args)
   | _ => fail state .expectedClosure
 
 def resumeExternal (request : ExternalRequest) (waiting : MachineState)

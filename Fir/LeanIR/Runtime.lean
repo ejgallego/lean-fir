@@ -452,6 +452,61 @@ def incValue (runtime : RuntimeState) (value : Value) (amount : Nat) (check : Bo
   | .object (.tagged _) => if check then .ok runtime else .error .expectedHeapReference
   | _ => .error .expectedObject
 
+/-- Retain one ownership unit when a runtime object transfers an owned field.
+Unlike the final-LCNF `inc` instruction, Lean's internal object operation is a
+no-op for non-heap values. -/
+def retainOwnedValue (runtime : RuntimeState) : Value → Except RuntimeFault RuntimeState
+  | .object (.heap location) => incLocation runtime location 1
+  | _ => .ok runtime
+
+/--
+Consume one reference to a closure and expose its fixed arguments with one
+owned reference each, matching Lean's `lean_apply_*` ownership boundary.
+
+An exclusive closure transfers its fixed arguments and is freed without
+recursively releasing them. A shared closure keeps its remaining owned fixed
+arguments, so the application retains each fixed argument before it runs.
+Persistent closures and their recursively persistent captures need no update.
+-/
+def takeClosureApplication (runtime : RuntimeState) (location : Location) :
+    Except RuntimeFault (RuntimeState × Name × Nat × Array Value) := do
+  let cell ← getLiveCell runtime location
+  let .closure function arity fixed := cell.object | throw .expectedClosure
+  if cell.persistent then
+    return (runtime, function, arity, fixed)
+  if cell.rc = 0 then
+    throw (.referenceCountUnderflow location)
+  if cell.rc = 1 then
+    let runtime ← setCell runtime location { cell with rc := 0, live := false }
+    return (runtime, function, arity, fixed)
+  let runtime ← setCell runtime location { cell with rc := cell.rc - 1 }
+  let runtime ← fixed.foldlM (init := runtime) retainOwnedValue
+  return (runtime, function, arity, fixed)
+
+private def takeClosureApplicationGuard (shared : Bool) : Bool :=
+  let (runtime, capture) := alloc {} (.natural 1)
+  let (runtime, closure) := alloc runtime (.closure `closureTarget 2 #[.object capture])
+  match capture, closure with
+  | .heap captureLocation, .heap closureLocation =>
+      let runtime :=
+        if shared then incLocation runtime closureLocation 1 else .ok runtime
+      match runtime >>= (takeClosureApplication · closureLocation) with
+      | .ok (runtime, function, arity, fixed) =>
+          match findCell? runtime.heap captureLocation,
+              findCell? runtime.heap closureLocation with
+          | some captureCell, some closureCell =>
+              function == `closureTarget && arity == 2 &&
+                fixed == #[.object capture] &&
+                captureCell.live && captureCell.rc == (if shared then 2 else 1) &&
+                closureCell.live == shared &&
+                closureCell.rc == (if shared then 1 else 0)
+          | _, _ => false
+      | .error _ => false
+  | _, _ => false
+
+#guard takeClosureApplicationGuard false
+#guard takeClosureApplicationGuard true
+
 def decValueOnce (runtime : RuntimeState) (value : Value) (check : Bool) :
     Except RuntimeFault RuntimeState :=
   match value with
