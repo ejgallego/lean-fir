@@ -3264,6 +3264,13 @@ def allocatingSourceOuterState (arguments : Array Value) : MachineState :=
     control := .code allocatingBefore
     frames := neutralEntryFrames arguments }
 
+/-- Target state after resolving the allocating fixture's `main`
+declaration.  The retained outer let is still active on both sides. -/
+def allocatingTargetOuterState (arguments : Array Value) : MachineState :=
+  { program := allocatingAfterProgram
+    control := .code allocatingAfter
+    frames := neutralEntryFrames arguments }
+
 /-- Active state after evaluating the fixture's retained live binding. -/
 def allocatingSourceInnerStateAt
     (arguments : Array Value) : MachineState :=
@@ -3271,6 +3278,175 @@ def allocatingSourceInnerStateAt
     control := .code (.let deadCtorDecl (.return live))
     env := liveEnv
     frames := neutralEntryFrames arguments }
+
+/-- Target counterpart of `allocatingSourceInnerStateAt`.  The target has
+already deleted the inner constructor and therefore waits at its return. -/
+def allocatingTargetInnerStateAt
+    (arguments : Array Value) : MachineState :=
+  { program := allocatingAfterProgram
+    control := .code (.return live)
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+/-- The declaration-entry frame is hereditarily related to itself whenever
+its saved application arguments are related. -/
+theorem allocatingEntryFramesBinderReadyRelated
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    ∃ roots,
+      BinderReadyReachableFramesRelated 3 emptyAddressRenaming
+        (neutralEntryFrames arguments) (neutralEntryFrames arguments)
+        roots roots := by
+  unfold neutralEntryFrames
+  split
+  · refine ⟨[], ?_⟩
+    simpa using
+      (BinderReadyReachableFramesRelated.cons
+        (BinderReadyReachableFrameRelated.cache (fuel := 3)
+          (rho := emptyAddressRenaming) `main)
+        (BinderReadyReachableFramesRelated.nil :
+          BinderReadyReachableFramesRelated
+            3 emptyAddressRenaming [] [] [] []))
+  · refine ⟨arguments.toList, ?_⟩
+    simpa using
+      (BinderReadyReachableFramesRelated.cons
+        (BinderReadyReachableFrameRelated.apply
+          (fuel := 3) argumentsRelated)
+        (BinderReadyReachableFramesRelated.nil :
+          BinderReadyReachableFramesRelated
+            3 emptyAddressRenaming [] [] [] []))
+
+/-- Exact active-code readiness at the retained outer let.  Its erased value
+is dynamically ready under either exact let decision; compiler provenance
+selects the retained branch. -/
+theorem allocatingOuterExactCodeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      (allocatingSourceOuterState arguments)
+      (runtimeRoots (allocatingSourceOuterState arguments).runtime
+        (envRootsOn neutralUsed
+          (allocatingSourceOuterState arguments).env ++ sourceFrameRoots))
+      allocatingBefore allocatingAfter := by
+  refine ⟨3, neutralUsed, Nat.le_refl 3,
+    allocatingExactGraph, UsedSubset.refl neutralUsed,
+    allocatingExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt (allocatingSourceOuterState arguments)
+        (runtimeRoots (allocatingSourceOuterState arguments).runtime
+          (envRootsOn neutralUsed
+            (allocatingSourceOuterState arguments).env ++ sourceFrameRoots))
+        liveDecl := by
+    exact .runtimeNeutral liveDecl .erased rfl
+  have kept :
+      RetainedLetReadyAt (allocatingSourceOuterState arguments)
+        (runtimeRoots (allocatingSourceOuterState arguments).runtime
+          (envRootsOn neutralUsed
+            (allocatingSourceOuterState arguments).env ++ sourceFrameRoots))
+        liveDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+/-- Exact active-code readiness at the deleted inner constructor, generalized
+to the declaration-entry frame roots carried by a full execution. -/
+theorem deletedCtorExactCodeReadyAtWithFrames
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      (allocatingSourceInnerStateAt arguments)
+      (runtimeRoots (allocatingSourceInnerStateAt arguments).runtime
+        (envRootsOn neutralUsed
+          (allocatingSourceInnerStateAt arguments).env ++ sourceFrameRoots))
+      (.let deadCtorDecl (.return live)) (.return live) := by
+  refine ⟨2, neutralUsed, by omega,
+    deletedCtorExactGraph, UsedSubset.refl neutralUsed,
+    deletedCtorExactBinderReady, ?_⟩
+  have constructorReady :
+      DeletedCtorReadyAt (allocatingSourceInnerStateAt arguments)
+        oneFieldInfo #[.fvar live] := by
+    refine .mk #[.erased] ?_ rfl
+    simp [allocatingSourceInnerStateAt, liveEnv, evalArgs, evalArg]
+    rfl
+  have removed :
+      DeletedLetReadyAt (allocatingSourceInnerStateAt arguments)
+        (runtimeRoots (allocatingSourceInnerStateAt arguments).runtime
+          (envRootsOn neutralUsed
+            (allocatingSourceInnerStateAt arguments).env ++ sourceFrameRoots))
+        deadCtorDecl := by
+    unfold deadCtorDecl letDecl
+    exact .constructor dead dead.name objType oneFieldInfo
+      #[.fvar live] constructorReady
+  have decision :
+      deletedCtorExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedCtorExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp)
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
+/-- Full exact-provenance readiness for the retained outer state, including
+the cache/apply frame introduced by declaration entry. -/
+theorem allocatingOuterExactMachineReadyAt
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (allocatingSourceOuterState arguments)
+      (allocatingTargetOuterState arguments) := by
+  rcases allocatingEntryFramesBinderReadyRelated argumentsRelated with
+    ⟨frameRoots, frames⟩
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed (allocatingSourceOuterState arguments).env,
+    envRootsOn neutralUsed (allocatingTargetOuterState arguments).env,
+    frameRoots, frameRoots, ?_, ?_, frames, ?_⟩
+  · simpa [allocatingSourceOuterState, allocatingTargetOuterState] using
+      allocatingProgramBinderReadyRelated
+  · exact .code (allocatingOuterExactCodeReadyAt arguments frameRoots)
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (EnvRelOn.empty emptyAddressRenaming neutralUsed)
+  · simpa [allocatingSourceOuterState, allocatingTargetOuterState] using
+      emptyRuntime_shadowRelated_of_roots
+        (listRel_append
+          (envRootsOn_related
+          (EnvRelOn.empty emptyAddressRenaming neutralUsed))
+          frames.roots)
+
+/-- Exact hereditary readiness starts at the canonical declaration
+invocation, before `main` has been resolved on either side. -/
+theorem allocatingInitialExactMachineReadyAt
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (initialState allocatingBeforeProgram `main arguments)
+      (initialState allocatingAfterProgram `main arguments) :=
+  initialState_binderReadyReachableMachineReadyAt
+    allocatingProgramBinderReadyRelated argumentsRelated
+
+/-- Full exact-provenance readiness at the destination inner edge, with the
+same saved declaration-entry frame. -/
+theorem deletedCtorExactMachineReadyAtWithFrames
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (allocatingSourceInnerStateAt arguments)
+      (allocatingTargetInnerStateAt arguments) := by
+  rcases allocatingEntryFramesBinderReadyRelated argumentsRelated with
+    ⟨frameRoots, frames⟩
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed (allocatingSourceInnerStateAt arguments).env,
+    envRootsOn neutralUsed (allocatingTargetInnerStateAt arguments).env,
+    frameRoots, frameRoots, ?_, ?_, frames, ?_⟩
+  · simpa [allocatingSourceInnerStateAt, allocatingTargetInnerStateAt] using
+      allocatingProgramBinderReadyRelated
+  · exact .code
+      (deletedCtorExactCodeReadyAtWithFrames arguments frameRoots)
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by
+        simpa [allocatingSourceInnerStateAt,
+          allocatingTargetInnerStateAt] using liveEnvReachableRelated)
+  · simpa [allocatingSourceInnerStateAt,
+      allocatingTargetInnerStateAt] using
+        emptyRuntime_shadowRelated_of_roots
+          (listRel_append
+            (envRootsOn_related liveEnvReachableRelated) frames.roots)
 
 /-- State after the source allocates the constructor that the target
 deletes.  Both the allocation result and its fresh runtime are explicit so
@@ -3314,10 +3490,48 @@ theorem allocatingSourceEntryStep (arguments : Array Value) :
       Program.findDecl?, invokeDecl, allocatingSourceOuterState,
       neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
 
+/-- Resolving the entry declaration preserves exact hereditary provenance
+and reaches a pair whose active retained-let edge is ready. -/
+theorem allocatingInitialExactStepPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (initialState allocatingAfterProgram `main arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3
+        (allocatingSourceOuterState arguments) targetAfter :=
+  (allocatingInitialExactMachineReadyAt argumentsRelated).related
+    |>.matchNextStep_of_ready
+      (allocatingInitialExactMachineReadyAt argumentsRelated)
+      (allocatingSourceEntryStep arguments)
+
 theorem allocatingSourceOuterStep (arguments : Array Value) :
     coreStep (allocatingSourceOuterState arguments) =
       .next (allocatingSourceInnerStateAt arguments) := by
   rfl
+
+theorem allocatingTargetOuterStep (arguments : Array Value) :
+    coreStep (allocatingTargetOuterState arguments) =
+      .next (allocatingTargetInnerStateAt arguments) := by
+  rfl
+
+/-- The exact dispatcher preserves hereditary provenance across the retained
+outer let edge and reaches the already-ready deleted constructor edge. -/
+theorem allocatingOuterExactStepPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments)
+    {sourceAfter : MachineState}
+    (step : Step externals
+      (allocatingSourceOuterState arguments) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (allocatingTargetOuterState arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  (allocatingOuterExactMachineReadyAt argumentsRelated).related
+    |>.matchCodeStep_of_ready
+      (allocatingOuterExactMachineReadyAt argumentsRelated) rfl step
 
 theorem allocatingSourceInnerStep (arguments : Array Value) :
     ∃ nextRuntime deadValue,
