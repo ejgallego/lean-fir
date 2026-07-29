@@ -3921,6 +3921,171 @@ theorem retainedNullaryCtorKeepsAllocationLedger :
     LedgerShadowRuntimeRel.allocCtorBoth, nullaryCtorInfo,
     LedgerShadowRuntimeRel.empty, TargetAllocationLedger.empty]
 
+/-- A retained underapplied function allocates a closure on both sides and
+therefore exercises the paired PAP ledger branch. -/
+def retainedPapDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.pap `first #[.erased])
+
+def retainedPapCode : LCNF.Code .impure :=
+  .let retainedPapDecl (.return live)
+
+theorem retainedPapShadowRun :
+    shadowCode? 2 {} retainedPapCode =
+      some (retainedPapCode, neutralUsed) := by
+  simp [retainedPapCode, retainedPapDecl, letDecl, neutralUsed,
+    shadowCode?, safeToElim, collectLetValue, collectArgs, collectArgList,
+    collectArg, live]
+
+def retainedPapExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed retainedPapCode retainedPapCode :=
+  ExactShadowCodeGraph.ofResult retainedPapShadowRun
+
+theorem retainedPapExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed retainedPapExactGraph.view := by
+  apply retainedPapExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [retainedPapCode, retainedPapDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live]
+
+theorem retainedPapStepBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedPapDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedPapDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+def retainedPapProgram : ImpureProgram :=
+  { decls := #[firstDecl] }
+
+def retainedPapState : MachineState :=
+  { program := retainedPapProgram
+    control := .code retainedPapCode }
+
+theorem retainedPapProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      retainedPapProgram retainedPapProgram := by
+  unfold retainedPapProgram ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [firstDecl] [firstDecl]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code ⟨({} : UsedLocals).insert x, 2,
+        ({} : UsedLocals).insert x, Nat.le_refl 2,
+        firstCodeExactGraph,
+        UsedSubset.refl (({} : UsedLocals).insert x),
+        firstCodeExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- Compiler-facing PAP regression: successful retained underapplication
+takes one source and target step and returns the proof-relevant paired closure
+ledger. -/
+theorem retainedPapExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedPapState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedPapState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedPapState.frames retainedPapState.frames [] [] := by
+    simpa [retainedPapState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedPapState.joins retainedPapState.joins := by
+    simpa [retainedPapState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedPapState.env retainedPapState.env := by
+    simpa [retainedPapState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedPapState.runtime retainedPapState.runtime
+        (envRootsOn neutralUsed retainedPapState.env ++ [])
+        (envRootsOn neutralUsed retainedPapState.env ++ []) := by
+    have emptyRoots (used : UsedLocals) :
+        envRootsOn used ([] : Env) = [] := by
+      unfold envRootsOn
+      induction used.toList with
+      | nil => rfl
+      | cons head tail ih =>
+          simp [lookup]
+    simpa [retainedPapState, emptyRoots] using
+      LedgerShadowRuntimeRel.empty
+  simpa [retainedPapState, retainedPapCode,
+    retainedPapDecl, letDecl] using
+    retainedPapStepBinderReady.match_retainedPapLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      (usedBound := UsedSubset.refl neutralUsed)
+      retainedPapState retainedPapState
+      retainedPapProgramBinderReadyRelated frames joins env runtime step
+
+/-- The deleted PAP fixture's successful source-only closure allocation keeps
+the empty target ledger unchanged. -/
+noncomputable def deletedPapLedgerResult :
+    LedgerPapLeftGarbageResult emptyAddressRenaming
+      deletedPapSourceState deletedPapTargetState.runtime
+      (envRootsOn neutralUsed deletedPapSourceState.env)
+      (envRootsOn neutralUsed deletedPapTargetState.env)
+      dead dead.name objType `first #[.fvar papArgVar] :=
+  let related : LedgerShadowRuntimeRel emptyAddressRenaming
+      deletedPapSourceState.runtime deletedPapTargetState.runtime
+      (envRootsOn neutralUsed deletedPapSourceState.env)
+      (envRootsOn neutralUsed deletedPapTargetState.env) := {
+    runtime := deletedPapRuntimeRelated
+    ledger := by
+      simpa [deletedPapTargetState] using
+        TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  related.evalLetValuePapLeftGarbage
+    (fvarId := dead) (binderName := dead.name) (type := objType)
+    (values := #[.erased]) (target := firstDecl)
+    (by
+      simp [deletedPapSourceState, deletedPapSourceEnv, evalArgs, evalArg,
+        Impure.bind, lookup, papArgVar]
+      rfl)
+    rfl
+    (by simp [firstDecl, decl])
+
+theorem deletedPapSourceOnlyKeepsAllocationLedger :
+    deletedPapLedgerResult.runtime.ledger.owner = fun _ => 0 := by
+  simp [deletedPapLedgerResult,
+    LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage,
+    TargetAllocationLedger.empty]
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime

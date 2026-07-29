@@ -7604,6 +7604,143 @@ noncomputable def LedgerShadowRuntimeRel.allocBoth
     }
   }
 
+/-- Proof-relevant paired allocation result for a retained partial
+application closure. -/
+structure LedgerClosureBothResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (name : Name) (leftArity rightArity : Nat)
+    (leftArguments rightArguments : Array Value) : Type where
+  larger : AddressRenaming
+  extension : RenamingExtends rho larger
+  values :
+    ValueRel larger
+      (.object (alloc left
+        (.closure name leftArity leftArguments)).2)
+      (.object (alloc right
+        (.closure name rightArity rightArguments)).2)
+  runtime :
+    LedgerShadowRuntimeRel larger
+      (alloc left (.closure name leftArity leftArguments)).1
+      (alloc right (.closure name rightArity rightArguments)).1
+      (.object (alloc left
+        (.closure name leftArity leftArguments)).2 :: leftExtra)
+      (.object (alloc right
+        (.closure name rightArity rightArguments)).2 :: rightExtra)
+
+/-- Related, published fixed arguments allocate one paired closure and extend
+the target allocation ledger with the actual fresh source owner. -/
+noncomputable def LedgerShadowRuntimeRel.allocClosureBoth
+    (related : LedgerShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (arityEq : leftArity = rightArity) :
+    LedgerClosureBothResult rho left right leftExtra rightExtra name
+      leftArity rightArity leftArguments rightArguments := by
+  let leftObject : HeapObject :=
+    .closure name leftArity leftArguments
+  let rightObject : HeapObject :=
+    .closure name rightArity rightArguments
+  have objects : HeapObjectRel rho leftObject rightObject := by
+    rw [show leftObject = .closure name leftArity leftArguments from rfl]
+    rw [show rightObject = .closure name rightArity rightArguments from rfl]
+    rw [← arityEq]
+    exact .closure arguments
+  have leftOwned : RootSubset leftObject.ownedValues.toList
+      (runtimeRoots left (leftArguments.toList ++ leftExtra)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [leftObject, HeapObject.ownedValues] using member
+  have rightOwned : RootSubset rightObject.ownedValues.toList
+      (runtimeRoots right (rightArguments.toList ++ rightExtra)) := by
+    intro value member
+    apply extra_subset_runtimeRoots
+    apply List.mem_append_left
+    simpa [rightObject, HeapObject.ownedValues] using member
+  let allocated := related.allocBoth objects leftOwned rightOwned false
+  let leftValue : Value := .object (alloc left leftObject).2
+  let rightValue : Value := .object (alloc right rightObject).2
+  have leftSubset : RootSubset
+      (leftValue :: leftExtra)
+      (leftValue :: (leftArguments.toList ++ leftExtra)) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | member
+    · exact Or.inl same
+    · exact Or.inr (List.mem_append_right _ member)
+  have rightSubset : RootSubset
+      (rightValue :: rightExtra)
+      (rightValue :: (rightArguments.toList ++ rightExtra)) := by
+    intro value member
+    simp only [List.mem_cons] at member ⊢
+    rcases member with same | member
+    · exact Or.inl same
+    · exact Or.inr (List.mem_append_right _ member)
+  exact {
+    larger := allocated.larger
+    extension := allocated.extension
+    values := by
+      simpa [leftObject, rightObject, leftValue, rightValue] using
+        allocated.values
+    runtime := {
+      runtime := by
+        apply allocated.runtime.runtime.restrictExtra
+        · exact .cons allocated.values
+            (listRel_mono (valueRel_mono allocated.extension) tail)
+        · exact leftSubset
+        · exact rightSubset
+      ledger := allocated.runtime.ledger
+    }
+  }
+
+/-- Proof-relevant result of one deleted partial-application evaluation. -/
+structure LedgerPapLeftGarbageResult
+    (rho : AddressRenaming) (state : MachineState)
+    (rightRuntime : RuntimeState) (leftExtra rightExtra : List Value)
+    (fvarId : FVarId) (binderName : Name) (type : Expr)
+    (name : Name) (arguments : Array (LCNF.Arg .impure)) : Type where
+  nextRuntime : RuntimeState
+  value : Value
+  effect :
+    evalLetValue state {
+      fvarId
+      binderName
+      type
+      value := .pap name arguments
+    } = .ok (nextRuntime, .value value)
+  runtime :
+    LedgerShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra
+
+/-- A deleted partial application allocates only a source closure, so the
+target frontier and owner ledger remain unchanged. -/
+noncomputable def LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage
+    (related : LedgerShadowRuntimeRel rho state.runtime rightRuntime
+      leftExtra rightExtra)
+    (argumentsResult : evalArgs state.env arguments = .ok values)
+    (targetFound : state.program.findDecl? name = some target)
+    (underapplied : values.size < target.params.size) :
+    LedgerPapLeftGarbageResult rho state rightRuntime leftExtra rightExtra
+      fvarId binderName type name arguments := by
+  let witness := related.runtime.evalLetValuePapLeftGarbage
+    (fvarId := fvarId) (binderName := binderName) (type := type)
+    argumentsResult targetFound underapplied
+  let nextRuntime := Classical.choose witness
+  have valueWitness := Classical.choose_spec witness
+  let value := Classical.choose valueWitness
+  have specification := Classical.choose_spec valueWitness
+  exact {
+    nextRuntime
+    value
+    effect := specification.1
+    runtime := {
+      runtime := specification.2
+      ledger := related.ledger
+    }
+  }
+
 /-- Publishing covered constructor arguments changes only the direct-root
 index of a ledger-carrying runtime relation. The target allocation frontier
 and its owner ledger are unchanged. -/
@@ -16387,6 +16524,327 @@ theorem match_deletedPapLetStep_binderReady
         ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
       exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying hereditary retained-partial-application matcher. The
+successful underapplication branch publishes related fixed arguments, pairs
+the fresh closure allocations, and returns their exact ledger extension. -/
+theorem match_retainedPapLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .pap name arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .pap name arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceArgumentsEq :
+    evalArgs sourceState.env arguments = sourceEvaluation
+  cases sourceEvaluation with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceArgumentsEq, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceArguments =>
+      have evaluated := evalArgs_relOn env covered
+      rw [sourceArgumentsEq] at evaluated
+      generalize targetArgumentsEq :
+        evalArgs targetState.env arguments = targetEvaluation at evaluated
+      cases evaluated with
+      | ok argumentsRelated =>
+          rename_i targetArguments
+          generalize sourceFound :
+            sourceState.program.findDecl? name = sourceDeclarationOption
+          cases sourceDeclarationOption with
+          | none =>
+              have sourceEvaluated :
+                  evalLetValue sourceState {
+                    fvarId, binderName, type,
+                    value := .pap name arguments
+                  } = .error (.unknownDecl name) := by
+                simp only [evalLetValue, sourceArgumentsEq,
+                  Bind.bind, Except.bind]
+                rw [sourceFound]
+                rfl
+              have currentEvaluated :
+                  evalLetValue sourceCurrent {
+                    fvarId, binderName, type,
+                    value := .pap name arguments
+                  } = .error (.unknownDecl name) := by
+                simpa [sourceCurrent, evalLetValue] using sourceEvaluated
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent
+                    (.fault (.unknownDecl name))) := by
+                simp [sourceCurrent, coreStep, currentEvaluated, fail]
+              exact (noStep done).elim
+          | some sourceDeclaration =>
+              have found := programs.findDecl? name
+              rw [sourceFound] at found
+              generalize targetFound :
+                targetState.program.findDecl? name = targetDeclarationOption
+                  at found
+              cases found with
+              | some declarations =>
+                  rename_i targetDeclaration
+                  by_cases underapplied :
+                      sourceArguments.size <
+                        sourceDeclaration.params.size
+                  · have targetUnderapplied :
+                        targetArguments.size <
+                          targetDeclaration.params.size := by
+                      rw [← declarations.params_eq,
+                        ← arrayRel_size_eq argumentsRelated]
+                      exact underapplied
+                    let publishedArguments := runtime.publishEvalArgs covered
+                      sourceArgumentsEq targetArgumentsEq argumentsRelated
+                    have tail : ListRel (ValueRel rho)
+                        (envRootsOn used sourceState.env ++ sourceFrameRoots)
+                        (envRootsOn used targetState.env ++ targetFrameRoots) :=
+                      listRel_append (envRootsOn_related env) frames.roots
+                    let allocated := publishedArguments.allocClosureBoth
+                      (name := name)
+                      (leftArity := sourceDeclaration.params.size)
+                      (rightArity := targetDeclaration.params.size)
+                      argumentsRelated tail
+                      (congrArg (fun params => params.size)
+                        declarations.params_eq)
+                    let sourceObject : HeapObject := .closure name
+                      sourceDeclaration.params.size sourceArguments
+                    let targetObject : HeapObject := .closure name
+                      targetDeclaration.params.size targetArguments
+                    let sourceRuntime := (alloc sourceState.runtime
+                      sourceObject).1
+                    let targetRuntime := (alloc targetState.runtime
+                      targetObject).1
+                    let sourceValue : Value := .object
+                      (alloc sourceState.runtime sourceObject).2
+                    let targetValue : Value := .object
+                      (alloc targetState.runtime targetObject).2
+                    have values :
+                        ValueRel allocated.larger
+                          sourceValue targetValue := by
+                      simpa [sourceObject, targetObject, sourceValue,
+                        targetValue] using allocated.values
+                    have nextRuntime :
+                        LedgerShadowRuntimeRel allocated.larger
+                          sourceRuntime targetRuntime
+                          (sourceValue ::
+                            envRootsOn used sourceState.env ++
+                              sourceFrameRoots)
+                          (targetValue ::
+                            envRootsOn used targetState.env ++
+                              targetFrameRoots) := by
+                      simpa [sourceObject, targetObject, sourceRuntime,
+                        targetRuntime, sourceValue, targetValue] using
+                        allocated.runtime
+                    have sourceEvaluated :
+                        evalLetValue sourceState {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .ok (sourceRuntime, .value sourceValue) := by
+                      simp only [evalLetValue, sourceArgumentsEq,
+                        Bind.bind, Except.bind]
+                      rw [sourceFound]
+                      simp only
+                      rw [if_neg (Nat.not_le_of_lt underapplied)]
+                      rfl
+                    have targetEvaluated :
+                        evalLetValue targetState {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .ok (targetRuntime, .value targetValue) := by
+                      simp only [evalLetValue, targetArgumentsEq,
+                        Bind.bind, Except.bind]
+                      rw [targetFound]
+                      simp only
+                      rw [if_neg (Nat.not_le_of_lt targetUnderapplied)]
+                      rfl
+                    let sourceExpected := {
+                      sourceState with
+                      runtime := sourceRuntime
+                      env := bind sourceState.env fvarId sourceValue
+                      control := .code sourceContinuation }
+                    let targetExpected := {
+                      targetState with
+                      runtime := targetRuntime
+                      env := bind targetState.env fvarId targetValue
+                      control := .code targetContinuation }
+                    have sourceTransition :
+                        coreStep sourceCurrent = .next sourceExpected := by
+                      have currentEvaluated :
+                          evalLetValue sourceCurrent {
+                            fvarId, binderName, type,
+                            value := .pap name arguments
+                          } = .ok
+                            (sourceRuntime, .value sourceValue) := by
+                        simpa [sourceCurrent, evalLetValue] using
+                          sourceEvaluated
+                      simp [sourceCurrent, sourceExpected, coreStep,
+                        currentEvaluated]
+                    have targetTransition :
+                        coreStep targetCurrent = .next targetExpected := by
+                      have currentEvaluated :
+                          evalLetValue targetCurrent {
+                            fvarId, binderName, type,
+                            value := .pap name arguments
+                          } = .ok
+                            (targetRuntime, .value targetValue) := by
+                        simpa [targetCurrent, evalLetValue] using
+                          targetEvaluated
+                      simp [targetCurrent, targetExpected, coreStep,
+                        currentEvaluated]
+                    have afterRelated :
+                        BinderReadyReachableMachineRelated fuel
+                          allocated.larger sourceExpected targetExpected := by
+                      exact retainedLetValue_binderReadyReachableRelated
+                        sourceState targetState sourceRuntime targetRuntime
+                        programs
+                        (frames.monoRenaming allocated.extension)
+                        continuation joins
+                        (envRelOn_monoRenaming allocated.extension env) values
+                        nextRuntime.runtime
+                    have afterLedger :
+                        TargetAllocationLedger allocated.larger
+                          targetExpected.runtime.nextLocation := by
+                      simpa [targetExpected] using nextRuntime.ledger
+                    rcases match_internalCoreSteps_binderReady
+                        sourceTransition targetTransition afterRelated
+                        (by simpa [sourceCurrent] using step) with
+                      ⟨targetPath, relatedAfter⟩
+                    exact ⟨allocated.larger, targetExpected,
+                      allocated.extension, targetPath, afterLedger,
+                      relatedAfter⟩
+                  · have applied :
+                        sourceDeclaration.params.size ≤
+                          sourceArguments.size :=
+                      Nat.le_of_not_gt underapplied
+                    let fault : RuntimeFault := .malformed
+                      s!"partial application {name} fixes \
+                        {sourceArguments.size} of \
+                        {sourceDeclaration.params.size} parameters"
+                    have evaluatedFault :
+                        evalLetValue sourceCurrent {
+                          fvarId, binderName, type,
+                          value := .pap name arguments
+                        } = .error fault := by
+                      simp only [sourceCurrent, evalLetValue,
+                        sourceArgumentsEq, Bind.bind, Except.bind]
+                      rw [sourceFound]
+                      simp only
+                      rw [if_pos applied]
+                      rfl
+                    have done : coreStep sourceCurrent =
+                        .done (observe sourceCurrent (.fault fault)) := by
+                      simp [sourceCurrent, coreStep, evaluatedFault, fail]
+                    exact (noStep done).elim
+
+/-- Ledger-carrying hereditary deleted-partial-application matcher. Both the
+runtime-neutral fallback and a certified source-only closure allocation leave
+the target frontier and its incoming owner ledger unchanged. -/
+theorem match_deletedPapLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .pap name arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      rcases coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated runtime.runtime with
+        ⟨transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+      subst targetAfter
+      exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+  | partialApplication fvarId binderName type name arguments ready =>
+      rcases coreStep_deletedPap_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime.runtime ready with
+        ⟨nextRuntime, value, transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+      subst targetAfter
+      exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+
 /-- Exact retained partial-application provenance supplies the hereditary
 continuation and compiler-derived coverage of every fixed argument. -/
 theorem ExactShadowCodeBinderReady.match_retainedPapLetStep
@@ -16504,6 +16962,130 @@ theorem ExactShadowCodeBinderReady.match_deletedPapLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedPapLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
+
+/-- Exact retained partial-application provenance consumed through the
+ledger-carrying matcher. Successful underapplication exposes the paired
+closure allocation at the compiler-facing boundary. -/
+theorem ExactShadowCodeBinderReady.match_retainedPapLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName name : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.pap name arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .pap name arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedPapLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime step
+
+/-- Exact deleted partial-application provenance consumed through the
+ledger-carrying source-only matcher. The target stutters at the selected
+continuation and retains its incoming allocation history. -/
+theorem ExactShadowCodeBinderReady.match_deletedPapLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName name : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.pap name arguments :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .pap name arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .pap name arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedPapLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime deletedReady step
