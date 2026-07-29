@@ -613,6 +613,37 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident numeric Format module: {repr error}"
+  let residentStringOperationsArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringOperations
+        residentNumericArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident String Format facade: {repr error}"
+  unless residentStringOperationsArtifact.module.imports.size == 6 do
+    throwError "resident Format String-operation frontier changed"
+  let residentStringArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals
+        residentStringOperationsArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident String-literal facade: {repr error}"
+  unless residentStringArtifact.module.imports.size == 2 do
+    throwError "resident Format String frontier changed"
+  unless Fir.Wasm.Emit.ResidentString.externalHelperNames.all
+      residentStringArtifact.module.exports.contains do
+    throwError "resident Format String helper exports changed"
+  unless residentStringArtifact.module.closureDispatch ==
+      residentNumericArtifact.module.closureDispatch &&
+      residentStringArtifact.module.closureDescriptors ==
+        residentNumericArtifact.module.closureDescriptors &&
+      residentStringArtifact.formattedLcnf ==
+        residentNumericArtifact.formattedLcnf do
+    throwError "resident String linking changed source or closure metadata"
+  match ← residentStringArtifact.write
+      "_build/source-pretty-format-resident-string.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident String Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

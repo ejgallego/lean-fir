@@ -9,6 +9,7 @@ import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentString
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
 
@@ -166,6 +167,34 @@ def internalizeNumeric (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident Nat/Int operations: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeStringOperations (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentString.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident String operations: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeStringLiterals (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentLiteral.internalizeStrings artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident String literals: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -342,9 +371,19 @@ def compileNumericModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
   return (← compileCacheModule entry).bind internalizeNumeric
 
+/--
+Continue from one-limb Nat/Int operations, internalize the eight UTF-8 String
+declarations reachable from `prettyM`, and then move its four String literals
+into the same module-owned heap.
+-/
+def compileStringModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileNumericModule entry
+  return result.bind internalizeStringOperations |>.bind internalizeStringLiterals
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileNumericModule entry
+  compileStringModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

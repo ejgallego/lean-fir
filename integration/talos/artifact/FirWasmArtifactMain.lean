@@ -10,6 +10,7 @@ import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentString
 
 open Fir.Wasm
 open Fir.Wasm.Emit
@@ -214,6 +215,20 @@ def emitResidentNumeric (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-numeric: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentString (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentString.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident String encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentString.manifest.compress
+  IO.println
+    s!"resident-string: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentIsShared (path : System.FilePath) : IO Unit := do
   let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode
     Fir.Wasm.Emit.ResidentRuntime.isSharedModule).mapError fun error =>
@@ -284,6 +299,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-releases <output.wasm>\n" ++
     "       fir-wasm-artifact resident-cache <output.wasm>\n" ++
     "       fir-wasm-artifact resident-numeric <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-string <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
     "       fir-wasm-artifact resident-read-projections <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-projections <output.wasm>\n" ++
@@ -336,6 +352,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-numeric", output] =>
         emitResidentNumeric output
+        return 0
+    | ["resident-string", output] =>
+        emitResidentString output
         return 0
     | ["resident-is-shared", output] =>
         emitResidentIsShared output

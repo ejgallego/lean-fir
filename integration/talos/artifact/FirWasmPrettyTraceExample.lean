@@ -314,3 +314,33 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled numeric module: {repr error}"
+  let stringOperationsArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringOperations
+        numericArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled String module: {repr error}"
+  unless stringOperationsArtifact.module.imports.size == 6 do
+    throwError "resident styled String-operation frontier changed"
+  let stringArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals
+        stringOperationsArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled String literals: {repr error}"
+  unless stringArtifact.module.imports.size == 2 do
+    throwError "resident styled String frontier changed"
+  unless Fir.Wasm.Emit.ResidentString.externalHelperNames.all
+      stringArtifact.module.exports.contains do
+    throwError "resident styled String helper exports changed"
+  unless stringArtifact.module.closureDispatch ==
+      numericArtifact.module.closureDispatch &&
+      stringArtifact.module.closureDescriptors ==
+        numericArtifact.module.closureDescriptors &&
+      stringArtifact.formattedLcnf == numericArtifact.formattedLcnf do
+    throwError "resident styled String linking changed source or closure metadata"
+  match ← stringArtifact.write
+      "_build/source-pretty-format-trace-resident-string.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled String module: {repr error}"

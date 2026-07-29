@@ -75,10 +75,11 @@ export function checkConcretePrettyFormatModule({
       assert.equal(typeof setFrontier, "function");
       setFrontier(host.heapCursor);
     }
-    const result = host.decode("object",
-      prettyM(...args));
-    assert.equal(result.kind, "heap");
-    return host.readString(host.addressOf(result.location));
+    const result = prettyM(...args) >>> 0;
+    host.synchronizeResidentFrontierBeforeImport();
+    assert.equal(host.classify(result), "heap",
+      "concrete prettyM result must be heap-backed");
+    return host.readString(result);
   }
 
   const hello = () => append(text("hello"), nest(2, append(line(), text("world"))));

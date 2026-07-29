@@ -111,6 +111,9 @@ node run-resident-cache.mjs _build/resident-cache.wasm
 lake exe fir-wasm-artifact resident-numeric \
   _build/resident-numeric.wasm
 node run-resident-numeric.mjs _build/resident-numeric.wasm
+lake exe fir-wasm-artifact resident-string \
+  _build/resident-string.wasm
+node run-resident-string.mjs _build/resident-string.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -637,6 +640,17 @@ styled artifacts both advance from 24 to 14 function imports without changing
 final LCNF or closure metadata. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14`.
 
+The next checkpoint internalizes all eight UTF-8 String declarations reachable
+from `prettyM` and then its four String literals. The helpers consume and
+produce the concrete W6 String layout directly; Natural byte positions and
+results go through the resident one-limb numeric surface. Standalone and linked
+Node/Chrome tests cover Unicode append/pushn, byte-versus-character position
+conversion, valid and invalid extraction boundaries, `next`, and literal
+allocation. Plain and styled artifacts advance from 14 to 2 function imports
+without changing final LCNF or closure metadata. The remaining imports are the
+two unreachable panic/inhabited fallbacks. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -651,7 +665,7 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 14 function imports, the same frontier
+memory and allocator and currently has 2 function imports, the same frontier
 as the text-only checkpoint while preserving the exact `MonadPrettyFormat`
 output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
