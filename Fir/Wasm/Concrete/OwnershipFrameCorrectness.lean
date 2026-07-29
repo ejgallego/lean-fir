@@ -2028,6 +2028,167 @@ theorem LiveHeapRel.incrementReference_refines
       check
   exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
+/-- Folding state transitions that individually preserve the heap frontier
+also preserves it for the complete successful fold. -/
+private theorem List.foldlM_memoryState_preserves_heapCursor
+    {α ε : Type} {step : MemoryState → α → Except ε MemoryState}
+    (preserves : ∀ before value after,
+      step before value = .ok after →
+      after.heapCursor = before.heapCursor)
+    {values : List α} {before after : MemoryState}
+    (operation : values.foldlM (init := before) step = .ok after) :
+    after.heapCursor = before.heapCursor := by
+  induction values generalizing before with
+  | nil =>
+      simpa only [List.foldlM_nil, Except.ok.injEq] using
+        (congrArg MemoryState.heapCursor (Except.ok.inj operation)).symm
+  | cons value rest ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at operation
+      cases firstOperation : step before value with
+      | error failure =>
+          rw [firstOperation] at operation
+          contradiction
+      | ok middle =>
+          rw [firstOperation] at operation
+          exact (ih operation).trans (preserves before value middle firstOperation)
+
+/-- Rewriting a validated header changes only linear memory. -/
+theorem writeLiveHeader_preserves_heapCursor
+    {state result : MemoryState} {address : Word32} {header : Header}
+    (operation : writeLiveHeader state address header = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  unfold writeLiveHeader at operation
+  change (do
+    let memory ← liftMemory (header.write state.memory address)
+    return ({ state with memory } : MemoryState)) = .ok result at operation
+  cases written : header.write state.memory address with
+  | error failure =>
+      rw [written] at operation
+      simp [liftMemory, Functor.map, Except.map] at operation
+  | ok memory =>
+      rw [written] at operation
+      simp [liftMemory, Functor.map, Except.map] at operation
+      subst result
+      rfl
+
+/--
+Every successful fuel-indexed recursive release preserves the exact heap
+frontier. This is a property of the executable ownership algorithm itself:
+it performs only header rewrites and recursive folds of the same operation.
+-/
+theorem decrementReferenceOnceFuel_preserves_heapCursor
+    {fuel : Nat} {state result : MemoryState} {object : Word32} {check : Bool}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      decrementReferenceOnceFuel fuel state object check descriptors =
+        .ok result) :
+    result.heapCursor = state.heapCursor := by
+  induction fuel generalizing state result object check with
+  | zero =>
+      simp only [decrementReferenceOnceFuel] at operation
+      cases classified : object.classify <;> rw [classified] at operation
+      · by_cases checked : check = true <;>
+          simp [checked, pure, Except.pure] at operation
+        subst result
+        rfl
+      · by_cases checked : check = true <;>
+          simp [checked, pure, Except.pure] at operation
+        subst result
+        rfl
+      · cases read : state.readLiveHeader object with
+        | error failure =>
+            simp [liftMemory, read, Bind.bind, Except.bind] at operation
+        | ok header =>
+            simp [liftMemory, read, Bind.bind, Except.bind] at operation
+            by_cases promoted : header.isPromotedTag = true
+            · by_cases checked : check = true <;>
+                simp [promoted, checked, pure, Except.pure] at operation
+              subst result
+              rfl
+            · simp [promoted] at operation
+      · simp at operation
+  | succ fuel ih =>
+      simp only [decrementReferenceOnceFuel] at operation
+      cases classified : object.classify <;> rw [classified] at operation
+      · by_cases checked : check = true <;>
+          simp [checked, pure, Except.pure] at operation
+        subst result
+        rfl
+      · by_cases checked : check = true <;>
+          simp [checked, pure, Except.pure] at operation
+        subst result
+        rfl
+      · cases read : state.readLiveHeader object with
+        | error failure =>
+            simp [liftMemory, read, Bind.bind, Except.bind] at operation
+        | ok header =>
+            simp only [liftMemory, read, Bind.bind, Except.bind] at operation
+            by_cases promoted : header.isPromotedTag = true
+            · by_cases checked : check = true <;>
+                simp [promoted, checked, pure, Except.pure] at operation
+              subst result
+              rfl
+            · simp only [promoted] at operation
+              by_cases persistent : header.persistent = true
+              · simp [persistent, pure, Except.pure] at operation
+                subst result
+                rfl
+              · simp only [persistent] at operation
+                by_cases zero : header.refCount == 0
+                · simp [zero] at operation
+                · simp only [zero] at operation
+                  by_cases shared : 1 < header.refCount.toNat
+                  · simp only [shared, if_true] at operation
+                    exact writeLiveHeader_preserves_heapCursor operation
+                  · simp only [shared, if_false] at operation
+                    cases ownedOperation :
+                        readOwnedReferences state object header descriptors with
+                    | error failure =>
+                        rw [ownedOperation] at operation
+                        contradiction
+                    | ok owned =>
+                        rw [ownedOperation] at operation
+                        cases writeOperation :
+                            writeLiveHeader state object header.forRelease with
+                        | error failure =>
+                            rw [writeOperation] at operation
+                            contradiction
+                        | ok middle =>
+                            rw [writeOperation] at operation
+                            exact
+                              (List.foldlM_memoryState_preserves_heapCursor
+                                (fun before child after childOperation =>
+                                  ih childOperation)
+                                operation).trans
+                                (writeLiveHeader_preserves_heapCursor
+                                  writeOperation)
+      · simp at operation
+
+/-- The public one-step release wrapper inherits exact frontier preservation
+from its fuel-indexed implementation. -/
+theorem decrementReferenceOnce_preserves_heapCursor
+    {state result : MemoryState} {object : Word32} {check : Bool}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      decrementReferenceOnce state object check descriptors = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  unfold decrementReferenceOnce at operation
+  exact decrementReferenceOnceFuel_preserves_heapCursor operation
+
+/-- Repeating successful release steps never advances or retracts the heap
+frontier. -/
+theorem decrementReference_preserves_heapCursor
+    {state result : MemoryState} {object : Word32} {amount : Nat} {check : Bool}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      decrementReference state object amount check descriptors = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  unfold decrementReference at operation
+  exact List.foldlM_memoryState_preserves_heapCursor
+    (fun before _ after step =>
+      decrementReferenceOnce_preserves_heapCursor step)
+    operation
+
 /-- Whole-heap source/concrete refinement for the nonrecursive decrement
 branch. The target count changes, every other allocation is framed by the
 descriptor disjointness invariant, and the semantic `setCell` update is
@@ -2765,13 +2926,14 @@ theorem LiveHeapRel.decrementReference_refines_with_capacity
     ∃ result,
       decrementReference state address amount check witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness nextRuntime ∧
+      result.heapCursor = state.heapCursor ∧
       MappedHeaderCapacityTransport state result witness := by
   induction amount generalizing state runtime nextRuntime with
   | zero =>
       simp [Fir.LeanIR.Impure.decValue] at semanticOperation
       have runtimeEq := Except.ok.inj semanticOperation
       subst nextRuntime
-      exact ⟨state, rfl, related, .refl state witness⟩
+      exact ⟨state, rfl, related, rfl, .refl state witness⟩
   | succ amount ih =>
       simp only [Fir.LeanIR.Impure.decValue, List.replicate_succ,
         List.foldlM_cons, Bind.bind, Except.bind,
@@ -2785,13 +2947,19 @@ theorem LiveHeapRel.decrementReference_refines_with_capacity
           obtain ⟨middleState, firstConcrete, middleRelated, firstCapacity⟩ :=
             related.decrementReferenceOnce_refines_with_capacity mapped check
               firstSemantic
-          obtain ⟨result, restConcrete, finalRelated, restCapacity⟩ :=
+          obtain ⟨result, restConcrete, finalRelated, _restCursor,
+              restCapacity⟩ :=
             ih middleRelated semanticOperation
-          refine ⟨result, ?_, finalRelated, firstCapacity.trans restCapacity⟩
-          simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
-            Bind.bind, Except.bind]
-          rw [firstConcrete]
-          exact restConcrete
+          have concreteOperation :
+              decrementReference state address (amount + 1) check
+                  witness.closureDescriptors = .ok result := by
+            simp only [decrementReference, List.replicate_succ, List.foldlM_cons,
+              Bind.bind, Except.bind]
+            rw [firstConcrete]
+            exact restConcrete
+          exact ⟨result, concreteOperation, finalRelated,
+            decrementReference_preserves_heapCursor concreteOperation,
+            firstCapacity.trans restCapacity⟩
 
 theorem LiveHeapRel.decrementReference_refines
     {state : MemoryState} {witness : RefinementWitness}
@@ -2806,7 +2974,7 @@ theorem LiveHeapRel.decrementReference_refines
     ∃ result,
       decrementReference state address amount check witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, concrete, finalRelated, _⟩ :=
+  obtain ⟨result, concrete, finalRelated, _, _⟩ :=
     related.decrementReference_refines_with_capacity mapped check
       semanticOperation
   exact ⟨result, concrete, finalRelated⟩

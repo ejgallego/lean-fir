@@ -568,7 +568,13 @@ acceptance tests pass.
    arbitrary-spine contract. Lift successful projections into that indexed
    union next.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
-   caches. Reuse the existing W6 operation lemmas, but do not expose
+   caches. Persistent ownership, ordinary increments, and ordinary recursive
+   decrements now instantiate the generic effect condition. The decrement
+   endpoint uses `ConcreteBudgetedPureExternalOwnershipFrame` to carry exactly
+   the host/witness closure-descriptor agreement required by recursive capture
+   release; direct and external step interfaces expose independent table
+   preservation, so the source admission remains target-free. Reuse the
+   existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
 5. Lift from the current source evaluation view to canonical
    `ExecEvaluates`, then package the complete generated export as T3.

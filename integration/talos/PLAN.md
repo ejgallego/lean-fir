@@ -4143,6 +4143,32 @@ addresses, or per-program simulation certificates cross the public boundary.
 No FIR semantic contract, concrete layout, executable ABI, or W7 helper
 signature changed.
 
+W6.6fm closes ordinary recursive decrement under the certificate-free effect
+condition. A general executable theorem proves that successful
+`decrementReferenceOnceFuel`, its public one-step wrapper, and arbitrary
+multi-decrement folds preserve `heapCursor` exactly: recursive release consists
+only of header rewrites and folds of the same cursor-preserving operation.
+The existing heap/runtime/effect refinement boundaries now export that exact
+frontier fact alongside mapped-header capacity.
+
+`OrdinaryDecrementEffectSupported` retains only the semantic lookup/update and
+the source local's ABI kind. `CodeAdapted.dec_eq` and resolver alignment derive
+the numeric local/import slots, exact `dec` contract, and adapted continuation.
+Recursive closure release needs immutable host/witness descriptor agreement,
+so `ConcreteBudgetedPureExternalOwnershipFrame` threads that relation as
+proof-side state instead of adding it to source admission. Costed direct and
+external runtime laws now expose independent preservation of both descriptor
+tables, and reusable lifting theorems re-establish their agreement after every
+surrounding node.
+
+`effectRuntimeRefines_ordinaryDecrement` proves the generated unary host call
+at zero allocation cost, and
+`correctBudgetedPureExternalOrdinaryDecrements` closes arbitrary successful
+decrements interleaved with default-only cases, all current direct operations,
+and the ten resident numeric externals. The contract harness checks both
+boundaries. This is a proof-surface extension only: no FIR semantic contract,
+concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

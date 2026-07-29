@@ -412,6 +412,13 @@ Cross-cutting W6.5 state:
   range from the value relation; and both whole-export theorems permit
   arbitrary chain length and nesting around the current direct and
   resident-numeric family; and
+- certificate-free finite compiler correctness now also crosses arbitrary
+  successful ordinary recursive decrements: production inversion derives the
+  object local, decrement import, and continuation; resolver alignment supplies
+  the exact unary concrete contract; recursive constructor/closure ownership
+  release preserves the heap frontier; and an ownership-aware threaded frame
+  carries immutable host/witness closure-descriptor agreement across every
+  surrounding direct or pure-external node; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

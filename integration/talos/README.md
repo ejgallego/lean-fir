@@ -363,6 +363,18 @@ budgeted pure-external frame, and
 `correctBudgetedPureExternalOrdinaryIncrements` closes arbitrary successful
 ordinary increments mixed with default cases and the same direct/resident
 families without a target witness or per-node simulation premise.
+`OrdinaryDecrementEffectSupported` extends this boundary to successful
+nonpersistent recursive release. `CodeAdapted.dec_eq` and
+`ConcreteSupportedExport.decrementCall` recover the exact generated unary
+prefix from the production compiler, adapter, and resolver.
+`ConcreteBudgetedPureExternalOwnershipFrame` carries immutable
+host/witness closure-descriptor agreement across direct and external nodes;
+the admission predicate contains no concrete table premise.
+`effectRuntimeRefines_ordinaryDecrement` consumes that agreement only at the
+recursive release step, while the executable `decrementReference` frontier
+theorem retains the allocation budget exactly.
+`correctBudgetedPureExternalOrdinaryDecrements` is the corresponding
+whole-export endpoint.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

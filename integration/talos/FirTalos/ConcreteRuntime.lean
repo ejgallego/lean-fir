@@ -4266,6 +4266,7 @@ theorem decrementStep_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases objectRelated with
   | tobject referenceRelated =>
@@ -4273,10 +4274,11 @@ theorem decrementStep_of_refines_with_capacity
       | heap heapRelated =>
           cases heapRelated with
           | mapped mapped =>
-              obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+              obtain ⟨heap, concreteOperation, finalHeapRelated, cursor,
+                  capacity⟩ :=
                 runtimeRelated.heap.decrementReference_refines_with_capacity
                   mapped check updated
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, cursor, capacity⟩
               · simp [decrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, descriptorsEq,
                   concreteOperation, replaceHeap]
@@ -4290,7 +4292,7 @@ theorem decrementStep_of_refines_with_capacity
                   have afterEq : nextRuntime = runtime := by
                     simpa [decValue] using (Except.ok.inj updated).symm
                   subst nextRuntime
-                  refine ⟨initial.host.runtime.heap, ?_, ?_,
+                  refine ⟨initial.host.runtime.heap, ?_, ?_, rfl,
                     .refl initial.host.runtime.heap witness⟩
                   · simp [decrementStep, decrementReference, clearFailure,
                       Word32.ofUInt32_ofNat_value, replaceHeap, pure,
@@ -4308,7 +4310,7 @@ theorem decrementStep_of_refines_with_capacity
                 rw [decValue_tagged_checked] at updated
                 exact (Except.ok.inj updated).symm
               subst nextRuntime
-              refine ⟨initial.host.runtime.heap, ?_, ?_,
+              refine ⟨initial.host.runtime.heap, ?_, ?_, rfl,
                 .refl initial.host.runtime.heap witness⟩
               · simp [decrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
@@ -4332,7 +4334,7 @@ theorem decrementStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     decrementStep_of_refines_with_capacity runtimeRelated objectRelated
       descriptorsEq updated
   exact ⟨heap, concrete, finalRelated⟩
@@ -7727,6 +7729,7 @@ theorem effectStepSimulates_dec_with_capacity
         (.dec objectId amount check false objectFields? continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
     unfold lookupValue at objectLookup
@@ -7741,10 +7744,10 @@ theorem effectStepSimulates_dec_with_capacity
   have tobjectRelated := physicalRelated.toTObject objectRefines
   cases tobjectRelated with
   | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+      obtain ⟨heap, operation, runtimeRelated, cursor, capacity⟩ :=
         decrementStep_of_refines_with_capacity initialRelated.1 objectRelated
           descriptorsEq updated
-      refine ⟨heap, ?_, capacity⟩
+      refine ⟨heap, ?_, cursor, capacity⟩
       apply effectStepSimulates_unaryHost
         (step := decrementStep amount check objectFields?)
       · intro externals
@@ -7810,7 +7813,7 @@ theorem effectStepSimulates_dec
         (.dec objectId amount check false objectFields? continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_dec_with_capacity objectLookup updated initialRelated
       objectCompiled objectFound kindAt objectRefines descriptorsEq callFound
       continuationAdapted hImp hSat hi hContract hParams hResults
