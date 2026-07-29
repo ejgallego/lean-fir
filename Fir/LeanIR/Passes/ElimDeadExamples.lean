@@ -1658,6 +1658,516 @@ theorem deletedBoxUnifiedReady :
   unfold deadBoxDecl letDecl
   exact .box dead dead.name objType u64Type boxInputVar deletedBoxReady
 
+/-- The large literal's unified deleted-let certificate records that its
+possible heap allocation is fresh source-only garbage. -/
+theorem deletedLargeNatUnifiedReady :
+    DeletedLetReadyAt deletedLargeNatSourceState
+      (runtimeRoots deletedLargeNatSourceState.runtime
+        (envRootsOn neutralUsed deletedLargeNatSourceState.env ++ []))
+      deadLargeNatDecl := by
+  unfold deadLargeNatDecl letDecl
+  exact .literal dead dead.name objType (.nat 9223372036854775808)
+
+/-- The partial application's unified deleted-let certificate records the
+resolved declaration and evaluated captured arguments. -/
+theorem deletedPapUnifiedReady :
+    DeletedLetReadyAt deletedPapSourceState
+      (runtimeRoots deletedPapSourceState.runtime
+        (envRootsOn neutralUsed deletedPapSourceState.env ++ []))
+      deadPapDecl := by
+  unfold deadPapDecl letDecl
+  exact .partialApplication dead dead.name objType `first
+    #[.fvar papArgVar] deletedPapReady
+
+/-- Concrete constructor readiness for the inner allocating fixture. -/
+theorem deletedCtorReady :
+    DeletedCtorReadyAt allocatingSourceInnerState
+      oneFieldInfo #[.fvar live] := by
+  refine .mk #[.erased] ?_ rfl
+  simp [allocatingSourceInnerState, liveEnv, evalArgs, evalArg]
+  rfl
+
+/-- The inner constructor's unified deleted-let certificate exposes its
+fresh source-only heap allocation. -/
+theorem deletedCtorUnifiedReady :
+    DeletedLetReadyAt allocatingSourceInnerState
+      (runtimeRoots allocatingSourceInnerState.runtime
+        (envRootsOn neutralUsed allocatingSourceInnerState.env ++ []))
+      deadCtorDecl := by
+  unfold deadCtorDecl letDecl
+  exact .constructor dead dead.name objType oneFieldInfo
+    #[.fvar live] deletedCtorReady
+
+/-- Transparent exact run for the inner deleted constructor. -/
+theorem deletedCtorShadowRun :
+    shadowCode? 2 {} (.let deadCtorDecl (.return live)) =
+      some (.return live, neutralUsed) := by
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deadCtorDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
+    deadAbsent]
+
+/-- Transparent exact identity run for the declaration used by the partial
+application fixture. -/
+theorem firstCodeShadowRun :
+    shadowCode? 2 {} (.return x) =
+      some (.return x, ({} : UsedLocals).insert x) := by
+  simp [shadowCode?]
+
+/-- Exact compiler provenance for the heap-allocating large literal. -/
+def deletedLargeNatExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      deletedLargeNatBefore deletedLargeNatAfter :=
+  ExactShadowCodeGraph.ofResult deletedLargeNatShadowRun
+
+/-- Exact compiler provenance for the deleted partial application. -/
+def deletedPapExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      deletedPapBefore deletedPapAfter :=
+  ExactShadowCodeGraph.ofResult deletedPapShadowRun
+
+/-- Exact compiler provenance for the deleted scalar box. -/
+def deletedBoxExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      deletedBoxBefore deletedBoxAfter :=
+  ExactShadowCodeGraph.ofResult deletedBoxShadowRun
+
+/-- Exact compiler provenance for the inner deleted constructor. -/
+def deletedCtorExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      (.let deadCtorDecl (.return live)) (.return live) :=
+  ExactShadowCodeGraph.ofResult deletedCtorShadowRun
+
+/-- Exact compiler provenance for the complete retained/deleted constructor
+fixture. -/
+def allocatingExactGraph :
+    ExactShadowCodeGraph 3 neutralUsed
+      allocatingBefore allocatingAfter :=
+  ExactShadowCodeGraph.ofResult allocatingShadowRun
+
+/-- Exact identity provenance for `first`'s return body. -/
+def firstCodeExactGraph :
+    ExactShadowCodeGraph 2 (({} : UsedLocals).insert x)
+      (.return x) (.return x) :=
+  ExactShadowCodeGraph.ofResult firstCodeShadowRun
+
+/-- Hereditary static readiness for the large literal graph. -/
+theorem deletedLargeNatExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedLargeNatExactGraph.view := by
+  apply deletedLargeNatExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deletedLargeNatBefore, deadLargeNatDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the partial-application graph. -/
+theorem deletedPapExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedPapExactGraph.view := by
+  apply deletedPapExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+        papArgVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deletedPapBefore, deadPapDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the scalar-box graph. -/
+theorem deletedBoxExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedBoxExactGraph.view := by
+  apply deletedBoxExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+        boxInputVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, .uint64⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deletedBoxBefore, deadBoxDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the inner constructor graph. -/
+theorem deletedCtorExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedCtorExactGraph.view := by
+  apply deletedCtorExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deadCtorDecl, letDecl, codeBinderIds, BinderNamesUnique,
+      live, dead]
+
+/-- Hereditary static readiness for the complete constructor fixture. -/
+theorem allocatingExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed allocatingExactGraph.view := by
+  apply allocatingExactGraph.binderReady_of_canonical
+    (index := Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.letE
+      · native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · exact ⟨.object, trivial⟩
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+  · simp [allocatingBefore, deadCtorDecl, liveDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the unchanged `first` declaration. -/
+theorem firstCodeExactBinderReady :
+    ExactShadowCodeBinderReady (({} : UsedLocals).insert x)
+      firstCodeExactGraph.view := by
+  apply firstCodeExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty x)
+        y)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+/-- Exact active-code readiness for the heap-allocating large literal. -/
+theorem deletedLargeNatExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      deletedLargeNatSourceState
+      (runtimeRoots deletedLargeNatSourceState.runtime
+        (envRootsOn neutralUsed deletedLargeNatSourceState.env ++ []))
+      deletedLargeNatBefore deletedLargeNatAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedLargeNatExactGraph, UsedSubset.refl neutralUsed,
+    deletedLargeNatExactBinderReady, ?_⟩
+  have decision :
+      deletedLargeNatExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedLargeNatExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedLargeNatAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision
+    deletedLargeNatUnifiedReady
+
+/-- Exact active-code readiness for the deleted partial application. -/
+theorem deletedPapExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      deletedPapSourceState
+      (runtimeRoots deletedPapSourceState.runtime
+        (envRootsOn neutralUsed deletedPapSourceState.env ++ []))
+      deletedPapBefore deletedPapAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedPapExactGraph, UsedSubset.refl neutralUsed,
+    deletedPapExactBinderReady, ?_⟩
+  have decision :
+      deletedPapExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedPapExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedPapAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision
+    deletedPapUnifiedReady
+
+/-- Exact active-code readiness for the deleted scalar box. -/
+theorem deletedBoxExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      deletedBoxSourceState
+      (runtimeRoots deletedBoxSourceState.runtime
+        (envRootsOn neutralUsed deletedBoxSourceState.env ++ []))
+      deletedBoxBefore deletedBoxAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedBoxExactGraph, UsedSubset.refl neutralUsed,
+    deletedBoxExactBinderReady, ?_⟩
+  have decision :
+      deletedBoxExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedBoxExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedBoxAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision
+    deletedBoxUnifiedReady
+
+/-- Exact active-code readiness for the inner deleted constructor. -/
+theorem deletedCtorExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      allocatingSourceInnerState
+      (runtimeRoots allocatingSourceInnerState.runtime
+        (envRootsOn neutralUsed allocatingSourceInnerState.env ++ []))
+      (.let deadCtorDecl (.return live)) (.return live) := by
+  refine ⟨2, neutralUsed, by omega,
+    deletedCtorExactGraph, UsedSubset.refl neutralUsed,
+    deletedCtorExactBinderReady, ?_⟩
+  have decision :
+      deletedCtorExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedCtorExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp)
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision
+    deletedCtorUnifiedReady
+
+/-- Lift one exact code relation through the synthetic one-declaration
+fixture wrapper. -/
+theorem fixtureProgram_binderReadyRelated
+    (related : BinderReadyShadowCodeRelated fuel source target) :
+    ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      { decls := #[fixtureDecl name source] }
+      { decls := #[fixtureDecl name target] } := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated fuel))
+    [fixtureDecl name source] [fixtureDecl name target]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code related
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- Exact hereditary program relation for the large literal fixture. -/
+theorem deletedLargeNatProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      deletedLargeNatBeforeProgram deletedLargeNatAfterProgram := by
+  simpa [deletedLargeNatBeforeProgram, deletedLargeNatAfterProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨neutralUsed, 2, neutralUsed, Nat.le_refl 2,
+        deletedLargeNatExactGraph, UsedSubset.refl neutralUsed,
+        deletedLargeNatExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 2
+          deletedLargeNatBefore deletedLargeNatAfter)
+
+/-- Exact hereditary program relation for the scalar-box fixture. -/
+theorem deletedBoxProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      deletedBoxBeforeProgram deletedBoxAfterProgram := by
+  simpa [deletedBoxBeforeProgram, deletedBoxAfterProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨neutralUsed, 2, neutralUsed, Nat.le_refl 2,
+        deletedBoxExactGraph, UsedSubset.refl neutralUsed,
+        deletedBoxExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 2 deletedBoxBefore deletedBoxAfter)
+
+/-- Exact hereditary program relation for the retained/deleted constructor
+fixture. -/
+theorem allocatingProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 3)
+      allocatingBeforeProgram allocatingAfterProgram := by
+  simpa [allocatingBeforeProgram, allocatingAfterProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨neutralUsed, 3, neutralUsed, Nat.le_refl 3,
+        allocatingExactGraph, UsedSubset.refl neutralUsed,
+        allocatingExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 3 allocatingBefore allocatingAfter)
+
+/-- Exact hereditary program relation for the two-declaration partial
+application fixture. -/
+theorem deletedPapProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      deletedPapBeforeProgram deletedPapAfterProgram := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [firstDecl, fixtureDecl `main deletedPapBefore]
+    [firstDecl, fixtureDecl `main deletedPapAfter]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code ⟨({} : UsedLocals).insert x, 2,
+        ({} : UsedLocals).insert x, Nat.le_refl 2,
+        firstCodeExactGraph,
+        UsedSubset.refl (({} : UsedLocals).insert x),
+        firstCodeExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · apply ListRel.cons
+    · exact {
+        name_eq := rfl
+        levelParams_eq := rfl
+        type_eq := rfl
+        params_eq := rfl
+        safe_eq := rfl
+        value := .code ⟨neutralUsed, 2, neutralUsed, Nat.le_refl 2,
+          deletedPapExactGraph, UsedSubset.refl neutralUsed,
+          deletedPapExactBinderReady⟩
+        recursive_eq := rfl
+        inlineAttr_eq := rfl
+      }
+    · exact .nil
+
+/-- Full exact-provenance machine readiness for the large literal. -/
+theorem deletedLargeNatExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedLargeNatSourceState deletedLargeNatTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedLargeNatSourceState.env,
+    envRootsOn neutralUsed deletedLargeNatTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+      deletedLargeNatProgramBinderReadyRelated
+  · exact .code deletedLargeNatExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by
+        simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+          liveEnvReachableRelated)
+  · simpa [deletedLargeNatSourceState, deletedLargeNatTargetState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+
+/-- Full exact-provenance machine readiness for the partial application. -/
+theorem deletedPapExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedPapSourceState deletedPapTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedPapSourceState.env,
+    envRootsOn neutralUsed deletedPapTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedPapSourceState, deletedPapTargetState] using
+      deletedPapProgramBinderReadyRelated
+  · exact .code deletedPapExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by
+        simpa [deletedPapSourceState, deletedPapTargetState] using
+          deletedPapEnvReachableRelated)
+  · simpa [deletedPapSourceState, deletedPapTargetState] using
+      deletedPapRuntimeRelated
+
+/-- Full exact-provenance machine readiness for the scalar box. -/
+theorem deletedBoxExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedBoxSourceState deletedBoxTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedBoxSourceState.env,
+    envRootsOn neutralUsed deletedBoxTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxProgramBinderReadyRelated
+  · exact .code deletedBoxExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by
+        simpa [deletedBoxSourceState, deletedBoxTargetState] using
+          deletedBoxEnvReachableRelated)
+  · simpa [deletedBoxSourceState, deletedBoxTargetState] using
+      deletedBoxRuntimeRelated
+
+/-- Full exact-provenance machine readiness for the inner constructor. -/
+theorem deletedCtorExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      allocatingSourceInnerState allocatingTargetInnerState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed allocatingSourceInnerState.env,
+    envRootsOn neutralUsed allocatingTargetInnerState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      allocatingProgramBinderReadyRelated
+  · exact .code deletedCtorExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by
+        simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+          liveEnvReachableRelated)
+  · simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+
+/-- The exact dispatcher preserves hereditary provenance across the
+source-only large-literal allocation. -/
+theorem deletedLargeNatExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedLargeNatSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedLargeNatTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedLargeNatExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedLargeNatExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the
+source-only partial-application allocation. -/
+theorem deletedPapExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedPapSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedPapTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedPapExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedPapExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the
+source-only scalar-box allocation. -/
+theorem deletedBoxExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedBoxSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedBoxTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedBoxExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedBoxExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the
+source-only constructor allocation. -/
+theorem deletedCtorExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals allocatingSourceInnerState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals allocatingTargetInnerState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  deletedCtorExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedCtorExactMachineReadyAt rfl step
+
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
       (runtimeRoots deletedReuseNoneSourceState.runtime
