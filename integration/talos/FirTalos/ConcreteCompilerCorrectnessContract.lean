@@ -363,6 +363,77 @@ example
   spec.externalLetRuntimeRefinesWithCost_pureInteger externals
 
 /--
+`Int.natAbs` is admitted through the representation-polymorphic natural-result
+family. The compiler law constructs all adapted code, indices, allocation
+artifacts, and the post-witness internally.
+-/
+example : PureNaturalExternalName ``Int.natAbs := .intNatAbs
+
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureNaturalExternalSupported context externals)
+      (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) :=
+  spec.externalLetRuntimeRefinesWithCost_pureNatural externals
+
+/--
+One source-facing natural result and exact budget construct the physical
+representation, extended witness, exact event trace, and residual budget.
+-/
+example
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {value remainingBytes : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (implementationRelated :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        concreteImplementation semanticImplementation)
+    (requestRelated :
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticNaturalExternalResponse semanticBefore value))
+    (budget :
+      concreteBefore.heap.AddressSpaceBudget remainingBytes)
+    (fits : naturalAllocationBytes value ≤ remainingBytes) :
+    ∃ result word afterWitness,
+      allocateNatural concreteBefore.heap value = .ok (result, word) ∧
+        concreteImplementation.invoke concreteRequest concreteBefore =
+          .ok (concreteBefore.applyExternalResponse concreteRequest
+              (concreteNaturalExternalResponse concreteBefore result word),
+            (concreteNaturalExternalResponse concreteBefore result word).value) ∧
+        semanticImplementation.call semanticRequest semanticBefore =
+          .ok (semanticNaturalExternalResponse semanticBefore value) ∧
+        ConcretePureExternalPost concreteBefore beforeWitness afterWitness
+          semanticBefore concreteRequest semanticRequest
+          (concreteNaturalExternalResponse concreteBefore result word)
+          (semanticNaturalExternalResponse semanticBefore value) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - naturalAllocationBytes value) :=
+  FirTalos.Concrete.ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
+    runtimeRelated implementationRelated requestRelated resultKind
+      semanticCalled budget fits
+
+/--
 An arbitrary finite natural-literal spine uses one source-computed budget
 across immediate, promoted-tag, and heap-limb representations.
 -/
@@ -740,6 +811,61 @@ example
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctBudgetedIntegerExternalSpine evaluation stateRelated frameAligned
+    budget implementation parameterCount
+
+/--
+The natural-result whole-export endpoint likewise needs only source
+evaluation, the initial state/frame relation, one path budget, and the
+installed operation-family law.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureNaturalExternalSupported context externals)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (implementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedNaturalExternalSpine evaluation stateRelated frameAligned
     budget implementation parameterCount
 
 /--

@@ -289,6 +289,13 @@ the four admitted pure integer operations. Its caller supplies only source
 evaluation, the initial state/frame relation, one exact path budget, and the
 initially installed handler law. This proof-facing surface is intentionally
 unstable.
+Natural-result externals use a separate representation-polymorphic law.
+`NaturalResultRefines` and its budgeted invocation/Talos-step theorems
+construct an immediate, promoted tag, or limb object together with the
+appropriate post-witness. `PureNaturalExternalSupported` initially admits
+`Int.natAbs`, and `correctBudgetedNaturalExternalSpine` proves arbitrary
+finite direct/`natAbs` spines without caller-supplied target or representation
+witnesses. Scalar results such as `Int.decLt` remain outside this family.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

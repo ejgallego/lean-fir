@@ -328,6 +328,201 @@ theorem ConcreteRuntimeRel.allocateNatural
       rw [auxiliary.2.2]
       exact related.trace.witnessExtension extension }
 
+/--
+Canonical concrete response for a pure external returning a `Nat`.
+
+The result word is deliberately representation-polymorphic: it may be an
+immediate tagged value, a promoted-tag address, or a limb-object address.
+-/
+def concreteNaturalExternalResponse
+    (before : ConcreteRuntimeState) (result : MemoryState) (word : Word32) :
+    ConcreteExternalResponse := {
+  value := .word32 word
+  heap := result
+  world := before.world }
+
+/--
+Matching semantic response for a pure external returning a `Nat`.
+
+Reusing `literal` makes this boundary agree definitionally with source
+evaluation for all three natural representations.
+-/
+def semanticNaturalExternalResponse
+    (before : RuntimeState) (value : Nat) : ExternalResponse :=
+  let allocated := literal before (.nat value)
+  {
+    value := allocated.2
+    heap := allocated.1.heap
+    nextLocation := allocated.1.nextLocation
+    world := before.world }
+
+/--
+A successful representation-polymorphic natural allocation establishes the
+complete concrete/source response relation. The witness is existential
+because an immediate keeps it unchanged, a promoted tag extends its
+descriptor map, and a limb object binds a fresh semantic location.
+-/
+theorem ConcreteRuntimeRel.naturalExternalResponse
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (semanticRequest : ExternalRequest)
+    (result : MemoryState) (word : Word32) (value : Nat)
+    (allocated :
+      Fir.Wasm.Concrete.allocateNatural concreteBefore.heap value =
+        .ok (result, word)) :
+    ∃ afterWitness,
+      ConcreteExternalResponseRel beforeWitness afterWitness
+        semanticRequest semanticBefore .tobject
+        (concreteNaturalExternalResponse concreteBefore result word)
+        (semanticNaturalExternalResponse semanticBefore value) := by
+  obtain ⟨afterWitness, extension, nextRuntimeRelated, valueRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
+  refine ⟨afterWitness, {
+    witnessExtension := extension
+    heap := ?_
+    value := ?_
+    world := runtimeRelated.world }⟩
+  · apply nextRuntimeRelated.heap.auxiliary
+    · simp [semanticNaturalExternalResponse, semanticExternalRuntimeAfter]
+    · simp [semanticNaturalExternalResponse, semanticExternalRuntimeAfter]
+  · simpa [concreteNaturalExternalResponse,
+      semanticNaturalExternalResponse] using valueRelated
+
+/--
+End-to-end pure-external refinement for a representation-polymorphic `Nat`
+result. The caller supplies only the two call equations and the successful
+canonical allocation; the representation-specific witness is constructed
+internally.
+-/
+theorem ConcreteExternalImpl.invoke_pure_natural_result_refines
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {result : MemoryState} {word : Word32} {value : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel beforeWitness
+      concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (allocated :
+      Fir.Wasm.Concrete.allocateNatural concreteBefore.heap value =
+        .ok (result, word))
+    (concreteCalled :
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteNaturalExternalResponse concreteBefore result word))
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticNaturalExternalResponse semanticBefore value)) :
+    ∃ afterWitness,
+      concreteImplementation.invoke concreteRequest concreteBefore =
+          .ok (concreteBefore.applyExternalResponse concreteRequest
+              (concreteNaturalExternalResponse concreteBefore result word),
+            (concreteNaturalExternalResponse concreteBefore result word).value) ∧
+        semanticImplementation.call semanticRequest semanticBefore =
+          .ok (semanticNaturalExternalResponse semanticBefore value) ∧
+        ConcretePureExternalPost concreteBefore beforeWitness afterWitness
+          semanticBefore concreteRequest semanticRequest
+          (concreteNaturalExternalResponse concreteBefore result word)
+          (semanticNaturalExternalResponse semanticBefore value) := by
+  obtain ⟨afterWitness, responseRelated⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.naturalExternalResponse runtimeRelated
+      semanticRequest result word value allocated
+  have responseRelated' : ConcreteExternalResponseRel beforeWitness afterWitness
+      semanticRequest semanticBefore concreteRequest.resultKind
+      (concreteNaturalExternalResponse concreteBefore result word)
+      (semanticNaturalExternalResponse semanticBefore value) := by
+    rw [resultKind]
+    exact responseRelated
+  exact ⟨afterWitness,
+    concreteImplementation.invoke_pure_result_refines runtimeRelated
+      requestRelated concreteCalled semanticCalled responseRelated' (by rfl)⟩
+
+/--
+Operation-family correctness law for pure concrete handlers that return a
+`Nat`. It constrains the implementation for every related request and every
+successful source response, independently of which natural representation is
+chosen.
+-/
+def ConcreteExternalImpl.NaturalResultRefines
+    (concreteImplementation : ConcreteExternalImpl)
+    (semanticImplementation : ExternalImpl) : Prop :=
+  ∀ {concreteBefore : ConcreteRuntimeState}
+      {beforeWitness : RefinementWitness}
+      {semanticBefore : RuntimeState}
+      {concreteRequest : ConcreteExternalRequest}
+      {semanticRequest : ExternalRequest}
+      {value : Nat} {result : MemoryState} {word : Word32},
+    ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore →
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest →
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticNaturalExternalResponse semanticBefore value) →
+      Fir.Wasm.Concrete.allocateNatural concreteBefore.heap value =
+        .ok (result, word) →
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteNaturalExternalResponse concreteBefore result word)
+
+/--
+An exact path budget turns the natural-result implementation law into the
+complete pure-external postcondition and residual budget. Allocation success,
+the physical word, and the representation-specific witness are all
+constructed internally.
+-/
+theorem ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {value : Nat} {remainingBytes : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (implementationRelated :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        concreteImplementation semanticImplementation)
+    (requestRelated :
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticNaturalExternalResponse semanticBefore value))
+    (budget :
+      concreteBefore.heap.AddressSpaceBudget remainingBytes)
+    (fits : naturalAllocationBytes value ≤ remainingBytes) :
+    ∃ result word afterWitness,
+      Fir.Wasm.Concrete.allocateNatural concreteBefore.heap value =
+        .ok (result, word) ∧
+        concreteImplementation.invoke concreteRequest concreteBefore =
+          .ok (concreteBefore.applyExternalResponse concreteRequest
+              (concreteNaturalExternalResponse concreteBefore result word),
+            (concreteNaturalExternalResponse concreteBefore result word).value) ∧
+        semanticImplementation.call semanticRequest semanticBefore =
+          .ok (semanticNaturalExternalResponse semanticBefore value) ∧
+        ConcretePureExternalPost concreteBefore beforeWitness afterWitness
+          semanticBefore concreteRequest semanticRequest
+          (concreteNaturalExternalResponse concreteBefore result word)
+          (semanticNaturalExternalResponse semanticBefore value) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - naturalAllocationBytes value) := by
+  obtain ⟨result, word, allocated, remainingBudget⟩ :=
+    runtimeRelated.heap.frontier.allocateNatural_eq_ok_of_budget value budget fits
+  have concreteCalled :=
+    implementationRelated runtimeRelated requestRelated semanticCalled allocated
+  obtain ⟨afterWitness, concreteInvoke, semanticInvoke, post⟩ :=
+    FirTalos.Concrete.ConcreteExternalImpl.invoke_pure_natural_result_refines
+      runtimeRelated requestRelated resultKind allocated concreteCalled
+      semanticCalled
+  exact ⟨result, word, afterWitness, allocated, concreteInvoke, semanticInvoke,
+    post, remainingBudget⟩
+
 /-- Fresh string allocation grows the proof witness exactly once and exposes
 the compiler's precise `.object` result lane. -/
 theorem allocateString_liveHeapRel_extends
@@ -1504,6 +1699,98 @@ theorem integerExternalStep_of_budget
                 result address))) := by
     simp [externalStep, decoded, concreteInvoke, laneMatches]
   exact ⟨result, address, allocated, operationStep, semanticInvoke,
+    post.witnessExtension, post.runtime, physicalOfLane_related post.value,
+    remainingBudget⟩
+
+/--
+Constructive Talos host step for a pure external returning one `Nat`.
+
+The exact source result selects the allocation cost and concrete
+representation. The theorem constructs the allocation word and refinement
+witness, then exposes the ordinary external step, related continuation, and
+exact residual budget without requiring a representation certificate.
+-/
+theorem naturalExternalStep_of_budget
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store Host) (physicalArgs : List Wasm.Value)
+    (concreteArgs : List LaneValue) (semanticArgs : Array Value)
+    (witness : RefinementWitness) (semanticRuntime : RuntimeState)
+    (semanticImplementation : ExternalImpl)
+    (value : Nat) (remainingBytes : Nat)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness
+      semanticRuntime)
+    (requestRelated : ConcreteExternalRequestRel witness
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      (operation.request semanticArgs))
+    (implementationRelated :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals semanticImplementation)
+    (resultKindEq : resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call (operation.request semanticArgs)
+          semanticRuntime =
+        .ok (semanticNaturalExternalResponse semanticRuntime value))
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (fits : naturalAllocationBytes value ≤ remainingBytes) :
+    ∃ result word afterWitness,
+      allocateNatural initial.host.runtime.heap value = .ok (result, word) ∧
+        externalStep operation resultKind initial physicalArgs =
+          .Return
+            [physicalOfLane
+              (concreteNaturalExternalResponse initial.host.runtime
+                result word).value]
+            (replaceRuntime initial
+              (initial.host.runtime.applyExternalResponse
+                (concreteExternalRequest operation resultKind
+                  concreteArgs.toArray)
+                (concreteNaturalExternalResponse initial.host.runtime
+                  result word))) ∧
+        semanticImplementation.call (operation.request semanticArgs)
+            semanticRuntime =
+          .ok (semanticNaturalExternalResponse semanticRuntime value) ∧
+        witness.Extends afterWitness ∧
+        ConcreteRuntimeRel
+          (initial.host.runtime.applyExternalResponse
+            (concreteExternalRequest operation resultKind concreteArgs.toArray)
+            (concreteNaturalExternalResponse initial.host.runtime result word))
+          afterWitness
+          (semanticExternalRuntimeAfter (operation.request semanticArgs)
+            semanticRuntime
+            (semanticNaturalExternalResponse semanticRuntime value)) ∧
+        PhysicalValueRel afterWitness resultKind
+          (physicalOfLane
+            (concreteNaturalExternalResponse initial.host.runtime
+              result word).value)
+          (semanticNaturalExternalResponse semanticRuntime value).value ∧
+        result.AddressSpaceBudget
+          (remainingBytes - naturalAllocationBytes value) := by
+  obtain ⟨result, word, afterWitness, allocated, concreteInvoke,
+      semanticInvoke, post, remainingBudget⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
+      runtimeRelated
+      implementationRelated requestRelated
+      (by simp [concreteExternalRequest, resultKindEq])
+      semanticCalled budget fits
+  have laneMatches :
+      ((concreteNaturalExternalResponse initial.host.runtime result word).value.valueType ==
+        resultKind.valueType) = true := by
+    exact valueRel_physical_type_beq post.value
+  have operationStep :
+      externalStep operation resultKind initial physicalArgs =
+        .Return
+          [physicalOfLane
+            (concreteNaturalExternalResponse initial.host.runtime
+              result word).value]
+          (replaceRuntime initial
+            (initial.host.runtime.applyExternalResponse
+              (concreteExternalRequest operation resultKind concreteArgs.toArray)
+              (concreteNaturalExternalResponse initial.host.runtime
+                result word))) := by
+    simp [externalStep, decoded, concreteInvoke, laneMatches]
+  exact ⟨result, word, afterWitness, allocated, operationStep, semanticInvoke,
     post.witnessExtension, post.runtime, physicalOfLane_related post.value,
     remainingBudget⟩
 

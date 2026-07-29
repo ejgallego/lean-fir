@@ -3916,6 +3916,28 @@ as `Int.natAbs` or `Int.decLt`; it should not be folded into the integer-result
 law. These proof-facing gates remain deliberately unstable. No FIR semantic
 contract or executable ABI changed.
 
+W6.6fb adds the distinct representation-polymorphic natural-result family.
+`semanticNaturalExternalResponse` reuses the source interpreter's `literal`
+transition, while `concreteNaturalExternalResponse` carries the exact word
+returned by `allocateNatural`. The unified allocation refinement constructs an
+existential post-witness across all three cases: unchanged for an immediate,
+descriptor-extended for a promoted source tag, and location-extended for a
+limb object. `NaturalResultRefines`,
+`invoke_pure_natural_result_refines_of_budget`, and
+`naturalExternalStep_of_budget` lift that boundary through exact pure-event
+traces and the Talos host step without a representation certificate.
+
+`PureNaturalExternalName` initially admits `Int.natAbs`.
+`externalLetRuntimeRefinesWithCost_pureNatural` reconstructs its production
+argument prefix, external import, request relation, result representation,
+destination write, and residual budget. The installed handler law is threaded
+through the current direct family, and
+`correctBudgetedNaturalExternalSpine` closes arbitrary finite direct/`natAbs`
+interleavings at the named-export boundary. `Int.decLt` remains a separate
+nonallocating scalar-result family. These proof-facing response, cost, and
+admission surfaces are deliberately unstable. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

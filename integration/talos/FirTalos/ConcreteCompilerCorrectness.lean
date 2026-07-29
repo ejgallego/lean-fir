@@ -3073,6 +3073,66 @@ inductive PureIntegerExternalSupported
         decl continuation nextRuntime sourceValue stepCost
 
 /--
+Source-facing pure externals whose result is a Lean `Nat`. This family is
+separate from scalar-returning externals: `Nat` uses the compiler's `.tobject`
+ABI and may choose any of the immediate, promoted-tag, or limb-object
+representations.
+-/
+inductive PureNaturalExternalName : Lean.Name → Prop where
+  | intNatAbs : PureNaturalExternalName ``Int.natAbs
+
+/--
+Source/compiler admission for pure natural-result externals.
+
+As with the integer family, the relation records only source evaluation and
+production compiler facts. It contains no adapted code, Wasm index, physical
+word, allocation result, or post-witness.
+-/
+inductive PureNaturalExternalSupported
+    (context : Fir.Wasm.Context) (externals : ExternalImpl) :
+    RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+      RuntimeState → Value → Nat → Prop where
+  | intro
+      (name : Lean.Name) (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
+      (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
+      (target : LCNF.Decl .impure) (value : Nat)
+      (valueEq : decl.value = .fap name args)
+      (operation : PureNaturalExternalName name)
+      (nonempty : args.isEmpty = false)
+      (targetFound : context.program.findDecl? name = some target)
+      (targetExternal : ∃ metadata, target.value = .extern metadata)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args =
+          .ok (argumentCode, argumentKinds))
+      (argumentsEvaluated :
+        evalArgs sourceEnv args = .ok semanticArgs)
+      (signature :
+        ExternalTypes.signature {
+          params := target.params.map (·.type)
+          result := target.type } =
+            .ok { params := argumentKinds, results := #[.tobject] })
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .tobject))
+      (semanticCalled :
+        externals.call (declarationExternalRequest target semanticArgs)
+            sourceRuntime =
+          .ok (semanticNaturalExternalResponse sourceRuntime value))
+      (nextRuntimeEq :
+        nextRuntime =
+          semanticExternalRuntimeAfter
+            (declarationExternalRequest target semanticArgs) sourceRuntime
+            (semanticNaturalExternalResponse sourceRuntime value))
+      (sourceValueEq :
+        sourceValue =
+          (semanticNaturalExternalResponse sourceRuntime value).value)
+      (stepCostEq : stepCost = naturalAllocationBytes value) :
+      PureNaturalExternalSupported context externals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue stepCost
+
+/--
 Static source/compiler admission for a nonempty constructor allocation.
 The relation records only source layout bounds and successful symbolic
 compilation. Physical arguments, numeric target indices, the concrete address,
@@ -3720,6 +3780,23 @@ def ConcreteBudgetedIntegerExternalFrame
       sourceEnv targetStore targetLocals witness ∧
     targetStore.host.externals.IntegerResultRefines externals
 
+/--
+Budgeted local-frame invariant for pure natural-result external spines. The
+natural implementation law is representation-polymorphic, so the threaded
+witness may remain unchanged, gain a promoted descriptor, or bind a fresh
+heap location after each call.
+-/
+def ConcreteBudgetedNaturalExternalFrame
+    (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+      sourceEnv targetStore targetLocals witness ∧
+    FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+      targetStore.host.externals externals
+
 theorem ConcreteLocalFrameAligned.validIndex
     {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
@@ -4125,6 +4202,219 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
   have nextImplementation :
       nextStore.host.externals.IntegerResultRefines externals := by
     change targetStore.host.externals.IntegerResultRefines externals
+    exact invariant.2
+  subst nextRuntime
+  subst sourceValue
+  subst stepCost
+  exact ⟨nextStore, updated, nextWitness, by simpa [requestEq] using step,
+    ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
+      nextImplementation⟩⟩
+
+/--
+The production compiler, adapter, concrete resolver, and reusable
+natural-result implementation law jointly discharge `Int.natAbs`.
+
+The proof constructs the physical arguments, target indices, concrete natural
+representation, and post-witness from the generated export and source result;
+none of those target artifacts appear in the source admission relation.
+-/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureNaturalExternalSupported context externals)
+      (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, value,
+      valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
+      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
+      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (argumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+      targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+  have valueCodeEq :
+      valueCode = argumentCode ++ [.call (.declaration name)] := by
+    rw [expectedCompiled] at valueCompiled
+    exact (Except.ok.inj valueCompiled).symm
+  subst valueCode
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_declaration_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
+      argumentsAdapted argumentsEvaluated stateRelated
+  obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
+      concreteRelated⟩ :=
+    argumentsRelated.decodePhysicalLanes 0
+  have programTargetFound :
+      program.findDecl? name = some declaration := by
+    rw [← spec.contextProgram]
+    exact targetFound
+  obtain ⟨externalOperation, resultKind, imp, operationName,
+      operationMatches, resultSignature, imported, inBounds, contracted,
+      parameterCount, resultCount⟩ :=
+    spec.externalCall programTargetFound targetExternal callFound
+  have operationSignature :
+      externalOperation.signature =
+        { params := argumentKinds, results := #[.tobject] } := by
+    have signatureMatch := operationMatches.signature
+    rw [signature] at signatureMatch
+    exact (Except.ok.inj signatureMatch).symm
+  have resultKindEq : resultKind = .tobject := by
+    have resultAt :=
+      congrArg (fun results : Array AbiKind => results[0]?) resultSignature
+    symm
+    simpa [operationSignature] using resultAt
+  have declarationName : name = declaration.name :=
+    operationName.symm.trans operationMatches.name
+  have requestEq :
+      externalOperation.request semanticArgs =
+        declarationExternalRequest declaration semanticArgs := by
+    simp [ExternalOperation.request, declarationExternalRequest,
+      operationName, declarationName, operationMatches.paramTypes,
+      operationMatches.resultType]
+  have requestRelated :
+      ConcreteExternalRequestRel witness
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        (externalOperation.request semanticArgs) := by
+    refine {
+      name := rfl
+      paramTypes := rfl
+      resultType := rfl
+      paramTypesSize := operationMatches.paramTypesSize
+      paramKindsSize := ?_
+      argsSize := ?_
+      arguments := ?_ }
+    · change externalOperation.signature.params.size = semanticArgs.size
+      rw [operationSignature]
+      simpa using semanticLength.symm
+    · change concreteArgs.toArray.size = semanticArgs.size
+      simpa using concreteLength.trans semanticLength.symm
+    · intro index kind lane semantic kindAt laneAt semanticAt
+      change externalOperation.signature.params[index]? = some kind at kindAt
+      change concreteArgs.toArray[index]? = some lane at laneAt
+      change semanticArgs[index]? = some semantic at semanticAt
+      exact concreteRelated index kind lane semantic
+        (by rw [operationSignature] at kindAt; simpa using kindAt)
+        (by simpa using laneAt) (by simpa using semanticAt)
+  have semanticCalled' :
+      externals.call (externalOperation.request semanticArgs) sourceRuntime =
+        .ok (semanticNaturalExternalResponse sourceRuntime value) := by
+    rw [requestEq]
+    exact semanticCalled
+  have fits : naturalAllocationBytes value ≤ remainingBytes := by
+    simpa [stepCostEq] using stepFits
+  have decoded' :
+      decodePhysicalLanes 0 externalOperation.signature.params.toList
+        physicalArgs = .ok concreteArgs := by
+    simpa [operationSignature] using decoded
+  obtain ⟨allocatedHeap, word, nextWitness, allocated, operationStep, _,
+      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget⟩ :=
+    naturalExternalStep_of_budget externalOperation resultKind targetStore
+      physicalArgs concreteArgs semanticArgs witness sourceRuntime externals
+      value remainingBytes decoded' stateRelated.1 requestRelated invariant.2
+      resultKindEq semanticCalled' invariant.1.2 fits
+  have resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some (.tobject) := by
+    obtain ⟨actualIndex, actualFound, actualKindAt⟩ :=
+      spec.localsAligned resultCompiled
+    rw [resultFound] at actualFound
+    injection actualFound with indexEq
+    subst actualIndex
+    exact actualKindAt
+  let response :=
+    concreteNaturalExternalResponse targetStore.host.runtime allocatedHeap word
+  let nextStore :=
+    replaceRuntime targetStore
+      (targetStore.host.runtime.applyExternalResponse
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        response)
+  obtain ⟨updated, targetSet, updatedFrame⟩ :=
+    invariant.1.1.set?
+      (nextRuntime := semanticExternalRuntimeAfter
+        (externalOperation.request semanticArgs) sourceRuntime
+        (semanticNaturalExternalResponse sourceRuntime value))
+      (nextEnv := bind sourceEnv decl.fvarId
+        (semanticNaturalExternalResponse sourceRuntime value).value)
+      (nextStore := nextStore) (nextWitness := nextWitness)
+      (physical := physicalOfLane response.value) resultFound
+  have failureClear : nextStore.host.failure? = none := by
+    simp [nextStore, replaceRuntime, clearFailure]
+  have nextRuntimeRelated' :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticNaturalExternalResponse sourceRuntime value)) := by
+    simpa [nextStore, response, replaceRuntime, clearFailure] using
+      nextRuntimeRelated
+  have nextStateRelated :
+      StateRelated sourceFunction
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticNaturalExternalResponse sourceRuntime value))
+        (bind sourceEnv decl.fvarId
+          (semanticNaturalExternalResponse sourceRuntime value).value)
+        nextStore updated nextWitness :=
+    stateRelated.bindAfter witnessExtension nextRuntimeRelated' failureClear
+      resultFound resultKindAt
+      (by simpa [resultKindEq, response] using resultRelated)
+      targetSet
+  have parameterCount' : imp.params.length = physicalArgs.length := by
+    calc
+      imp.params.length = externalOperation.signature.params.size :=
+        parameterCount
+      _ = argumentKinds.size := by simp [operationSignature]
+      _ = physicalArgs.length := physicalLength.symm
+  have step :
+      ExternalLetStepSimulates context sourceFunction target.wasmModule
+        hosts.env externals decl continuation
+        (targetArguments ++ [.call callIndex]) sourceRuntime
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticNaturalExternalResponse sourceRuntime value))
+        sourceEnv (semanticNaturalExternalResponse sourceRuntime value).value
+        targetStore nextStore targetLocals updated resultIndex witness
+        nextWitness := by
+    refine ⟨?_, stateRelated, nextStateRelated, ?_⟩
+    · simpa [nextRuntimeEq, sourceValueEq, requestEq] using sourceStep
+    · intro rest Q tail continued
+      simpa [List.append_assoc] using
+        wp_external_ready_let externalOperation resultKind tail
+          argumentsReady imported spec.hostsSatisfy inBounds contracted
+          parameterCount' resultCount operationStep targetSet continued
+  have nextBudget :
+      nextStore.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - naturalAllocationBytes value) := by
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteNaturalExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using remainingBudget
+  have nextImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        nextStore.host.externals externals := by
+    change
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        targetStore.host.externals externals
     exact invariant.2
   subst nextRuntime
   subst sourceValue
@@ -5618,6 +5908,46 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_integerEx
         fun concrete => concrete.IntegerResultRefines externals)
       spec.directLetRuntimeRefines_budgetedDirect
 
+/--
+The complete direct family preserves the frame and installed implementation
+law used by pure natural-result external calls.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_naturalExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+            sourceEnv targetStore targetLocals witness ∧
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            targetStore.host.externals externals)
+  exact
+    DirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+      (ExternalInvariant :=
+        fun concrete =>
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            concrete externals)
+      spec.directLetRuntimeRefines_budgetedDirect
+
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without
 changing the structural theorem. -/
@@ -6163,6 +6493,93 @@ theorem ConcreteSupportedExport.correctBudgetedIntegerExternalSpine
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_integerExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureInteger externals)
+      parameterCount spec.singleResult
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultRuntimeRelated, failureClear, valueRelated, rfl⟩
+
+/--
+Concrete whole-export partial correctness for spines that interleave every
+currently admitted direct operation with pure natural-result externals. The
+initial implementation law covers `Int.natAbs`; the proof internally chooses
+the immediate, promoted-tag, or limb-object result representation at each
+source step.
+-/
+theorem ConcreteSupportedExport.correctBudgetedNaturalExternalSpine
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureNaturalExternalSupported context externals)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (implementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+      resultRuntimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedSpineEvaluates
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned stateRelated
+      ⟨⟨frameAligned, budget⟩, implementation⟩
+      (spec.directLetRuntimeRefines_budgetedDirect_naturalExternal externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureNatural externals)
       parameterCount spec.singleResult
   have parameterPrefix :
       (parameters ++ callerTail).take spec.targetFunction.numParams =

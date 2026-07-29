@@ -99,6 +99,15 @@ Cross-cutting W6.5 state:
   `correctBudgetedIntegerExternalSpine` therefore closes arbitrary finite
   direct/pure-integer interleavings at the named-export boundary without
   caller-supplied runtime laws or target witnesses.
+  Pure natural results now have their own constructive boundary:
+  `NaturalResultRefines` and
+  `invoke_pure_natural_result_refines_of_budget` select the immediate,
+  promoted-tag, or limb-object representation and construct the corresponding
+  post-witness. `PureNaturalExternalSupported` initially admits `Int.natAbs`;
+  `externalLetRuntimeRefinesWithCost_pureNatural` and
+  `correctBudgetedNaturalExternalSpine` derive its compiler-shaped host step
+  and arbitrary finite direct/`natAbs` whole-export spines without target or
+  representation witnesses. `Int.decLt` remains a separate scalar lane.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

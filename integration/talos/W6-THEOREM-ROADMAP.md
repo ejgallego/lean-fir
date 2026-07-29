@@ -176,8 +176,15 @@ the strengthened costed direct law preserves `Host.externals`, the generic
 lift threads `IntegerResultRefines`, and
 `correctBudgetedIntegerExternalSpine` consumes both direct and pure-Int
 families in one finite whole-export proof. The next external result family
-must account for the distinct representation of results such as `Nat` or
-`UInt8`; the structural theorem itself does not need to change.
+now accounts for `Nat` independently of `UInt8`.
+`NaturalResultRefines`, its constructive budgeted invocation and Talos-step
+theorems, and `PureNaturalExternalSupported` cover the immediate,
+promoted-tag, and limb-object cases under one existential post-witness.
+`externalLetRuntimeRefinesWithCost_pureNatural` and
+`correctBudgetedNaturalExternalSpine` instantiate that family for
+`Int.natAbs`. The remaining `UInt8` case, including `Int.decLt`, is a
+nonallocating scalar-result family; the structural theorem itself does not
+need to change.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
