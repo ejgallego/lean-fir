@@ -8199,6 +8199,23 @@ def ExactShadowCodeRuntimeReadyAt
       DeletedScalarSetReadyAt state roots object field
   | _, _ => True
 
+/-- Package the two possible dynamic obligations for one exact let edge.
+The proof-relevant view chooses the retained or deleted certificate, while
+the impossible write decisions reduce to the static branch. -/
+theorem ExactShadowCodeRuntimeReadyAt.let_of_ready
+    {view : ExactShadowCodeView initial fuel final
+      (.let declaration continuation) target}
+    (deleted : DeletedLetReadyAt state roots declaration)
+    (retained : RetainedLetReadyAt state roots declaration.value) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  cases decision : view.runtimeDecision with
+  | retainedLet =>
+      simpa [ExactShadowCodeRuntimeReadyAt, decision] using retained
+  | deletedLet =>
+      simpa [ExactShadowCodeRuntimeReadyAt, decision] using deleted
+  | deletedObjectSet | deletedUSizeSet | deletedScalarSet | static =>
+      simp [ExactShadowCodeRuntimeReadyAt, decision]
+
 /-- Hereditary static provenance paired with only the active node's dynamic
 runtime obligation.  This is the code-local certificate that a preservation
 invariant must carry after declaration lookup or a residual control step. -/
@@ -9057,15 +9074,7 @@ theorem SourceRuntimeOwnershipReadyAt.let_of_ready
           (envRootsOn used state.env ++ sourceFrameRoots))
         declaration.value :=
     retained _
-  cases decision : exact.view.runtimeDecision with
-  | retainedLet =>
-      simpa [ExactShadowCodeRuntimeReadyAt,
-        decision] using kept
-  | deletedLet =>
-      simpa [ExactShadowCodeRuntimeReadyAt,
-        decision] using removed
-  | deletedObjectSet | deletedUSizeSet | deletedScalarSet | static =>
-      simp [ExactShadowCodeRuntimeReadyAt, decision]
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
 
 /-- Literal allocation readiness lifted to the source-only exact-view
 contract.  Small immediates and heap-allocating large literals share this
@@ -9256,6 +9265,62 @@ theorem BinderReadySourceRuntimeOwnershipInvariant.stable
     (sourcePath.trans sourceTail) (targetPath.trans targetTail)
     futureRelated
 
+/-- Hereditary runtime/ownership contract indexed by the exact compiler
+provenance carried by each future related pair.  Unlike the source-only
+contract below, this asks for the dynamic certificate selected by that
+particular structural witness rather than certificates for every possible
+ambient liveness widening.  This distinction is essential for concrete
+reuse tokens and unreachable reset/write operands. -/
+def BinderReadyExactRuntimeOwnershipInvariant
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeBinderReadyReachableMachineRelated fuel sourceAfter targetAfter →
+      BinderReadyReachableMachineReadyAt fuel sourceAfter targetAfter
+
+/-- Exact-provenance readiness at the current pair follows by reflexive
+specialization of the hereditary contract. -/
+theorem BinderReadyExactRuntimeOwnershipInvariant.ready
+    (invariant :
+      BinderReadyExactRuntimeOwnershipInvariant
+        externals fuel source target)
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target :=
+  invariant source target
+    (NonLockstep.reaches_refl source)
+    (NonLockstep.reaches_refl target) related
+
+/-- Exact-provenance readiness is stable under already matched prefixes. -/
+theorem BinderReadyExactRuntimeOwnershipInvariant.stable
+    (invariant :
+      BinderReadyExactRuntimeOwnershipInvariant
+        externals fuel source target)
+    (sourcePath : NonLockstep.Reaches externals source sourceAfter)
+    (targetPath : NonLockstep.Reaches externals target targetAfter) :
+    BinderReadyExactRuntimeOwnershipInvariant
+      externals fuel sourceAfter targetAfter := by
+  intro sourceFuture targetFuture sourceTail targetTail futureRelated
+  exact invariant sourceFuture targetFuture
+    (sourcePath.trans sourceTail) (targetPath.trans targetTail)
+    futureRelated
+
+/-- The source-oriented universal contract remains a convenient sufficient
+condition for exact-provenance readiness.  Root-insensitive fixture proofs
+continue to use it unchanged, while ownership-sensitive fixtures can target
+the weaker exact interface directly. -/
+theorem BinderReadySourceRuntimeOwnershipInvariant.exact
+    (invariant :
+      BinderReadySourceRuntimeOwnershipInvariant
+        externals fuel source target) :
+    BinderReadyExactRuntimeOwnershipInvariant
+      externals fuel source target := by
+  intro sourceAfter targetAfter sourcePath targetPath related
+  exact invariant.ready sourceAfter targetAfter
+    sourcePath targetPath related
+
 /-- Source-only projection of the saved-frame root decomposition carried by
 the strong machine relation.  Target frames, roots, and the address renaming
 are existential implementation witnesses; clients proving source safety do
@@ -9351,7 +9416,7 @@ structure BinderReadyReachableMachineRelatedWith
   structural :
     SomeBinderReadyReachableMachineRelated fuel source target
   sourceRuntime :
-    BinderReadySourceRuntimeOwnershipInvariant
+    BinderReadyExactRuntimeOwnershipInvariant
       externals fuel source target
 
 /-- The strong simulation package is ready at its current pair by reflexive
@@ -9361,10 +9426,7 @@ theorem BinderReadyReachableMachineRelatedWith.ready
       BinderReadyReachableMachineRelatedWith
         externals fuel source target) :
     BinderReadyReachableMachineReadyAt fuel source target :=
-  related.sourceRuntime.ready source target
-    (NonLockstep.reaches_refl source)
-    (NonLockstep.reaches_refl target)
-    related.structural
+  related.sourceRuntime.ready related.structural
 
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
@@ -25724,16 +25786,15 @@ def SourceRuntimeOwnershipInitialInvariantOn
       (initialState source entry sourceArguments)
 
 /-- Whole-program forward correctness through the canonical strong
-simulation.  The compiler supplies hereditary exact program provenance, the
-source proof supplies runtime/ownership readiness along related executions,
-and the foreign environment preserves the same strong relation on resume. -/
-theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
+simulation, with runtime/ownership readiness indexed by the exact compiler
+provenance carried by each related future pair. -/
+theorem binderReadyProgram_loweringCorrect_exactRuntimeOwnership
     (programs : ProgramRelated
       (BinderReadyShadowCodeRelated fuel) source target)
     (compatible :
       BinderReadyReachableExternalSpecCompatible externals fuel)
-    (initialSourceRuntime : ReachableInitialInvariantOn
-      (BinderReadySourceRuntimeOwnershipInvariant externals fuel)
+    (initialRuntime : ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
       source target entries) :
     LoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
@@ -25752,12 +25813,32 @@ theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
         (initialState target entry targetArguments) := {
     structural := initialStructural
     sourceRuntime :=
-      initialSourceRuntime entry member sourceArguments
+      initialRuntime entry member sourceArguments
         targetArguments arguments
   }
   exact
     (BinderReadyReachableMachineRelatedWith.simulation
       compatible).evaluatesState initialRelated sourceEvaluation
+
+/-- The source-oriented universal contract is a sufficient condition for the
+exact-provenance whole-program endpoint. -/
+theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialSourceRuntime : ReachableInitialInvariantOn
+      (BinderReadySourceRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply binderReadyProgram_loweringCorrect_exactRuntimeOwnership
+    programs compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialSourceRuntime entry member sourceArguments
+      targetArguments arguments).exact
 
 /-- Program-level forward correctness for a transparent `elimDeadVars` graph.
 The operational proof is complete: clients supply program relatedness plus
@@ -25884,6 +25965,25 @@ theorem shadowProgram_loweringCorrect_reachablyCodeReady
   binderReadyProgram_loweringCorrect_reachablyCodeReady
     (shadowProgram_binderReadyShadowRelated wellFormed run)
     compatible initialReady
+
+/-- Checked compiler-run endpoint for ownership-sensitive clients.  Dynamic
+readiness is required only for the exact traversal witness retained by each
+future related pair, so reset/reuse/write proofs need not survive unrelated
+liveness widenings. -/
+theorem shadowProgram_loweringCorrect_exactRuntimeOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (run : shadowProgram? fuel source = some target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialRuntime : ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  binderReadyProgram_loweringCorrect_exactRuntimeOwnership
+    (shadowProgram_binderReadyShadowRelated wellFormed run)
+    compatible initialRuntime
 
 /-- Checked compiler-run endpoint using the canonical strong simulation.
 After a successful transparent traversal, the only compiler-client premise

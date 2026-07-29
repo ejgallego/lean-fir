@@ -1463,6 +1463,120 @@ theorem deletedResetReady :
   · simpa [deletedResetSourceState] using deletedResetEffect
   · exact deletedResetRuntimeFrame
 
+/-- The concrete reset fixture's actual transparent traversal, before any
+fuel or liveness widening. -/
+def deletedResetExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      deletedResetBefore deletedResetAfter :=
+  ExactShadowCodeGraph.ofResult deletedResetShadowRun
+
+/-- Hereditary binder readiness for that exact reset deletion.  The scoped
+index names precisely the two ambient operands supplied by this synthetic
+mid-execution fixture. -/
+theorem deletedResetExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedResetExactGraph.view := by
+  apply deletedResetExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+        resetObjectVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deletedResetBefore, deadResetDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds, live, dead]
+
+/-- The exact-provenance interface accepts the concrete reset ownership
+certificate at its actual liveness roots.  The older universal source
+contract cannot express this state because widening the roots with the reset
+operand itself would make its destination reachable. -/
+theorem deletedResetExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed deletedResetSourceState
+      (runtimeRoots deletedResetSourceState.runtime
+        (envRootsOn neutralUsed deletedResetSourceState.env ++ []))
+      deletedResetBefore deletedResetAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedResetExactGraph, UsedSubset.refl neutralUsed,
+    deletedResetExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt deletedResetSourceState
+        (runtimeRoots deletedResetSourceState.runtime
+          (envRootsOn neutralUsed deletedResetSourceState.env ++ []))
+        deadResetDecl := by
+    unfold deadResetDecl letDecl
+    exact .reset dead dead.name objType 1 resetObjectVar
+      (by simpa using deletedResetReady)
+  have kept :
+      RetainedLetReadyAt deletedResetSourceState
+        (runtimeRoots deletedResetSourceState.runtime
+          (envRootsOn neutralUsed deletedResetSourceState.env ++ []))
+        deadResetDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+/-- The synthetic reset programs retain the same hereditary exact graph in
+their single declaration bodies. -/
+theorem deletedResetProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      deletedResetBeforeProgram deletedResetAfterProgram := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [fixtureDecl `main deletedResetBefore]
+    [fixtureDecl `main deletedResetAfter]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code ⟨neutralUsed, 2, neutralUsed, Nat.le_refl 2,
+        deletedResetExactGraph, UsedSubset.refl neutralUsed,
+        deletedResetExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- Full strong readiness of the concrete reset pair, including exact
+compiler provenance, live environments, empty saved stacks, and the
+unreachable-heap relation. -/
+theorem deletedResetExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedResetSourceState deletedResetTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedResetSourceState.env,
+    envRootsOn neutralUsed deletedResetTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetProgramBinderReadyRelated
+  · exact .code deletedResetExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by simpa [deletedResetSourceState, deletedResetTargetState] using
+        deletedResetEnvReachableRelated)
+  · simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetRuntimeRelated
+
+/-- The exact dispatcher consumes the concrete ownership certificate and
+preserves hereditary compiler provenance after the reset step, while the
+target may take a non-lockstep path (reflexive for this deletion). -/
+theorem deletedResetExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedResetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedResetTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedResetExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedResetExactMachineReadyAt rfl step
+
 theorem deletedPapEnvReachableRelated :
     EnvRelOn emptyAddressRenaming neutralUsed deletedPapSourceEnv liveEnv := by
   unfold deletedPapSourceEnv
