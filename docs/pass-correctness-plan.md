@@ -879,6 +879,13 @@ target frontier. A deleted join installs only the unreachable source body and
 is matched by target stuttering. The exact retained and deleted traversal
 wrappers expose both rules directly to the future ledger dispatcher.
 
+Retained returns now preserve the ledger while changing from active code to
+yielded control. The proof transports the related live result values, narrows
+the published roots to those values plus saved-frame roots, and takes one
+paired return step. Since neither runtime changes, the exact target frontier
+and owner history are carried unchanged. The exact return view exposes this
+rule without retaining the consumed active graph.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -957,11 +964,11 @@ its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer. It still has to be threaded through
-retained copies/projections and local-value applications, return/case and
-invocation steps, existing-address mutations, and allocation-capable external
-responses, then assembled into the unified non-lockstep dispatcher and
-compiler-client invariant so arbitrary selected edges receive that history
-rather than only focused fixtures.
+retained copies/projections and local-value applications, case and invocation
+steps, existing-address mutations, and allocation-capable external responses,
+then assembled into the unified non-lockstep dispatcher and compiler-client
+invariant so arbitrary selected edges receive that history rather than only
+focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1003,9 +1010,9 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Preserve the ledger through retained copies/projections, local-value
-   applications, return/case and invocation steps, and the existing-address
-   matcher families. Strengthen the foreign-response boundary when an
-   external response allocates, then
+   applications, case and invocation steps, and the existing-address matcher
+   families. Strengthen the foreign-response boundary when an external
+   response allocates, then
    assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
