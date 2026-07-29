@@ -1014,6 +1014,31 @@ theorem closedWritesShadowRun :
     collectLetValue, collectArgs, collectArgList, collectArg,
     liveMember, deadAbsent, usizeAbsent, scalarAbsent]
 
+/-- The fail-closed checker accepts the complete closed write chain and
+computes the same exact target as the transparent traversal. -/
+theorem closedWritesCheckedRun :
+    nullarySafeShadowCode? 8 {} closedWritesBefore =
+      some (closedWritesAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have usizeAbsent : usizeField ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have scalarAbsent : scalarField ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  unfold closedWritesBefore
+  rw [nullarySafeShadowCode?]
+  rw [nullarySafeShadowCode?]
+  rw [nullarySafeShadowCode?]
+  rw [nullarySafeShadowCode?]
+  rw [deletedWritesCheckedRun]
+  simp [closedWritesAfter, neutralAfter, neutralUsed, deletedWritesAfter,
+    liveDecl, closedWritesObjectDecl, closedWritesUSizeDecl,
+    closedWritesScalarDecl, letDecl, safeToElim, isNullaryFap,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, deadAbsent, usizeAbsent, scalarAbsent]
+
 theorem deletedUSizeScalarShadowRun :
     shadowCode? 3 {}
         (.uset dead 1 usizeField <|
@@ -6191,6 +6216,15 @@ theorem closedWritesShadowProgramRun :
     closedWritesBeforeProgram, closedWritesAfterProgram,
     fixtureDecl, decl, closedWritesShadowRun]
 
+/-- Checked whole-program form of the closed write chain. -/
+theorem closedWritesCheckedProgramRun :
+    nullarySafeShadowProgram? 8 closedWritesBeforeProgram =
+      some closedWritesAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, closedWritesBeforeProgram,
+    closedWritesAfterProgram, fixtureDecl, decl,
+    closedWritesCheckedRun]
+
 /-- The liveness-indexed machine relation accepts the concrete environment
 difference introduced by executing and then deleting the dead binding. -/
 theorem deadBindingMachineRelated :
@@ -7107,26 +7141,60 @@ theorem closedWritesTargetReachable_of_reaches
         exact ih (closedWritesTargetReachable_step ready head)
   exact preserves steps .entry
 
-/-- Pair-indexed hereditary ownership for the complete closed fixture.
-Related entry arguments may differ, but the empty initial address renaming
-and the target's zero allocation frontier rule out aliases to the
-source-only object at every write edge. -/
+/-- Inductive exact-pair ownership contract for the complete closed fixture.
+Related entry arguments may differ, but the target's zero allocation frontier
+rules out aliases to the source-only object at every write edge. -/
+def closedWritesExactOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadExactOwnershipContract externals 8
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    ClosedWritesSourceReachable sourceArguments source ∧
+      ClosedWritesTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments _argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact ⟨.entry, .entry⟩
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨closedWritesSourceReachable_step sourceReachable step,
+      targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      closedWritesTargetReachable_step targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ related
+    exact closedWritesSourceReachable_pairReady sourceReachable
+      (closedWritesTargetReachable_runtimeShape targetReachable)
+      related
+
+/-- The exact contract supplies the hereditary invariant consumed by the
+lower-level semantic endpoint. -/
 theorem closedWritesExactRuntimeOwnershipInitialInvariant
     (externals : ExternalSpec) :
     ReachableInitialInvariantOn
       (BinderReadyExactRuntimeOwnershipInvariant externals 8)
-      closedWritesBeforeProgram closedWritesAfterProgram #[`main] := by
-  intro entry member sourceArguments targetArguments argumentsRelated
-  have entryEq : entry = `main := by
-    simpa using member
-  subst entry
-  intro sourceAfter targetAfter sourcePath targetPath related
-  have sourceReachable :=
-    closedWritesSourceReachable_of_reaches sourcePath
-  have targetReachable :=
-    closedWritesTargetReachable_of_reaches targetPath
-  exact closedWritesSourceReachable_pairReady sourceReachable
-    (closedWritesTargetReachable_runtimeShape targetReachable) related
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  (closedWritesExactOwnershipContract externals).initialInvariant
+
+/-- The checked pass result, compiler well-formedness, and inductive exact
+ownership contract form the strict compiler-facing package. -/
+theorem closedWritesCompilerAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadCompilerAdmissibleRun externals 8
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    closedWritesBeforeProgramElimDeadWellFormed
+    closedWritesCheckedProgramRun
+    (.ofExact (closedWritesExactOwnershipContract externals))
 
 /-- Whole-program semantic correctness for allocation plus all three
 source-only mutation forms. -/
@@ -7138,10 +7206,7 @@ theorem closedWritesProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_exactRuntimeOwnership
-    closedWritesBeforeProgramElimDeadWellFormed
-    closedWritesShadowProgramRun compatible
-    (closedWritesExactRuntimeOwnershipInitialInvariant externals)
+  (closedWritesCompilerAdmissibleRun externals).loweringCorrect compatible
 
 /-- Concrete source states for the closed failed-token reuse fixture.  The
 tagged live value makes `reset` return `reuseToken none`; evaluating the
