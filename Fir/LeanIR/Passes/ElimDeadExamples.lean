@@ -23,6 +23,7 @@ def scalarField : FVarId := ⟨`scalarField⟩
 def reuseTokenVar : FVarId := ⟨`reuseToken⟩
 def reuseArgVar : FVarId := ⟨`reuseArg⟩
 def resetObjectVar : FVarId := ⟨`resetObject⟩
+def resetChildVar : FVarId := ⟨`resetChild⟩
 def papArgVar : FVarId := ⟨`papArg⟩
 def boxInputVar : FVarId := ⟨`boxInput⟩
 
@@ -135,6 +136,30 @@ def closedConcreteReuseBefore : LCNF.Code .impure :=
   .return live
 
 def closedConcreteReuseAfter : LCNF.Code .impure :=
+  closedReuseAfter
+
+def closedOwnedReuseChildDecl : LCNF.LetDecl .impure :=
+  letDecl resetChildVar objType (.ctor oneFieldInfo #[.erased])
+
+def closedOwnedReuseObjectDecl : LCNF.LetDecl .impure :=
+  letDecl resetObjectVar objType
+    (.ctor oneFieldInfo #[.fvar resetChildVar])
+
+def closedOwnedReuseTokenDecl : LCNF.LetDecl .impure :=
+  letDecl reuseTokenVar objType (.reset 1 resetObjectVar)
+
+/-- Closed owned-child reset/reuse fixture.  Reset releases the constructor
+owned by its cleared field before the returned token is reused in place. -/
+def closedOwnedReuseBefore : LCNF.Code .impure :=
+  .let closedReuseLiveDecl <|
+  .let closedOwnedReuseChildDecl <|
+  .let closedOwnedReuseObjectDecl <|
+  .let closedOwnedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedOwnedReuseAfter : LCNF.Code .impure :=
   closedReuseAfter
 
 def deletedReuseBefore : LCNF.Code .impure :=
@@ -265,6 +290,8 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadClosedReuse closedReuseBefore closedReuseAfter
   checkActualElimDead `elimDeadClosedConcreteReuse
     closedConcreteReuseBefore closedConcreteReuseAfter
+  checkActualElimDead `elimDeadClosedOwnedReuse
+    closedOwnedReuseBefore closedOwnedReuseAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualElimDead `elimDeadLargeNat
@@ -322,6 +349,12 @@ def closedConcreteReuseBeforeProgram : ImpureProgram :=
 
 def closedConcreteReuseAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main closedConcreteReuseAfter] }
+
+def closedOwnedReuseBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedOwnedReuseBefore] }
+
+def closedOwnedReuseAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedOwnedReuseAfter] }
 
 def deletedReuseBeforeProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedReuseBefore] }
@@ -536,6 +569,34 @@ theorem closedConcreteReuseShadowRun :
     deadReuseDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
     collectLetValue, collectArgs, collectArgList, collectArg,
     liveMember, objectAbsent, tokenAbsent, argumentAbsent, deadAbsent]
+
+theorem closedOwnedReuseShadowRun :
+    shadowCode? 7 {} closedOwnedReuseBefore =
+      some (closedOwnedReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have childAbsent :
+      resetChildVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have objectAbsent :
+      resetObjectVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedOwnedReuseBefore, closedOwnedReuseAfter,
+    closedOwnedReuseChildDecl, closedOwnedReuseObjectDecl,
+    closedOwnedReuseTokenDecl, closedReuseAfter,
+    closedReuseArgDecl, closedReuseLiveDecl,
+    deadReuseDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, childAbsent, objectAbsent, tokenAbsent,
+    argumentAbsent, deadAbsent]
 
 theorem deletedResetShadowRun :
     shadowCode? 2 {} deletedResetBefore =
@@ -7780,6 +7841,924 @@ theorem closedConcreteReuseProgramLoweringCorrect
     closedConcreteReuseBeforeProgramElimDeadWellFormed
     closedConcreteReuseShadowProgramRun compatible
     (closedConcreteReuseExactRuntimeOwnershipInitialInvariant
+      externals)
+
+/-! ## Closed owned-child reset/reuse correctness -/
+
+def closedOwnedReuseChildEnv : Env :=
+  bind closedReuseLiveEnv resetChildVar (.object (.heap 0))
+
+def closedOwnedReuseParentObject : ConstructorObject :=
+  { tag := oneFieldInfo.cidx
+    objectFields := #[.object (.heap 0)]
+    usizeFields := #[]
+    scalarFields := [] }
+
+def closedOwnedReuseParentCell : HeapCell :=
+  { object := .ctor closedOwnedReuseParentObject }
+
+def closedOwnedReuseParentRuntime : RuntimeState :=
+  (alloc closedReuseAllocation.1
+    (.ctor closedOwnedReuseParentObject)).1
+
+def closedOwnedReuseObjectEnv : Env :=
+  bind closedOwnedReuseChildEnv resetObjectVar (.object (.heap 1))
+
+def closedOwnedReuseClearedParentObject : ConstructorObject :=
+  { closedOwnedReuseParentObject with
+    objectFields := #[.object (.tagged 0)] }
+
+def closedOwnedReuseClearedParentCell : HeapCell :=
+  { object := .ctor closedOwnedReuseClearedParentObject }
+
+def closedOwnedReuseReleasedChildCell : HeapCell :=
+  { object := .ctor closedReuseAllocatedObject
+    rc := 0
+    live := false }
+
+def closedOwnedReuseResetRuntime : RuntimeState :=
+  { closedOwnedReuseParentRuntime with
+    heap := [
+      (1, closedOwnedReuseClearedParentCell),
+      (0, closedOwnedReuseReleasedChildCell)] }
+
+def closedOwnedReuseTokenEnv : Env :=
+  bind closedOwnedReuseObjectEnv reuseTokenVar
+    (.reuseToken (some 1))
+
+def closedOwnedReuseArgEnv : Env :=
+  bind closedOwnedReuseTokenEnv reuseArgVar .erased
+
+def closedOwnedReuseFinalRuntime : RuntimeState :=
+  { closedOwnedReuseResetRuntime with
+    heap := [
+      (1, { object := .ctor closedReuseAllocatedObject }),
+      (0, closedOwnedReuseReleasedChildCell)] }
+
+def closedOwnedReuseAfterLiveCode : LCNF.Code .impure :=
+  .let closedOwnedReuseChildDecl <|
+  .let closedOwnedReuseObjectDecl <|
+  .let closedOwnedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedOwnedReuseAfterChildCode : LCNF.Code .impure :=
+  .let closedOwnedReuseObjectDecl <|
+  .let closedOwnedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedOwnedReuseAfterObjectCode : LCNF.Code .impure :=
+  .let closedOwnedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedOwnedReuseAfterResetCode : LCNF.Code .impure :=
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedOwnedReuseAfterArgCode : LCNF.Code .impure :=
+  .let deadReuseDecl <| .return live
+
+def closedOwnedReuseSourceOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseBefore
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceChildState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseAfterLiveCode
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceObjectState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseAfterChildCode
+    env := closedOwnedReuseChildEnv
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceResetState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseAfterObjectCode
+    env := closedOwnedReuseObjectEnv
+    runtime := closedOwnedReuseParentRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceArgState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseAfterResetCode
+    env := closedOwnedReuseTokenEnv
+    runtime := closedOwnedReuseResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceReuseState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code closedOwnedReuseAfterArgCode
+    env := closedOwnedReuseArgEnv
+    runtime := closedOwnedReuseResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .code (.return live)
+    env := bind closedOwnedReuseArgEnv dead (.object (.heap 1))
+    runtime := closedOwnedReuseFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedOwnedReuseArgEnv dead (.object (.heap 1))
+    runtime := closedOwnedReuseFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedOwnedReuseSourceCachedState : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedOwnedReuseArgEnv dead (.object (.heap 1))
+    runtime := closedOwnedReuseFinalRuntime.setGlobal `main
+      (.object (.tagged 0)) }
+
+def closedOwnedReuseSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedOwnedReuseBeforeProgram
+    control := .invokeValue (.object (.tagged 0)) arguments
+    env := bind closedOwnedReuseArgEnv dead (.object (.heap 1))
+    runtime := closedOwnedReuseFinalRuntime }
+
+theorem closedOwnedReuseResetEffect :
+    reset closedOwnedReuseParentRuntime 1 (.object (.heap 1)) =
+      .ok (closedOwnedReuseResetRuntime,
+        .reuseToken (some 1)) := by
+  rfl
+
+theorem closedOwnedReuseSourceEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState closedOwnedReuseBeforeProgram `main arguments) =
+      .next (closedOwnedReuseSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedOwnedReuseBeforeProgram,
+      Program.findDecl?, invokeDecl, closedOwnedReuseSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedOwnedReuseSourceOuterStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceOuterState arguments) =
+      .next (closedOwnedReuseSourceChildState arguments) := by
+  rfl
+
+theorem closedOwnedReuseSourceChildStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceChildState arguments) =
+      .next (closedOwnedReuseSourceObjectState arguments) := by
+  have evaluated :
+      evalLetValue (closedOwnedReuseSourceChildState arguments)
+          closedOwnedReuseChildDecl =
+        .ok (closedReuseAllocation.1,
+          .value (.object (.heap 0))) := by
+    simp [evalLetValue, closedOwnedReuseSourceChildState,
+      closedOwnedReuseAfterLiveCode,
+      closedOwnedReuseChildDecl, letDecl, evalArgs, evalArg,
+      allocCtor, alloc, oneFieldInfo, closedReuseAllocation,
+      closedReuseAllocatedObject, Functor.map, Except.map,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+  change coreStep {
+      closedOwnedReuseSourceChildState arguments with
+      control := .code
+        (.let closedOwnedReuseChildDecl
+          closedOwnedReuseAfterChildCode) } =
+    .next (closedOwnedReuseSourceObjectState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedOwnedReuseSourceObjectStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceObjectState arguments) =
+      .next (closedOwnedReuseSourceResetState arguments) := by
+  have evaluated :
+      evalLetValue (closedOwnedReuseSourceObjectState arguments)
+          closedOwnedReuseObjectDecl =
+        .ok (closedOwnedReuseParentRuntime,
+          .value (.object (.heap 1))) := by
+    simp [evalLetValue, closedOwnedReuseSourceObjectState,
+      closedOwnedReuseAfterChildCode,
+      closedOwnedReuseObjectDecl, letDecl,
+      closedOwnedReuseChildEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      resetChildVar, allocCtor, alloc, oneFieldInfo,
+      closedOwnedReuseParentRuntime, closedOwnedReuseParentObject,
+      closedReuseAllocation, closedReuseAllocatedObject,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      closedOwnedReuseSourceObjectState arguments with
+      control := .code
+        (.let closedOwnedReuseObjectDecl
+          closedOwnedReuseAfterObjectCode) } =
+    .next (closedOwnedReuseSourceResetState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedOwnedReuseSourceResetStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceResetState arguments) =
+      .next (closedOwnedReuseSourceArgState arguments) := by
+  have evaluated :
+      evalLetValue (closedOwnedReuseSourceResetState arguments)
+          closedOwnedReuseTokenDecl =
+        .ok (closedOwnedReuseResetRuntime,
+          .value (.reuseToken (some 1))) := by
+    simp only [evalLetValue, closedOwnedReuseTokenDecl, letDecl]
+    have objectRead :
+        lookupValue
+            (closedOwnedReuseSourceResetState arguments).env
+            resetObjectVar =
+          .ok (.object (.heap 1)) := by
+      simp [closedOwnedReuseSourceResetState,
+        closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+        closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+        resetObjectVar, resetChildVar, live]
+    rw [objectRead]
+    simp only [Bind.bind, Except.bind]
+    simp [closedOwnedReuseSourceResetState,
+      closedOwnedReuseResetEffect, Pure.pure, Except.pure]
+  change coreStep {
+      closedOwnedReuseSourceResetState arguments with
+      control := .code
+        (.let closedOwnedReuseTokenDecl
+          closedOwnedReuseAfterResetCode) } =
+    .next (closedOwnedReuseSourceArgState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedOwnedReuseSourceArgStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceArgState arguments) =
+      .next (closedOwnedReuseSourceReuseState arguments) := by
+  rfl
+
+theorem closedOwnedReuseSourceReuseStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceReuseState arguments) =
+      .next (closedOwnedReuseSourceReturnState arguments) := by
+  have evaluated :
+      evalLetValue (closedOwnedReuseSourceReuseState arguments)
+          deadReuseDecl =
+        .ok (closedOwnedReuseFinalRuntime,
+          .value (.object (.heap 1))) := by
+    simp [evalLetValue, closedOwnedReuseSourceReuseState,
+      closedOwnedReuseAfterArgCode, deadReuseDecl, letDecl,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, closedOwnedReuseResetRuntime,
+      closedOwnedReuseClearedParentCell,
+      closedOwnedReuseClearedParentObject,
+      closedOwnedReuseParentObject,
+      closedOwnedReuseReleasedChildCell,
+      closedOwnedReuseFinalRuntime,
+      lookupValue, evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar,
+      reuse, getLiveCell, setCell, findCell?, replaceCell,
+      oneFieldInfo, closedReuseAllocatedObject,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      closedOwnedReuseSourceReuseState arguments with
+      control := .code (.let deadReuseDecl (.return live)) } =
+    .next (closedOwnedReuseSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedOwnedReuseSourceReturnStep
+    (arguments : Array Value) :
+    coreStep (closedOwnedReuseSourceReturnState arguments) =
+      .next (closedOwnedReuseSourceYieldedState arguments) := by
+  rfl
+
+theorem closedOwnedReuseSourceYieldedStepEmpty :
+    coreStep (closedOwnedReuseSourceYieldedState #[]) =
+      .next closedOwnedReuseSourceCachedState := by
+  rfl
+
+theorem closedOwnedReuseSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedOwnedReuseSourceYieldedState arguments) =
+      .next (closedOwnedReuseSourceInvokingState arguments) := by
+  simp [coreStep, closedOwnedReuseSourceYieldedState,
+    neutralEntryFrames, notEmpty,
+    closedOwnedReuseSourceInvokingState]
+
+/-- Complete source execution graph for the owned-child branch. -/
+inductive ClosedOwnedReuseSourceReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      ClosedOwnedReuseSourceReachable arguments
+        (initialState closedOwnedReuseBeforeProgram `main arguments)
+  | outer :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceOuterState arguments)
+  | child :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceChildState arguments)
+  | object :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceObjectState arguments)
+  | reset :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceResetState arguments)
+  | argument :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceArgState arguments)
+  | reuse :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceReuseState arguments)
+  | ret :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceReturnState arguments)
+  | yielded :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedOwnedReuseSourceReachable arguments
+        closedOwnedReuseSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedOwnedReuseSourceReachable arguments
+        (closedOwnedReuseSourceInvokingState arguments)
+
+theorem closedOwnedReuseSourceReachable_step
+    (reachable :
+      ClosedOwnedReuseSourceReachable arguments before)
+    (step : Step externals before after) :
+    ClosedOwnedReuseSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceOuterStep arguments) .child step
+  | child =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceChildStep arguments) .object step
+  | object =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceObjectStep arguments) .reset step
+  | reset =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceResetStep arguments) .argument step
+  | argument =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceArgStep arguments) .reuse step
+  | reuse =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceReuseStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedOwnedReuseSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          closedOwnedReuseSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedOwnedReuseSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedOwnedReuseSourceCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [closedOwnedReuseSourceCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedOwnedReuseSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedOwnedReuseSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+
+theorem closedOwnedReuseSourceReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedOwnedReuseBeforeProgram `main arguments)
+      state) :
+    ClosedOwnedReuseSourceReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        ClosedOwnedReuseSourceReachable arguments before →
+          ClosedOwnedReuseSourceReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih
+          (closedOwnedReuseSourceReachable_step ready head)
+  exact preserves steps .entry
+
+/-- The owned-child target is definitionally the already audited one-let
+target, so its exact finite graph and empty-frontier shape are reused. -/
+theorem closedOwnedReuseTargetReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedOwnedReuseAfterProgram `main arguments)
+      state) :
+    ClosedConcreteReuseTargetReachable arguments state := by
+  apply closedConcreteReuseTargetReachable_of_reaches
+  simpa [closedOwnedReuseAfterProgram,
+    closedConcreteReuseAfterProgram,
+    closedOwnedReuseAfter, closedConcreteReuseAfter] using path
+
+/-- Recursive child release changes only source cells that the empty target
+frontier proves unreachable.  Both heap rewrites therefore form one
+observable runtime frame. -/
+theorem closedOwnedReuseResetReady_of_shadowRuntime
+    (target : MachineState)
+    (runtime :
+      ShadowRuntimeRel rho
+        (closedOwnedReuseSourceResetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedResetReadyAt
+      (closedOwnedReuseSourceResetState arguments)
+      (runtimeRoots
+        (closedOwnedReuseSourceResetState arguments).runtime
+        sourceRoots)
+      1 resetObjectVar := by
+  have noSourceLocation (location : Location) :
+      ¬Reachable
+        (closedOwnedReuseSourceResetState arguments).runtime.heap
+        (runtimeRoots
+          (closedOwnedReuseSourceResetState arguments).runtime
+          sourceRoots)
+        location :=
+    runtime.leftUnreachable_of_rightNextLocation_zero
+      targetEmpty location
+  have frame :
+      RuntimeReachableFrame
+        (closedOwnedReuseSourceResetState arguments).runtime
+        closedOwnedReuseResetRuntime
+        (runtimeRoots
+          (closedOwnedReuseSourceResetState arguments).runtime
+          sourceRoots) := by
+    refine {
+      nextLocation_eq := rfl
+      globals_eq := rfl
+      world_eq := rfl
+      trace_eq := rfl
+      heap := ?_
+      heapFresh := ?_ }
+    · intro location reachable
+      exact (noSourceLocation location reachable).elim
+    · intro location bounded
+      have twoLe : 2 ≤ location := by
+        simpa [closedOwnedReuseResetRuntime,
+          closedOwnedReuseParentRuntime, closedReuseAllocation,
+          alloc] using bounded
+      have notZero : (0 : Nat) ≠ location :=
+        Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) twoLe)
+      have notOne : (1 : Nat) ≠ location :=
+        Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) twoLe)
+      simp [closedOwnedReuseResetRuntime, findCell?,
+        notZero, notOne]
+  refine .mk (.object (.heap 1)) (.reuseToken (some 1))
+    closedOwnedReuseResetRuntime ?_ ?_ frame
+  · simp [closedOwnedReuseSourceResetState,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+      resetObjectVar, resetChildVar, live]
+  · simpa [closedOwnedReuseSourceResetState] using
+      closedOwnedReuseResetEffect
+
+theorem closedOwnedReuseResetPairReady
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 7
+      (closedOwnedReuseSourceResetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 7
+      (closedOwnedReuseSourceResetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedOwnedReuseSourceResetState arguments).control =
+        .code closedOwnedReuseAfterObjectCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have resetReady :=
+        closedOwnedReuseResetReady_of_shadowRuntime
+          target runtime targetShape.1
+      have removed :
+          DeletedLetReadyAt
+            (closedOwnedReuseSourceResetState arguments)
+            (runtimeRoots
+              (closedOwnedReuseSourceResetState arguments).runtime
+              (envRootsOn used
+                (closedOwnedReuseSourceResetState arguments).env ++
+                sourceFrameRoots))
+            closedOwnedReuseTokenDecl := by
+        unfold closedOwnedReuseTokenDecl letDecl
+        exact .reset reuseTokenVar reuseTokenVar.name objType
+          1 resetObjectVar (by simpa using resetReady)
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.let_of_ready
+              removed (by trivial)⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedOwnedReuseReady_of_shadowRuntime
+    (target : MachineState)
+    (runtime :
+      ShadowRuntimeRel rho
+        (closedOwnedReuseSourceReuseState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedReuseReadyAt
+      (closedOwnedReuseSourceReuseState arguments)
+      (runtimeRoots
+        (closedOwnedReuseSourceReuseState arguments).runtime
+        sourceRoots)
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  refine .some 1 closedOwnedReuseClearedParentCell
+    closedOwnedReuseClearedParentObject #[.erased]
+    ?_ ?_ ?_ ?_ ?_ ?_ ?_
+  · simp [closedOwnedReuseSourceReuseState,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+  · simp [closedOwnedReuseSourceReuseState,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+    rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · exact runtime.leftUnreachable_of_rightNextLocation_zero
+      targetEmpty 1
+
+theorem closedOwnedReusePairReady
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 7
+      (closedOwnedReuseSourceReuseState arguments) target) :
+    BinderReadyReachableMachineReadyAt 7
+      (closedOwnedReuseSourceReuseState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedOwnedReuseSourceReuseState arguments).control =
+        .code closedOwnedReuseAfterArgCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision :
+          exact.view.runtimeDecision = .deletedLet :=
+        exact.view
+          |>.runtimeDecision_eq_deletedLet_of_target_not_same_let
+            (targetShape.2 targetCode targetControl)
+      have reuseReady :=
+        closedOwnedReuseReady_of_shadowRuntime
+          target runtime targetShape.1
+      have removed :
+          DeletedLetReadyAt
+            (closedOwnedReuseSourceReuseState arguments)
+            (runtimeRoots
+              (closedOwnedReuseSourceReuseState arguments).runtime
+              (envRootsOn used
+                (closedOwnedReuseSourceReuseState arguments).env ++
+                sourceFrameRoots))
+            deadReuseDecl := by
+        unfold deadReuseDecl letDecl
+        exact .reuse dead dead.name objType reuseTokenVar
+          oneFieldInfo true #[.fvar reuseArgVar]
+          (by simpa using reuseReady)
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedOwnedReuseBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 7 state sourceFrameRoots
+      closedOwnedReuseBefore := by
+  unfold closedOwnedReuseBefore closedReuseLiveDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedOwnedReuseChildSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 7
+      (closedOwnedReuseSourceChildState arguments)
+      sourceFrameRoots closedOwnedReuseAfterLiveCode := by
+  unfold closedOwnedReuseAfterLiveCode
+    closedOwnedReuseChildDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.erased] ?_ rfl
+  simp [closedOwnedReuseSourceChildState,
+    closedReuseLiveEnv, evalArgs, evalArg]
+  rfl
+
+theorem closedOwnedReuseObjectSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 7
+      (closedOwnedReuseSourceObjectState arguments)
+      sourceFrameRoots closedOwnedReuseAfterChildCode := by
+  unfold closedOwnedReuseAfterChildCode
+    closedOwnedReuseObjectDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.object (.heap 0)] ?_ rfl
+  simp [closedOwnedReuseSourceObjectState,
+    closedOwnedReuseChildEnv, closedReuseLiveEnv,
+    evalArgs, evalArg, Impure.bind, lookup,
+    resetChildVar, live]
+  rfl
+
+theorem closedOwnedReuseArgSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 7
+      (closedOwnedReuseSourceArgState arguments)
+      sourceFrameRoots closedOwnedReuseAfterResetCode := by
+  unfold closedOwnedReuseAfterResetCode
+    closedReuseArgDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem closedOwnedReuseReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 7 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+theorem closedOwnedReuseOuterSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 7
+      (closedOwnedReuseSourceOuterState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedOwnedReuseBefore :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedOwnedReuseBeforeSourceRuntimeReadyAt
+    (closedOwnedReuseSourceOuterState arguments)
+    sourceFrameRoots bounded exact subset static
+
+theorem closedOwnedReuseChildSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 7
+      (closedOwnedReuseSourceChildState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedOwnedReuseAfterLiveCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedOwnedReuseChildSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem closedOwnedReuseObjectSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 7
+      (closedOwnedReuseSourceObjectState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedOwnedReuseAfterChildCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedOwnedReuseObjectSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem closedOwnedReuseArgSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 7
+      (closedOwnedReuseSourceArgState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedOwnedReuseAfterResetCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedOwnedReuseArgSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem closedOwnedReuseReturnSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 7
+      (closedOwnedReuseSourceReturnState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = .return live :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedOwnedReuseReturnSourceRuntimeReadyAt
+    (closedOwnedReuseSourceReturnState arguments)
+    sourceFrameRoots bounded exact subset static
+
+/-- Every reachable related pair carries the dynamic certificate selected by
+the exact owned-child compiler residual. -/
+theorem closedOwnedReuseSourceReachable_pairReady
+    (sourceReachable :
+      ClosedOwnedReuseSourceReachable arguments source)
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related :
+      SomeBinderReadyReachableMachineRelated 7 source target) :
+    BinderReadyReachableMachineReadyAt 7 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedOwnedReuseOuterSourceMachineReadyAt arguments)
+  | child =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedOwnedReuseChildSourceMachineReadyAt arguments)
+  | object =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedOwnedReuseObjectSourceMachineReadyAt arguments)
+  | reset =>
+      exact closedOwnedReuseResetPairReady targetShape related
+  | argument =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedOwnedReuseArgSourceMachineReadyAt arguments)
+  | reuse =>
+      exact closedOwnedReusePairReady targetShape related
+  | ret =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedOwnedReuseReturnSourceMachineReadyAt arguments)
+  | yielded =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedOwnedReuseSourceYieldedState] at control
+  | cached empty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedOwnedReuseSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedOwnedReuseSourceInvokingState] at control
+
+theorem closedOwnedReuseExactRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals 7)
+      closedOwnedReuseBeforeProgram
+      closedOwnedReuseAfterProgram #[`main] := by
+  intro entry member sourceArguments targetArguments argumentsRelated
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  intro sourceAfter targetAfter sourcePath targetPath related
+  have sourceReachable :=
+    closedOwnedReuseSourceReachable_of_reaches sourcePath
+  have targetReachable :=
+    closedOwnedReuseTargetReachable_of_reaches targetPath
+  exact closedOwnedReuseSourceReachable_pairReady
+    sourceReachable
+    (closedConcreteReuseTargetReachable_runtimeShape
+      targetReachable)
+    related
+
+theorem closedOwnedReuseBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed
+      closedOwnedReuseBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique,
+          closedOwnedReuseBeforeProgram, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [closedOwnedReuseBeforeProgram] at member
+      subst declaration
+      exact .letE
+        (.letE (.letE (.letE (.letE (.letE .ret)))))
+    · intro declaration member
+      simp [closedOwnedReuseBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩
+            (.letE ⟨.object, trivial⟩
+              (.letE ⟨.object, trivial⟩
+                (.letE ⟨.object, trivial⟩ .ret)))))
+  · intro declaration member
+    simp [closedOwnedReuseBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+      closedOwnedReuseBefore, closedReuseLiveDecl,
+      closedOwnedReuseChildDecl, closedOwnedReuseObjectDecl,
+      closedOwnedReuseTokenDecl, closedReuseArgDecl,
+      deadReuseDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds,
+      live, resetChildVar, resetObjectVar,
+      reuseTokenVar, reuseArgVar, dead]
+
+theorem closedOwnedReuseShadowProgramRun :
+    shadowProgram? 7 closedOwnedReuseBeforeProgram =
+      some closedOwnedReuseAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedOwnedReuseBeforeProgram,
+    closedOwnedReuseAfterProgram,
+    fixtureDecl, decl, closedOwnedReuseShadowRun]
+
+/-- Whole-program correctness for deleted reset/reuse with a real owned
+child.  The source recursively releases the child and overwrites the parent;
+the target omits the unreachable object graph and returns the same value. -/
+theorem closedOwnedReuseProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 7) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedOwnedReuseBeforeProgram
+      closedOwnedReuseAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_exactRuntimeOwnership
+    closedOwnedReuseBeforeProgramElimDeadWellFormed
+    closedOwnedReuseShadowProgramRun compatible
+    (closedOwnedReuseExactRuntimeOwnershipInitialInvariant
       externals)
 
 end Fir.LeanIR.Passes.ElimDeadExamples
