@@ -776,6 +776,17 @@ wrapper expose this stronger history to machine clients, while their
 non-empty-target fixture now obtains its source-only write fact from this
 carried history rather than constructing a final-state ledger by hand.
 
+The literal-let family is the first exact non-lockstep matcher to consume and
+return that history. `LedgerLiteralBothResult` distinguishes immediate
+literals, which retain the current ledger, from heap-backed naturals and
+strings, which extend it with their actual paired allocation.
+`match_retainedLiteralLetStep_binderReady_ledger` carries that result through
+the one-step target match; the deleted counterpart allows a source-only
+literal allocation while the target stutters and keeps its ledger unchanged.
+Exact traversal-view wrappers expose both branches at the compiler-facing
+boundary. A retained large-Nat fixture forces the paired heap branch from
+empty runtimes and proves that its post-state carries the enlarged ledger.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -850,8 +861,9 @@ entry states from auditable static ownership facts: in particular, to carry
 the target allocation ledger through arbitrary exact executions and derive
 each local operation shape from compiler typing and ownership invariants. The
 ledger now solves the address-map part without assuming an empty target, and
-its proof-relevant carrier covers the allocation primitives. It still has to
-be threaded through the full non-lockstep machine-step matcher and the
+its proof-relevant carrier covers the allocation primitives and the complete
+literal-let matcher. It still has to be threaded through the remaining
+allocation families, the unified non-lockstep dispatcher, and the
 compiler-client invariant so arbitrary selected edges receive that history
 rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
@@ -894,16 +906,21 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Thread `SomeLedgerBinderReadyReachableMachineRelated` through the
-   non-lockstep machine-step matcher, preserving the carried ledger across
-   paired and deleted source-only allocation transitions.
-2. Define the ledger-aware entry-indexed exact ownership contract and use it
+1. Extend the ledger-aware runtime result and exact non-lockstep matcher
+   pattern from literals to constructors, partial applications, boxes, and
+   failed-token reuse, covering both paired and deleted source-only
+   allocations.
+2. Preserve the ledger through the no-allocation/existing-address matcher
+   families and strengthen the foreign-response boundary when an external
+   response allocates, then assemble the unified
+   `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
+3. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
    write/reset/reuse edges, leaving only their local compiler
    typing/heap-shape certificates.
-3. Extend the actual-pass matrix when new ownership laws or semantic
+4. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
-4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
+5. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract and prove the queued closure-application preservation consumers
    before that shared validation stack lands.
 
