@@ -851,6 +851,16 @@ paired live constructor and overwrites it with a self-reference on both sides;
 the deleted exact regression overwrites only an unmapped source cell while
 the empty target ledger remains unchanged.
 
+The first no-allocation layer now preserves the ledger uniformly.
+`match_internalCoreSteps_binderReady_ledger` and
+`match_sourceOnlyCoreStep_binderReady_ledger` lift the hereditary paired and
+source-only determinism lemmas without changing the target allocation
+history. Retained erased lets take their real step on both machines, while
+deleted runtime-neutral lets take the source step and let the target stutter;
+the generic exact wrapper covers erased values, copies, projections,
+unboxing, and `isShared` whenever their local evaluation equation is
+available. These branches no longer need operation-specific ledger proofs.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -927,11 +937,13 @@ each local operation shape from compiler typing and ownership invariants. The
 ledger now solves the address-map part without assuming an empty target, and
 its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
-matchers, together with the concrete-token existing-address reuse branch. It
-still has to be threaded through the remaining no-allocation and external
-response branches, the unified non-lockstep dispatcher, and the
-compiler-client invariant so arbitrary selected edges receive that history
-rather than only focused fixtures.
+matchers, together with concrete-token existing-address reuse and the generic
+runtime-neutral erased/deleted layer. It still has to be threaded through
+retained operation-specific no-allocation branches, control/application
+steps, existing-address mutations, and allocation-capable external responses,
+then assembled into the unified non-lockstep dispatcher and compiler-client
+invariant so arbitrary selected edges receive that history rather than only
+focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -972,9 +984,10 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through the remaining no-allocation matcher families
-   and strengthen the foreign-response boundary when an external response
-   allocates, then assemble the unified
+1. Preserve the ledger through retained copies/projections and the remaining
+   control/application and existing-address matcher families. Strengthen the
+   foreign-response boundary when an external response allocates, then
+   assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
