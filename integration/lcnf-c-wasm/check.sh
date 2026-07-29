@@ -87,12 +87,12 @@ compile_flags=(
   -I "$lean_prefix/include"
 )
 link_flags=(
-  -Wl,--no-entry
-  -Wl,--export=fir_lcnf_c_affine
-  -Wl,--export=fir_lcnf_c_mix
-  -Wl,--gc-sections
-  -Wl,--strip-all
-  -Wl,--lto-O3
+  "-Wl,--no-entry"
+  "-Wl,--export=fir_lcnf_c_affine"
+  "-Wl,--export=fir_lcnf_c_mix"
+  "-Wl,--gc-sections"
+  "-Wl,--strip-all"
+  "-Wl,--lto-O3"
 )
 
 "$wasm_clang" \
