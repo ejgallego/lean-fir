@@ -4075,6 +4075,26 @@ inversion, runtime refinement, and whole-export use. Scalar `UInt8` comparison
 chains are next. No FIR semantic contract, concrete layout, executable ABI, or
 W7 helper signature changed.
 
+W6.6fj closes that scalar control-flow family at the same arbitrary-chain
+boundary. `CaseChainAdapted.scalarUInt8Constructor_eq` peels one production
+local/constant comparison and its recursively compiled suffix.
+`ScalarUInt8CaseAltsSupported` admits any normalized constructor-only list or
+constructor list with exactly one trailing default, with every expected tag
+inside the compiler's `UInt8` lane. `ScalarUInt8CasesSupported` adds only the
+scalar discriminator mode and compiler local-kind equation; the semantic
+actual-tag bound is derived constructively from `StateRelated` and
+`ValueRel.uint8`.
+
+`caseChainWP_scalarUInt8_constructor` proves the exact direct Wasm comparison
+without a host import. `scalarUInt8CaseChainRefines` follows the
+source-selected hit/miss path under nested case-resumption wrappers, and
+`caseRuntimeRefines_scalarUInt8Cases` supplies the reusable runtime condition.
+`correctBudgetedPureExternalScalarUInt8Cases` consequently closes arbitrary
+chain length and arbitrary nesting around the current direct/resident-numeric
+family. The contract harness checks both the generic runtime law and
+whole-export endpoint. No FIR semantic contract, concrete layout, executable
+ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

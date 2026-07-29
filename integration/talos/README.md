@@ -335,8 +335,14 @@ default. Generic compiler inversion recovers the production fallback, suffix,
 branch targets, and indices; `objectConstructorCaseChainRefines` recursively
 follows the source-selected hit/miss path; and
 `correctBudgetedPureExternalObjectConstructorCases` closes arbitrary chain
-length and nesting without a per-program target witness. The singleton and
-two-arm APIs remain compatibility corollaries. Scalar comparisons remain next.
+length and nesting without a per-program target witness.
+`ScalarUInt8CaseAltsSupported`, `scalarUInt8CaseChainRefines`, and
+`caseRuntimeRefines_scalarUInt8Cases` provide the parallel arbitrary-chain
+result for direct `.uint8` local comparisons, deriving the actual tag range
+from the value relation and requiring no host import.
+`correctBudgetedPureExternalScalarUInt8Cases` closes arbitrary scalar-chain
+length and nesting around the same mixed family. The singleton and two-arm
+object APIs remain compatibility corollaries.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

@@ -143,8 +143,12 @@ Cross-cutting W6.5 state:
   `caseRuntimeRefines_objectConstructorCases` generalize this to every
   normalized object-constructor chain, with or without one trailing default;
   `correctBudgetedPureExternalObjectConstructorCases` closes arbitrary chain
-  length and nesting. Scalar comparisons remain the next control-flow
-  coverage gap.
+  length and nesting. `ScalarUInt8CaseAltsSupported`,
+  `scalarUInt8CaseChainRefines`, and
+  `caseRuntimeRefines_scalarUInt8Cases` close the parallel arbitrary scalar
+  `.uint8` comparison family, deriving the dynamic tag range from
+  `StateRelated`; `correctBudgetedPureExternalScalarUInt8Cases` closes
+  arbitrary chain length and nesting without a host import.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
@@ -381,13 +385,14 @@ Cross-cutting W6.5 state:
   while packed constructors and other initial heap kinds retain explicit
   layout gates; and
 - certificate-free finite compiler correctness now crosses arbitrary-length
-  normalized concrete object-case control flow: production inversion derives
-  the actual fallback, every branch/suffix target, and numeric indices; the
-  recursive concrete `getTag` theorem follows the source-selected hit/miss
-  path through constructor-only chains or one trailing default; and the
-  whole-export theorem permits arbitrary chain length and nesting around the
-  current direct and resident-numeric family. Scalar `UInt8` cases remain
-  open; and
+  normalized concrete object and scalar-`UInt8` case control flow: production
+  inversion derives the actual fallback, every branch/suffix target, and
+  numeric indices; the recursive object theorem follows the source-selected
+  hit/miss path through concrete `getTag`, while the scalar theorem follows
+  the same path through direct local comparisons and derives its dynamic
+  range from the value relation; and both whole-export theorems permit
+  arbitrary chain length and nesting around the current direct and
+  resident-numeric family; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

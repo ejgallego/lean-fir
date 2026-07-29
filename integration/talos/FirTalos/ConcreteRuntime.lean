@@ -11974,6 +11974,40 @@ theorem wp_i32Eq_ifElse
         cases level <;> rfl
     | _ => rfl
 
+/-- Host-polymorphic direct scalar-case dispatch. The generated code loads the
+`UInt8` discriminator local, compares its exact i32 lane, and selects an arm
+without a runtime import. -/
+theorem wp_scalarUInt8_case_test
+    {host : Type} {module : Wasm.Module} {env : Wasm.HostEnv host}
+    {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion host}
+    {store : Wasm.Store host} {locals : Wasm.Locals}
+    {localIndex : Nat} (actualTag expectedTag : Nat)
+    (hLocal :
+      locals.get localIndex = some (.i32 (UInt32.ofNat actualTag)))
+    (actualFits : actualTag < UInt8.size)
+    (expectedFits : expectedTag < UInt8.size)
+    (hBody :
+      Wasm.wp module (if actualTag = expectedTag then thenBody else elseBody)
+        (fun continuation => match continuation with
+          | .Fallthrough nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break 0 nextStore nextLocals =>
+              Wasm.wp module rest Q nextStore
+                { nextLocals with values := locals.values } env
+          | .Break (level + 1) nextStore nextLocals =>
+              Q (.Break level nextStore nextLocals)
+          | other => Q other)
+        store { locals with values := locals.values } env) :
+    Wasm.wp module
+      (.localGet localIndex :: .const (UInt32.ofNat expectedTag) :: .eq ::
+        .iff 0 0 thenBody elseBody :: rest)
+      Q store locals env := by
+  rw [Wasm.wp_localGet_cons, hLocal]
+  apply wp_i32Eq_ifElse (UInt32.ofNat actualTag)
+    (UInt32.ofNat expectedTag)
+  simpa only [constructorTag_uint8_eq_iff actualFits expectedFits] using hBody
+
 /-- Concrete-host WP for the exact tag-test instruction sequence emitted by
 the lowerer. The source and concrete object representations meet only through
 `ValueRel`; no opaque semantic handle is allocated or decoded. -/
@@ -12171,6 +12205,95 @@ theorem caseChainWP_constructor
           tagged actualFits expectedFits
       rw [stateRelated.clearFailure]
       exact selectedWP
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/--
+Concrete-host rule for a scalar `UInt8` constructor test.
+
+`StateRelated` and the compiler's `.uint8` local kind recover the exact direct
+i32 discriminator lane. The semantic `getTag` equation then identifies that
+lane with the source-selected tag, so no host contract or runtime call is
+needed.
+-/
+theorem caseChainWP_scalarUInt8_constructor
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {thenTarget elseTarget : Wasm.Program}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    {discrIndex : Nat} {sourceValue : Value} {actualTag : Nat}
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
+    (fits : Fir.Wasm.constructorTagFitsUInt8 info = true)
+    (thenAdapted :
+      FirTalos.Correctness.CodeAdapted context sourceModule sourceFunction
+        labels code thenTarget)
+    (elseAdapted :
+      FirTalos.Correctness.CaseChainAdapted context sourceModule sourceFunction
+        labels discr alts fallback elseTarget)
+    (discrFound :
+      findFVar? (functionBindings sourceFunction) discr = some discrIndex)
+    (discrKind :
+      (functionBindings sourceFunction)[discrIndex]?.map Prod.snd =
+        some .uint8)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (sourceLookup : lookup sourceEnv discr = some sourceValue)
+    (tagged : getTag sourceRuntime sourceValue = .ok actualTag)
+    (expectedFits : info.cidx < UInt8.size)
+    (selectedWP :
+      Wasm.wp module
+        (if actualTag = info.cidx then thenTarget else elseTarget)
+        (CaseResumePost module hostEnv [] Q tail) initial
+        { locals with values := tail } hostEnv) :
+    CaseChainWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv discr (.ctorAlt info code :: alts) fallback
+      [.localGet discrIndex, .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 thenTarget elseTarget]
+      initial locals witness tail Q := by
+  obtain ⟨index, kind, physical, found, kindAt, localValue,
+      physicalRelated⟩ := stateRelated.2.2 sourceLookup
+  rw [discrFound] at found
+  have indexEq := Option.some.inj found
+  subst index
+  rw [discrKind] at kindAt
+  have kindEq := Option.some.inj kindAt
+  subst kind
+  refine ⟨caseChainAdapted_scalarUInt8_constructor modeEq fits thenAdapted
+    elseAdapted discrFound, stateRelated, ?_⟩
+  cases physicalRelated with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | @uint8 word value encoded =>
+          have fits64 : value.toNat < UInt64.size := by
+            have sizeLe : UInt8.size ≤ UInt64.size := by native_decide
+            exact lt_of_lt_of_le (UInt8.toNat_lt_size value) sizeLe
+          have valueToNat :
+              (UInt64.ofNat value.toNat).toNat = value.toNat :=
+            UInt64.toNat_ofNat_of_lt' fits64
+          have tagEq : actualTag = value.toNat := by
+            simpa [getTag, ScalarValue.toUInt64, valueToNat] using tagged.symm
+          subst actualTag
+          apply wp_scalarUInt8_case_test (host := Host) (rest := [])
+            value.toNat info.cidx
+          · simpa [Wasm.Locals.get, encoded] using localValue
+          · exact UInt8.toNat_lt_size value
+          · exact expectedFits
+          · convert selectedWP using 1
+            funext continuation
+            cases continuation with
+            | Break level nextStore nextLocals =>
+                cases level <;> (apply propext; rfl)
+            | _ => apply propext; rfl
   | word64 valueRelated => cases valueRelated
   | float32Bits valueRelated => cases valueRelated
   | float64Bits valueRelated => cases valueRelated

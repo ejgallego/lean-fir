@@ -237,8 +237,16 @@ nested resumption law, `caseRuntimeRefines_objectConstructorCases` supplies the
 uniform runtime condition, and
 `correctBudgetedPureExternalObjectConstructorCases` exposes arbitrary chain
 length and nesting at the whole-export boundary. The fixed-arity theorems
-remain compatibility surfaces. Scalar comparisons are the next control-flow
-instance.
+remain compatibility surfaces.
+`CaseChainAdapted.scalarUInt8Constructor_eq` and
+`caseChainWP_scalarUInt8_constructor` give the corresponding production
+inversion and concrete direct-comparison rule for `.uint8` discriminators.
+`ScalarUInt8CaseAltsSupported` admits arbitrary normalized constructor chains,
+`scalarUInt8CaseChainRefines` follows the selected hit/miss path, and
+`caseRuntimeRefines_scalarUInt8Cases` supplies the uniform runtime condition
+without a host import or dynamic range premise.
+`correctBudgetedPureExternalScalarUInt8Cases` exposes arbitrary scalar-chain
+length and nesting at the whole-export boundary.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
