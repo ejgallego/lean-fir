@@ -85,8 +85,37 @@ emcmake cmake \
 
 cmake --build "$lean_build" --target leanrt --parallel "$jobs"
 
-test -f "$lean_build/lib/lean/libleanrt.a"
-printf 'Emscripten %s and Lean runtime %s are ready in %s\n' \
+stdlib_cflags="-O3 -DNDEBUG -flto -fomit-frame-pointer -ffunction-sections -fdata-sections -fno-fast-math -ffp-contract=off"
+
+build_stdlib_archive() {
+  local package="$1"
+  (
+    cd "$lean_src/stage0/src"
+    "$lean_build/bin/leanmake" \
+      --no-print-directory \
+      --jobs "$jobs" \
+      lib lib.export \
+      "PKG=$package" \
+      C_ONLY=1 \
+      "C_OUT=$lean_src/stage0/stdlib" \
+      "OUT=$lean_build/lib" \
+      "LIB_OUT=$lean_build/lib/lean" \
+      "OLEAN_OUT=$lean_build/lib/lean" \
+      "TEMP_OUT=$lean_build/lib/temp" \
+      "LEANC=$lean_build/leanc.sh" \
+      "LEAN_AR=$emsdk_dir/upstream/emscripten/emar" \
+      "LEANC_OPTS=$stdlib_cflags"
+  )
+}
+
+build_stdlib_archive Init
+build_stdlib_archive Std
+
+for archive in libleanrt.a libInit.a libStd.a; do
+  test -f "$lean_build/lib/lean/$archive"
+done
+
+printf 'Emscripten %s and Lean runtime/Init/Std %s are ready in %s\n' \
   "$FIR_LCNF_C_EMSDK_VERSION" \
   "$FIR_LCNF_C_LEAN_VERSION" \
   "$deps_root"

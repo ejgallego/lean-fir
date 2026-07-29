@@ -76,3 +76,32 @@ export function expectedHeapChecksum(rounds, seed) {
     accumulated.sumMultiplier * seed + accumulated.sumIncrement
   ) & mask;
 }
+
+export function expectedRuntimeChecksum(rounds, seed) {
+  let remaining = rounds;
+  let next = seed;
+  let arraySum = 0n;
+  let first;
+
+  while (remaining !== 0n) {
+    next = (next * multiplier + increment) & mask;
+    const value = (
+      next ^ ((remaining * 11400714819323198485n) & mask)
+    ) & mask;
+    if (first === undefined) {
+      first = value;
+    }
+    arraySum = (arraySum + value) & mask;
+    remaining -= 1n;
+  }
+
+  const missingLength = 9n;
+  const firstOrMissing = first ?? missingLength;
+  const label = `fir:${rounds}:${rounds}:${rounds}`;
+  const labelLength = BigInt(new TextEncoder().encode(label).byteLength);
+  const closureValue = ((arraySum + seed) & mask) ^ rounds;
+
+  return (
+    closureValue + firstOrMissing + missingLength + labelLength
+  ) & mask;
+}

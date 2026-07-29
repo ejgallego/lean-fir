@@ -23,24 +23,33 @@ second compiler:
 | Profile | Host contract | Current acceptance fixture |
 | --- | --- | --- |
 | `freestanding` | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
-| `emscripten` | browser/Node ES module plus the pinned Lean `libleanrt` | heap-allocating `List UInt64` build/fold |
+| `emscripten` | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd` | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
 | `wasi` | WASI Preview 1 reactor (`wasm32-wasip1`) | the same scalar C plus a real monotonic-clock import |
 
 `Smoke.lean` exports two raw `UInt64` functions. One is a scalar expression;
 the other is a compiler-lowered tail loop. `HeapSmoke.lean` dynamically
 allocates boxed `UInt64` values and list constructors, consumes the list, and
-returns an exact checksum.
+returns an exact checksum. `RuntimeSmoke.lean` widens that coverage to a
+captured-closure pipeline, mutable arrays, strings, success/error `Except`
+branches, and a `Std.HashMap`, then exposes a real `Init` I/O probe.
 
 The freestanding runtime is deliberately narrow. It implements only the
 primitive operations referenced by `Smoke.lean`; it must not silently grow a
 second object model.
 
-The Emscripten setup builds the complete Lean runtime archive from the exact
-source commit matching the frontend. Link-time garbage collection retains the
-allocation/reference-counting cone required by `HeapSmoke.lean`. Standalone
-modules use a narrow `IO.eprintln` diagnostic bridge because they do not yet
-link the much larger generated `libInit`/`libStd` archives. Bringing those
-archives into the profile is the next Emscripten capability slice.
+The Emscripten setup builds the complete Lean runtime plus the generated
+`libInit` and `libStd` archives from the exact source commit matching the
+frontend. All three archives are compiled at `-O3` with LTO. The linked module
+initializes `RuntimeSmoke`, reaches the real `Init` implementation of
+`IO.eprintln`, and has no lane-local replacement for that symbol. Link-time
+garbage collection retains only the reachable runtime/library cone.
+
+`check-emscripten.sh` compiles the same `RuntimeSmoke.c` with the native Lean
+toolchain and compares five native results byte-for-byte with the Wasm exports
+and an independent JavaScript oracle. This catches frontend, runtime, and host
+ABI drift separately. Setting `FIR_BROWSER` additionally serves the artifact
+with cross-origin-isolation headers and runs the same Init/Std surface in a
+headless browser.
 
 The WASI artifact is intentionally a Preview 1 core-module reactor. It imports
 `clock_time_get` (and the SDK reactor startup imports `random_get`), so the
@@ -61,9 +70,9 @@ All profiles use:
 
 The freestanding and WASI scalar profiles also remove exceptions and unwind
 tables. Emscripten follows Lean's supported runtime settings:
-`-fwasm-exceptions`, `-pthread`, and growing memory. The thread-enabled artifact
-therefore requires shared-memory-capable hosts; browsers need the usual
-cross-origin isolation headers.
+`-fwasm-exceptions`, `-pthread`, growing memory, and the filesystem surface
+needed by full `Init`. The thread-enabled artifact therefore requires
+shared-memory-capable hosts; browsers need cross-origin isolation headers.
 
 `-ffast-math` is intentionally disabled and floating-point contraction is
 disabled. FIR validates exact floating-point bit patterns, so those semantic
@@ -109,6 +118,9 @@ directory:
 ```sh
 bash integration/lcnf-c-wasm/setup-emscripten.sh
 bash integration/lcnf-c-wasm/check-emscripten.sh
+
+FIR_BROWSER=google-chrome \
+  bash integration/lcnf-c-wasm/check-emscripten.sh
 
 bash integration/lcnf-c-wasm/setup-wasi-sdk.sh
 bash integration/lcnf-c-wasm/check-wasi.sh
