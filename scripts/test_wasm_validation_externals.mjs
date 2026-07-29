@@ -1396,6 +1396,30 @@ for (const [handler, leftValue, rightValue, expected] of [
     host,
   );
 
+  const tripledHost = new SemanticHost();
+  const tripled = tripledHost.alloc({ kind: "byteArray", value: [3] });
+  tripledHost.incLocation(tripled.location, 2);
+  validateMaterializedArgumentAliases(
+    "multi-target-argument-alias",
+    [{ source: 0, target: 1 }, { source: 0, target: 2 }],
+    [tripled, tripled, tripled],
+    tripledHost,
+  );
+
+  const independentHost = new SemanticHost();
+  const independentFirst =
+    independentHost.alloc({ kind: "byteArray", value: [4] });
+  independentHost.incLocation(independentFirst.location, 1);
+  const independentSecond =
+    independentHost.alloc({ kind: "byteArray", value: [5] });
+  independentHost.incLocation(independentSecond.location, 1);
+  validateMaterializedArgumentAliases(
+    "independent-argument-alias-roots",
+    [{ source: 0, target: 1 }, { source: 2, target: 3 }],
+    [independentFirst, independentFirst, independentSecond, independentSecond],
+    independentHost,
+  );
+
   const distinctHost = new SemanticHost();
   const first = distinctHost.alloc({ kind: "byteArray", value: [1] });
   const second = distinctHost.alloc({ kind: "byteArray", value: [1] });

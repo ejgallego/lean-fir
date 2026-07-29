@@ -1253,6 +1253,26 @@ class HarnessTests(unittest.TestCase):
                 json.dumps(fixture_mismatch), ["native", "--manifest"]
             )
 
+    def test_manifest_argument_alias_stars_and_independent_roots_accepted(self) -> None:
+        item = descriptor("case")
+        item["args"] = [
+            {"bytes": {"value": [1]}},
+            {"bytes": {"value": [1]}},
+            {"bytes": {"value": [1]}},
+            {"bytes": {"value": [2]}},
+            {"bytes": {"value": [2]}},
+        ]
+        item["argSchemas"] = ["bytes", "bytes", "bytes", "bytes", "bytes"]
+        item["argumentAliases"] = [
+            {"source": 0, "target": 1},
+            {"source": 0, "target": 2},
+            {"source": 3, "target": 4},
+        ]
+        prepared = harness.manifest_from_output(
+            json.dumps(item), ["native", "--manifest"]
+        )
+        self.assertEqual(prepared[0]["argumentAliases"], item["argumentAliases"])
+
     def test_manifest_drives_tag_and_explicit_selection(self) -> None:
         manifest = [
             descriptor("a-case", tags=["quick"]),

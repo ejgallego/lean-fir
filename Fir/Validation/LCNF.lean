@@ -3160,6 +3160,41 @@ private def encodedArgumentAliasGuard : Bool :=
             | none => false
       | _, _ => false
 
+private def encodedMultiTargetArgumentAliasGuard : Bool :=
+  match encodeArgs #[.bytes, .bytes, .bytes]
+      #[.bytes #[0, 127, 255], .bytes #[0, 127, 255], .bytes #[0, 127, 255]]
+      #[{ source := 0, target := 1 }, { source := 0, target := 2 }] with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]?, values[1]?, values[2]? with
+      | some (Value.object (.heap first)), some (Value.object (.heap second)),
+          some (Value.object (.heap third)) =>
+          first == second && first == third &&
+            match findCell? runtime.heap first with
+            | some cell => cell.live && cell.rc == 3 &&
+                cell.object == .byteArray #[0, 127, 255]
+            | none => false
+      | _, _, _ => false
+
+private def encodedIndependentArgumentAliasRootsGuard : Bool :=
+  match encodeArgs #[.bytes, .bytes, .bytes, .bytes]
+      #[.bytes #[1], .bytes #[1], .bytes #[2], .bytes #[2]]
+      #[{ source := 0, target := 1 }, { source := 2, target := 3 }] with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match values[0]?, values[1]?, values[2]?, values[3]? with
+      | some (Value.object (.heap first)), some (Value.object (.heap firstAlias)),
+          some (Value.object (.heap second)), some (Value.object (.heap secondAlias)) =>
+          first == firstAlias && second == secondAlias && first != second &&
+            match findCell? runtime.heap first, findCell? runtime.heap second with
+            | some firstCell, some secondCell =>
+                firstCell.live && firstCell.rc == 2 &&
+                  firstCell.object == .byteArray #[1] &&
+                secondCell.live && secondCell.rc == 2 &&
+                  secondCell.object == .byteArray #[2]
+            | _, _ => false
+      | _, _, _, _ => false
+
 private def rejectsNonHeapArgumentAliasGuard : Bool :=
   match encodeArgs #[.nat, .nat] #[.nat 1, .nat 1]
       #[{ source := 0, target := 1 }] with
@@ -3174,6 +3209,8 @@ private def rejectsNonCanonicalArgumentAliasGuard : Bool :=
   | .ok _ => false
 
 #guard encodedArgumentAliasGuard
+#guard encodedMultiTargetArgumentAliasGuard
+#guard encodedIndependentArgumentAliasRootsGuard
 #guard rejectsNonHeapArgumentAliasGuard
 #guard rejectsNonCanonicalArgumentAliasGuard
 
