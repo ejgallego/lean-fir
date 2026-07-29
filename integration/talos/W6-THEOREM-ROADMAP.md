@@ -407,10 +407,12 @@ acceptance tests pass.
    else. `ReadOnlyDirectSupported` composes aliases and both projection
    families into mixed spines. Packed-scalar projections and nonallocating
    literals now join that structural fragment. UTF-8 String and nonempty
-   constructor allocation have constructive wasm32-capacity boundaries; the
-   next proof strengthens compiled constructor-argument decoding so the
-   recursive compiler theorem can consume the constructor boundary directly,
-   then threads the remaining capacity through allocating paths.
+   constructor allocation have constructive wasm32-capacity boundaries.
+   Compiled constructor arguments now derive their mixed local/erased physical
+   relation, exact i32 decoding, and pointwise source refinement, and both the
+   recursive and finite nonempty-constructor theorems consume that boundary
+   without an opaque concrete step. Thread the remaining capacity through
+   sequential allocating paths next.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

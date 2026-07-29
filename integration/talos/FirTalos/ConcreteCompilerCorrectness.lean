@@ -266,6 +266,88 @@ inductive ConstructorArgsCompiled (context : Fir.Wasm.Context) :
       ConstructorArgsCompiled context (.fvar fvarId :: args)
         (.localGet fvarId :: argumentCode) (kind :: fieldKinds)
 
+/--
+The source-order physical constructor operands produced by compiled arguments
+refine the corresponding evaluated source values at their compiler-selected
+ABI kinds. This relation is target-numbering independent and contains no
+allocation or execution witness.
+-/
+inductive ConstructorArgumentsRelated (witness : RefinementWitness) :
+    List AbiKind → List Wasm.Value → List Value → Prop where
+  | nil : ConstructorArgumentsRelated witness [] [] []
+  | cons
+      (head : PhysicalValueRel witness kind physical semantic)
+      (rest :
+        ConstructorArgumentsRelated witness kinds physicals semanticValues) :
+      ConstructorArgumentsRelated witness (kind :: kinds)
+        (physical :: physicals) (semantic :: semanticValues)
+
+/--
+An object-field ABI kind rules out every non-i32 physical lane. The remaining
+word is exactly the one related to the source field.
+-/
+theorem PhysicalValueRel.objectFieldWord
+    {witness : RefinementWitness} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness kind physical semantic)
+    (objectField : kind.isObjectField = true) :
+    ∃ word,
+      physical = .i32 (UInt32.ofNat word.value) ∧
+        ValueRel witness kind (.word32 word) semantic := by
+  cases related with
+  | word32 valueRelated =>
+      exact ⟨_, rfl, valueRelated⟩
+  | word64 valueRelated =>
+      cases valueRelated <;> simp [AbiKind.isObjectField] at objectField
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/--
+The compiled/evaluated argument relation constructively decodes every
+object-field operand and preserves its pointwise source-value refinement.
+-/
+theorem ConstructorArgumentsRelated.decodeObjectWords
+    {witness : RefinementWitness} {fieldKinds : List AbiKind}
+    {physicalArgs : List Wasm.Value} {semanticArgs : List Value}
+    (related :
+      ConstructorArgumentsRelated witness fieldKinds physicalArgs semanticArgs)
+    (valid : fieldKinds.all AbiKind.isObjectField = true)
+    (start : Nat) :
+    ∃ fields,
+      decodeConstructorWords start physicalArgs = .ok fields ∧
+        fields.length = fieldKinds.length ∧
+        ∀ (index : Nat) (kind : AbiKind) (value : Value),
+          fieldKinds[index]? = some kind →
+          semanticArgs[index]? = some value →
+          ∃ word, fields[index]? = some word ∧
+            ValueRel witness kind (.word32 word) value := by
+  induction related generalizing start with
+  | nil =>
+      exact ⟨[], by simp [decodeConstructorWords], rfl, by
+        intro index kind value kindAt
+        simp at kindAt⟩
+  | @cons kind physical semantic kinds physicals semanticValues head rest ih =>
+      simp only [List.all_cons, Bool.and_eq_true] at valid
+      obtain ⟨word, physicalEq, headRelated⟩ :=
+        head.objectFieldWord valid.1
+      obtain ⟨fields, decoded, lengthEq, fieldsRelated⟩ :=
+        ih valid.2 (start + 1)
+      subst physical
+      refine ⟨word :: fields, ?_, by simp [lengthEq], ?_⟩
+      · simp [decodeConstructorWords, decoded]
+      · intro index actualKind value kindAt valueAt
+        cases index with
+        | zero =>
+            simp at kindAt valueAt
+            subst actualKind
+            subst value
+            exact ⟨word, by simp, headRelated⟩
+        | succ index =>
+            simp at kindAt valueAt
+            obtain ⟨field, fieldAt, fieldRelated⟩ :=
+              fieldsRelated index actualKind value kindAt valueAt
+            exact ⟨field, by simpa, fieldRelated⟩
+
 theorem ConstructorArgsCompiled.append
     {context : Fir.Wasm.Context}
     {leftArgs rightArgs : List (LCNF.Arg .impure)}
@@ -425,13 +507,20 @@ theorem ConstructorArgsCompiled.ready
         witness) :
     ∃ physicalArgs,
       ConstructorArgsReady locals targetArguments physicalArgs ∧
-        physicalArgs.length = fieldKinds.length := by
+        physicalArgs.length = fieldKinds.length ∧
+        ConstructorArgumentsRelated witness fieldKinds physicalArgs
+          semanticArgs := by
   induction compiled generalizing targetArguments semanticArgs with
   | nil =>
       have targetEq : targetArguments = [] := by
         simpa [instructions, pure, Except.pure] using adapted.symm
+      have semanticEq : semanticArgs = [] := by
+        change (Except.ok [] : Except RuntimeFault (List Value)) =
+          Except.ok semanticArgs at evaluated
+        exact (Except.ok.inj evaluated).symm
       subst targetArguments
-      exact ⟨[], .nil, rfl⟩
+      subst semanticArgs
+      exact ⟨[], .nil, rfl, .nil⟩
   | @erased args argumentCode fieldKinds rest ih =>
       obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
         instructions_cons_eq_ok adapted
@@ -445,12 +534,17 @@ theorem ConstructorArgsCompiled.ready
             Bind.bind, Except.bind] at evaluated
           contradiction
       | ok restValues =>
-          obtain ⟨physicalArgs, ready, lengthEq⟩ :=
+          have semanticEq : semanticArgs = .erased :: restValues := by
+            rw [List.mapM_cons] at evaluated
+            simpa [evalArg, restEvaluated, Functor.map, Except.map, Bind.bind,
+              Except.bind, pure, Except.pure] using evaluated.symm
+          obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
             ih restAdapted restEvaluated
           subst targetHead
           subst targetArguments
+          subst semanticArgs
           exact ⟨.i32 0 :: physicalArgs, .erased ready, by
-            simp [lengthEq]⟩
+            simp [lengthEq], .cons (.word32 .erased) argumentsRelated⟩
   | @fvar fvarId kind args argumentCode fieldKinds kindFound rest ih =>
       obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
         instructions_cons_eq_ok adapted
@@ -489,14 +583,21 @@ theorem ConstructorArgsCompiled.ready
                   simpa [instruction, localFound', pure, Except.pure] using
                     headAdapted
                 exact (Except.ok.inj adaptedEq).symm
-              obtain ⟨physical, physicalFound, _⟩ :=
+              obtain ⟨physical, physicalFound, physicalRelated⟩ :=
                 stateRelated.resolve sourceLookup localFound kindAt
-              obtain ⟨physicalArgs, ready, lengthEq⟩ :=
+              have semanticEq : semanticArgs = sourceValue :: restValues := by
+                rw [List.mapM_cons] at evaluated
+                simpa [evalArg, sourceLookup, restEvaluated, Functor.map,
+                  Except.map, Bind.bind, Except.bind, pure, Except.pure] using
+                    evaluated.symm
+              obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
                 ih restAdapted restEvaluated
               subst targetHead
               subst targetArguments
+              subst semanticArgs
               exact ⟨physical :: physicalArgs,
-                .localGet physicalFound ready, by simp [lengthEq]⟩
+                .localGet physicalFound ready, by simp [lengthEq],
+                .cons physicalRelated argumentsRelated⟩
 
 /--
 Public array-facing corollary: the actual `compileArgs`, adapter, evaluator,
@@ -531,7 +632,9 @@ theorem constructorArgsReady_of_compileArgs
         witness) :
     ∃ physicalArgs,
       ConstructorArgsReady locals targetArguments physicalArgs ∧
-        physicalArgs.length = fieldKinds.size := by
+        physicalArgs.length = fieldKinds.size ∧
+        ConstructorArgumentsRelated witness fieldKinds.toList physicalArgs
+          semanticArgs.toList := by
   have characterized := ConstructorArgsCompiled.ofCompileArgs compiled
   unfold evalArgs at evaluated
   rw [Array.mapM_eq_mapM_toList] at evaluated
@@ -541,9 +644,13 @@ theorem constructorArgsReady_of_compileArgs
       rw [listEvaluated] at evaluated
       contradiction
   | ok semanticValues =>
-      obtain ⟨physicalArgs, ready, lengthEq⟩ :=
+      have semanticEq : semanticArgs = semanticValues.toArray := by
+        simpa [listEvaluated] using evaluated.symm
+      obtain ⟨physicalArgs, ready, lengthEq, argumentsRelated⟩ :=
         characterized.ready localsAligned adapted listEvaluated stateRelated
-      exact ⟨physicalArgs, ready, by simpa using lengthEq⟩
+      subst semanticArgs
+      exact ⟨physicalArgs, ready, by simpa using lengthEq, by simpa using
+        argumentsRelated⟩
 
 /--
 Invert adaptation of an arbitrary successfully compiled argument prefix
@@ -1936,6 +2043,82 @@ theorem ConcreteSupportedExport.codeWP_scalarProjectionLet
   | float64Bits valueRelated => cases valueRelated
 
 /--
+The constructor-argument relation and explicit wasm32 resource conditions
+construct the complete nonempty concrete host step. The only dynamic source
+premise is the actual `allocCtor` step being simulated.
+-/
+theorem constructorNonemptyStep_of_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind} {physicalArgs : List Wasm.Value}
+    {semanticArgs : Array Value} {sourceValue : Value}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness sourceRuntime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness fieldKinds.toList physicalArgs
+        semanticArgs.toList)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (semanticArity : semanticArgs.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (capacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (ConstructorLayout.ofInfo info).allocationBytes) :
+    ∃ (nextStore : Wasm.Store Host) (word : Word32)
+        (nextWitness : RefinementWitness),
+      allocCtorStep info fieldKinds resultKind initial physicalArgs =
+          .Return [.i32 (UInt32.ofNat word.value)] nextStore ∧
+        witness.Extends nextWitness ∧
+        ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime ∧
+        nextStore.host.failure? = none ∧
+        PhysicalValueRel nextWitness resultKind
+          (.i32 (UInt32.ofNat word.value)) sourceValue := by
+  obtain ⟨fields, decoded, fieldsLength, fieldsRelated⟩ :=
+    argumentsRelated.decodeObjectWords (by simpa using fieldKindsValid) 0
+  have arity : fields.toArray.size = info.size := by
+    simpa [fieldsLength] using fieldKindsSize
+  have fieldsRelatedArray :
+      ∀ (index : Nat) (kind : AbiKind) (value : Value),
+        fieldKinds[index]? = some kind →
+        semanticArgs[index]? = some value →
+        ∃ word, fields.toArray[index]? = some word ∧
+          ValueRel witness kind (.word32 word) value := by
+    intro index kind value kindAt valueAt
+    obtain ⟨word, wordAt, valueRelated⟩ :=
+      fieldsRelated index kind value (by simpa using kindAt)
+        (by simpa using valueAt)
+    exact ⟨word, by simpa using wordAt, valueRelated⟩
+  obtain ⟨heap, address, extension, operation, nextRuntimeRelated,
+      physicalRelated, expectedSourceStep⟩ :=
+    allocCtorNonemptyStep_of_refines_of_capacity runtimeRelated argsLength
+      decoded arity semanticArity fieldKindsSize fieldKindsValid
+      fieldsRelatedArray nonempty tagFits objectFieldsFit usizeFieldsFit
+      scalarBytesFit resultRefines capacity
+  have resultEq :
+      (semanticConstructorResult sourceRuntime info semanticArgs,
+        .object (.heap sourceRuntime.nextLocation)) =
+        (nextRuntime, sourceValue) :=
+    Except.ok.inj (expectedSourceStep.symm.trans semanticStep)
+  injection resultEq with runtimeEq valueEq
+  subst nextRuntime
+  subst sourceValue
+  let nextWitness :=
+    witness.bindConstructor sourceRuntime.nextLocation address info fieldKinds
+  refine ⟨replaceHeap initial heap, address, nextWitness, operation, extension,
+    nextRuntimeRelated, ?_, physicalRelated⟩
+  simp [replaceHeap, clearFailure]
+
+/--
 Certificate-free recursive correctness for the complete constructor argument
 language.  The compiler, adapter, source evaluator, and state relation derive
 the physical local/erased prefix.  The caller supplies only the
@@ -1987,6 +2170,8 @@ theorem ConcreteSupportedExport.codeWP_constructorLet
     (concreteStep :
       ∀ {physicalArgs},
         physicalArgs.length = fieldKinds.size →
+          ConstructorArgumentsRelated witness fieldKinds.toList physicalArgs
+            semanticArgs.toList →
           ∃ (nextStore : Wasm.Store Host) (word : Word32)
               (nextWitness : RefinementWitness),
             allocCtorStep info fieldKinds resultKind initial physicalArgs =
@@ -2030,12 +2215,12 @@ theorem ConcreteSupportedExport.codeWP_constructorLet
       continuationAdapted, bodyEq⟩ :=
     CodeAdapted.constructorLet_eq spec.localsAligned valueEq fits valueKind
       argumentsCompiled localCompiled spec.bodyAdapted
-  obtain ⟨physicalArgs, argumentsReady, physicalArity⟩ :=
+  obtain ⟨physicalArgs, argumentsReady, physicalArity, argumentsRelated⟩ :=
     constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
       argumentsAdapted evaluated stateRelated
   obtain ⟨nextStore, word, nextWitness, operation, extension,
       nextRuntimeRelated, failureClear, valueRelated⟩ :=
-    concreteStep physicalArity
+    concreteStep physicalArity argumentsRelated
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.allocCtorCall callFound
@@ -2049,6 +2234,112 @@ theorem ConcreteSupportedExport.codeWP_constructorLet
     valueRelated targetSet
   exact continued continuationAdapted resultFound targetSet extension
     nextRuntimeRelated failureClear valueRelated
+
+/--
+Constructive recursive correctness for a nonempty constructor allocation.
+Production compilation and adaptation derive the target prefix; source
+evaluation and `StateRelated` derive its exact physical fields. The remaining
+conditions are the generated operation's ABI well-formedness, representable
+header counts, and explicit wasm32 address-space capacity.
+-/
+theorem ConcreteSupportedExport.codeWP_constructorNonemptyLet_of_capacity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {info : LCNF.CtorInfo}
+    {args : Array (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .ctor info args)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (argumentCode, fieldKinds))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (operationWellFormed :
+      (RuntimeOp.allocCtor info fieldKinds resultKind).abiWellFormed = true)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {semanticArgs : Array Value}
+    {sourceValue : Value}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (capacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (ConstructorLayout.ofInfo info).allocationBytes)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {word : Word32},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated)
+    (continued :
+      ∀ {targetRest : Wasm.Program} {resultIndex : Nat}
+          {nextStore : Wasm.Store Host} {word : Word32}
+          {nextWitness : RefinementWitness} {updated : Wasm.Locals},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+            some updated →
+          witness.Extends nextWitness →
+          ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime →
+          nextStore.host.failure? = none →
+          PhysicalValueRel nextWitness resultKind
+              (.i32 (UInt32.ofNat word.value)) sourceValue →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+            continuation targetRest nextStore updated nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  have operationFacts :
+      (info.size = fieldKinds.size ∧
+        fieldKinds.all AbiKind.isObjectField = true) ∧
+        (constructorKind info).refines resultKind = true := by
+    simpa [RuntimeOp.abiWellFormed] using operationWellFormed
+  have semanticArity : semanticArgs.size = info.size := by
+    by_contra mismatch
+    simp [allocCtor, mismatch, Bind.bind, Except.bind] at semanticStep
+  have tagFits : info.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using fits
+  apply spec.codeWP_constructorLet valueEq fits valueKind argumentsCompiled
+    localCompiled evaluated semanticStep stateRelated
+  · intro physicalArgs physicalArity argumentsRelated
+    exact constructorNonemptyStep_of_capacity stateRelated.1 physicalArity
+      argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
+      operationFacts.1.2 nonempty tagFits objectFieldsFit usizeFieldsFit
+      scalarBytesFit operationFacts.2 capacity
+  · exact localSetReady
+  · exact continued
 
 /--
 Certificate-free recursive correctness for an all-`fvar` constructor
@@ -3984,6 +4275,8 @@ theorem ConcreteSupportedExport.correctConstructorReturn
     (concreteStep :
       ∀ {physicalArgs},
         physicalArgs.length = fieldKinds.size →
+          ConstructorArgumentsRelated initialWitness fieldKinds.toList
+            physicalArgs semanticArgs.toList →
           ∃ (nextStore : Wasm.Store Host) (word : Word32)
               (nextWitness : RefinementWitness),
             allocCtorStep info fieldKinds resultKind initial physicalArgs =
@@ -4013,12 +4306,12 @@ theorem ConcreteSupportedExport.correctConstructorReturn
       argumentsAdapted, callFound, resultFound, resultKindAt, bodyEq⟩ :=
     CodeAdapted.constructorReturn_eq spec.localsAligned valueEq fits valueKind
       argumentsCompiled localCompiled spec.bodyAdapted
-  obtain ⟨physicalArgs, argumentsReady, physicalArity⟩ :=
+  obtain ⟨physicalArgs, argumentsReady, physicalArity, argumentsRelated⟩ :=
     constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
       argumentsAdapted evaluated stateRelated
   obtain ⟨nextStore, word, nextWitness, operation, extension,
       nextRuntimeRelated, failureClear, valueRelated⟩ :=
-    concreteStep physicalArity
+    concreteStep physicalArity argumentsRelated
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.allocCtorCall callFound
@@ -4077,6 +4370,98 @@ theorem ConcreteSupportedExport.correctConstructorReturn
     valueRelated }
   exact ⟨declaration.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
     declaration.terminatesWith callerTail⟩
+
+/--
+Finite nonempty-constructor corollary with constructive concrete allocation.
+No successful target allocation or operation-simulation function is supplied
+by the caller.
+-/
+theorem ConcreteSupportedExport.correctConstructorNonemptyReturn_of_capacity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {info : LCNF.CtorInfo}
+    {args : Array (LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context
+        (.let decl (.return decl.fvarId)) sourceModule sourceFunction target
+        hosts exportName)
+    (valueEq : decl.value = .ctor info args)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (argumentCode, fieldKinds))
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (operationWellFormed :
+      (RuntimeOp.allocCtor info fieldKinds resultKind).abiWellFormed = true)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {parameters callerTail : List Wasm.Value}
+    {semanticArgs : Array Value}
+    {sourceValue : Value}
+    {initialWitness : RefinementWitness}
+    (evaluated : evalArgs sourceEnv args = .ok semanticArgs)
+    (semanticStep :
+      allocCtor sourceRuntime info semanticArgs =
+        .ok (nextRuntime, sourceValue))
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams)
+    (capacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (ConstructorLayout.ofInfo info).allocationBytes)
+    (localSetReady :
+      ∀ {resultIndex : Nat} {word : Word32},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            (spec.targetFunction.toLocals parameters.reverse).set? resultIndex
+                (.i32 (UInt32.ofNat word.value)) =
+              some updated) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv
+          (.let decl (.return decl.fvarId)))
+        (ReturnedObservation nextRuntime sourceValue) ∧
+      ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+        initial (parameters ++ callerTail)
+        (RefinedReturnPost nextRuntime sourceValue resultKind callerTail) := by
+  have operationFacts :
+      (info.size = fieldKinds.size ∧
+        fieldKinds.all AbiKind.isObjectField = true) ∧
+        (constructorKind info).refines resultKind = true := by
+    simpa [RuntimeOp.abiWellFormed] using operationWellFormed
+  have semanticArity : semanticArgs.size = info.size := by
+    by_contra mismatch
+    simp [allocCtor, mismatch, Bind.bind, Except.bind] at semanticStep
+  have tagFits : info.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using fits
+  apply spec.correctConstructorReturn valueEq fits valueKind argumentsCompiled
+    localCompiled evaluated semanticStep stateRelated parameterCount
+  · intro physicalArgs physicalArity argumentsRelated
+    exact constructorNonemptyStep_of_capacity stateRelated.1 physicalArity
+      argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
+      operationFacts.1.2 nonempty tagFits objectFieldsFit usizeFieldsFit
+      scalarBytesFit operationFacts.2 capacity
+  · exact localSetReady
 
 /--
 Certificate-free finite compiler correctness for an all-`fvar` constructor

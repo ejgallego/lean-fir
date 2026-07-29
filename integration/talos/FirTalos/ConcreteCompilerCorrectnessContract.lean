@@ -752,10 +752,11 @@ example
     localSetReady continued
 
 /--
-Mixed local/erased constructor allocation exposes the recursive
-certificate-free API. Static code and physical operands are derived
-internally; the caller supplies only the concrete allocation refinement at
-those operands and the continuation induction hypothesis.
+Mixed local/erased nonempty constructor allocation exposes the recursive
+certificate-free API. Static code, physical operands, field decoding, and the
+concrete allocation/refinement step are derived internally. The caller
+supplies explicit ABI/layout/resource conditions and the continuation
+induction hypothesis.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -784,6 +785,12 @@ example
     (localCompiled :
       Fir.Wasm.getLocal context decl.fvarId =
         .ok (.localGet decl.fvarId, resultKind))
+    (operationWellFormed :
+      (RuntimeOp.allocCtor info fieldKinds resultKind).abiWellFormed = true)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
     {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {initial : Wasm.Store Host}
@@ -799,19 +806,9 @@ example
         .ok (nextRuntime, sourceValue))
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (concreteStep :
-      ∀ {physicalArgs},
-        physicalArgs.length = fieldKinds.size →
-          ∃ (nextStore : Wasm.Store Host) (word : Word32)
-              (nextWitness : RefinementWitness),
-            allocCtorStep info fieldKinds resultKind initial physicalArgs =
-                .Return [.i32 (UInt32.ofNat word.value)] nextStore ∧
-              witness.Extends nextWitness ∧
-              ConcreteRuntimeRel nextStore.host.runtime nextWitness
-                nextRuntime ∧
-              nextStore.host.failure? = none ∧
-              PhysicalValueRel nextWitness resultKind
-                (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (capacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (ConstructorLayout.ofInfo info).allocationBytes)
     (localSetReady :
       ∀ {resultIndex : Nat} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -840,13 +837,14 @@ example
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
       spec.targetFunction.body initial locals witness tail Q :=
-  spec.codeWP_constructorLet valueEq fits valueKind argumentsCompiled
-    localCompiled evaluated semanticStep stateRelated concreteStep
-    localSetReady continued
+  spec.codeWP_constructorNonemptyLet_of_capacity valueEq fits valueKind
+    argumentsCompiled localCompiled operationWellFormed nonempty
+    objectFieldsFit usizeFieldsFit scalarBytesFit evaluated semanticStep
+    stateRelated capacity localSetReady continued
 
 /--
-The finite constructor-return corollary also has no caller-supplied
-`ConcreteCodeSimulation` or translation certificate.
+The finite nonempty-constructor corollary has no caller-supplied concrete
+operation step, `ConcreteCodeSimulation`, or translation certificate.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -875,6 +873,12 @@ example
     (localCompiled :
       Fir.Wasm.getLocal context decl.fvarId =
         .ok (.localGet decl.fvarId, resultKind))
+    (operationWellFormed :
+      (RuntimeOp.allocCtor info fieldKinds resultKind).abiWellFormed = true)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
     {sourceExternals : ExternalImpl}
     {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -892,19 +896,9 @@ example
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (parameterCount :
       parameters.length = spec.targetFunction.numParams)
-    (concreteStep :
-      ∀ {physicalArgs},
-        physicalArgs.length = fieldKinds.size →
-          ∃ (nextStore : Wasm.Store Host) (word : Word32)
-              (nextWitness : RefinementWitness),
-            allocCtorStep info fieldKinds resultKind initial physicalArgs =
-                .Return [.i32 (UInt32.ofNat word.value)] nextStore ∧
-              initialWitness.Extends nextWitness ∧
-              ConcreteRuntimeRel nextStore.host.runtime nextWitness
-                nextRuntime ∧
-              nextStore.host.failure? = none ∧
-              PhysicalValueRel nextWitness resultKind
-                (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (capacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (ConstructorLayout.ofInfo info).allocationBytes)
     (localSetReady :
       ∀ {resultIndex : Nat} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -920,8 +914,9 @@ example
       ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
         initial (parameters ++ callerTail)
         (RefinedReturnPost nextRuntime sourceValue resultKind callerTail) :=
-  spec.correctConstructorReturn valueEq fits valueKind argumentsCompiled
-    localCompiled evaluated semanticStep stateRelated parameterCount
-    concreteStep localSetReady
+  spec.correctConstructorNonemptyReturn_of_capacity valueEq fits valueKind
+    argumentsCompiled localCompiled operationWellFormed nonempty
+    objectFieldsFit usizeFieldsFit scalarBytesFit evaluated semanticStep
+    stateRelated parameterCount capacity localSetReady
 
 end FirTalos.Concrete.CompilerCorrectnessContract

@@ -3662,10 +3662,30 @@ concrete host/source refinement boundary: the resulting heap, address,
 witness extension, target return, and source `allocCtor` step are all
 constructed from the static layout capacity. The older equation-driven
 operation theorem remains an internal factoring lemma; compiler clients no
-longer need it once their argument relation supplies decoded fields. The next
-slice strengthens that relation and replaces the recursive compiler theorem's
-opaque constructor-step premise. This resource surface remains experimental,
-and no FIR semantic contract or executable ABI changed.
+longer need it once their argument relation supplies decoded fields. W6.6en
+performs that compiler lift. This resource surface remains experimental, and
+no FIR semantic contract or executable ABI changed.
+
+W6.6en removes the opaque constructor-step premise from the public recursive
+and finite nonempty-constructor compiler theorems.
+`ConstructorArgumentsRelated` is derived alongside
+`ConstructorArgsReady` from the production compiler, adapter, evaluator, and
+`StateRelated`; erased arguments contribute the canonical related zero word,
+while locals retain their exact `PhysicalValueRel`.
+`decodeObjectWords` proves that the generated operation's object-field ABI
+condition forces every operand onto its i32 word lane, constructively
+recreates `decodeConstructorWords`, and supplies pointwise field refinement.
+`codeWP_constructorNonemptyLet_of_capacity` and
+`correctConstructorNonemptyReturn_of_capacity` then require only the source
+step, generated-operation ABI well-formedness, nonempty/representable layout
+bounds, exact address-space capacity, local-write capacity, and the ordinary
+continuation induction hypothesis. They construct the concrete heap, address,
+host return, witness extension, and target/source agreement internally. The
+equation-driven theorem remains internal compatibility factoring; the
+contract harness exposes the constructive API. The next allocation task is
+to consume `AddressSpaceBudget.consume` in the structural direct-value
+induction so sequential allocating paths retain enough headroom. No FIR
+semantic contract or executable ABI changed.
 
 ## Parallel agent packages
 

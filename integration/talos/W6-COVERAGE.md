@@ -179,7 +179,11 @@ Cross-cutting W6.5 state:
   empty-token reuse allocation branches, actual in-place reuse, and unique
   reset; fresh nonempty constructor allocation additionally derives its exact
   checked heap/address result from static `ConstructorLayout` address-space
-  capacity rather than an opaque successful-allocation equation;
+  capacity rather than an opaque successful-allocation equation; the
+  production compiler/evaluator/state relation now also derives mixed
+  local/erased word decoding and pointwise field refinement, eliminating the
+  caller-supplied concrete step from recursive and finite nonempty-constructor
+  compiler correctness;
   reset carries the retained constructor bound to its returned nonempty token;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,
