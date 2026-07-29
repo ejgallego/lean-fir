@@ -8193,6 +8193,53 @@ theorem ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
   | letDeleted continuation absent safe =>
       rfl
 
+/-- An exact object write traversal whose target is not an object write must
+have selected the deleted branch. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
+    (view : ExactShadowCodeView initial fuel final
+      (.oset object index field sourceContinuation) target)
+    (targetNotObjectSet :
+      ∀ targetObject targetIndex targetField targetContinuation,
+        target ≠ .oset targetObject targetIndex targetField targetContinuation) :
+    view.runtimeDecision = .deletedObjectSet := by
+  cases view with
+  | objectSetRetained continuation live =>
+      exact (targetNotObjectSet _ _ _ _ rfl).elim
+  | objectSetDeleted continuation absent =>
+      rfl
+
+/-- An exact unboxed write traversal whose target is not an unboxed write
+must have selected the deleted branch. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_deletedUSizeSet_of_target_not_uset
+    (view : ExactShadowCodeView initial fuel final
+      (.uset object index field sourceContinuation) target)
+    (targetNotUSizeSet :
+      ∀ targetObject targetIndex targetField targetContinuation,
+        target ≠ .uset targetObject targetIndex targetField targetContinuation) :
+    view.runtimeDecision = .deletedUSizeSet := by
+  cases view with
+  | usizeSetRetained continuation live =>
+      exact (targetNotUSizeSet _ _ _ _ rfl).elim
+  | usizeSetDeleted continuation absent =>
+      rfl
+
+/-- An exact scalar write traversal whose target is not a scalar write must
+have selected the deleted branch. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_deletedScalarSet_of_target_not_sset
+    (view : ExactShadowCodeView initial fuel final
+      (.sset object width offset field type sourceContinuation) target)
+    (targetNotScalarSet :
+      ∀ targetObject targetWidth targetOffset targetField targetType
+          targetContinuation,
+        target ≠ .sset targetObject targetWidth targetOffset targetField
+          targetType targetContinuation) :
+    view.runtimeDecision = .deletedScalarSet := by
+  cases view with
+  | scalarSetRetained continuation live =>
+      exact (targetNotScalarSet _ _ _ _ _ _ rfl).elim
+  | scalarSetDeleted continuation absent =>
+      rfl
+
 /-- Dynamic, operation-specific obligations at one proof-relevant exact
 compiler edge.  The exact view chooses the applicable branch, while the
 source syntax supplies its operation operands.  Liveness coverage and
@@ -8224,6 +8271,36 @@ theorem ExactShadowCodeRuntimeReadyAt.letDeleted
       (.let declaration continuation) target}
     (decision : view.runtimeDecision = .deletedLet)
     (ready : DeletedLetReadyAt state roots declaration) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
+
+/-- A selected deleted exact object write consumes only its source-only
+ownership certificate. -/
+theorem ExactShadowCodeRuntimeReadyAt.objectSetDeleted
+    {view : ExactShadowCodeView initial fuel final
+      (.oset object index field continuation) target}
+    (decision : view.runtimeDecision = .deletedObjectSet)
+    (ready : DeletedObjectSetReadyAt state roots object index field) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
+
+/-- A selected deleted exact unboxed write consumes only its source-only
+ownership certificate. -/
+theorem ExactShadowCodeRuntimeReadyAt.usizeSetDeleted
+    {view : ExactShadowCodeView initial fuel final
+      (.uset object index field continuation) target}
+    (decision : view.runtimeDecision = .deletedUSizeSet)
+    (ready : DeletedUSizeSetReadyAt state roots object index field) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
+
+/-- A selected deleted exact scalar write consumes only its source-only
+ownership certificate. -/
+theorem ExactShadowCodeRuntimeReadyAt.scalarSetDeleted
+    {view : ExactShadowCodeView initial fuel final
+      (.sset object width offset field type continuation) target}
+    (decision : view.runtimeDecision = .deletedScalarSet)
+    (ready : DeletedScalarSetReadyAt state roots object field) :
     ExactShadowCodeRuntimeReadyAt state roots view := by
   simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
 

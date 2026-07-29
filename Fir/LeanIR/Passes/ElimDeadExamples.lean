@@ -1882,6 +1882,265 @@ theorem deletedScalarSetReady :
   · simpa [deletedScalarSetSourceState] using
       deletedWriteDestinationUnreachable
 
+/-- The source scope used by the three concrete deleted-write fixtures. -/
+def deletedWriteScopeIndex :
+    Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex :=
+  Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+    (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+      (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+        dead)
+      usizeField)
+    scalarField
+
+/-- Exact transparent provenance for the complete deleted-write chain. -/
+def deletedWritesExactGraph :
+    ExactShadowCodeGraph 4 neutralUsed
+      deletedWritesBefore deletedWritesAfter :=
+  ExactShadowCodeGraph.ofResult deletedWritesShadowRun
+
+/-- Exact transparent provenance for the unboxed/scalar suffix. -/
+def deletedUSizeScalarExactGraph :
+    ExactShadowCodeGraph 3 neutralUsed
+      (.uset dead 1 usizeField <|
+        .sset dead 8 0 scalarField u8Type <| .return live)
+      deletedWritesAfter :=
+  ExactShadowCodeGraph.ofResult deletedUSizeScalarShadowRun
+
+/-- Exact transparent provenance for the scalar suffix. -/
+def deletedScalarExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      (.sset dead 8 0 scalarField u8Type <| .return live)
+      deletedWritesAfter :=
+  ExactShadowCodeGraph.ofResult deletedScalarShadowRun
+
+/-- Hereditary static readiness for the complete exact deleted-write chain. -/
+theorem deletedWritesExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedWritesExactGraph.view := by
+  apply deletedWritesExactGraph.binderReady_of_canonical
+    (index := deletedWriteScopeIndex)
+  · apply ScopedCodeWellFormedTree.oset
+    · native_decide
+    · native_decide
+    · apply ScopedCodeWellFormedTree.uset
+      · native_decide
+      · native_decide
+      · apply ScopedCodeWellFormedTree.sset
+        · native_decide
+        · native_decide
+        · apply ScopedCodeWellFormedTree.ret
+          native_decide
+  · simp [deletedWritesBefore, codeBinderIds, BinderNamesUnique]
+
+/-- Hereditary static readiness for the exact unboxed/scalar suffix. -/
+theorem deletedUSizeScalarExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedUSizeScalarExactGraph.view := by
+  apply deletedUSizeScalarExactGraph.binderReady_of_canonical
+    (index := deletedWriteScopeIndex)
+  · apply ScopedCodeWellFormedTree.uset
+    · native_decide
+    · native_decide
+    · apply ScopedCodeWellFormedTree.sset
+      · native_decide
+      · native_decide
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+/-- Hereditary static readiness for the exact scalar suffix. -/
+theorem deletedScalarExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedScalarExactGraph.view := by
+  apply deletedScalarExactGraph.binderReady_of_canonical
+    (index := deletedWriteScopeIndex)
+  · apply ScopedCodeWellFormedTree.sset
+    · native_decide
+    · native_decide
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+/-- Exact active-code readiness for the deleted object write. -/
+theorem deletedObjectSetExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 4 neutralUsed
+      deletedObjectSetSourceState
+      (runtimeRoots deletedObjectSetSourceState.runtime
+        (envRootsOn neutralUsed deletedObjectSetSourceState.env ++ []))
+      deletedWritesBefore deletedWritesAfter := by
+  refine ⟨4, neutralUsed, Nat.le_refl 4,
+    deletedWritesExactGraph, UsedSubset.refl neutralUsed,
+    deletedWritesExactBinderReady, ?_⟩
+  have decision :
+      deletedWritesExactGraph.view.runtimeDecision =
+        .deletedObjectSet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
+      deletedWritesExactGraph.view
+        (by
+          intro targetObject targetIndex targetField targetContinuation
+          simp [deletedWritesAfter])
+  exact ExactShadowCodeRuntimeReadyAt.objectSetDeleted decision
+    (by simpa using deletedObjectSetReady)
+
+/-- Exact active-code readiness for the deleted unboxed write. -/
+theorem deletedUSizeSetExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 4 neutralUsed
+      deletedUSizeSetSourceState
+      (runtimeRoots deletedUSizeSetSourceState.runtime
+        (envRootsOn neutralUsed deletedUSizeSetSourceState.env ++ []))
+      (.uset dead 1 usizeField <|
+        .sset dead 8 0 scalarField u8Type <| .return live)
+      deletedWritesAfter := by
+  refine ⟨3, neutralUsed, by omega,
+    deletedUSizeScalarExactGraph, UsedSubset.refl neutralUsed,
+    deletedUSizeScalarExactBinderReady, ?_⟩
+  have decision :
+      deletedUSizeScalarExactGraph.view.runtimeDecision =
+        .deletedUSizeSet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedUSizeSet_of_target_not_uset
+      deletedUSizeScalarExactGraph.view
+        (by
+          intro targetObject targetIndex targetField targetContinuation
+          simp [deletedWritesAfter])
+  exact ExactShadowCodeRuntimeReadyAt.usizeSetDeleted decision
+    (by simpa using deletedUSizeSetReady)
+
+/-- Exact active-code readiness for the deleted scalar write. -/
+theorem deletedScalarSetExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 4 neutralUsed
+      deletedScalarSetSourceState
+      (runtimeRoots deletedScalarSetSourceState.runtime
+        (envRootsOn neutralUsed deletedScalarSetSourceState.env ++ []))
+      (.sset dead 8 0 scalarField u8Type <| .return live)
+      deletedWritesAfter := by
+  refine ⟨2, neutralUsed, by omega,
+    deletedScalarExactGraph, UsedSubset.refl neutralUsed,
+    deletedScalarExactBinderReady, ?_⟩
+  have decision :
+      deletedScalarExactGraph.view.runtimeDecision =
+        .deletedScalarSet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedScalarSet_of_target_not_sset
+      deletedScalarExactGraph.view
+        (by
+          intro targetObject targetWidth targetOffset targetField targetType
+            targetContinuation
+          simp [deletedWritesAfter])
+  exact ExactShadowCodeRuntimeReadyAt.scalarSetDeleted decision
+    (by simpa using deletedScalarSetReady)
+
+/-- The deleted-write fixture retains its exact hereditary compiler graph at
+the declaration/program boundary. -/
+theorem deletedWritesProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 4)
+      deletedWritesBeforeProgram deletedWritesAfterProgram := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 4))
+    [fixtureDecl `main deletedWritesBefore]
+    [fixtureDecl `main deletedWritesAfter]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code ⟨neutralUsed, 4, neutralUsed, Nat.le_refl 4,
+        deletedWritesExactGraph, UsedSubset.refl neutralUsed,
+        deletedWritesExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- Full exact-provenance machine readiness at the deleted object write. -/
+theorem deletedObjectSetExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 4
+      deletedObjectSetSourceState deletedWritesTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedObjectSetSourceState.env,
+    envRootsOn neutralUsed deletedWritesTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  · exact .code deletedObjectSetExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed)
+      (by
+        simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+          deletedWriteEnvReachableRelated)
+  · simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+
+/-- Full exact-provenance machine readiness at the deleted unboxed write. -/
+theorem deletedUSizeSetExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 4
+      deletedUSizeSetSourceState deletedWritesTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedUSizeSetSourceState.env,
+    envRootsOn neutralUsed deletedWritesTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  · exact .code deletedUSizeSetExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed)
+      (by
+        simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+          deletedWriteEnvReachableRelated)
+  · simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+
+/-- Full exact-provenance machine readiness at the deleted scalar write. -/
+theorem deletedScalarSetExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 4
+      deletedScalarSetSourceState deletedWritesTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedScalarSetSourceState.env,
+    envRootsOn neutralUsed deletedWritesTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  · exact .code deletedScalarSetExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed)
+      (by
+        simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+          deletedWriteEnvReachableRelated)
+  · simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+
+/-- The exact dispatcher preserves hereditary provenance across the deleted
+object write. -/
+theorem deletedObjectSetExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedObjectSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedWritesTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 4 sourceAfter targetAfter :=
+  deletedObjectSetExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedObjectSetExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the deleted
+unboxed write. -/
+theorem deletedUSizeSetExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedUSizeSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedWritesTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 4 sourceAfter targetAfter :=
+  deletedUSizeSetExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedUSizeSetExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the deleted
+scalar write. -/
+theorem deletedScalarSetExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedScalarSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedWritesTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 4 sourceAfter targetAfter :=
+  deletedScalarSetExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedScalarSetExactMachineReadyAt rfl step
+
 /-- The first mutation in the closed regression takes one source step while
 the transformed target stutters at the live return. -/
 theorem deletedObjectSetSourceOnlyMachineStep :
