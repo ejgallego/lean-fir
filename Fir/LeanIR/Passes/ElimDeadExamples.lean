@@ -1721,6 +1721,34 @@ theorem deletedReuseSomeExactBinderReady :
   · simp [deletedReuseBefore, deadReuseDecl, letDecl, codeBinderIds,
       BinderNamesUnique, live, dead]
 
+/-- Failed-token reuse allocates only on the source, and the exact deleted
+edge consumes that allocation-safety certificate. -/
+theorem deletedReuseNoneExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      deletedReuseNoneSourceState
+      (runtimeRoots deletedReuseNoneSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseNoneSourceState.env ++ []))
+      deletedReuseBefore deletedReuseAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedReuseSomeExactGraph, UsedSubset.refl neutralUsed,
+    deletedReuseSomeExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt deletedReuseNoneSourceState
+        (runtimeRoots deletedReuseNoneSourceState.runtime
+          (envRootsOn neutralUsed deletedReuseNoneSourceState.env ++ []))
+        deadReuseDecl := by
+    unfold deadReuseDecl letDecl
+    exact .reuse dead dead.name objType reuseTokenVar oneFieldInfo true
+      #[.fvar reuseArgVar] (by simpa using deletedReuseNoneReady)
+  have decision :
+      deletedReuseSomeExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedReuseSomeExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedReuseAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
 /-- At the deleted edge's roots, retained concrete-token reuse readiness is
 constructively false: the token names exactly the unreachable cell certified
 for source-only overwrite. -/
@@ -1788,6 +1816,35 @@ theorem deletedReuseSomeProgramBinderReadyRelated :
       inlineAttr_eq := rfl
     }
   · exact .nil
+
+/-- Full exact-provenance machine readiness for failed-token reuse. -/
+theorem deletedReuseNoneExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedReuseNoneSourceState deletedReuseTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedReuseNoneSourceState.env,
+    envRootsOn neutralUsed deletedReuseTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseSomeProgramBinderReadyRelated
+  · exact .code deletedReuseNoneExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by
+        simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+          deletedReuseNoneEnvReachableRelated)
+  · simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseNoneRuntimeRelated
+
+/-- The exact dispatcher preserves hereditary compiler provenance after
+failed-token reuse performs its source-only allocation. -/
+theorem deletedReuseNoneExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedReuseNoneSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedReuseTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedReuseNoneExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedReuseNoneExactMachineReadyAt rfl step
 
 /-- Full exact-provenance machine readiness for the concrete-token reuse
 pair. -/
