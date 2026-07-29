@@ -3784,6 +3784,24 @@ extends the admitted syntax/effects and develops the trace/simulation layer
 beyond terminating direct evaluation. No FIR semantic contract or executable
 ABI changed.
 
+W6.6eu extends that public fragment across all three concrete natural-literal
+representations. `naturalAllocationBytes` assigns zero cost to wasm32-tagged
+immediates, one aligned object-and-slot extent to source-tagged values that
+must be promoted on wasm32, and the aligned limb-object extent to larger
+arbitrary-precision naturals. From `FrontierInvariant` and one
+`AddressSpaceBudget`, `allocateNatural_eq_ok_of_budget` constructs the
+corresponding immediate, promoted, or heap result and returns the exact
+residual budget. The indexed compiler law uses that result together with the
+existing natural-step simulation, so `NaturalLiteralSupported` joins
+`BudgetedDirectSupported` without a caller-supplied allocation equation or
+representation witness. The contract harness checks arbitrary finite
+Nat-literal spines, including values selected from each representation class;
+the existing `correctBudgetedDirect` theorem therefore covers their arbitrary
+interleavings with the previously supported direct families unchanged. This
+proof-facing cost classification is a workable, deliberately unstable
+boundary rather than a compatibility promise. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

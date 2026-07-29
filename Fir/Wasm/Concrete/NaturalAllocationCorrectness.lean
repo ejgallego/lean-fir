@@ -10,6 +10,23 @@ def naturalLimbsValue : List UInt64 → Nat
   | [] => 0
   | limb :: rest => limb.toNat + UInt64.size * naturalLimbsValue rest
 
+/--
+Exact wasm32 frontier cost of a concrete natural literal.
+
+Small source naturals that fit the wasm32 immediate payload allocate nothing.
+Larger source-tagged values use one persistent promoted-tag object, while
+source heap naturals use their complete little-endian limb extent.
+-/
+def naturalAllocationBytes (value : Nat) : Nat :=
+  if value ≤ maxTaggedPayload then
+    if value ≤ maxImmediatePayload then
+      0
+    else
+      align8 (headerBytes + target.semanticSlotBytes)
+  else
+    align8
+      (headerBytes + target.semanticSlotBytes * (naturalLimbs value).length)
+
 /-- The executable limb splitter preserves the represented natural. -/
 theorem naturalLimbs_value (value : Nat) :
     naturalLimbsValue (naturalLimbs value) = value := by
@@ -315,6 +332,195 @@ theorem uint32Field_success (field : String) (value : Nat) (result : UInt32)
   next fits =>
     exact ⟨fits, (Except.ok.inj encoded).symm⟩
   next overflow => contradiction
+
+/--
+One exact source-path budget makes natural allocation constructive and
+transports the residual budget across all three concrete representations:
+wasm32 immediate, persistent promoted tag, and ordinary heap natural.
+-/
+theorem MemoryState.FrontierInvariant.allocateNatural_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant) (value : Nat)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : naturalAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateNatural state value = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - naturalAllocationBytes value) := by
+  by_cases sourceTagged : value ≤ maxTaggedPayload
+  · have valueLt : value < UInt64.size := by
+      have taggedBound : maxTaggedPayload < UInt64.size := by decide
+      omega
+    have payloadToNat : (UInt64.ofNat value).toNat = value :=
+      UInt64.toNat_ofNat_of_lt' valueLt
+    by_cases immediate : value ≤ maxImmediatePayload
+    · refine
+        ⟨state, Word32.encodeImmediate value immediate, ?_, ?_⟩
+      · simp [allocateNatural, sourceTagged, encodeTagged, payloadToNat,
+          immediate]
+      · simpa [naturalAllocationBytes, sourceTagged, immediate] using budget
+    · have allocationFits :
+          align8 (headerBytes + target.semanticSlotBytes) ≤ remainingBytes := by
+        simpa [naturalAllocationBytes, sourceTagged, immediate] using fits
+      obtain ⟨middle, address, objectAllocation⟩ :=
+        state.allocateObject_eq_ok_of_capacity .natural
+          target.semanticSlotBytes true promotedTagMarker 1 0 0
+          valid.cursorAligned
+          (budget.allocationCapacity (by
+            simpa only [align8_align8] using allocationFits))
+      have middleValid := valid.allocateObject objectAllocation
+      have middleExtent := MemoryState.allocateObject_extent objectAllocation
+      have payloadInBounds :
+          address.value + headerBytes +
+              target.semanticSlotBytes * (0 + [UInt64.ofNat value].length) ≤
+            middle.memory.size := by
+        have cursorInBounds := middleValid.cursorInBounds
+        rw [middleExtent] at cursorInBounds
+        have extent :=
+          align8_ge (headerBytes + target.semanticSlotBytes)
+        simp [target] at cursorInBounds extent ⊢
+        omega
+      obtain ⟨memory, payloadWrite, _⟩ :=
+        writeNaturalLimbs_spec middle.memory address.value 0
+          [UInt64.ofNat value] payloadInBounds
+      let result : MemoryState := { middle with memory }
+      have allocated :
+          allocateNatural state value = .ok (result, address) := by
+        have notImmediate :
+            ¬(UInt64.ofNat value).toNat ≤ maxImmediatePayload := by
+          rw [payloadToNat]
+          exact immediate
+        unfold allocateNatural
+        rw [if_pos sourceTagged]
+        unfold encodeTagged
+        rw [dif_neg notImmediate]
+        unfold allocatePromotedTag
+        simp only [Bind.bind, Except.bind]
+        have objectAllocation8 :
+            state.allocateObject .natural 8 true promotedTagMarker 1 =
+              .ok (middle, address) := by
+          simpa [target] using objectAllocation
+        rw [objectAllocation8]
+        simp only [liftMemory]
+        have write64 :
+            middle.memory.writeUInt64 (address.value + headerBytes)
+                (UInt64.ofNat value) =
+              .ok memory := by
+          cases writeEq :
+              middle.memory.writeUInt64 (address.value + headerBytes)
+                (UInt64.ofNat value) with
+          | error failure =>
+              simp [Fir.Wasm.Concrete.writeNaturalLimbs, target, writeEq,
+                Bind.bind, Except.bind] at payloadWrite
+          | ok actual =>
+              have actualEq : actual = memory := by
+                simpa [Fir.Wasm.Concrete.writeNaturalLimbs, target, writeEq,
+                  Bind.bind, Except.bind] using payloadWrite
+              subst actual
+              rfl
+        rw [write64]
+        rfl
+      have middleBudget :=
+        budget.allocateObject valid.cursorAligned allocationFits
+          objectAllocation
+      have resultBudget :
+          result.AddressSpaceBudget
+            (remainingBytes -
+              align8 (headerBytes + target.semanticSlotBytes)) := {
+        cursorPositive := middleBudget.cursorPositive
+        endWithinAddressSpace := middleBudget.endWithinAddressSpace }
+      exact ⟨result, address, allocated, by
+        simpa [naturalAllocationBytes, sourceTagged, immediate] using
+          resultBudget⟩
+  · let limbs := naturalLimbs value
+    have allocationFits :
+        align8
+            (headerBytes + target.semanticSlotBytes * limbs.length) ≤
+          remainingBytes := by
+      simpa [naturalAllocationBytes, sourceTagged, limbs] using fits
+    have limbCountFits : limbs.length < UInt32.size := by
+      have endWithin :
+          state.heapCursor +
+              align8
+                (align8
+                  (headerBytes + target.semanticSlotBytes * limbs.length)) ≤
+            wordModulus := by
+        simpa [limbs] using
+          (budget.allocationCapacity (by
+            simpa only [align8_align8] using allocationFits)).endWithinAddressSpace
+      simp only [align8_align8] at endWithin
+      have extent :=
+        align8_ge (headerBytes + target.semanticSlotBytes * limbs.length)
+      have cursorPositive := budget.cursorPositive
+      have belowWordModulus : limbs.length < wordModulus := by
+        simp [target] at endWithin extent
+        omega
+      simpa [wordModulus] using belowWordModulus
+    have limbCount :
+        uint32Field "natural limb count" limbs.length =
+          .ok (UInt32.ofNat limbs.length) := by
+      simp [uint32Field, limbCountFits]
+    obtain ⟨middle, address, objectAllocation⟩ :=
+      state.allocateObject_eq_ok_of_capacity .natural
+        (target.semanticSlotBytes * limbs.length) false bigNaturalMarker
+        (UInt32.ofNat limbs.length) 0 0 valid.cursorAligned
+        (budget.allocationCapacity (by
+          simpa only [align8_align8] using allocationFits))
+    have middleValid := valid.allocateObject objectAllocation
+    have middleExtent := MemoryState.allocateObject_extent objectAllocation
+    have payloadInBounds :
+        address.value + headerBytes +
+            target.semanticSlotBytes * (0 + limbs.length) ≤
+          middle.memory.size := by
+      have payloadEnd :
+          address.value + headerBytes +
+              target.semanticSlotBytes * (0 + limbs.length) ≤
+            middle.heapCursor := by
+        simp only [Nat.zero_add]
+        rw [middleExtent]
+        have extent :=
+          align8_ge (headerBytes + target.semanticSlotBytes * limbs.length)
+        simpa [Nat.add_assoc] using
+          Nat.add_le_add_left extent address.value
+      exact Nat.le_trans payloadEnd middleValid.cursorInBounds
+    obtain ⟨memory, payloadWrite, _⟩ :=
+      writeNaturalLimbs_spec middle.memory address.value 0 limbs
+        payloadInBounds
+    let result : MemoryState := { middle with memory }
+    have allocated :
+        allocateNatural state value = .ok (result, address) := by
+      unfold allocateNatural
+      rw [if_neg sourceTagged]
+      dsimp only
+      change
+        (do
+          let limbCount ← uint32Field "natural limb count" limbs.length
+          let (state, address) ← liftMemory <|
+            state.allocateObject .natural
+              (target.semanticSlotBytes * limbs.length) false
+              bigNaturalMarker limbCount
+          let memory ← liftMemory <|
+            Fir.Wasm.Concrete.writeNaturalLimbs
+              state.memory address.value 0 limbs
+          return ({ state with memory }, address)) =
+          .ok (result, address)
+      rw [limbCount]
+      simp only [Bind.bind, Except.bind]
+      rw [objectAllocation]
+      simp only [liftMemory]
+      rw [payloadWrite]
+      rfl
+    have middleBudget :=
+      budget.allocateObject valid.cursorAligned allocationFits objectAllocation
+    have resultBudget :
+        result.AddressSpaceBudget
+          (remainingBytes -
+            align8
+              (headerBytes + target.semanticSlotBytes * limbs.length)) := {
+      cursorPositive := middleBudget.cursorPositive
+      endWithinAddressSpace := middleBudget.endWithinAddressSpace }
+    exact ⟨result, address, allocated, by
+      simpa [naturalAllocationBytes, sourceTagged, limbs] using resultBudget⟩
 
 /-- A successful heap-backed natural literal is one checked object allocation
 followed by the canonical limb writer. -/

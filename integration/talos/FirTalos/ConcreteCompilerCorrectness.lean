@@ -2744,9 +2744,26 @@ nonallocating in this cost model.
 def directLetAllocationCost (decl : LCNF.LetDecl .impure) : Nat :=
   match decl.value with
   | .ctor info _ => (ConstructorLayout.ofInfo info).allocationBytes
+  | .lit (.nat value) => naturalAllocationBytes value
   | .lit (.str value) =>
       align8 (headerBytes + (stringUtf8Bytes value).length)
   | _ => 0
+
+/--
+Static source/compiler admission for a representation-polymorphic natural
+literal. Its immediate, promoted-tag, or limb-object representation is chosen
+constructively from the source value and available address-space budget.
+-/
+inductive NaturalLiteralSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (value : Nat)
+      (valueEq : decl.value = .lit (.nat value))
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .tobject)) :
+      NaturalLiteralSupported context decl
 
 /--
 Static source/compiler admission for an allocating UTF-8 String literal.
@@ -4047,6 +4064,104 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_immediateLiteral
     nextFrameAligned, by simpa [costZero] using budgeted.2⟩
 
 /--
+Cost-indexed runtime-law instance for representation-polymorphic natural
+literals.
+
+`naturalAllocationBytes` selects zero cost, a promoted-tag extent, or a
+variable limb-object extent from the source value. The constructive allocator
+returns both the exact concrete representation and its residual budget; the
+ordinary generated literal-call theorem then establishes the related
+continuation state.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_naturalLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (NaturalLiteralSupported context)
+      directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits budgeted sourceStep stateRelated valueCompiled
+    valueAdapted resultFound
+  rcases supported with
+    ⟨value, valueEq, valueKind, resultCompiled⟩
+  have naturalFits :
+      naturalAllocationBytes value ≤ remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  obtain ⟨heap, word, allocated, remainingBudget⟩ :=
+    stateRelated.1.heap.frontier.allocateNatural_eq_ok_of_budget value
+      budgeted.2 naturalFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.call (.runtime (.literal (.nat value) .tobject))] :=
+    compileLetValue_naturalLiteral valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.literal (.nat value) .tobject)) with
+  | none =>
+      simp [instructions, instruction, callFound] at valueAdapted
+      change
+        Except.error AdapterError.unknownCallTarget =
+          Except.ok targetValue at valueAdapted
+      cases valueAdapted
+  | some callIndex =>
+      have expectedAdapted :
+          instructions sourceModule sourceFunction labels
+              [.call (.runtime (.literal (.nat value) .tobject))] =
+            .ok [.call callIndex] := by
+        simp [instructions, instruction, callFound]
+        rfl
+      rw [expectedAdapted] at valueAdapted
+      injection valueAdapted with targetValueEq
+      subst targetValue
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨updated, targetSet⟩ :=
+        FirTalos.Correctness.locals_set?_exists
+          (budgeted.1.validIndex resultFound)
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.naturalLiteralCall callFound
+      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+        letStepSimulates_naturalLiteral (context := context) valueEq stateRelated
+          resultFound resultKindAt allocated imported spec.hostsSatisfy
+          inBounds contracted params results targetSet
+      obtain ⟨runtimeEq, sourceValueEq⟩ :=
+        SourceLetResult.deterministic sourceStep step.1
+      subst nextRuntime
+      subst sourceValue
+      have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+      have nextFrame :
+          ConcreteLocalFrameAligned sourceFunction
+            (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        ⟨lengths.1.trans budgeted.1.1, lengths.2.trans budgeted.1.2⟩
+      have nextBudget :
+          (replaceHeap targetStore heap).host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - naturalAllocationBytes value) := by
+        simpa [replaceHeap, clearFailure] using remainingBudget
+      exact ⟨replaceHeap targetStore heap, updated, nextWitness, step,
+        nextFrame, by
+          simpa [directLetAllocationCost, valueEq] using nextBudget⟩
+
+/--
 Cost-indexed runtime-law instance for allocating UTF-8 String literals.
 
 The source declaration determines its exact aligned allocation cost.
@@ -4777,24 +4892,26 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
 
 /--
 Current mixed allocating structural fragment: local aliases, immediate
-integer/`USize` literals, successful object/`USize`/packed-scalar projections,
-UTF-8 String literals, and nonempty constructors.
+integer/`USize` literals, representation-polymorphic natural literals,
+successful object/`USize`/packed-scalar projections, UTF-8 String literals,
+and nonempty constructors.
 -/
 def BudgetedDirectSupported (context : Fir.Wasm.Context)
     (decl : LCNF.LetDecl .impure) : Prop :=
   LocalAliasSupported context decl ∨
     ImmediateLiteralSupported context decl ∨
-      USizeProjectionSupported context decl ∨
-        ObjectProjectionSupported context decl ∨
-          ScalarProjectionSupported context decl ∨
-            StringLiteralSupported context decl ∨
-              NonemptyConstructorSupported context decl
+      NaturalLiteralSupported context decl ∨
+        USizeProjectionSupported context decl ∨
+          ObjectProjectionSupported context decl ∨
+            ScalarProjectionSupported context decl ∨
+              StringLiteralSupported context decl ∨
+                NonemptyConstructorSupported context decl
 
 /--
-The cost-indexed runtime law composes allocating String/constructor steps with
-cost-zero aliases, immediates, and successful projections. One source-path
-budget is preserved across nonallocating nodes and consumed exactly at
-allocating nodes.
+The cost-indexed runtime law composes natural/String/constructor allocation
+with cost-zero aliases, fixed-width immediates, and successful projections.
+One source-path budget is preserved across nonallocating nodes and consumed
+exactly at allocating nodes.
 -/
 theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
     {program : Fir.LeanIR.ImpureProgram}
@@ -4819,25 +4936,28 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
         (fun decl =>
           LocalAliasSupported context decl ∨
             (ImmediateLiteralSupported context decl ∨
-              (USizeProjectionSupported context decl ∨
-                (ObjectProjectionSupported context decl ∨
-                  (ScalarProjectionSupported context decl ∨
-                    (StringLiteralSupported context decl ∨
-                      NonemptyConstructorSupported context decl))))))
+              (NaturalLiteralSupported context decl ∨
+                (USizeProjectionSupported context decl ∨
+                  (ObjectProjectionSupported context decl ∨
+                    (ScalarProjectionSupported context decl ∨
+                      (StringLiteralSupported context decl ∨
+                        NonemptyConstructorSupported context decl)))))))
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
   apply DirectLetRuntimeRefinesWithCost.or
   · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
   · apply DirectLetRuntimeRefinesWithCost.or
     · exact spec.directLetRuntimeRefinesWithCost_immediateLiteral
     · apply DirectLetRuntimeRefinesWithCost.or
-      · exact spec.directLetRuntimeRefinesWithCost_usizeProjection
+      · exact spec.directLetRuntimeRefines_naturalLiteral
       · apply DirectLetRuntimeRefinesWithCost.or
-        · exact spec.directLetRuntimeRefinesWithCost_objectProjection
+        · exact spec.directLetRuntimeRefinesWithCost_usizeProjection
         · apply DirectLetRuntimeRefinesWithCost.or
-          · exact spec.directLetRuntimeRefinesWithCost_scalarProjection
+          · exact spec.directLetRuntimeRefinesWithCost_objectProjection
           · apply DirectLetRuntimeRefinesWithCost.or
-            · exact spec.directLetRuntimeRefines_stringLiteral
-            · exact spec.directLetRuntimeRefines_nonemptyConstructor
+            · exact spec.directLetRuntimeRefinesWithCost_scalarProjection
+            · apply DirectLetRuntimeRefinesWithCost.or
+              · exact spec.directLetRuntimeRefines_stringLiteral
+              · exact spec.directLetRuntimeRefines_nonemptyConstructor
 
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without

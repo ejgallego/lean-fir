@@ -135,6 +135,15 @@ composition now includes cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar projections
 through `BudgetedDirectSupported`. The projection instances preserve the
 concrete heap exactly and return the full residual address-space budget.
+Natural literals now use the same indexed law. `naturalAllocationBytes`
+classifies their concrete cost as zero for wasm32-tagged immediates, an
+aligned one-slot object for promoted source tags, or an aligned limb object
+for arbitrary-precision values. `allocateNatural_eq_ok_of_budget` constructs
+all three cases from the frontier invariant and one source budget and exposes
+the exact residual headroom. Thus `NaturalLiteralSupported` admits arbitrary
+Nat-literal and mixed spines without a concrete allocation-success premise or
+target representation witness; this proof-facing classifier remains an
+unstable implementation boundary.
 `ConcreteSupportedExport.correctBudgetedDirect` now turns the resulting
 structural `CodeWP` into the public named-export statement: finite source
 evaluation plus one source-path budget implies the matching source observation

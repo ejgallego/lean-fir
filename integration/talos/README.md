@@ -243,6 +243,15 @@ literals plus successful object, `USize`, and packed-integer scalar
 projections under one source path budget. The projection laws expose exact
 heap preservation across their generated readers, so the complete residual
 budget reaches the continuation.
+Natural literals now join the same indexed fragment across their three
+wasm32 representations. `naturalAllocationBytes` assigns zero bytes to
+immediates, an aligned one-slot object to promoted source tags, and the exact
+aligned limb-object extent to arbitrary-precision heap naturals.
+`allocateNatural_eq_ok_of_budget` constructs the selected representation and
+returns the exact unused headroom, allowing arbitrary Nat-literal spines and
+mixed direct spines to use the same single source-computed budget. This
+proof-facing cost surface is intentionally allowed to evolve with the
+implementation.
 `ConcreteSupportedExport.correctBudgetedDirect` packages that structural
 result at the named-export boundary: successful finite source evaluation and
 one initial budget imply the matching executable source observation and

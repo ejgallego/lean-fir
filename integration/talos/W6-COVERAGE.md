@@ -67,6 +67,12 @@ Cross-cutting W6.5 state:
   object, `USize`, and packed-integer scalar projections in arbitrary finite
   interleavings. Each projection instance records exact heap preservation and
   therefore retains the complete residual budget.
+  Natural literals are included through an exact three-way cost boundary:
+  zero-byte wasm32 tagged immediates, aligned one-slot promoted tags, and
+  aligned arbitrary-precision limb objects. The allocator theorem constructs
+  the selected representation from frontier invariants and the path budget,
+  then returns its exact remainder, so arbitrary finite Nat-literal and mixed
+  spines require no allocation equation or representation witness.
   `ConcreteSupportedExport.correctBudgetedDirect` closes this fragment at the
   named-export boundary, pairing executable source evaluation with fuel-free
   concrete Wasm termination under `RefinedReturnPost`.
