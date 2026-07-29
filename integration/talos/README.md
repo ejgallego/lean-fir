@@ -231,9 +231,11 @@ allocation now has its first recursive transport rule:
 `codeWP_stringLiteralLet_of_budget` gives an arbitrary generated continuation
 the exact residual source-path budget after UTF-8 allocation. Object and
 constructor allocation expose the same exact residual boundary below the
-compiler. The general direct-value induction still needs a before/after
-indexed runtime law before mixed allocating spines can use that transport
-automatically.
+compiler. `codeWP_of_directValueEvaluates_withCost` and
+`DirectLetRuntimeRefinesWithCost` now provide the before/after indexed
+structural law, and the String instance proves arbitrary finite String-literal
+spines from one source-computed budget. Nonempty constructors and mixed
+cost-zero/read-only paths are the next instances.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

@@ -3704,6 +3704,24 @@ with a before/after indexed law and supplies allocating String and constructor
 instances. The resource interface remains deliberately unstable while that
 design is completed. No FIR semantic contract or executable ABI changed.
 
+W6.6ep generalizes the structural direct-value theorem to finite allocation.
+`DirectValuePathCost` folds an operation cost over the source LCNF `let`
+spine. `DirectLetRuntimeRefinesWithCost` is the corresponding before/after
+runtime law: a generated direct step consumes the head declaration's cost and
+establishes an indexed invariant at the remainder.
+`codeWP_of_directValueEvaluates_withCost` proves by source-evaluation
+induction that the initial total path cost is enough; compiler and adapter
+inversion still recover every target fragment and numeric slot.
+`ConcreteBudgetedLocalFrame` combines this address-space index with exact
+local-frame shape. Its UTF-8 String instance derives the call, allocation,
+witness extension, destination write, and residual budget constructively.
+The contract harness now proves arbitrary finite String-literal spines from
+one source-computed budget, with no translation certificate or per-node
+allocation equation. The next instance is nonempty constructor allocation,
+followed by composition with the cost-zero read-only families. The cost and
+invariant interfaces remain deliberately unstable. No FIR semantic contract
+or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -55,7 +55,11 @@ Cross-cutting W6.5 state:
   transport: one source-path budget constructs the allocation and its exact
   residual budget is passed to the generated continuation. The lower object
   and nonempty-constructor allocation boundaries expose the corresponding
-  residual budgets as well.
+  residual budgets as well. `DirectValuePathCost`,
+  `DirectLetRuntimeRefinesWithCost`, and
+  `codeWP_of_directValueEvaluates_withCost` lift this transport to the
+  structural theorem. The contract harness checks arbitrary finite
+  String-literal spines using one exact source-computed budget.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

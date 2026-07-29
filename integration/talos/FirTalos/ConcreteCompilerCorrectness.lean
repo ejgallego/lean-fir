@@ -2578,6 +2578,21 @@ inductive DirectValueEvaluates (context : Fir.Wasm.Context)
       DirectValueEvaluates context Supported sourceRuntime sourceEnv
         (.let decl continuation) resultRuntime resultValue
 
+/--
+Total source-path allocation cost for the direct-value fragment.
+
+The operation-specific `letCost` is source-facing. This fold follows only the
+direct `let` spine; other code forms have cost zero because they cannot occur
+in a `DirectValueEvaluates` derivation. No target program or translation
+evidence contributes to the result.
+-/
+def DirectValuePathCost
+    (letCost : LCNF.LetDecl .impure → Nat) :
+    LCNF.Code .impure → Nat
+  | .let decl continuation =>
+      letCost decl + DirectValuePathCost letCost continuation
+  | _ => 0
+
 /-- The direct-value evaluation view is a sound restriction of the existing
 proof-facing source semantics. -/
 theorem DirectValueEvaluates.toCodeEvaluates
@@ -2637,6 +2652,35 @@ inductive LocalAliasSupported (context : Fir.Wasm.Context) :
         Fir.Wasm.getLocal context decl.fvarId =
           .ok (.localGet decl.fvarId, kind)) :
       LocalAliasSupported context decl
+
+/--
+Source-level wasm32 allocation cost for the currently admitted direct-value
+operations. Nonempty constructors use their concrete layout extent and UTF-8
+String literals use their encoded payload extent; all other forms are
+nonallocating in this cost model.
+-/
+def directLetAllocationCost (decl : LCNF.LetDecl .impure) : Nat :=
+  match decl.value with
+  | .ctor info _ => (ConstructorLayout.ofInfo info).allocationBytes
+  | .lit (.str value) =>
+      align8 (headerBytes + (stringUtf8Bytes value).length)
+  | _ => 0
+
+/--
+Static source/compiler admission for an allocating UTF-8 String literal.
+The concrete address, target import index, and target local index are not part
+of the relation.
+-/
+inductive StringLiteralSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (value : String)
+      (valueEq : decl.value = .lit (.str value))
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .object)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .object)) :
+      StringLiteralSupported context decl
 
 /--
 The nonallocating literal forms and their exact compiler ABI kind.
@@ -2889,6 +2933,30 @@ inductive ScalarProjectionSupported (context : Fir.Wasm.Context) :
               .ok (.scalar scalar) →
               ScalarValueKind scalar resultKind) :
       ScalarProjectionSupported context decl
+
+/-- Direct source `let` evaluation is deterministic at fixed source state,
+environment, and declaration. -/
+theorem SourceLetResult.deterministic
+    {context : Fir.Wasm.Context}
+    {sourceRuntime leftRuntime rightRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {leftValue rightValue : Value}
+    (left :
+      SourceLetResult context sourceRuntime sourceEnv decl leftRuntime
+        leftValue)
+    (right :
+      SourceLetResult context sourceRuntime sourceEnv decl rightRuntime
+        rightValue) :
+    leftRuntime = rightRuntime ∧ leftValue = rightValue := by
+  simp only [SourceLetResult] at left right
+  rw [left] at right
+  have pairEq :
+      (leftRuntime, LetAction.value leftValue) =
+        (rightRuntime, LetAction.value rightValue) :=
+    Except.ok.inj right
+  exact ⟨congrArg Prod.fst pairEq,
+    LetAction.value.inj (congrArg Prod.snd pairEq)⟩
 
 /-- Every successful absolute-slot `USize` read produces an unboxed word. -/
 theorem getUSizeSlot_ok_eq_usize
@@ -3152,6 +3220,20 @@ def ConcreteLocalFrameAligned
   targetLocals.params.length = sourceFunction.params.size ∧
     targetLocals.locals.length = sourceFunction.locals.size
 
+/--
+The structural allocating invariant: exact compiler-local frame shape paired
+with the remaining source-path wasm32 address-space budget.
+-/
+def ConcreteBudgetedLocalFrame
+    (sourceFunction : Fir.Wasm.Function)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness ∧
+    targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes
+
 theorem ConcreteLocalFrameAligned.validIndex
     {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
@@ -3240,6 +3322,59 @@ def DirectLetRuntimeRefines
         Invariant nextRuntime (bind sourceEnv decl.fvarId sourceValue)
           nextStore nextLocals nextWitness
 
+/--
+Resource-indexed direct-`let` runtime law.
+
+`letCost` assigns a source-level cost to each admitted declaration.
+`Invariant remainingBytes ...` describes the concrete resources available
+before a step. The runtime implementation consumes exactly the declaration's
+cost and establishes the invariant at the residual index. This is the
+before/after form needed by allocating structural proofs; it remains entirely
+independent of target-program certificates.
+-/
+def DirectLetRuntimeRefinesWithCost
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (Supported : LCNF.LetDecl .impure → Prop)
+    (letCost : LCNF.LetDecl .impure → Nat)
+    (Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes : Nat}
+      {witness : RefinementWitness},
+    Supported decl →
+      letCost decl ≤ remainingBytes →
+      Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness →
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness,
+        LetStepSimulates context sourceFunction module hostEnv decl targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+          targetLocals nextLocals resultIndex witness nextWitness ∧
+        Invariant (remainingBytes - letCost decl) nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+          nextWitness
+
 /-- Uniform runtime laws with the same resource invariant compose by source
 admission disjunction. This is the structural bridge for mixed direct-value
 spines; it combines verified operation families without constructing a
@@ -3273,6 +3408,40 @@ theorem DirectLetRuntimeRefines.or
   | inr rightSupported =>
       exact right rightSupported invariant sourceStep stateRelated valueCompiled
         valueAdapted resultFound
+
+/-- Cost-indexed runtime laws compose when they use the same source cost
+function and indexed invariant. -/
+theorem DirectLetRuntimeRefinesWithCost.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Left Right : LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (left :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv Left letCost Invariant)
+    (right :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv Right letCost Invariant) :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      module hostEnv (fun decl => Left decl ∨ Right decl) letCost Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep stateRelated valueCompiled
+    valueAdapted resultFound
+  cases supported with
+  | inl leftSupported =>
+      exact left leftSupported stepFits invariant sourceStep stateRelated
+        valueCompiled valueAdapted resultFound
+  | inr rightSupported =>
+      exact right rightSupported stepFits invariant sourceStep stateRelated
+        valueCompiled valueAdapted resultFound
 
 /--
 One compiler-produced immediate literal is simulated by its generated
@@ -3547,6 +3716,105 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_immediateLiteral
     letStepSimulates_immediateLiteral shape sourceStep stateRelated resultFound
       resultKindAt targetSet,
     nextFrameAligned⟩
+
+/--
+Cost-indexed runtime-law instance for allocating UTF-8 String literals.
+
+The source declaration determines its exact aligned allocation cost.
+`ConcreteBudgetedLocalFrame` supplies that headroom and the local-frame shape;
+the concrete allocator returns the residual budget that is paired with the
+generated call/local-write simulation for the continuation.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_stringLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (StringLiteralSupported context)
+      directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits budgeted sourceStep stateRelated valueCompiled
+    valueAdapted resultFound
+  rcases supported with
+    ⟨value, valueEq, valueKind, resultCompiled⟩
+  have stringFits :
+      align8 (headerBytes + (stringUtf8Bytes value).length) ≤
+        remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  obtain ⟨heap, word, allocated, remainingBudget⟩ :=
+    stateRelated.1.heap.frontier.allocateString_eq_ok_of_budget value
+      budgeted.2 stringFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.call (.runtime (.literal (.str value) .object))] :=
+    compileLetValue_stringLiteral valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.literal (.str value) .object)) with
+  | none =>
+      simp [instructions, instruction, callFound] at valueAdapted
+      change
+        Except.error AdapterError.unknownCallTarget =
+          Except.ok targetValue at valueAdapted
+      cases valueAdapted
+  | some callIndex =>
+      have expectedAdapted :
+          instructions sourceModule sourceFunction labels
+              [.call (.runtime (.literal (.str value) .object))] =
+            .ok [.call callIndex] := by
+        simp [instructions, instruction, callFound]
+        rfl
+      rw [expectedAdapted] at valueAdapted
+      injection valueAdapted with targetValueEq
+      subst targetValue
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨updated, targetSet⟩ :=
+        FirTalos.Correctness.locals_set?_exists
+          (budgeted.1.validIndex resultFound)
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.stringLiteralCall callFound
+      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+        letStepSimulates_stringLiteral (context := context) valueEq stateRelated
+          resultFound resultKindAt allocated imported spec.hostsSatisfy
+          inBounds contracted params results targetSet
+      obtain ⟨runtimeEq, sourceValueEq⟩ :=
+        SourceLetResult.deterministic sourceStep step.1
+      subst nextRuntime
+      subst sourceValue
+      have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+      have nextFrame :
+          ConcreteLocalFrameAligned sourceFunction
+            (literal sourceRuntime (.str value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.str value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        ⟨lengths.1.trans budgeted.1.1, lengths.2.trans budgeted.1.2⟩
+      have nextBudget :
+          (replaceHeap targetStore heap).host.runtime.heap.AddressSpaceBudget
+            (remainingBytes -
+              align8
+                (headerBytes + (stringUtf8Bytes value).length)) := by
+        simpa [replaceHeap, clearFailure] using remainingBudget
+      exact ⟨replaceHeap targetStore heap, updated, nextWitness, step,
+        nextFrame, by
+          simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
 /--
 Uniform runtime-law instance for direct `USize` projections in any concrete
@@ -3950,6 +4218,108 @@ theorem codeWP_of_directValueEvaluates
           continuationWP, resultRuntimeRelated, failureClear,
           valueRelated⟩ :=
         ih continuationAdapted step.2.2.1 nextInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+
+/--
+Cost-indexed structural partial correctness for the direct-value code spine.
+
+The initial invariant is required at the source-computed
+`DirectValuePathCost`. At every `let`, the runtime law consumes the head
+declaration's cost and the induction hypothesis receives exactly the
+continuation cost. This supports finite wasm32 allocation without adding a
+translation certificate or a target-derived resource witness.
+-/
+theorem codeWP_of_directValueEvaluates_withCost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant :
+      Invariant (DirectValuePathCost letCost sourceCode) sourceRuntime sourceEnv
+        initial locals witness)
+    (runtimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv Supported letCost Invariant)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing target initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst target
+      exact ⟨initial, witness, kind, physical,
+        codeWP_return_to_exactBodyPost
+          (callerTail := callerTail) localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup parameterCount resultCount,
+        stateRelated.1, stateRelated.2.1, valueRelated⟩
+  | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
+      continuation _ _ supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          letCost decl ≤
+            DirectValuePathCost letCost (.let decl continuation) := by
+        simp [DirectValuePathCost]
+      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+        runtimeRefines supported stepFits invariant sourceStep stateRelated
+          valueCompiled valueAdapted resultFound
+      have continuationInvariant :
+          Invariant (DirectValuePathCost letCost continuation)
+            letNextRuntime (bind letSourceEnv decl.fvarId letSourceValue)
+            nextStore nextLocals nextWitness := by
+        simpa [DirectValuePathCost] using nextInvariant
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 continuationInvariant
       subst target
       exact ⟨resultStore, resultWitness, resultKind, physical,
         codeWP_letValue valueCompiled valueAdapted resultFound step
