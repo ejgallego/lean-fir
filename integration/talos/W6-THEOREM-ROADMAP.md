@@ -165,8 +165,13 @@ proof derives metadata encodability plus exact residual headroom. Concrete
 law, and `invoke_pure_integer_result_refines_of_budget` plus
 `integerExternalStep_of_budget` construct the full concrete response, witness
 extension, related result, Talos host return, and residual budget without
-allocation or target witnesses. Compiler/adapter inversion and the concrete
-`Int.ofNat`/`Int.neg` instances remain the next proof slice.
+allocation or target witnesses. `PureIntegerExternalSupported` now admits
+exactly `Int.ofNat` and `Int.neg`; argument decoding, named-call inversion,
+static external resolver alignment, and
+`externalLetRuntimeRefinesWithCost_pureInteger` derive their complete
+compiler-shaped external step without target witnesses. Lifting the existing
+direct-operation laws through the installed-handler invariant is next, after
+which the mixed whole-export theorem can consume both families together.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

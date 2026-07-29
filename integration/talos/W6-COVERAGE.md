@@ -87,8 +87,13 @@ Cross-cutting W6.5 state:
   current header-plus-limb cost,
   `invoke_pure_integer_result_refines_of_budget` constructs the allocation,
   response, and extended witness, and `integerExternalStep_of_budget` exposes
-  the resulting Talos host return and exact residual budget. Compiler-shaped
-  `Int.ofNat` and `Int.neg` call admission remains the next instance.
+  the resulting Talos host return and exact residual budget.
+  `PureIntegerExternalSupported` and
+  `externalLetRuntimeRefinesWithCost_pureInteger` now derive compiler-shaped
+  `Int.ofNat` and `Int.neg` calls through real argument compilation,
+  adaptation, static external resolution, destination binding, exact source
+  traces, and residual budget. Direct/external mixed-spine use awaits the
+  generic installed-handler invariant lift for existing direct laws.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

@@ -65,6 +65,52 @@ def ConcreteRuntimeCallsAligned
           imp.params.length = operation.signature.params.size ∧
           imp.results.length = operation.signature.results.size
 
+/--
+One executable external operation retains exactly the declaration metadata
+used by the source interpreter and the ABI signature computed by lowering.
+-/
+structure ExternalOperationMatchesDeclaration
+    (operation : ExternalOperation) (declaration : LCNF.Decl .impure) : Prop where
+  name : operation.name = declaration.name
+  paramTypes : operation.paramTypes = declaration.params.map (·.type)
+  resultType : operation.resultType = declaration.type
+  paramTypesSize :
+    operation.paramTypes.size = operation.signature.params.size
+  signature :
+    ExternalTypes.signature {
+      params := declaration.params.map (·.type)
+      result := declaration.type } = .ok operation.signature
+
+/--
+Every named call to a source external declaration occupies the matching
+adapted import slot and selects the concrete external host contract built from
+that declaration's exact metadata and ABI signature.
+
+This is static lowering/adapter/resolver alignment, analogous to
+`ConcreteRuntimeCallsAligned`. It is discharged once for a generated module;
+it contains no source execution, concrete response, allocation result, or
+per-program target simulation.
+-/
+def ConcreteExternalCallsAligned
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts) : Prop :=
+  ∀ {name : Lean.Name} {declaration : LCNF.Decl .impure} {id : Nat},
+    program.findDecl? name = some declaration →
+      (∃ metadata, declaration.value = .extern metadata) →
+      callIndex? sourceModule (.declaration name) = some id →
+      ∃ operation resultKind imp,
+        operation.name = name ∧
+          ExternalOperationMatchesDeclaration operation declaration ∧
+          operation.signature.results = #[resultKind] ∧
+          target.wasmModule.imports[id]? = some imp ∧
+          id < target.wasmModule.imports.length ∧
+          hosts.spec.contracts[id]? =
+            some (externalContract operation resultKind) ∧
+          imp.params.length = operation.signature.params.size ∧
+          imp.results.length = 1
+
 /-- Static whole-pipeline evidence for one concrete generated export.
 
 `bodyAdapted` is the crucial compiler-facing equation: it ties the selected
@@ -93,6 +139,8 @@ structure ConcreteSupportedExport
     target.wasmModule.imports.length = hosts.hosts.length
   runtimeCallsAligned :
     ConcreteRuntimeCallsAligned sourceModule target hosts
+  externalCallsAligned :
+    ConcreteExternalCallsAligned program sourceModule target hosts
   targetFunctionIndex : Nat
   targetFunction : Wasm.Function
   exported :
@@ -123,6 +171,37 @@ theorem ConcreteSupportedExport.hostsSatisfy
         target hosts exportName) :
     hosts.env.Satisfies target.wasmModule hosts.spec :=
   hosts.satisfies target.wasmModule spec.hostsAligned
+
+/-- Specialize whole-pipeline external alignment to one compiler-selected
+named call. -/
+theorem ConcreteSupportedExport.externalCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {name : Lean.Name} {declaration : LCNF.Decl .impure} {id : Nat}
+    (found : program.findDecl? name = some declaration)
+    (external : ∃ metadata, declaration.value = .extern metadata)
+    (callFound :
+      callIndex? sourceModule (.declaration name) = some id) :
+    ∃ operation resultKind imp,
+      operation.name = name ∧
+        ExternalOperationMatchesDeclaration operation declaration ∧
+        operation.signature.results = #[resultKind] ∧
+        target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (externalContract operation resultKind) ∧
+        imp.params.length = operation.signature.params.size ∧
+        imp.results.length = 1 :=
+  spec.externalCallsAligned found external callFound
 
 /-- Resolver/adaptor alignment specializes to the exact concrete natural
 literal contract expected by the allocation refinement theorem. -/

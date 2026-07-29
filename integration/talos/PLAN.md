@@ -3855,6 +3855,30 @@ from the compiler/adapter and instantiates this family for `Int.ofNat` and
 `Int.neg`. These proof-facing laws and the heap layout remain deliberately
 unstable. No FIR semantic contract or executable ABI changed.
 
+W6.6ey closes the compiler-shaped `Int.ofNat`/`Int.neg` external step.
+`PureIntegerExternalSupported` admits exactly those two names and records only
+source/compiler facts: the production `compileArgs` result, evaluated source
+arguments, exact declaration signature and source response, destination kind,
+and response-sized allocation cost. A general decoder theorem turns the
+compiler-derived physical operand relation into W6 lanes, while named-call
+adapter inversion recovers the numeric declaration call. Whole-export static
+alignment now covers external imports as well as runtime imports, connecting
+the source declaration metadata and ABI signature to the concrete resolver's
+exact host contract.
+
+`externalLetRuntimeRefinesWithCost_pureInteger` composes those facts with the
+reusable `IntegerResultRefines` implementation law. It internally constructs
+the physical operands, import/local indices, request relation, allocation and
+address, concrete response, extended witness, destination write, exact
+source-trace runtime, Talos WP, and residual budget. The contract harness
+checks that none of those target or allocation witnesses appear in the public
+interface. The implementation law is threaded as an installed-host invariant
+because `StateRelated` deliberately ignores host configuration. The next
+slice lifts the existing direct-operation laws through that invariant so
+arbitrary direct and pure-Int steps can use `correctBudgetedSpine` together.
+These proof-facing admission and layout surfaces remain deliberately
+unstable. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

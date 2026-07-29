@@ -333,6 +333,31 @@ example
     implementationRelated requestRelated resultKind semanticCalled budget fits
 
 /--
+The compiler-level pure-Int law is discharged from the whole generated-export
+package and the installed operation-family implementation law. Its interface
+contains no target code, numeric indices, physical operands, concrete
+response, allocation result, or per-program simulation certificate.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureIntegerExternalSupported context externals)
+      (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) :=
+  spec.externalLetRuntimeRefinesWithCost_pureInteger externals
+
+/--
 An arbitrary finite natural-literal spine uses one source-computed budget
 across immediate, promoted-tag, and heap-limb representations.
 -/

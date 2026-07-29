@@ -273,8 +273,14 @@ representation from one source-facing budget. The reusable
 `ConcreteExternalImpl.IntegerResultRefines` law and its budgeted invocation and
 Talos-step theorems now add the exact response, witness extension, related
 runtime/value, and unused headroom without caller-supplied allocation or
-target witnesses. Compiler-shaped `Int.ofNat` and `Int.neg` admission is the
-next layer. This proof-facing surface is intentionally unstable.
+target witnesses. `PureIntegerExternalSupported` admits compiler-shaped
+`Int.ofNat` and `Int.neg`, and
+`externalLetRuntimeRefinesWithCost_pureInteger` reconstructs their argument
+prefix, external import, host contract, allocation, local write, exact source
+trace, and residual budget from production compilation and static resolver
+alignment. Existing direct laws still need the small installed-handler
+invariant lift before arbitrary mixed spines use both families together. This
+proof-facing surface is intentionally unstable.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

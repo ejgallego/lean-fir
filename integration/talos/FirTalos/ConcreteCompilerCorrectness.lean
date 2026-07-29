@@ -348,6 +348,55 @@ theorem ConstructorArgumentsRelated.decodeObjectWords
               fieldsRelated index actualKind value kindAt valueAt
             exact ⟨field, by simpa, fieldRelated⟩
 
+/--
+The ABI-indexed relation produced by `compileArgs` constructively decodes the
+entire Talos operand prefix into W6 lanes. This is the general external-call
+counterpart of `decodeObjectWords`: all supported ABI kinds are retained, and
+the decoded list remains pointwise related to the evaluated source arguments.
+-/
+theorem ConstructorArgumentsRelated.decodePhysicalLanes
+    {witness : RefinementWitness} {kinds : List AbiKind}
+    {physicalArgs : List Wasm.Value} {semanticArgs : List Value}
+    (related :
+      ConstructorArgumentsRelated witness kinds physicalArgs semanticArgs)
+    (start : Nat) :
+    ∃ lanes,
+      FirTalos.Concrete.decodePhysicalLanes start kinds physicalArgs =
+          .ok lanes ∧
+        lanes.length = kinds.length ∧
+        semanticArgs.length = kinds.length ∧
+        ∀ (index : Nat) (kind : AbiKind) (lane : LaneValue) (value : Value),
+          kinds[index]? = some kind →
+          lanes[index]? = some lane →
+          semanticArgs[index]? = some value →
+          ValueRel witness kind lane value := by
+  induction related generalizing start with
+  | nil =>
+      exact ⟨[], by simp [FirTalos.Concrete.decodePhysicalLanes], rfl, rfl, by
+        intro index kind lane value kindAt
+        simp at kindAt⟩
+  | @cons kind physical semantic kinds physicals semanticValues head rest ih =>
+      obtain ⟨headLane, headDecoded, headRelated⟩ :=
+        FirTalos.Concrete.decodePhysicalLane_of_related head
+      obtain ⟨lanes, tailDecoded, lanesLength, semanticLength, lanesRelated⟩ :=
+        ih (start + 1)
+      refine ⟨headLane :: lanes, ?_, by simp [lanesLength],
+        by simp [semanticLength], ?_⟩
+      · simp [FirTalos.Concrete.decodePhysicalLanes, headDecoded, tailDecoded,
+          Bind.bind, Except.bind, pure, Except.pure]
+      · intro index actualKind lane value kindAt laneAt valueAt
+        cases index with
+        | zero =>
+            simp at kindAt laneAt valueAt
+            subst actualKind
+            subst lane
+            subst value
+            exact headRelated
+        | succ index =>
+            simp at kindAt laneAt valueAt
+            exact lanesRelated index actualKind lane value
+              kindAt laneAt valueAt
+
 theorem ConstructorArgsCompiled.append
     {context : Fir.Wasm.Context}
     {leftArgs rightArgs : List (LCNF.Arg .impure)}
@@ -679,6 +728,54 @@ theorem instructions_append_call_eq
         at adapted
       cases callFound :
           callIndex? sourceModule (.runtime operation) with
+      | none =>
+          have impossible :
+              Except.error AdapterError.unknownCallTarget =
+                Except.ok target := by
+            simpa [instructions, instruction, callFound, Functor.map,
+              Except.map, Bind.bind, Except.bind, pure, Except.pure] using
+              adapted
+          contradiction
+      | some callIndex =>
+          have adaptedEq :
+              (Except.ok (targetArguments ++ [.call callIndex]) :
+                Except AdapterError Wasm.Program) =
+                Except.ok target := by
+            simpa [instructions, instruction, callFound, Functor.map,
+              Except.map, Bind.bind, Except.bind, pure, Except.pure] using
+              adapted
+          exact ⟨targetArguments, callIndex, rfl, rfl,
+            (Except.ok.inj adaptedEq).symm⟩
+
+/--
+Invert adaptation of a successfully compiled argument prefix followed by one
+named declaration call. Unlike the runtime-call corollary above, the recovered
+numeric target may denote either an imported external or an internal function;
+the resolver/compiler theorem using this lemma determines which case applies.
+-/
+theorem instructions_append_declaration_call_eq
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {argumentCode : List Fir.Wasm.Instruction}
+    {name : Lean.Name} {target : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels
+          (argumentCode ++ [.call (.declaration name)]) = .ok target) :
+    ∃ targetArguments callIndex,
+      instructions sourceModule sourceFunction labels argumentCode =
+          .ok targetArguments ∧
+        callIndex? sourceModule (.declaration name) = some callIndex ∧
+        target = targetArguments ++ [.call callIndex] := by
+  cases argumentsAdapted :
+      instructions sourceModule sourceFunction labels argumentCode with
+  | error fault =>
+      rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+        at adapted
+      contradiction
+  | ok targetArguments =>
+      rw [FirTalos.Correctness.instructions_append, argumentsAdapted]
+        at adapted
+      cases callFound :
+          callIndex? sourceModule (.declaration name) with
       | none =>
           have impossible :
               Except.error AdapterError.unknownCallTarget =
@@ -2897,6 +2994,70 @@ inductive StringLiteralSupported (context : Fir.Wasm.Context) :
           .ok (.localGet decl.fvarId, .object)) :
       StringLiteralSupported context decl
 
+/-- Exact source request metadata generated when invoking one external
+declaration with an already evaluated argument array. -/
+def declarationExternalRequest (declaration : LCNF.Decl .impure)
+    (args : Array Value) : ExternalRequest := {
+  name := declaration.name
+  paramTypes := declaration.params.map (·.type)
+  resultType := declaration.type
+  args }
+
+/--
+Source/compiler admission for the pure arbitrary-precision integer
+construction family.
+
+The relation admits exactly `Int.ofNat` and `Int.neg`, records their real
+`compileArgs`/`evalArgs` results and source external response, and indexes the
+step by the semantic result's exact heap cost. It contains no adapted program,
+numeric Wasm index, concrete response, allocation result, or refinement
+witness.
+-/
+inductive PureIntegerExternalSupported
+    (context : Fir.Wasm.Context) (externals : ExternalImpl) :
+    RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+      RuntimeState → Value → Nat → Prop where
+  | intro
+      (name : Lean.Name) (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
+      (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
+      (target : LCNF.Decl .impure) (value : Int)
+      (valueEq : decl.value = .fap name args)
+      (operation :
+        name = ``Int.ofNat ∨ name = ``Int.neg)
+      (nonempty : args.isEmpty = false)
+      (targetFound : context.program.findDecl? name = some target)
+      (targetExternal : ∃ metadata, target.value = .extern metadata)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args =
+          .ok (argumentCode, argumentKinds))
+      (argumentsEvaluated :
+        evalArgs sourceEnv args = .ok semanticArgs)
+      (signature :
+        ExternalTypes.signature {
+          params := target.params.map (·.type)
+          result := target.type } =
+            .ok { params := argumentKinds, results := #[.tobject] })
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .tobject))
+      (semanticCalled :
+        externals.call (declarationExternalRequest target semanticArgs)
+            sourceRuntime =
+          .ok (semanticIntegerExternalResponse sourceRuntime value))
+      (nextRuntimeEq :
+        nextRuntime =
+          semanticExternalRuntimeAfter
+            (declarationExternalRequest target semanticArgs) sourceRuntime
+            (semanticIntegerExternalResponse sourceRuntime value))
+      (sourceValueEq :
+        sourceValue =
+          (semanticIntegerExternalResponse sourceRuntime value).value)
+      (stepCostEq : stepCost = integerAllocationBytes value) :
+      PureIntegerExternalSupported context externals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue stepCost
+
 /--
 Static source/compiler admission for a nonempty constructor allocation.
 The relation records only source layout bounds and successful symbolic
@@ -3529,6 +3690,22 @@ def ConcreteBudgetedLocalFrame
       targetLocals witness ∧
     targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes
 
+/--
+Budgeted local-frame invariant for pure integer external spines. In addition
+to the ordinary frame and heap budget, the currently installed concrete
+external implementation satisfies the reusable integer-result family law.
+`replaceRuntime` preserves that implementation field.
+-/
+def ConcreteBudgetedIntegerExternalFrame
+    (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+      sourceEnv targetStore targetLocals witness ∧
+    targetStore.host.externals.IntegerResultRefines externals
+
 theorem ConcreteLocalFrameAligned.validIndex
     {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
@@ -3726,6 +3903,219 @@ def ExternalLetRuntimeRefinesWithCost
         Invariant (remainingBytes - stepCost) nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
           nextWitness
+
+/--
+The production compiler, adapter, concrete resolver, and reusable external
+implementation law jointly discharge the `Int.ofNat`/`Int.neg` step of the
+budgeted structural theorem.
+
+All physical arguments, decoded lanes, the import/local indices, allocation
+address, response, and extended witness are constructed inside the proof.
+-/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureIntegerExternalSupported context externals)
+      (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, value,
+      valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
+      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
+      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (argumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+      targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+  have valueCodeEq :
+      valueCode = argumentCode ++ [.call (.declaration name)] := by
+    rw [expectedCompiled] at valueCompiled
+    exact (Except.ok.inj valueCompiled).symm
+  subst valueCode
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_declaration_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
+      argumentsAdapted argumentsEvaluated stateRelated
+  obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
+      concreteRelated⟩ :=
+    argumentsRelated.decodePhysicalLanes 0
+  have programTargetFound :
+      program.findDecl? name = some declaration := by
+    rw [← spec.contextProgram]
+    exact targetFound
+  obtain ⟨externalOperation, resultKind, imp, operationName,
+      operationMatches, resultSignature, imported, inBounds, contracted,
+      parameterCount, resultCount⟩ :=
+    spec.externalCall programTargetFound targetExternal callFound
+  have operationSignature :
+      externalOperation.signature =
+        { params := argumentKinds, results := #[.tobject] } := by
+    have signatureMatch := operationMatches.signature
+    rw [signature] at signatureMatch
+    exact (Except.ok.inj signatureMatch).symm
+  have resultKindEq : resultKind = .tobject := by
+    have resultAt :=
+      congrArg (fun results : Array AbiKind => results[0]?) resultSignature
+    symm
+    simpa [operationSignature] using resultAt
+  have declarationName : name = declaration.name :=
+    operationName.symm.trans operationMatches.name
+  have requestEq :
+      externalOperation.request semanticArgs =
+        declarationExternalRequest declaration semanticArgs := by
+    simp [ExternalOperation.request, declarationExternalRequest,
+      operationName, declarationName, operationMatches.paramTypes,
+      operationMatches.resultType]
+  have requestRelated :
+      ConcreteExternalRequestRel witness
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        (externalOperation.request semanticArgs) := by
+    refine {
+      name := rfl
+      paramTypes := rfl
+      resultType := rfl
+      paramTypesSize := operationMatches.paramTypesSize
+      paramKindsSize := ?_
+      argsSize := ?_
+      arguments := ?_ }
+    · change externalOperation.signature.params.size = semanticArgs.size
+      rw [operationSignature]
+      simpa using semanticLength.symm
+    · change concreteArgs.toArray.size = semanticArgs.size
+      simpa using concreteLength.trans semanticLength.symm
+    · intro index kind lane semantic kindAt laneAt semanticAt
+      change externalOperation.signature.params[index]? = some kind at kindAt
+      change concreteArgs.toArray[index]? = some lane at laneAt
+      change semanticArgs[index]? = some semantic at semanticAt
+      exact concreteRelated index kind lane semantic
+        (by rw [operationSignature] at kindAt; simpa using kindAt)
+        (by simpa using laneAt) (by simpa using semanticAt)
+  have semanticCalled' :
+      externals.call (externalOperation.request semanticArgs) sourceRuntime =
+        .ok (semanticIntegerExternalResponse sourceRuntime value) := by
+    rw [requestEq]
+    exact semanticCalled
+  have fits : integerAllocationBytes value ≤ remainingBytes := by
+    simpa [stepCostEq] using stepFits
+  have decoded' :
+      decodePhysicalLanes 0 externalOperation.signature.params.toList
+        physicalArgs = .ok concreteArgs := by
+    simpa [operationSignature] using decoded
+  obtain ⟨allocatedHeap, address, allocated, operationStep, _,
+      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget⟩ :=
+    integerExternalStep_of_budget externalOperation resultKind targetStore
+      physicalArgs concreteArgs semanticArgs witness sourceRuntime externals
+      value remainingBytes decoded' stateRelated.1 requestRelated invariant.2
+      resultKindEq semanticCalled' invariant.1.2 fits
+  have resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some (.tobject) := by
+    obtain ⟨actualIndex, actualFound, actualKindAt⟩ :=
+      spec.localsAligned resultCompiled
+    rw [resultFound] at actualFound
+    injection actualFound with indexEq
+    subst actualIndex
+    exact actualKindAt
+  let response :=
+    concreteIntegerExternalResponse targetStore.host.runtime allocatedHeap
+      address
+  let nextStore :=
+    replaceRuntime targetStore
+      (targetStore.host.runtime.applyExternalResponse
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        response)
+  let nextWitness :=
+    witness.bindInteger sourceRuntime.nextLocation address value
+  obtain ⟨updated, targetSet, updatedFrame⟩ :=
+    invariant.1.1.set?
+      (nextRuntime := semanticExternalRuntimeAfter
+        (externalOperation.request semanticArgs) sourceRuntime
+        (semanticIntegerExternalResponse sourceRuntime value))
+      (nextEnv := bind sourceEnv decl.fvarId
+        (semanticIntegerExternalResponse sourceRuntime value).value)
+      (nextStore := nextStore) (nextWitness := nextWitness)
+      (physical := physicalOfLane response.value) resultFound
+  have failureClear : nextStore.host.failure? = none := by
+    simp [nextStore, replaceRuntime, clearFailure]
+  have nextRuntimeRelated' :
+      ConcreteRuntimeRel nextStore.host.runtime nextWitness
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticIntegerExternalResponse sourceRuntime value)) := by
+    simpa [nextStore, nextWitness, response, replaceRuntime, clearFailure] using
+      nextRuntimeRelated
+  have nextStateRelated :
+      StateRelated sourceFunction
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticIntegerExternalResponse sourceRuntime value))
+        (bind sourceEnv decl.fvarId
+          (semanticIntegerExternalResponse sourceRuntime value).value)
+        nextStore updated nextWitness :=
+    stateRelated.bindAfter witnessExtension nextRuntimeRelated' failureClear
+      resultFound resultKindAt
+      (by simpa [resultKindEq, response, nextWitness] using resultRelated)
+      targetSet
+  have parameterCount' : imp.params.length = physicalArgs.length := by
+    calc
+      imp.params.length = externalOperation.signature.params.size :=
+        parameterCount
+      _ = argumentKinds.size := by simp [operationSignature]
+      _ = physicalArgs.length := physicalLength.symm
+  have step :
+      ExternalLetStepSimulates context sourceFunction target.wasmModule
+        hosts.env externals decl continuation
+        (targetArguments ++ [.call callIndex]) sourceRuntime
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticIntegerExternalResponse sourceRuntime value))
+        sourceEnv (semanticIntegerExternalResponse sourceRuntime value).value
+        targetStore nextStore targetLocals updated resultIndex witness
+        nextWitness := by
+    refine ⟨?_, stateRelated, nextStateRelated, ?_⟩
+    · simpa [nextRuntimeEq, sourceValueEq, requestEq] using sourceStep
+    · intro rest Q tail continued
+      simpa [List.append_assoc] using
+        wp_external_ready_let externalOperation resultKind tail
+          argumentsReady imported spec.hostsSatisfy inBounds contracted
+          parameterCount' resultCount operationStep targetSet continued
+  have nextBudget :
+      nextStore.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - integerAllocationBytes value) := by
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteIntegerExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using remainingBudget
+  have nextImplementation :
+      nextStore.host.externals.IntegerResultRefines externals := by
+    change targetStore.host.externals.IntegerResultRefines externals
+    exact invariant.2
+  subst nextRuntime
+  subst sourceValue
+  subst stepCost
+  exact ⟨nextStore, updated, nextWitness, by simpa [requestEq] using step,
+    ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
+      nextImplementation⟩⟩
 
 /-- Uniform runtime laws with the same resource invariant compose by source
 admission disjunction. This is the structural bridge for mixed direct-value

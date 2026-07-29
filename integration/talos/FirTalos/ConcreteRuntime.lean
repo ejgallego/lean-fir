@@ -8970,6 +8970,45 @@ theorem wp_external_let
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
 
+/--
+Concrete-host WP for the complete mixed local/erased argument prefix produced
+by `compileArgs`, followed by one resolved external call and destination write.
+-/
+theorem wp_external_ready_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest targetArguments : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {physicalResult : Wasm.Value}
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (tail : List Wasm.Value)
+    (ready : ConstructorArgsReady locals targetArguments physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (externalContract operation resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operationStep : externalStep operation resultKind initial physicalArgs =
+      .Return [physicalResult] nextStore)
+    (targetSet : locals.set? resultIndex physicalResult = some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module
+      (targetArguments ++ .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply ready.wp
+  apply wp_exact_host_call_of_return
+    (step := externalStep operation resultKind)
+    (physicalArgs := physicalArgs) (results := [physicalResult])
+    hImp hSat hi hContract
+  · simp [hParams]
+  · exact operationStep
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) targetSet continued
+
 /-- Compose one pair of related concrete/source foreign responses through the
 generated external-call prefix and destination-local write. The source call,
 concrete call, and response relation remain explicit contractual premises. -/
