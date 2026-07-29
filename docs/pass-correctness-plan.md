@@ -904,6 +904,15 @@ deleted `.fvar` is necessarily the runtime-neutral nullary copy, so the source
 steps while the target stutters and retains the incoming ledger. Exact
 retained/deleted wrappers expose the whole family to the future dispatcher.
 
+Retained object-field projections now preserve the ledger as well. A generic
+retained runtime-neutral let matcher separates the shared paired bind/control
+step from each operation's local evaluation proof. The object specialization
+transports a successful related field lookup, publishes the selected child as
+a continuation root, and proves that the unchanged target runtime keeps the
+same allocation frontier. Deleted object projections reuse the generic
+source-step/target-stutter rule. Exact retained/deleted wrappers and a focused
+compiler-view consumer exercise both interfaces.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -982,8 +991,9 @@ its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer, plus retained/deleted local-value
-applications. It still has to be threaded through retained projections, the
-remaining invocation steps, existing-address mutations, and
+applications and object-field projections. It still has to be threaded
+through retained `USize`/scalar projections and unboxing/ownership queries,
+the remaining invocation steps, existing-address mutations, and
 allocation-capable external responses, then assembled into the unified
 non-lockstep dispatcher and compiler-client invariant so arbitrary selected
 edges receive that history rather than only focused fixtures.
@@ -1027,9 +1037,10 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through retained projections, invocation steps, and
-   the existing-address matcher families. Strengthen the foreign-response
-   boundary when an external response allocates, then
+1. Preserve the ledger through retained `USize`/scalar projections,
+   unboxing/ownership queries, invocation steps, and the existing-address
+   matcher families. Strengthen the foreign-response boundary when an
+   external response allocates, then
    assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
