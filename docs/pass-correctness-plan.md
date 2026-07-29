@@ -980,7 +980,14 @@ Retained constructor-tag updates now use the same existing-address argument.
 runtime mutation; `match_setTagCodeStep_binderReady_ledger` and
 `ExactShadowCodeBinderReady.match_setTagStep_ledger` carry it through the
 semantic and exact-view boundaries. This slice is integrated at `a70955fd`.
-Reference-count, recursive deletion, and general reset/reuse updates remain.
+
+Reference-count increments and retained nonrecursive deletes now preserve the
+ledger as well. Persistent increments are runtime-neutral administrative
+steps; ordinary increments replace one existing live cell; delete either
+accepts the erased sentinel without a runtime change or marks one existing
+live cell dead. Frontier lemmas, paired core rules, hereditary semantic
+matchers, and exact-view wrappers cover these cases at `7fca313f`. Recursive
+decrement/release and general reset/reuse updates remain.
 
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
@@ -1064,7 +1071,7 @@ applications, all three layout-field projection families, unboxing, and
 ownership queries, as well as named and closure external-request suspension.
 It now also covers retained/deleted object, `USize`, and scalar writes plus
 retained constructor-tag updates. The remaining existing-address work is
-reference-count/deletion and general reset/reuse matching;
+recursive decrement/release and general reset/reuse matching;
 allocation-capable external responses remain separate. Those families must
 then be assembled into the unified non-lockstep dispatcher and compiler-client
 invariant so arbitrary selected edges receive that history rather than only
@@ -1109,7 +1116,7 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Finish ledger preservation for reference-count/deletion and general
+1. Finish ledger preservation for recursive decrement/release and general
    reset/reuse matcher families. Strengthen the foreign-response boundary when
    a response allocates, then assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
