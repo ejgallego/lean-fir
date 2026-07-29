@@ -3802,6 +3802,28 @@ proof-facing cost classification is a workable, deliberately unstable
 boundary rather than a compatibility promise. No FIR semantic contract or
 executable ABI changed.
 
+W6.6ev opens the indexed structural theorem to real external-call spines.
+Lean 4.32 LCNF deliberately has no `Int` literal constructor: source integer
+constants are ordinary calls such as `Int.ofNat` and `Int.neg`, so treating
+them as another literal family would prove the wrong compiler boundary.
+`BudgetedSpineEvaluates` instead interleaves direct source-value steps with
+the interpreter's exact three-step external protocol and carries the required
+wasm32 budget as a source-execution index. Direct nodes retain
+`directLetAllocationCost`; an external node supplies a dynamic Nat cost
+because an arbitrary-precision `Nat`, `Int`, or `String` result size may
+depend on the actual response. `ExternalLetRuntimeRefinesWithCost` is the
+corresponding reusable operation-family law.
+`codeWP_of_budgetedSpineEvaluates` inverts the production compiler/adapter and
+dispatches to the direct or external law at every node, while
+`correctBudgetedSpine` packages the matching executable source observation
+(including exact external trace insertion) and fuel-free concrete export
+termination. The contract harness confirms that neither interface contains a
+target body, numeric Wasm index, concrete response, or per-program simulation
+certificate. The next slice instantiates this framework for pure integer
+construction calls, starting from constructive heap-Int allocation capacity.
+The cost and admission relations remain deliberately unstable. No FIR
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

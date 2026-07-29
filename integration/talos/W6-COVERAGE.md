@@ -76,6 +76,15 @@ Cross-cutting W6.5 state:
   `ConcreteSupportedExport.correctBudgetedDirect` closes this fragment at the
   named-export boundary, pairing executable source evaluation with fuel-free
   concrete Wasm termination under `RefinedReturnPost`.
+  `BudgetedSpineEvaluates` and
+  `codeWP_of_budgetedSpineEvaluates` generalize the same induction to mixed
+  direct/external spines. External nodes use the interpreter's exact
+  three-step request/resume/bind protocol and a source-execution cost index,
+  which can express response-dependent arbitrary-precision allocation.
+  `correctBudgetedSpine` packages exact source trace execution and concrete
+  export termination from reusable direct/external runtime laws. No concrete
+  pure-Int call family is admitted by this framework slice yet; `Int.ofNat`
+  and `Int.neg` are the next instances.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

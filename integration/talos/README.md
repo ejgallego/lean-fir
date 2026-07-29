@@ -257,6 +257,19 @@ result at the named-export boundary: successful finite source evaluation and
 one initial budget imply the matching executable source observation and
 fuel-free concrete Wasm termination under `RefinedReturnPost`, with no
 translation certificate or target-level witnesses.
+The next structural layer covers external calls without inventing an `Int`
+literal that Lean 4.32 LCNF does not have. `BudgetedSpineEvaluates` mixes
+direct lets with each exact three-step source external protocol and indexes
+the path by its required allocation budget. Direct costs remain
+syntax-computed; external result costs are source-execution indices because
+arbitrary-precision result size can depend on the response.
+`ExternalLetRuntimeRefinesWithCost`,
+`codeWP_of_budgetedSpineEvaluates`, and
+`ConcreteSupportedExport.correctBudgetedSpine` then compose reusable external
+operation-family theorems with the production compiler/adapter and preserve
+the source's exact trace. Pure `Int.ofNat`/`Int.neg` construction is the first
+planned concrete instance. This proof-facing surface is intentionally
+unstable.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

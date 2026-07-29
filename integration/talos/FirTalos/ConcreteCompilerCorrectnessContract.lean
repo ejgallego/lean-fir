@@ -532,6 +532,71 @@ example
     parameterCount
 
 /--
+The mixed direct/external endpoint is also certificate-free. External result
+allocation is represented by the source evaluation's Nat cost index, while
+the reusable external runtime law supplies the implementation proof for the
+admitted operation family. The public application contains no target body,
+numeric Wasm index, concrete response, or per-node simulation witness.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (directRuntimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+        target.wasmModule hosts.env DirectSupported directCost
+        (ConcreteBudgetedLocalFrame sourceFunction))
+    (externalRuntimeRefines :
+      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+        target.wasmModule hosts.env externals ExternalSupported
+        (ConcreteBudgetedLocalFrame sourceFunction))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedSpine evaluation stateRelated frameAligned budget
+    directRuntimeRefines externalRuntimeRefines parameterCount
+
+/--
 The recursive direct-`let` API is likewise certificate-free: its only
 recursive premise is correctness of the compiler-selected continuation.
 -/

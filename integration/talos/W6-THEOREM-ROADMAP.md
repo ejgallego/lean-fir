@@ -148,6 +148,16 @@ unstable implementation boundary.
 structural `CodeWP` into the public named-export statement: finite source
 evaluation plus one source-path budget implies the matching source observation
 and fuel-free concrete Wasm termination under `RefinedReturnPost`.
+Lean 4.32 LCNF has no `Int` literal constructor, so integer construction enters
+the next layer as ordinary external calls. `BudgetedSpineEvaluates` mixes
+direct steps with exact three-step external source executions and carries a
+Nat budget index; response-dependent external result allocation is therefore
+expressible without target evidence. `ExternalLetRuntimeRefinesWithCost` is
+the reusable implementation-law boundary, while
+`codeWP_of_budgetedSpineEvaluates` and `correctBudgetedSpine` reconstruct the
+compiler/adapter body and preserve exact external traces across arbitrary
+mixed spines. Concrete `Int.ofNat`/`Int.neg` instances remain the next proof
+slice.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

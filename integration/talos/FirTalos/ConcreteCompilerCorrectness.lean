@@ -2714,6 +2714,122 @@ theorem DirectValueEvaluates.execEvaluates
   evaluation.toCodeEvaluates.execEvaluates externals
 
 /--
+Successful source evaluation for a mixed direct/external `let` spine,
+indexed by the wasm32 allocation budget required along that execution.
+
+Direct declarations retain their syntax-computed cost. An external
+declaration carries a source-facing dynamic cost because the size of a pure
+`Nat`, `Int`, or `String` result need not be determined by the declaration
+alone. `ExternalSupported` may inspect the exact source step and result, but
+neither it nor this relation contains target code, numeric Wasm indices, or a
+translation witness.
+-/
+inductive BudgetedSpineEvaluates (context : Fir.Wasm.Context)
+    (externals : ExternalImpl)
+    (DirectSupported : LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (directCost : LCNF.LetDecl .impure → Nat) :
+    RuntimeState → Env → LCNF.Code .impure → RuntimeState → Value → Nat → Prop where
+  | ret
+      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv (.return result)
+        sourceRuntime sourceValue 0
+  | letValue
+      (supported : DirectSupported decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (continued :
+        BudgetedSpineEvaluates context externals DirectSupported
+          ExternalSupported directCost nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation
+          resultRuntime resultValue continuationCost) :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv
+        (.let decl continuation) resultRuntime resultValue
+        (directCost decl + continuationCost)
+  | externalLet
+      (supported :
+        ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost)
+      (sourceStep :
+        SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (continued :
+        BudgetedSpineEvaluates context externals DirectSupported
+          ExternalSupported directCost nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation
+          resultRuntime resultValue continuationCost) :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv
+        (.let decl continuation) resultRuntime resultValue
+        (stepCost + continuationCost)
+
+/-- The indexed mixed-spine evaluation is an actual finite execution of the
+repository source interpreter, including each complete three-step external
+protocol and its exact trace insertion. -/
+theorem BudgetedSpineEvaluates.execEvaluates
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue requiredBytes) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) := by
+  induction evaluation with
+  | ret sourceLookup =>
+      exact (CodeEvaluates.ret sourceLookup).execEvaluates externals
+  | letValue _ sourceStep _ ih =>
+      exact sourceLetResult_thenExecEvaluates sourceStep ih
+  | externalLet _ sourceStep _ ih =>
+      exact sourceExternalLetResult_thenExecEvaluates sourceStep ih
+
+/-- The previous direct-only source relation embeds into the mixed indexed
+relation with the exact existing `DirectValuePathCost`. -/
+theorem DirectValueEvaluates.toBudgetedSpineEvaluates
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    (evaluation :
+      DirectValueEvaluates context DirectSupported sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue) :
+    BudgetedSpineEvaluates context externals DirectSupported ExternalSupported
+      directCost sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+      (DirectValuePathCost directCost sourceCode) := by
+  induction evaluation with
+  | ret sourceLookup =>
+      simpa [DirectValuePathCost] using
+        (BudgetedSpineEvaluates.ret (externals := externals)
+          (ExternalSupported := ExternalSupported)
+          (directCost := directCost) sourceLookup)
+  | letValue supported sourceStep _ ih =>
+      simpa [DirectValuePathCost] using
+        (BudgetedSpineEvaluates.letValue supported sourceStep ih)
+
+/--
 Static admission for a direct local alias.
 
 The declaration copies an existing local without applying it, and source and
@@ -3551,6 +3667,63 @@ def DirectLetRuntimeRefinesWithCost
           sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
           targetLocals nextLocals resultIndex witness nextWitness ∧
         Invariant (remainingBytes - letCost decl) nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+          nextWitness
+
+/--
+Resource-indexed external-`let` runtime law.
+
+Unlike a direct declaration, a pure external may allocate a result whose size
+depends on the actual source response. `ExternalSupported` therefore carries
+the step cost as an execution index. The law still inverts and executes the
+production compiler/adapter prefix; it does not accept target instructions,
+numeric indices, or a per-program simulation certificate.
+-/
+def ExternalLetRuntimeRefinesWithCost
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (externals : ExternalImpl)
+    (ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes stepCost : Nat}
+      {witness : RefinementWitness},
+    ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      stepCost ≤ remainingBytes →
+      Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness →
+      SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness,
+        ExternalLetStepSimulates context sourceFunction module hostEnv externals
+          decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+          sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+          witness nextWitness ∧
+        Invariant (remainingBytes - stepCost) nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
           nextWitness
 
@@ -5203,6 +5376,240 @@ theorem codeWP_of_directValueEvaluates_withCost
         codeWP_letValue valueCompiled valueAdapted resultFound step
           continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
+
+/--
+Cost-indexed structural partial correctness for mixed direct and external
+`let` spines.
+
+The source evaluation supplies the exact external-call protocol and a
+source-facing allocation-cost index for each foreign result. The two uniform
+runtime laws discharge whole operation families. Compiler code, adapted
+instructions, local/import indices, concrete responses, and continuation
+splits are all reconstructed inside this induction.
+-/
+theorem codeWP_of_budgetedSpineEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant :
+      Invariant requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (directRuntimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv DirectSupported directCost Invariant)
+    (externalRuntimeRefines :
+      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+        labels module hostEnv externals ExternalSupported Invariant)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing target initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst target
+      exact ⟨initial, witness, kind, physical,
+        codeWP_return_to_exactBodyPost
+          (callerTail := callerTail) localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup parameterCount resultCount,
+        stateRelated.1, stateRelated.2.1, valueRelated⟩
+  | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
+      continuation _ _ continuationCost supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          directCost decl ≤ directCost decl + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+        directRuntimeRefines supported stepFits invariant sourceStep stateRelated
+          valueCompiled valueAdapted resultFound
+      have continuationInvariant :
+          Invariant continuationCost letNextRuntime
+            (bind letSourceEnv decl.fvarId letSourceValue)
+            nextStore nextLocals nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 continuationInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+  | @externalLet externalSourceRuntime externalSourceEnv decl continuation
+      externalNextRuntime externalSourceValue stepCost _ _ continuationCost
+      supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ stepCost + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+        externalRuntimeRefines supported stepFits invariant sourceStep
+          stateRelated valueCompiled valueAdapted resultFound
+      have continuationInvariant :
+          Invariant continuationCost externalNextRuntime
+            (bind externalSourceEnv decl.fvarId externalSourceValue)
+            nextStore nextLocals nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 continuationInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_externalLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+
+/--
+Whole-export partial correctness for a mixed budgeted direct/external spine.
+
+The operation-family runtime laws are reusable semantic implementation
+theorems, not per-program certificates. The source evaluation and its cost
+index determine the path; the production compiler and adapter determine the
+target body.
+-/
+theorem ConcreteSupportedExport.correctBudgetedSpine
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (directRuntimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+        target.wasmModule hosts.env DirectSupported directCost
+        (ConcreteBudgetedLocalFrame sourceFunction))
+    (externalRuntimeRefines :
+      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+        target.wasmModule hosts.env externals ExternalSupported
+        (ConcreteBudgetedLocalFrame sourceFunction))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+      resultRuntimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedSpineEvaluates
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned stateRelated
+      ⟨frameAligned, budget⟩ directRuntimeRefines externalRuntimeRefines
+      parameterCount spec.singleResult
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultRuntimeRelated, failureClear, valueRelated, rfl⟩
 
 /--
 Whole-export partial correctness for the current budgeted direct-value
