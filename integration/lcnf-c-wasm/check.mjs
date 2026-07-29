@@ -1,6 +1,12 @@
 import { readFile } from "node:fs/promises";
 import { performance } from "node:perf_hooks";
 
+import {
+  asUInt64,
+  expectedMix,
+  mask,
+} from "./reference.mjs";
+
 const wasmPath = process.argv[2];
 if (wasmPath === undefined) {
   throw new Error("usage: node check.mjs <Smoke.wasm>");
@@ -12,40 +18,6 @@ const { fir_lcnf_c_affine: affine, fir_lcnf_c_mix: mix } = instance.exports;
 
 if (typeof affine !== "function" || typeof mix !== "function") {
   throw new Error("expected fir_lcnf_c_affine and fir_lcnf_c_mix exports");
-}
-
-const mask = (1n << 64n) - 1n;
-const multiplier = 6364136223846793005n;
-const increment = 1442695040888963407n;
-
-function asUInt64(value) {
-  return value & mask;
-}
-
-function compose(lhs, rhs) {
-  return {
-    multiplier: (lhs.multiplier * rhs.multiplier) & mask,
-    increment:
-      (lhs.multiplier * rhs.increment + lhs.increment) & mask,
-  };
-}
-
-function expectedMix(rounds, seed) {
-  let accumulated = { multiplier: 1n, increment: 0n };
-  let power = { multiplier, increment };
-  let remaining = rounds;
-
-  while (remaining !== 0n) {
-    if ((remaining & 1n) !== 0n) {
-      accumulated = compose(power, accumulated);
-    }
-    power = compose(power, power);
-    remaining >>= 1n;
-  }
-
-  return (
-    accumulated.multiplier * seed + accumulated.increment
-  ) & mask;
 }
 
 const affineCases = [
