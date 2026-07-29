@@ -293,3 +293,24 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled cache module: {repr error}"
+  let numericArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeNumeric cacheArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident styled numeric module: {repr error}"
+  unless numericArtifact.module.imports.size == 14 do
+    throwError "resident styled Format numeric frontier changed"
+  unless Fir.Wasm.Emit.ResidentNumeric.externalHelperNames.all
+      numericArtifact.module.exports.contains do
+    throwError "resident styled numeric helper exports changed"
+  unless numericArtifact.module.closureDispatch ==
+      cacheArtifact.module.closureDispatch &&
+      numericArtifact.module.closureDescriptors ==
+        cacheArtifact.module.closureDescriptors &&
+      numericArtifact.formattedLcnf == cacheArtifact.formattedLcnf do
+    throwError "resident styled numeric linking changed source or closure metadata"
+  match ← numericArtifact.write
+      "_build/source-pretty-format-trace-resident-numeric.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident styled numeric module: {repr error}"

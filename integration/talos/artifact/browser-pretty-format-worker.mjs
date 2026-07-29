@@ -30,6 +30,9 @@ import {
 import {
   checkFetchedResidentCache,
 } from "./resident-cache-client.mjs";
+import {
+  checkFetchedResidentNumeric,
+} from "./resident-numeric-client.mjs";
 import { checkFetchedConcretePrettyFormat } from "./fetch-concrete-pretty-format.mjs";
 import {
   checkFetchedConcretePrettyFormatTrace,
@@ -61,6 +64,7 @@ try {
     checkFetchedResidentIncrements("./_build/resident-increments.wasm"),
     checkFetchedResidentReleases("./_build/resident-releases.wasm"),
     checkFetchedResidentCache("./_build/resident-cache.wasm"),
+    checkFetchedResidentNumeric("./_build/resident-numeric.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-get-tag.wasm",
@@ -92,6 +96,12 @@ try {
     checkFetchedConcretePrettyFormat(
       "./_build/source-pretty-format-resident-cache.wasm",
     ),
+    checkFetchedConcretePrettyFormat(
+      "./_build/source-pretty-format-resident-numeric.wasm",
+    ),
+    checkFetchedResidentNumeric(
+      "./_build/source-pretty-format-resident-numeric.wasm",
+    ),
     checkFetchedConcretePrettyFormatTrace(
       "./_build/source-pretty-format-trace-resident-increments.wasm",
     ),
@@ -103,6 +113,12 @@ try {
     ),
     checkFetchedConcretePrettyFormatTrace(
       "./_build/source-pretty-format-trace-resident-cache.wasm",
+    ),
+    checkFetchedConcretePrettyFormatTrace(
+      "./_build/source-pretty-format-trace-resident-numeric.wasm",
+    ),
+    checkFetchedResidentNumeric(
+      "./_build/source-pretty-format-trace-resident-numeric.wasm",
     ),
     checkFetchedResidentGetTag("./_build/resident-get-tag.wasm"),
     checkFetchedResidentIsShared("./_build/resident-is-shared.wasm"),

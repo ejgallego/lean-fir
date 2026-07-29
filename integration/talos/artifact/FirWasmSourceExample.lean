@@ -590,6 +590,29 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident cache Format module: {repr error}"
+  let residentNumericArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeNumeric
+        residentCacheArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to compile resident numeric Format facade: {repr error}"
+  unless residentNumericArtifact.module.imports.size == 14 do
+    throwError "resident Format numeric frontier changed"
+  unless Fir.Wasm.Emit.ResidentNumeric.externalHelperNames.all
+      residentNumericArtifact.module.exports.contains do
+    throwError "resident Format numeric helper exports changed"
+  unless residentNumericArtifact.module.closureDispatch ==
+      residentCacheArtifact.module.closureDispatch &&
+      residentNumericArtifact.module.closureDescriptors ==
+        residentCacheArtifact.module.closureDescriptors &&
+      residentNumericArtifact.formattedLcnf ==
+        residentCacheArtifact.formattedLcnf do
+    throwError "resident numeric linking changed source or closure metadata"
+  match ← residentNumericArtifact.write
+      "_build/source-pretty-format-resident-numeric.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write resident numeric Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

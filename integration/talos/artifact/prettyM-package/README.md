@@ -83,7 +83,7 @@ the final zero-function-import W7 artifact. It owns a `WebAssembly.Memory`,
 starts its private frontier at byte 1024, and exports low-level
 `fir_heap_frontier`, `fir_heap_set_frontier`, `fir_heap_alloc`, and typed raw
 store operations. The accompanying `runtime/` tree supplies the current
-concrete JavaScript implementations of the remaining 24 function imports.
+concrete JavaScript implementations of the remaining 14 function imports.
 All 27 constructor-allocation operations, all four immediate-Natural literal
 operations, all 87 closure-allocation operations, all ten direct
 constructor-setter operations, and all four nonrecursive reference-count
@@ -94,7 +94,11 @@ inside the module. The styling-only fixed constructor-tag mutation is resident
 as well. All 21 lazy-cache publication operations are resident too: their
 reachable constructor and closure graphs are marked persistent recursively in
 Wasm while the compiler-generated module globals continue to own the cached
-physical lanes. The package therefore retains 24 function imports.
+physical lanes. The ten Nat/Int operations reachable from `prettyM` are also
+resident for canonical immediate and one-limb W6 numeric values, including the
+signed 32-bit representation transitions and full 64-bit magnitudes.
+Multi-limb numeric inputs remain explicitly fail-closed pending the recursive
+limb extension. The package therefore retains 14 function imports.
 The standalone
 resident literal module also covers UTF-8 strings, but the four String imports
 remain until their JavaScript-consuming externals move into Wasm. While other

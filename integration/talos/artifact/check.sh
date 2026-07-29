@@ -40,6 +40,9 @@ node run-resident-releases.mjs _build/resident-releases.wasm
 lake exe fir-wasm-artifact resident-cache \
   _build/resident-cache.wasm
 node run-resident-cache.mjs _build/resident-cache.wasm
+lake exe fir-wasm-artifact resident-numeric \
+  _build/resident-numeric.wasm
+node run-resident-numeric.mjs _build/resident-numeric.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
@@ -89,6 +92,7 @@ resident_pretties=(
   "source-pretty-format-resident-increments"
   "source-pretty-format-resident-releases"
   "source-pretty-format-resident-cache"
+  "source-pretty-format-resident-numeric"
   "source-pretty-format-trace-resident-constructors"
   "source-pretty-format-trace-resident-naturals"
   "source-pretty-format-trace-resident-partial-applications"
@@ -97,6 +101,7 @@ resident_pretties=(
   "source-pretty-format-trace-resident-releases"
   "source-pretty-format-trace-resident-tag-setters"
   "source-pretty-format-trace-resident-cache"
+  "source-pretty-format-trace-resident-numeric"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -146,6 +151,8 @@ cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-releases.wasm.lcnf
 cmp _build/source-pretty-format-resident-releases.wasm.lcnf \
   _build/source-pretty-format-resident-cache.wasm.lcnf
+cmp _build/source-pretty-format-resident-cache.wasm.lcnf \
+  _build/source-pretty-format-resident-numeric.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-naturals.wasm.lcnf \
   _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf \
@@ -158,6 +165,8 @@ cmp _build/source-pretty-format-trace-resident-releases.wasm.lcnf \
   _build/source-pretty-format-trace-resident-tag-setters.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-tag-setters.wasm.lcnf \
   _build/source-pretty-format-trace-resident-cache.wasm.lcnf
+cmp _build/source-pretty-format-trace-resident-cache.wasm.lcnf \
+  _build/source-pretty-format-trace-resident-numeric.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
@@ -175,7 +184,13 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-trace-resident-releases.wasm \
   _build/source-pretty-format-trace-resident-tag-setters.wasm \
   _build/source-pretty-format-resident-cache.wasm \
-  _build/source-pretty-format-trace-resident-cache.wasm
+  _build/source-pretty-format-trace-resident-cache.wasm \
+  _build/source-pretty-format-resident-numeric.wasm \
+  _build/source-pretty-format-trace-resident-numeric.wasm
+node run-resident-numeric.mjs \
+  _build/source-pretty-format-resident-numeric.wasm
+node run-resident-numeric.mjs \
+  _build/source-pretty-format-trace-resident-numeric.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -302,6 +317,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-releases.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-cache.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-numeric.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -412,6 +429,13 @@ lake exe fir-wasm-artifact resident-cache \
 cmp "$first/resident/cache.wasm" "$second/resident/cache.wasm"
 cmp "$first/resident/cache.wasm.json" \
   "$second/resident/cache.wasm.json"
+lake exe fir-wasm-artifact resident-numeric \
+  "$first/resident/numeric.wasm"
+lake exe fir-wasm-artifact resident-numeric \
+  "$second/resident/numeric.wasm"
+cmp "$first/resident/numeric.wasm" "$second/resident/numeric.wasm"
+cmp "$first/resident/numeric.wasm.json" \
+  "$second/resident/numeric.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

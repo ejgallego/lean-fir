@@ -5,6 +5,7 @@ import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
+import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
@@ -151,6 +152,20 @@ def internalizeCacheSets (artifact : Source.ModuleArtifact) :
     | .error error =>
         throw (.manifest
           s!"failed to internalize resident lazy-cache publication: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+def internalizeNumeric (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentNumeric.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident Nat/Int operations: {repr error}")
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
@@ -317,9 +332,19 @@ def compileCacheModule (entry : Name) :
   let result ← compileTagSetterModule entry
   return result.bind internalizeCacheSets
 
+/--
+Continue from lazy-cache publication and internalize the ten Nat/Int
+operations reachable from `prettyM`. The current generation helper covers
+canonical immediates and canonical one-limb W6 numeric objects; multi-limb
+numeric inputs trap explicitly pending the recursive-limb extension.
+-/
+def compileNumericModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) :=
+  return (← compileCacheModule entry).bind internalizeNumeric
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileCacheModule entry
+  compileNumericModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

@@ -108,6 +108,9 @@ node run-resident-releases.mjs _build/resident-releases.wasm
 lake exe fir-wasm-artifact resident-cache \
   _build/resident-cache.wasm
 node run-resident-cache.mjs _build/resident-cache.wasm
+lake exe fir-wasm-artifact resident-numeric \
+  _build/resident-numeric.wasm
+node run-resident-numeric.mjs _build/resident-numeric.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -623,6 +626,17 @@ now have 24 function imports, with final LCNF and both closure tables unchanged.
 The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24`.
 
+The next checkpoint internalizes the ten Nat/Int declarations reachable from
+`prettyM`: `Nat.add`, `Nat.sub`, the three Nat decisions, `Int.ofNat`,
+`Int.natAbs`, `Int.add`, `Int.sub`, and `Int.decLt`. The resident helpers cover
+canonical wasm32 immediates plus canonical one-limb W6 Natural/Integer
+objects, preserving signed transitions and 64-bit magnitudes. Overflow and
+multi-limb inputs trap rather than wrap; recursive limb arithmetic remains a
+follow-up before this helper family can claim an unbounded contract. Plain and
+styled artifacts both advance from 24 to 14 function imports without changing
+final LCNF or closure metadata. The text audit is now
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
 self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
@@ -637,7 +651,7 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 24 function imports, the same frontier
+memory and allocator and currently has 14 function imports, the same frontier
 as the text-only checkpoint while preserving the exact `MonadPrettyFormat`
 output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
