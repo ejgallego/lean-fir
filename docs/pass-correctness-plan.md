@@ -886,6 +886,15 @@ paired return step. Since neither runtime changes, the exact target frontier
 and owner history are carried unchanged. The exact return view exposes this
 rule without retaining the consumed active graph.
 
+Case selection now preserves the ledger through its complete successful
+control path. The hereditary proof relates discriminator lookup, tag
+extraction, and alternative choice, then takes one paired step into the
+selected exact alternative. Faulting lookup/tag and missing-alternative
+branches are terminal and cannot inhabit the semantic-step premise. Since
+successful selection changes only control, the target frontier and owner
+ledger are unchanged; the exact case view supplies the related alternative
+table directly.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -964,9 +973,9 @@ its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer. It still has to be threaded through
-retained copies/projections and local-value applications, case and invocation
-steps, existing-address mutations, and allocation-capable external responses,
-then assembled into the unified non-lockstep dispatcher and compiler-client
+retained copies/projections and local-value applications, invocation steps,
+existing-address mutations, and allocation-capable external responses, then
+assembled into the unified non-lockstep dispatcher and compiler-client
 invariant so arbitrary selected edges receive that history rather than only
 focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
@@ -1010,7 +1019,7 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Preserve the ledger through retained copies/projections, local-value
-   applications, case and invocation steps, and the existing-address matcher
+   applications, invocation steps, and the existing-address matcher
    families. Strengthen the foreign-response boundary when an external
    response allocates, then
    assemble the unified
