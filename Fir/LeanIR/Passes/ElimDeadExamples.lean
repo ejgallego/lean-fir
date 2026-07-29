@@ -1111,6 +1111,31 @@ theorem closedConcreteReuseShadowRun :
     collectLetValue, collectArgs, collectArgList, collectArg,
     liveMember, objectAbsent, tokenAbsent, argumentAbsent, deadAbsent]
 
+/-- The checked policy accepts the complete one-cell reset/reuse chain. -/
+theorem closedConcreteReuseCheckedRun :
+    nullarySafeShadowCode? 6 {} closedConcreteReuseBefore =
+      some (closedConcreteReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have objectAbsent :
+      resetObjectVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedConcreteReuseBefore, closedConcreteReuseAfter,
+    closedConcreteReuseObjectDecl, closedConcreteReuseTokenDecl,
+    closedReuseAfter, closedReuseArgDecl, closedReuseLiveDecl,
+    deadReuseDecl, letDecl, neutralUsed, nullarySafeShadowCode?,
+    safeToElim, isNullaryFap,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, objectAbsent, tokenAbsent, argumentAbsent, deadAbsent]
+
 theorem closedOwnedReuseShadowRun :
     shadowCode? 7 {} closedOwnedReuseBefore =
       some (closedOwnedReuseAfter, neutralUsed) := by
@@ -1135,6 +1160,37 @@ theorem closedOwnedReuseShadowRun :
     closedOwnedReuseTokenDecl, closedReuseAfter,
     closedReuseArgDecl, closedReuseLiveDecl,
     deadReuseDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, childAbsent, objectAbsent, tokenAbsent,
+    argumentAbsent, deadAbsent]
+
+/-- The checked policy also accepts recursive child release followed by
+concrete-token reuse. -/
+theorem closedOwnedReuseCheckedRun :
+    nullarySafeShadowCode? 7 {} closedOwnedReuseBefore =
+      some (closedOwnedReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have childAbsent :
+      resetChildVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have objectAbsent :
+      resetObjectVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedOwnedReuseBefore, closedOwnedReuseAfter,
+    closedOwnedReuseChildDecl, closedOwnedReuseObjectDecl,
+    closedOwnedReuseTokenDecl, closedReuseAfter,
+    closedReuseArgDecl, closedReuseLiveDecl,
+    deadReuseDecl, letDecl, neutralUsed, nullarySafeShadowCode?,
+    safeToElim, isNullaryFap,
     collectLetValue, collectArgs, collectArgList, collectArg,
     liveMember, childAbsent, objectAbsent, tokenAbsent,
     argumentAbsent, deadAbsent]
@@ -8520,26 +8576,50 @@ theorem closedConcreteReuseTargetReachable_of_reaches
           (closedConcreteReuseTargetReachable_step ready head)
   exact preserves steps .entry
 
+/-- Exact ownership contract for the one-cell reset/reuse branch. -/
+def closedConcreteReuseExactOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadExactOwnershipContract externals 6
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    ClosedConcreteReuseSourceReachable sourceArguments source ∧
+      ClosedConcreteReuseTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments _argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact ⟨.entry, .entry⟩
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨closedConcreteReuseSourceReachable_step
+      sourceReachable step, targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      closedConcreteReuseTargetReachable_step
+        targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ related
+    exact closedConcreteReuseSourceReachable_pairReady
+      sourceReachable
+      (closedConcreteReuseTargetReachable_runtimeShape
+        targetReachable)
+      related
+
 theorem closedConcreteReuseExactRuntimeOwnershipInitialInvariant
     (externals : ExternalSpec) :
     ReachableInitialInvariantOn
       (BinderReadyExactRuntimeOwnershipInvariant externals 6)
       closedConcreteReuseBeforeProgram
-      closedConcreteReuseAfterProgram #[`main] := by
-  intro entry member sourceArguments targetArguments argumentsRelated
-  have entryEq : entry = `main := by
-    simpa using member
-  subst entry
-  intro sourceAfter targetAfter sourcePath targetPath related
-  have sourceReachable :=
-    closedConcreteReuseSourceReachable_of_reaches sourcePath
-  have targetReachable :=
-    closedConcreteReuseTargetReachable_of_reaches targetPath
-  exact closedConcreteReuseSourceReachable_pairReady
-    sourceReachable
-    (closedConcreteReuseTargetReachable_runtimeShape
-      targetReachable)
-    related
+      closedConcreteReuseAfterProgram #[`main] :=
+  (closedConcreteReuseExactOwnershipContract externals).initialInvariant
 
 theorem closedConcreteReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed
@@ -8583,6 +8663,27 @@ theorem closedConcreteReuseShadowProgramRun :
     closedConcreteReuseAfterProgram,
     fixtureDecl, decl, closedConcreteReuseShadowRun]
 
+/-- Checked whole-program reset/reuse result. -/
+theorem closedConcreteReuseCheckedProgramRun :
+    nullarySafeShadowProgram? 6 closedConcreteReuseBeforeProgram =
+      some closedConcreteReuseAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, closedConcreteReuseBeforeProgram,
+    closedConcreteReuseAfterProgram, fixtureDecl, decl,
+    closedConcreteReuseCheckedRun]
+
+/-- Strict compiler package for the one-cell concrete-token branch. -/
+theorem closedConcreteReuseCompilerAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadCompilerAdmissibleRun externals 6
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] :=
+  ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    closedConcreteReuseBeforeProgramElimDeadWellFormed
+    closedConcreteReuseCheckedProgramRun
+    (.ofExact
+      (closedConcreteReuseExactOwnershipContract externals))
+
 /-- Whole-program semantic correctness for the closed concrete-token branch.
 The source allocates, resets, and reuses one compiler-owned cell; the target
 omits the entire dead suffix while preserving every observable root. -/
@@ -8595,11 +8696,8 @@ theorem closedConcreteReuseProgramLoweringCorrect
       (reachablePhaseSimulation externals)
       closedConcreteReuseBeforeProgram
       closedConcreteReuseAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_exactRuntimeOwnership
-    closedConcreteReuseBeforeProgramElimDeadWellFormed
-    closedConcreteReuseShadowProgramRun compatible
-    (closedConcreteReuseExactRuntimeOwnershipInitialInvariant
-      externals)
+  (closedConcreteReuseCompilerAdmissibleRun
+    externals).loweringCorrect compatible
 
 /-! ## Closed owned-child reset/reuse correctness -/
 
@@ -9531,16 +9629,34 @@ theorem closedOwnedReuseShadowProgramRun :
     closedOwnedReuseAfterProgram,
     fixtureDecl, decl, closedOwnedReuseShadowRun]
 
+/-- Checked whole-program form of recursive child release and reuse. -/
+theorem closedOwnedReuseCheckedProgramRun :
+    nullarySafeShadowProgram? 7 closedOwnedReuseBeforeProgram =
+      some closedOwnedReuseAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, closedOwnedReuseBeforeProgram,
+    closedOwnedReuseAfterProgram, fixtureDecl, decl,
+    closedOwnedReuseCheckedRun]
+
+/-- Strict compiler package for owned-child reset/reuse. -/
+theorem closedOwnedReuseCompilerAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadCompilerAdmissibleRun externals 7
+      closedOwnedReuseBeforeProgram
+      closedOwnedReuseAfterProgram #[`main] :=
+  ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    closedOwnedReuseBeforeProgramElimDeadWellFormed
+    closedOwnedReuseCheckedProgramRun
+    (.ofExact
+      (closedOwnedReuseExactOwnershipContract externals))
+
 theorem closedOwnedReuseSemanticallyAdmissibleRun
     (externals : ExternalSpec) :
     ElimDeadSemanticallyAdmissibleRun externals 7
       closedOwnedReuseBeforeProgram
       closedOwnedReuseAfterProgram #[`main] :=
-  ElimDeadSemanticallyAdmissibleRun.ofOwnership
-    closedOwnedReuseBeforeProgramElimDeadWellFormed
-    closedOwnedReuseShadowProgramRun
-    (ElimDeadOwnershipContract.ofExact
-      (closedOwnedReuseExactOwnershipContract externals))
+  (closedOwnedReuseCompilerAdmissibleRun
+    externals).toSemanticallyAdmissibleRun
 
 /-- Whole-program correctness for deleted reset/reuse with a real owned
 child.  The source recursively releases the child and overwrites the parent;
@@ -9554,7 +9670,7 @@ theorem closedOwnedReuseProgramLoweringCorrect
       (reachablePhaseSimulation externals)
       closedOwnedReuseBeforeProgram
       closedOwnedReuseAfterProgram #[`main] :=
-  (closedOwnedReuseSemanticallyAdmissibleRun
+  (closedOwnedReuseCompilerAdmissibleRun
     externals).loweringCorrect compatible
 
 /-! ## Closed partial-application and box allocation correctness -/
