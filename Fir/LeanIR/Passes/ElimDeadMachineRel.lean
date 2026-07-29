@@ -7799,6 +7799,154 @@ theorem deleteValue_nextLocation_eq_of_ok
   | scalar value => simp [deleteValue] at effect
   | reuseToken location? => simp [deleteValue] at effect
 
+/-- Recursive reference-count release only rewrites existing heap cells.
+Every successful fuel-bounded execution therefore preserves the allocation
+frontier, including the fold over recursively owned children. -/
+theorem decLocationFuel_nextLocation_eq_of_ok
+    (effect : decLocationFuel fuel runtime location = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  induction fuel generalizing runtime result location with
+  | zero =>
+      simp [decLocationFuel] at effect
+  | succ fuel recurse =>
+      generalize cellEq : getLiveCell runtime location = cellResult
+      cases cellResult with
+      | error fault =>
+          simp [decLocationFuel, cellEq, Bind.bind, Except.bind] at effect
+      | ok cell =>
+          by_cases persistent : cell.persistent = true
+          · have noop :
+                decLocationFuel (fuel + 1) runtime location = .ok runtime := by
+              simp only [decLocationFuel, cellEq, Bind.bind, Except.bind]
+              rw [if_pos persistent]
+              rfl
+            rw [noop] at effect
+            have resultEq := Except.ok.inj effect
+            subst result
+            rfl
+          · by_cases zero : cell.rc = 0
+            · simp [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                persistent, zero] at effect
+            · by_cases above : 1 < cell.rc
+              · exact setCell_nextLocation_eq_of_ok
+                  (effect := by simpa [decLocationFuel, cellEq, Bind.bind,
+                    Except.bind, persistent, zero, above] using effect)
+              · simp only [decLocationFuel, cellEq, Bind.bind,
+                  Except.bind] at effect
+                rw [if_neg persistent, if_neg zero, if_neg above] at effect
+                generalize parentEq :
+                  setCell runtime location
+                      { cell with rc := 0, live := false } =
+                    parentResult at effect
+                cases parentResult with
+                | error fault =>
+                    simp at effect
+                | ok parent =>
+                    dsimp only at effect
+                    have parentFrontier :=
+                      setCell_nextLocation_eq_of_ok parentEq
+                    have foldFrontier : ∀ (values : List Value)
+                        (before after : RuntimeState),
+                        values.foldlM (init := before) (fun next value =>
+                          match value with
+                          | .object (.heap child) =>
+                              decLocationFuel fuel next child
+                          | _ => .ok next) = .ok after →
+                        after.nextLocation = before.nextLocation := by
+                      intro values
+                      induction values with
+                      | nil =>
+                          intro before after folded
+                          have same := Except.ok.inj folded
+                          subst after
+                          rfl
+                      | cons value values tailIH =>
+                          intro before after folded
+                          simp only [List.foldlM_cons, Bind.bind,
+                            Except.bind] at folded
+                          cases value with
+                          | object reference =>
+                              cases reference with
+                              | tagged payload =>
+                                  exact tailIH before after folded
+                              | heap child =>
+                                  dsimp only at folded
+                                  cases childEq :
+                                      decLocationFuel fuel before child with
+                                  | error fault =>
+                                      rw [childEq] at folded
+                                      contradiction
+                                  | ok middle =>
+                                      rw [childEq] at folded
+                                      exact (tailIH middle after folded).trans
+                                        (recurse childEq)
+                          | usize | scalar | erased | reuseToken =>
+                              exact tailIH before after folded
+                    rw [← Array.foldlM_toList] at effect
+                    exact
+                      (foldFrontier cell.object.ownedValues.toList
+                        parent result effect).trans parentFrontier
+
+/-- The public fuel-adequate recursive release preserves the frontier. -/
+theorem decLocation_nextLocation_eq_of_ok
+    (effect : decLocation runtime location = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  exact decLocationFuel_nextLocation_eq_of_ok
+    (effect := by simpa [decLocation] using effect)
+
+/-- One value decrement is either runtime-neutral or recursively rewrites
+existing cells. -/
+theorem decValueOnce_nextLocation_eq_of_ok
+    (effect : decValueOnce runtime value check = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact decLocation_nextLocation_eq_of_ok
+            (effect := by simpa [decValueOnce] using effect)
+      | tagged payload =>
+          simp only [decValueOnce] at effect
+          split at effect
+          · have resultEq := Except.ok.inj effect
+            subst result
+            rfl
+          · simp at effect
+  | usize value => simp [decValueOnce] at effect
+  | scalar value => simp [decValueOnce] at effect
+  | erased => simp [decValueOnce] at effect
+  | reuseToken location? => simp [decValueOnce] at effect
+
+/-- Repeating value decrements preserves the allocation frontier. -/
+theorem decValue_nextLocation_eq_of_ok
+    (effect : decValue runtime value amount check = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  unfold decValue at effect
+  have foldFrontier : ∀ (values : List Value)
+      (before after : RuntimeState),
+      values.foldlM (init := before) (fun next current =>
+        decValueOnce next current check) = .ok after →
+      after.nextLocation = before.nextLocation := by
+    intro values
+    induction values with
+    | nil =>
+        intro before after folded
+        have same := Except.ok.inj folded
+        subst after
+        rfl
+    | cons head tail recurse =>
+        intro before after folded
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at folded
+        cases headEq : decValueOnce before head check with
+        | error fault =>
+            rw [headEq] at folded
+            contradiction
+        | ok middle =>
+            rw [headEq] at folded
+            exact (recurse middle after folded).trans
+              (decValueOnce_nextLocation_eq_of_ok headEq)
+  exact foldFrontier (List.replicate amount value) runtime result effect
+
 /-- Reusing a concrete token updates an existing cell and therefore
 preserves the allocation frontier on every successful result. -/
 theorem reuseSome_nextLocation_eq_of_ok
@@ -9928,6 +10076,62 @@ theorem coreStep_increment_binderReadyReachableRelated_ledger
   have ledger :
       TargetAllocationLedger rho targetNextRuntime.nextLocation := by
     rw [incValue_nextLocation_eq_of_ok targetEffect]
+    exact runtime.ledger
+  exact ⟨sourceStep, targetStep, ledger, related⟩
+
+/-- A successful non-persistent decrement, including recursive release of
+owned children, preserves the target allocation ledger. -/
+theorem coreStep_decrement_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : decValue sourceState.runtime objectValue amount check =
+      .ok sourceNextRuntime)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      decValue targetState.runtime targetObjectValue amount check =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.dec object amount check false compilerObjects sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.dec object amount check false compilerObjects targetContinuation)) =
+          .next targetAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  rcases coreStep_decrement_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectMember objectRead effect runtime.runtime with
+    ⟨targetObjectValue, targetNextRuntime, targetObjectRead, targetEffect,
+      nextRelated⟩
+  refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+    targetEffect, ?_⟩
+  dsimp only at nextRelated ⊢
+  rcases nextRelated with ⟨sourceStep, targetStep, related⟩
+  have ledger :
+      TargetAllocationLedger rho targetNextRuntime.nextLocation := by
+    rw [decValue_nextLocation_eq_of_ok targetEffect]
     exact runtime.ledger
   exact ⟨sourceStep, targetStep, ledger, related⟩
 
@@ -31682,6 +31886,115 @@ theorem match_decrementCodeStep_binderReady
                 ⟨targetPath, finalRelated⟩
               exact ⟨_, targetPath, finalRelated⟩
 
+/-- Ledger-aware hereditary semantic matcher for reference-count decrements.
+Persistent instructions are runtime-neutral; ordinary decrements may
+recursively release owned children but never allocate. -/
+theorem match_decrementCodeStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.dec object amount check persistent compilerObjects
+          sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.dec object amount check persistent compilerObjects
+            targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases persistent with
+  | true =>
+      let sourceNext := {
+        sourceState with control := .code sourceContinuation }
+      let targetNext := {
+        targetState with control := .code targetContinuation }
+      have sourceTransition :
+          coreStep (withCodeControl sourceState
+            (.dec object amount check true compilerObjects
+              sourceContinuation)) =
+            .next sourceNext := by
+        simp [sourceNext, withCodeControl, coreStep]
+      have targetTransition :
+          coreStep (withCodeControl targetState
+            (.dec object amount check true compilerObjects
+              targetContinuation)) =
+            .next targetNext := by
+        simp [targetNext, withCodeControl, coreStep]
+      have afterRelated :
+          LedgerBinderReadyReachableMachineRelated fuel rho
+            sourceNext targetNext :=
+        ⟨runtime.ledger,
+          continueCode_binderReadyReachableRelated
+            sourceState targetState programs frames continuation joins env
+            runtime.runtime⟩
+      rcases match_internalCoreSteps_binderReady_ledger
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨targetNext, targetPath, finalRelated⟩
+  | false =>
+      let sourceCurrent := withCodeControl sourceState
+        (.dec object amount check false compilerObjects sourceContinuation)
+      have noStep {observation : Observation}
+          (done : coreStep sourceCurrent = .done observation) : False := by
+        cases step with
+        | internal transition =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+        | external transition externalProof =>
+            rw [show withCodeControl sourceState
+              (.dec object amount check false compilerObjects
+                sourceContinuation) = sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+      generalize objectRead :
+        lookupValue sourceState.env object = objectResult
+      cases objectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+          exact (noStep done).elim
+      | ok objectValue =>
+          generalize effect :
+            decValue sourceState.runtime objectValue amount check = effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_decrement_binderReadyReachableRelated_ledger
+                  sourceState targetState programs frames continuation joins
+                  env objectMember objectRead effect runtime with
+                ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+                  targetEffect, sourceTransition, targetTransition,
+                  afterRelated⟩
+              rcases match_internalCoreSteps_binderReady_ledger
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
 /-- An exact decrement view supplies its live operand and hereditary
 continuation to the persistent or runtime-updating matcher. -/
 theorem ExactShadowCodeBinderReady.match_decrementStep
@@ -31730,6 +32043,57 @@ theorem ExactShadowCodeBinderReady.match_decrementStep
     simp
   exact match_decrementCodeStep_binderReady sourceState targetState programs
     frames (ready.decrement_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
+/-- Ledger-aware exact matcher for a reference-count decrement. -/
+theorem ExactShadowCodeBinderReady.match_decrementStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel amount : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId} {check persistent : Bool}
+    {compilerObjects : Option Nat}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.decrement
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent)
+          (objects := compilerObjects) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.dec object amount check persistent compilerObjects
+          sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.dec object amount check persistent compilerObjects
+            targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_decrementCodeStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.decrement_continuationGraph fuelBound usedBound) joins env
     objectMember runtime step
 
 /-- Complete graph-level matcher for retained deletes. Source faults are
