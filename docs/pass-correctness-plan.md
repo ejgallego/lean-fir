@@ -749,6 +749,20 @@ one-cell reset/reuse, and owned-child reset/reuse fixtures now consume these
 shared laws instead of rebuilding the mixed local/ownership existential at
 each edge.
 
+The empty-target shortcut is no longer the general ownership boundary.
+`TargetAllocationLedger` records, for every address below the target
+allocation frontier, the exact source allocation paired with it.
+`SourceOnlyUnderTargetLedger` says that a source address is outside that
+owner image. The runtime relation proves this criterion equivalent to
+`rho.forward location = none`; empty ledgers initialize it, and paired fresh
+allocations extend it while preserving older source-only locations. The
+criterion now discharges all three write certificates and concrete-token
+reuse. For reset, preserving the ledger-owned source cells yields the complete
+reachable-runtime frame while leaving source-only cells unconstrained. A
+kernel fixture with one retained paired allocation and one deleted
+source-only allocation exercises the object-write bridge against a genuinely
+non-empty target.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -819,9 +833,12 @@ The remaining general problem is therefore not an operational matcher, a
 missing whole-program theorem, an implicit nullary-purity assumption, an
 unauditable policy graph, or a reachability-shaped client API. It is to
 instantiate the inductive ownership contract for arbitrary compiler-produced
-entry states from auditable static ownership facts: in particular, to derive
-the now-explicit unmapped/source-only location premise and local operation
-shape from compiler typing and ownership invariants.
+entry states from auditable static ownership facts: in particular, to carry
+the target allocation ledger through arbitrary exact executions and derive
+each local operation shape from compiler typing and ownership invariants. The
+ledger now solves the address-map part without assuming an empty target; it
+still has to be threaded through the compiler-client invariant rather than
+constructed only by focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -862,11 +879,12 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Introduce an auditable source-only location invariant whose preservation
-   implies `rho.forward location = none`, then connect it to the existing
-   root-independent operation certificates.
-2. Exercise that invariant on a non-empty-target fixture so the compiler
-   ownership bridge no longer depends on an empty target frontier.
+1. Lift `TargetAllocationLedger` into an entry-indexed exact ownership
+   invariant that initializes at the empty renaming, extends on paired
+   allocations, and remains unchanged on deleted source-only allocations.
+2. Use that invariant to derive the ledger and source-only facts selected by
+   arbitrary deleted write/reset/reuse edges, leaving only their local
+   compiler typing/heap-shape certificates.
 3. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
