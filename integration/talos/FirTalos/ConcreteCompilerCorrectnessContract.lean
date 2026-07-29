@@ -176,10 +176,32 @@ example
     parameterCount resultCount
 
 /--
+The successful packed-scalar leaf is itself a uniform runtime law. Its only
+additional admission fact is source scalar/ABI-kind agreement.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ScalarProjectionSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) :=
+  spec.directLetRuntimeRefines_scalarProjection
+
+/--
 A whole mixed read-only direct-value spine obtains its runtime law from the
-concrete supported export. Local aliases, `USize` projections, and object
-projections may be interleaved; the client supplies neither target
-instructions/import indices nor constructor descriptors.
+concrete supported export. Local aliases plus object, `USize`, and successful
+packed-integer projections may be interleaved; the client supplies neither
+target instructions/import indices nor concrete heap-read witnesses.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}

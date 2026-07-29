@@ -197,10 +197,17 @@ the real adapter, related local frame, concrete heap relation, and resolved
 host recover the numeric read/call/write prefix and its successful concrete
 step. Object projections now use the same boundary, with selected-field
 ABI-kind agreement represented as their one source typing obligation.
+Packed integer projections join it through `ScalarValueKind`, the
+target-independent source typing relation between `UInt8/16/32/64` semantic
+constructors and their ABI lanes. `scalarProjStep_of_refines` derives the
+matching concrete read and physical value for every successful source read.
 `DirectLetRuntimeRefines.or` and `ReadOnlyDirectSupported` compose local
-aliases plus both projection families into arbitrary mixed spines. The
+aliases plus all three projection families into arbitrary mixed spines. The
 structural contract harness accepts them without a descriptor, concrete read,
-numeric layout, or translation-certificate premise.
+numeric layout, or translation-certificate premise. This success theorem does
+not weaken the recorded uninitialized-coordinate fault discrepancy:
+`FIR-BUG-wasm-none-uninitialized-scalar-projection` remains the boundary for
+full structured-fault correspondence.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

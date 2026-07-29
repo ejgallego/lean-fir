@@ -2355,6 +2355,18 @@ theorem scalarProjStep_expectedConstructor_of_refines
     rw [constructorFailed]
     rfl
 
+/--
+The source scalar constructor agrees with the ABI lane selected by lowering.
+
+This is a source-typing relation: it contains no concrete heap, address,
+physical value, or executable-step witness.
+-/
+inductive ScalarValueKind : ScalarValue → AbiKind → Prop where
+  | uint8 (value : UInt8) : ScalarValueKind (.uint8 value) .uint8
+  | uint16 (value : UInt16) : ScalarValueKind (.uint16 value) .uint16
+  | uint32 (value : UInt32) : ScalarValueKind (.uint32 value) .uint32
+  | uint64 (value : UInt64) : ScalarValueKind (.uint64 value) .uint64
+
 theorem scalarProjUInt8Step_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
@@ -2476,6 +2488,43 @@ theorem scalarProjUInt64Step_of_refines
           cases taggedRelated <;>
             simp [getScalarField, getConstructor, Bind.bind, Except.bind]
               at projected
+
+/--
+Every successfully projected, ABI-aligned integer scalar has one matching
+concrete host step and related physical result.
+
+This unifies the four integer lanes used by the compiler. It is deliberately
+a success theorem: it does not claim that a valid but semantically
+uninitialized coordinate faults in the zero-filled concrete heap.
+-/
+theorem scalarProjStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {width offset : Nat} {scalar : ScalarValue} {kind : AbiKind}
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getScalarField runtime sourceObject width offset =
+      .ok (.scalar scalar))
+    (kindAligned : ScalarValueKind scalar kind) :
+    ∃ physical,
+      scalarProjStep width offset kind initial
+          [.i32 (UInt32.ofNat objectWord.value)] =
+        .Return [physical] (clearFailure initial) ∧
+      PhysicalValueRel witness kind physical (.scalar scalar) := by
+  cases kindAligned with
+  | uint8 value =>
+      exact ⟨.i32 (UInt32.ofNat (Word32.ofUInt8 value).value),
+        scalarProjUInt8Step_of_refines runtimeRelated objectRelated projected⟩
+  | uint16 value =>
+      exact ⟨.i32 (UInt32.ofNat (Word32.ofUInt16 value).value),
+        scalarProjUInt16Step_of_refines runtimeRelated objectRelated projected⟩
+  | uint32 value =>
+      exact ⟨.i32 (UInt32.ofNat (Word32.ofUInt32 value).value),
+        scalarProjUInt32Step_of_refines runtimeRelated objectRelated projected⟩
+  | uint64 value =>
+      exact ⟨.i64 value,
+        scalarProjUInt64Step_of_refines runtimeRelated objectRelated projected⟩
 
 theorem naturalLiteralStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}

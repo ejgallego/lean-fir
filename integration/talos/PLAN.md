@@ -3604,6 +3604,21 @@ still exposes a concrete-read premise that must be reduced to a stable source
 typing/layout boundary before joining the uniform law. No FIR semantic
 contract or executable ABI changed.
 
+W6.6ej constructs the successful packed-integer projection instance.
+`ScalarValueKind` is the sole additional source typing boundary: it relates
+the semantic `UInt8`, `UInt16`, `UInt32`, and `UInt64` scalar constructors to
+the corresponding compiler ABI lanes without mentioning target code or heap
+addresses. A single `scalarProjStep_of_refines` theorem combines the four
+existing concrete read refinements. Successful source evaluation supplies the
+initialized coordinate and exact scalar; compilation, adaptation,
+`StateRelated`, and exact frame capacity supply every target operand, import,
+read step, physical result, and destination write. `ReadOnlyDirectSupported`
+now admits arbitrary interleavings of aliases and all three projection
+families. This is deliberately successful-step partial correctness:
+`FIR-BUG-wasm-none-uninitialized-scalar-projection` still records why a
+source-failing uninitialized coordinate cannot yet have exact concrete fault
+correspondence. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

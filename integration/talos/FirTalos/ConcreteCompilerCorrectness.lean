@@ -2306,6 +2306,37 @@ inductive ObjectProjectionSupported (context : Fir.Wasm.Context) :
               fieldKinds[index]? = some resultKind) :
       ObjectProjectionSupported context decl
 
+/--
+Static admission for a direct packed-integer scalar projection.
+
+The final premise is exactly the missing source typing judgment: whenever the
+successful semantic read produces a scalar, its constructor agrees with the
+compiler-selected result ABI kind. It contains no concrete object word,
+numeric local/import, heap read, or target-step witness.
+-/
+inductive ScalarProjectionSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (width offset : Nat) (objectId : FVarId)
+      (objectKind resultKind : AbiKind)
+      (valueEq : decl.value = .sproj width offset objectId)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, resultKind))
+      (valueKindAligned :
+        ∀ {sourceRuntime : RuntimeState} {sourceEnv : Env}
+            {sourceObject : Value} {scalar : ScalarValue},
+          lookup sourceEnv objectId = some sourceObject →
+            getScalarField sourceRuntime sourceObject width offset =
+              .ok (.scalar scalar) →
+              ScalarValueKind scalar resultKind) :
+      ScalarProjectionSupported context decl
+
 /-- Every successful absolute-slot `USize` read produces an unboxed word. -/
 theorem getUSizeSlot_ok_eq_usize
     {runtime : RuntimeState} {object result : Value} {slot : Nat}
@@ -2439,6 +2470,89 @@ theorem sourceLetResult_objectProjection_eq
             LetAction.value.inj (congrArg Prod.snd pairEq)
           subst projectedValue
           exact ⟨sourceObject, runtimeEq.symm, rfl, projected⟩
+
+/-- Every successful packed-scalar read returns an unboxed scalar value. -/
+theorem getScalarField_ok_eq_scalar
+    {runtime : RuntimeState} {object result : Value}
+    {width offset : Nat}
+    (read : getScalarField runtime object width offset = .ok result) :
+    ∃ scalar, result = .scalar scalar := by
+  unfold getScalarField at read
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at read
+  cases constructorResult with
+  | error fault =>
+      simp [Bind.bind, Except.bind] at read
+  | ok constructor =>
+      obtain ⟨location, cell, value⟩ := constructor
+      simp only [Bind.bind, Except.bind] at read
+      generalize fieldEq :
+        value.scalarFields.find? (fun field =>
+          field.width == width && field.offset == offset) = fieldResult
+          at read
+      cases fieldResult with
+      | none =>
+          simp at read
+      | some field =>
+          simp [Pure.pure, Except.pure] at read
+          cases read
+          exact ⟨field.value, rfl⟩
+
+/--
+Invert a successful source scalar projection to its object lookup, scalar
+constructor, and exact semantic field read.
+-/
+theorem sourceLetResult_scalarProjection_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {width offset : Nat} {objectId : FVarId}
+    (valueEq : decl.value = .sproj width offset objectId)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject scalar,
+      nextRuntime = sourceRuntime ∧
+        sourceValue = .scalar scalar ∧
+        lookup sourceEnv objectId = some sourceObject ∧
+        getScalarField sourceRuntime sourceObject width offset =
+          .ok (.scalar scalar) := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases projected : getScalarField sourceRuntime sourceObject width offset with
+      | error fault =>
+          rw [projected] at sourceStep
+          contradiction
+      | ok projectedValue =>
+          rw [projected] at sourceStep
+          have pairEq :
+              (sourceRuntime, LetAction.value projectedValue) =
+                (nextRuntime, LetAction.value sourceValue) :=
+            Except.ok.inj sourceStep
+          have runtimeEq : sourceRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : projectedValue = sourceValue :=
+            LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst sourceValue
+          obtain ⟨scalar, resultEq⟩ :=
+            getScalarField_ok_eq_scalar projected
+          subst projectedValue
+          exact ⟨sourceObject, scalar, runtimeEq.symm, rfl, rfl, projected⟩
 
 /--
 The concrete frame has exactly the parameter and local capacity allocated for
@@ -2920,6 +3034,95 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_objectProjection
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
+/--
+Uniform runtime-law instance for successful packed-integer scalar
+projections.
+
+The source step determines the exact initialized scalar field. Source typing
+connects its scalar constructor to the compiler-selected ABI kind; the generic
+concrete runtime theorem then derives both the concrete read and physical
+result. This theorem intentionally says nothing about a failing source read
+from an uninitialized coordinate, whose zero-filled-heap discrepancy remains
+recorded separately.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_scalarProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ScalarProjectionSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    frameAligned sourceStep stateRelated valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨width, offset, objectId, objectKind, resultKind, valueEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, valueKindAligned⟩
+  obtain ⟨sourceObject, scalar, rfl, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_scalarProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.scalarProj width offset resultKind))] :=
+    compileLetValue_scalarProjection valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .scalarProj width offset resultKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          have kindAligned := valueKindAligned sourceLookup projected
+          obtain ⟨physical, operation, resultRelated⟩ :=
+            scalarProjStep_of_refines stateRelated.1 objectRelated projected
+              kindAligned
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            frameAligned.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId (.scalar scalar))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := physical) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.scalarProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_scalarProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject resultRelated
+              imported spec.hostsSatisfy inBounds contracted params results
+              operation targetSet,
+            nextFrameAligned⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without
 changing the structural theorem. -/
@@ -2927,11 +3130,12 @@ def ReadOnlyDirectSupported (context : Fir.Wasm.Context)
     (decl : LCNF.LetDecl .impure) : Prop :=
   LocalAliasSupported context decl ∨
     USizeProjectionSupported context decl ∨
-      ObjectProjectionSupported context decl
+      ObjectProjectionSupported context decl ∨
+        ScalarProjectionSupported context decl
 
 /--
-Mixed local-alias, `USize`-projection, and object-projection spines share one
-uniform runtime law and the same exact-frame invariant.
+Mixed local-alias, object, `USize`, and successful packed-integer projection
+spines share one uniform runtime law and the same exact-frame invariant.
 -/
 theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
     {program : Fir.LeanIR.ImpureProgram}
@@ -2955,13 +3159,16 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
         (fun decl =>
           LocalAliasSupported context decl ∨
             (USizeProjectionSupported context decl ∨
-              ObjectProjectionSupported context decl))
+              (ObjectProjectionSupported context decl ∨
+                ScalarProjectionSupported context decl)))
         (ConcreteLocalFrameAligned sourceFunction)
   apply DirectLetRuntimeRefines.or
   · exact directLetRuntimeRefines_localAlias spec.localsAligned
   · apply DirectLetRuntimeRefines.or
     · exact spec.directLetRuntimeRefines_usizeProjection
-    · exact spec.directLetRuntimeRefines_objectProjection
+    · apply DirectLetRuntimeRefines.or
+      · exact spec.directLetRuntimeRefines_objectProjection
+      · exact spec.directLetRuntimeRefines_scalarProjection
 
 /--
 Structural, certificate-free partial correctness for the direct-value code
