@@ -132,8 +132,9 @@ source-computed `DirectValuePathCost`. The nonempty-constructor runtime
 instance now derives mixed arguments and exact residual layout cost, so
 arbitrary finite constructor spines use the same theorem. Mixed read-only
 composition now includes cost-zero local aliases and immediate integer/`USize`
-literals through `BudgetedDirectSupported`; the three successful projection
-families remain to be lifted.
+literals plus successful object, `USize`, and packed-integer scalar projections
+through `BudgetedDirectSupported`. The projection instances preserve the
+concrete heap exactly and return the full residual address-space budget.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

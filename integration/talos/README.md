@@ -239,8 +239,10 @@ does the same for arbitrary constructor spines, deriving mixed local/erased
 physical arguments and every concrete allocation internally.
 `BudgetedDirectSupported` now permits arbitrary interleavings of these two
 allocating families with cost-zero local aliases and immediate integer/`USize`
-literals under one source path budget. Successful projection families are the
-next cost-zero instances.
+literals plus successful object, `USize`, and packed-integer scalar
+projections under one source path budget. The projection laws expose exact
+heap preservation across their generated readers, so the complete residual
+budget reaches the continuation.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

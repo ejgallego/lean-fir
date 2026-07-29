@@ -378,8 +378,9 @@ example
     spec.singleResult
 
 /--
-The mixed indexed fragment interleaves cost-zero aliases/immediate literals
-with allocating Strings and nonempty constructors under one source path cost.
+The mixed indexed fragment interleaves cost-zero aliases, immediate literals,
+and successful object/`USize`/packed-scalar projections with allocating
+Strings and nonempty constructors under one source path cost.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}

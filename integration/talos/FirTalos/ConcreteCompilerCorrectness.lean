@@ -4241,56 +4241,6 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
     simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
 
 /--
-Current mixed allocating structural fragment: local aliases, immediate
-integer/`USize` literals, UTF-8 String literals, and nonempty constructors.
--/
-def BudgetedDirectSupported (context : Fir.Wasm.Context)
-    (decl : LCNF.LetDecl .impure) : Prop :=
-  LocalAliasSupported context decl ∨
-    ImmediateLiteralSupported context decl ∨
-      StringLiteralSupported context decl ∨
-        NonemptyConstructorSupported context decl
-
-/--
-The cost-indexed runtime law composes allocating String/constructor steps with
-cost-zero aliases and immediate literals. One source-path budget is preserved
-across nonallocating nodes and consumed exactly at allocating nodes.
--/
-theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {sourceCode : LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {target : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {exportName : String}
-    (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
-    {labels : List FVarId} :
-    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (BudgetedDirectSupported context)
-      directLetAllocationCost
-      (ConcreteBudgetedLocalFrame sourceFunction) := by
-  change
-    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
-      target.wasmModule hosts.env
-        (fun decl =>
-          LocalAliasSupported context decl ∨
-            (ImmediateLiteralSupported context decl ∨
-              (StringLiteralSupported context decl ∨
-                NonemptyConstructorSupported context decl)))
-      directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
-  apply DirectLetRuntimeRefinesWithCost.or
-  · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
-  · apply DirectLetRuntimeRefinesWithCost.or
-    · exact spec.directLetRuntimeRefinesWithCost_immediateLiteral
-    · apply DirectLetRuntimeRefinesWithCost.or
-      · exact spec.directLetRuntimeRefines_stringLiteral
-      · exact spec.directLetRuntimeRefines_nonemptyConstructor
-
-/--
 Uniform runtime-law instance for direct `USize` projections in any concrete
 supported export.
 
@@ -4372,6 +4322,93 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_usizeProjection
               descriptor imported spec.hostsSatisfy inBounds contracted params
               results targetSet,
             nextFrameAligned⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
+Cost-indexed runtime-law instance for direct `USize` projections.
+
+The generated reader only clears the host failure slot and leaves the concrete
+heap unchanged, so the declaration has zero allocation cost and preserves the
+complete residual address-space budget.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_usizeProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (USizeProjectionSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨index, objectId, objectKind, valueEq, resultKind, objectCompiled,
+      objectRefines, resultCompiled⟩
+  obtain ⟨sourceObject, value, rfl, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_usizeProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.usizeProj index))] :=
+    compileLetValue_usizeProjection valueEq resultKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId]) (operation := .usizeProj index) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨info, fieldKinds, descriptor⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getUSizeSlot
+              stateRelated.1 objectRelated projected
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId (.usize value))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i64 value) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.usizeProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_usizeProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject objectRelated
+              descriptor imported spec.hostsSatisfy inBounds contracted params
+              results targetSet,
+            nextFrameAligned, by
+              simpa [directLetAllocationCost, valueEq, clearFailure] using
+                budgeted.2⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
@@ -4467,6 +4504,99 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_objectProjection
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Cost-indexed runtime-law instance for direct object projections.
+
+Successful field reads preserve the concrete heap exactly.  Consequently the
+projection threads the same address-space budget through the compiler-emitted
+host call and destination-local write.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_objectProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ObjectProjectionSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨index, objectId, objectKind, resultKind, valueEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, fieldKindAligned⟩
+  obtain ⟨sourceObject, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_objectProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.objectProj index resultKind))] :=
+    compileLetValue_objectProjection valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .objectProj index resultKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨info, fieldKinds, descriptor⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getObjectField
+              stateRelated.1 objectRelated projected
+          have fieldKind :=
+            fieldKindAligned sourceLookup objectRelated descriptor
+          obtain ⟨resultWord, concreteRead, valueRelated⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.readObjectField_refines
+              stateRelated.1 objectRelated descriptor fieldKind projected
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i32 (UInt32.ofNat resultWord.value)) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.objectProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_objectProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject objectRelated
+              descriptor fieldKind concreteRead imported spec.hostsSatisfy
+              inBounds contracted params results targetSet,
+            nextFrameAligned, by
+              simpa [directLetAllocationCost, valueEq, clearFailure] using
+                budgeted.2⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 Uniform runtime-law instance for successful packed-integer scalar
 projections.
 
@@ -4554,6 +4684,160 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_scalarProjection
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
+
+/--
+Cost-indexed runtime-law instance for successful packed-integer scalar
+projections.
+
+As with the other projection families, the concrete reader changes only the
+failure slot.  The source-facing allocation cost is zero and the exact heap
+budget is therefore available unchanged to the continuation.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ScalarProjectionSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨width, offset, objectId, objectKind, resultKind, valueEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, valueKindAligned⟩
+  obtain ⟨sourceObject, scalar, rfl, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_scalarProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.scalarProj width offset resultKind))] :=
+    compileLetValue_scalarProjection valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .scalarProj width offset resultKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          have kindAligned := valueKindAligned sourceLookup projected
+          obtain ⟨physical, operation, resultRelated⟩ :=
+            scalarProjStep_of_refines stateRelated.1 objectRelated projected
+              kindAligned
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId (.scalar scalar))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := physical) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.scalarProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_scalarProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject resultRelated
+              imported spec.hostsSatisfy inBounds contracted params results
+              operation targetSet,
+            nextFrameAligned, by
+              simpa [directLetAllocationCost, valueEq, clearFailure] using
+                budgeted.2⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
+Current mixed allocating structural fragment: local aliases, immediate
+integer/`USize` literals, successful object/`USize`/packed-scalar projections,
+UTF-8 String literals, and nonempty constructors.
+-/
+def BudgetedDirectSupported (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure) : Prop :=
+  LocalAliasSupported context decl ∨
+    ImmediateLiteralSupported context decl ∨
+      USizeProjectionSupported context decl ∨
+        ObjectProjectionSupported context decl ∨
+          ScalarProjectionSupported context decl ∨
+            StringLiteralSupported context decl ∨
+              NonemptyConstructorSupported context decl
+
+/--
+The cost-indexed runtime law composes allocating String/constructor steps with
+cost-zero aliases, immediates, and successful projections. One source-path
+budget is preserved across nonallocating nodes and consumed exactly at
+allocating nodes.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (fun decl =>
+          LocalAliasSupported context decl ∨
+            (ImmediateLiteralSupported context decl ∨
+              (USizeProjectionSupported context decl ∨
+                (ObjectProjectionSupported context decl ∨
+                  (ScalarProjectionSupported context decl ∨
+                    (StringLiteralSupported context decl ∨
+                      NonemptyConstructorSupported context decl))))))
+      directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
+  apply DirectLetRuntimeRefinesWithCost.or
+  · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
+  · apply DirectLetRuntimeRefinesWithCost.or
+    · exact spec.directLetRuntimeRefinesWithCost_immediateLiteral
+    · apply DirectLetRuntimeRefinesWithCost.or
+      · exact spec.directLetRuntimeRefinesWithCost_usizeProjection
+      · apply DirectLetRuntimeRefinesWithCost.or
+        · exact spec.directLetRuntimeRefinesWithCost_objectProjection
+        · apply DirectLetRuntimeRefinesWithCost.or
+          · exact spec.directLetRuntimeRefinesWithCost_scalarProjection
+          · apply DirectLetRuntimeRefinesWithCost.or
+            · exact spec.directLetRuntimeRefines_stringLiteral
+            · exact spec.directLetRuntimeRefines_nonemptyConstructor
 
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without

@@ -3754,6 +3754,20 @@ indexed invariant, then turns the structural `CodeWP` into the whole-export
 partial-correctness endpoint. No FIR semantic contract or executable ABI
 changed.
 
+W6.6es lifts every successful direct projection into the cost-indexed
+fragment. Object, `USize`, and packed-integer scalar readers now expose that
+their generated concrete operation clears only the host failure slot and
+preserves the heap exactly. Their source-facing allocation cost is therefore
+zero, and each indexed runtime law returns the full incoming address-space
+budget to the continuation. `BudgetedDirectSupported` now admits arbitrary
+finite interleavings of aliases, immediate literals, all three successful
+projection families, UTF-8 Strings, and nonempty constructors under one
+`DirectValuePathCost`. The structural contract harness checks the expanded
+union without target instructions, numeric indices, concrete read witnesses,
+or per-node budget premises. The next slice packages this structural `CodeWP`
+as the whole-export partial-correctness endpoint. No FIR semantic contract or
+executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

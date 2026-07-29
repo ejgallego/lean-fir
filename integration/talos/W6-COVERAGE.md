@@ -63,8 +63,10 @@ Cross-cutting W6.5 state:
   one exact source-computed budget. Constructor nodes derive mixed
   local/erased physical arguments and concrete host steps internally.
   `BudgetedDirectSupported` additionally composes both allocating families
-  with cost-zero aliases and immediate integer/`USize` literals in arbitrary
-  finite interleavings.
+  with cost-zero aliases, immediate integer/`USize` literals, and successful
+  object, `USize`, and packed-integer scalar projections in arbitrary finite
+  interleavings. Each projection instance records exact heap preservation and
+  therefore retains the complete residual budget.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
