@@ -16,10 +16,9 @@ from `Std.Format.prettyM`. It consumes and produces the W6 concrete UTF-8
 String layout directly and reuses the resident one-limb Natural helpers for
 String positions and results.
 
-The byte walkers are recursive because the shared symbolic Wasm surface does
-not yet expose a loop instruction. This is sufficient for the `prettyM`
-acceptance closure; replacing the walkers with loops is an independent
-performance improvement, not a semantic prerequisite.
+The byte walkers use structured Wasm loops. Their stack usage is therefore
+independent of String size while preserving the same concrete W6 layout and
+helper signatures.
 
 The helper is intentionally independent from its W6 refinement theorem.
 -/
@@ -55,6 +54,11 @@ private def byte1Param : FVarId := ⟨`byte1⟩
 private def byte2Param : FVarId := ⟨`byte2⟩
 private def byte3Param : FVarId := ⟨`byte3⟩
 
+private def copyBytesLoop : FVarId := ⟨`copyBytesLoop⟩
+private def countLeadingLoop : FVarId := ⟨`countLeadingLoop⟩
+private def fillCodePointLoop : FVarId := ⟨`fillCodePointLoop⟩
+private def findCodePointLoop : FVarId := ⟨`findCodePointLoop⟩
+
 private def addressLocal : FVarId := ⟨`address⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
@@ -80,6 +84,7 @@ private def highLocal : FVarId := ⟨`highValue⟩
 private def limitLocal : FVarId := ⟨`limit⟩
 private def remainingLocal : FVarId := ⟨`remaining⟩
 private def matchLocal : FVarId := ⟨`matches⟩
+private def leadingCountLocal : FVarId := ⟨`leadingCount⟩
 private def effectiveEndLocal : FVarId := ⟨`effectiveEnd⟩
 private def copyLengthLocal : FVarId := ⟨`copyLength⟩
 
@@ -330,25 +335,28 @@ def copyBytesFunction : Function := {
   results := #[]
   locals := #[]
   body := [
-    .localGet countParam,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .ifElse [.ret] [],
-    .localGet destinationParam,
-    .localGet sourceParam,
-    .i32Load8U .uint32 0,
-    .i32Store8 .uint32 0,
-    .localGet destinationParam,
-    .i32Const .uint32 1,
-    .i32Add,
-    .localGet sourceParam,
-    .i32Const .uint32 1,
-    .i32Add,
-    .localGet countParam,
-    .i32Const .uint32 1,
-    .i32Sub,
-    .call (.declaration copyBytesName),
-    .ret] }
+    .loop copyBytesLoop [
+      .localGet countParam,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [.ret] [],
+      .localGet destinationParam,
+      .localGet sourceParam,
+      .i32Load8U .uint32 0,
+      .i32Store8 .uint32 0,
+      .localGet destinationParam,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet destinationParam,
+      .localGet sourceParam,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet sourceParam,
+      .localGet countParam,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet countParam,
+      .br copyBytesLoop]] }
 
 def countLeadingFunction : Function := {
   name := countLeadingName
@@ -358,33 +366,40 @@ def countLeadingFunction : Function := {
   results := #[.uint32]
   locals := #[
     (byteLocal, .uint32),
-    (incrementLocal, .uint32)]
+    (incrementLocal, .uint32),
+    (leadingCountLocal, .uint32)]
   body := [
-    .localGet countParam,
     .i32Const .uint32 0,
-    .i32Eq,
-    .ifElse [.i32Const .uint32 0, .ret] [],
-    .localGet sourceParam,
-    .i32Load8U .uint32 0,
-    .localSet byteLocal,
-    .localGet byteLocal,
-    .i32Const .uint32 192,
-    .i32And,
-    .i32Const .uint32 128,
-    .i32Eq,
-    .ifElse
-      [.i32Const .uint32 0, .localSet incrementLocal]
-      [.i32Const .uint32 1, .localSet incrementLocal],
-    .localGet sourceParam,
-    .i32Const .uint32 1,
-    .i32Add,
-    .localGet countParam,
-    .i32Const .uint32 1,
-    .i32Sub,
-    .call (.declaration countLeadingName),
-    .localGet incrementLocal,
-    .i32Add,
-    .ret] }
+    .localSet leadingCountLocal,
+    .loop countLeadingLoop [
+      .localGet countParam,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [.localGet leadingCountLocal, .ret] [],
+      .localGet sourceParam,
+      .i32Load8U .uint32 0,
+      .localSet byteLocal,
+      .localGet byteLocal,
+      .i32Const .uint32 192,
+      .i32And,
+      .i32Const .uint32 128,
+      .i32Eq,
+      .ifElse
+        [.i32Const .uint32 0, .localSet incrementLocal]
+        [.i32Const .uint32 1, .localSet incrementLocal],
+      .localGet leadingCountLocal,
+      .localGet incrementLocal,
+      .i32Add,
+      .localSet leadingCountLocal,
+      .localGet sourceParam,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet sourceParam,
+      .localGet countParam,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet countParam,
+      .br countLeadingLoop]] }
 
 private def widthBranch (threshold width : UInt32)
     (fallback : List Instruction) : List Instruction := [
@@ -608,36 +623,34 @@ def fillCodePointFunction : Function := {
   results := #[]
   locals := #[]
   body := [
-    .localGet countParam,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .ifElse [.ret] []] ++
-    storeEncodedByte byte0Param 0 ++ [
-    .i32Const .uint32 1,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (storeEncodedByte byte1Param 1) [],
-    .i32Const .uint32 2,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (storeEncodedByte byte2Param 2) [],
-    .i32Const .uint32 3,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (storeEncodedByte byte3Param 3) [],
-    .localGet destinationParam,
-    .localGet widthParam,
-    .i32Add,
-    .localGet widthParam,
-    .localGet byte0Param,
-    .localGet byte1Param,
-    .localGet byte2Param,
-    .localGet byte3Param,
-    .localGet countParam,
-    .i32Const .uint32 1,
-    .i32Sub,
-    .call (.declaration fillCodePointName),
-    .ret] }
+    .loop fillCodePointLoop <|
+      [
+        .localGet countParam,
+        .i32Const .uint32 0,
+        .i32Eq,
+        .ifElse [.ret] []] ++
+      storeEncodedByte byte0Param 0 ++ [
+        .i32Const .uint32 1,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (storeEncodedByte byte1Param 1) [],
+        .i32Const .uint32 2,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (storeEncodedByte byte2Param 2) [],
+        .i32Const .uint32 3,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (storeEncodedByte byte3Param 3) [],
+        .localGet destinationParam,
+        .localGet widthParam,
+        .i32Add,
+        .localSet destinationParam,
+        .localGet countParam,
+        .i32Const .uint32 1,
+        .i32Sub,
+        .localSet countParam,
+        .br fillCodePointLoop]] }
 
 private def compareDynamicByte (offset : Nat) (expected : FVarId) :
     List Instruction := [
@@ -667,44 +680,39 @@ def findCodePointFunction : Function := {
     (remainingLocal, .uint32),
     (matchLocal, .uint32)]
   body := [
-    .localGet byteCountParam,
-    .localGet indexParam,
-    .i32Sub,
-    .localSet remainingLocal,
-    .localGet remainingLocal,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse [.localGet byteCountParam, .ret] [],
-    .i32Const .uint32 1,
-    .localSet matchLocal] ++
-    compareDynamicByte 0 byte0Param ++ [
-    .i32Const .uint32 1,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (compareDynamicByte 1 byte1Param) [],
-    .i32Const .uint32 2,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (compareDynamicByte 2 byte2Param) [],
-    .i32Const .uint32 3,
-    .localGet widthParam,
-    .i32LtU,
-    .ifElse (compareDynamicByte 3 byte3Param) [],
-    .localGet matchLocal,
-    .ifElse
-      [.localGet indexParam, .ret]
-      [.localGet sourceParam,
+    .loop findCodePointLoop <|
+      [
         .localGet byteCountParam,
         .localGet indexParam,
-        .i32Const .uint32 1,
-        .i32Add,
+        .i32Sub,
+        .localSet remainingLocal,
+        .localGet remainingLocal,
         .localGet widthParam,
-        .localGet byte0Param,
-        .localGet byte1Param,
-        .localGet byte2Param,
-        .localGet byte3Param,
-        .call (.declaration findCodePointName),
-        .ret]] }
+        .i32LtU,
+        .ifElse [.localGet byteCountParam, .ret] [],
+        .i32Const .uint32 1,
+        .localSet matchLocal] ++
+      compareDynamicByte 0 byte0Param ++ [
+        .i32Const .uint32 1,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (compareDynamicByte 1 byte1Param) [],
+        .i32Const .uint32 2,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (compareDynamicByte 2 byte2Param) [],
+        .i32Const .uint32 3,
+        .localGet widthParam,
+        .i32LtU,
+        .ifElse (compareDynamicByte 3 byte3Param) [],
+        .localGet matchLocal,
+        .ifElse
+          [.localGet indexParam, .ret]
+          [.localGet indexParam,
+            .i32Const .uint32 1,
+            .i32Add,
+            .localSet indexParam,
+            .br findCodePointLoop]]] }
 
 private def encodedLocals : Array (FVarId × AbiKind) := #[
   (widthLocal, .uint32),
@@ -1276,7 +1284,7 @@ def manifest : Json :=
     ("closureDescriptors", Json.arr #[]),
     ("imports", Json.arr #[]),
     ("stringEncoding", "UTF-8"),
-    ("walkerImplementation", "recursive"),
+    ("walkerImplementation", "structured-loop"),
     ("status", "generation-only; W6 String contract proofs pending")]
 
 #guard match residentExampleModule with
