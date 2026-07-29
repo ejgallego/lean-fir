@@ -3784,6 +3784,85 @@ theorem retainedLargeNatExactStepLedgerPreserved
     retainedLargeNatState retainedLargeNatState programs frames joins env
       runtime step
 
+/-- The exact retained object-projection fixture publishes both the returned
+binder and the object local read by the let value. -/
+def retainedObjectProjectionUsed : UsedLocals :=
+  neutralUsed.insert dead
+
+def retainedObjectProjectionDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.oproj 0 dead)
+
+def retainedObjectProjectionCode : LCNF.Code .impure :=
+  .let retainedObjectProjectionDecl (.return live)
+
+theorem retainedObjectProjectionShadowRun :
+    shadowCode? 2 {} retainedObjectProjectionCode =
+      some (retainedObjectProjectionCode, retainedObjectProjectionUsed) := by
+  simp [retainedObjectProjectionCode, retainedObjectProjectionDecl, letDecl,
+    retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, live, dead]
+
+theorem retainedObjectProjectionStepBinderReady :
+    ExactShadowCodeBinderReady retainedObjectProjectionUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedObjectProjectionDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedObjectProjectionDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.view.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    (binders := [])
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact .ret
+  · simp [BinderNamesUnique]
+  · intro forbidden member
+    simp at member
+
+/-- Focused API regression for retained object projections. Once the caller
+supplies related machines and a ledger, the exact compiler view alone derives
+the object-local coverage needed by the hereditary projection matcher. -/
+theorem retainedObjectProjectionExactStepLedgerPreserved
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated 2)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated 2 rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated 2
+      retainedObjectProjectionUsed sourceState.joins targetState.joins)
+    (env : EnvRelOn rho retainedObjectProjectionUsed
+      sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn retainedObjectProjectionUsed sourceState.env ++
+        sourceFrameRoots)
+      (envRootsOn retainedObjectProjectionUsed targetState.env ++
+        targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code retainedObjectProjectionCode }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code retainedObjectProjectionCode }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 rho
+        sourceAfter targetAfter := by
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.oproj 0 dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedObjectProjectionCode, retainedObjectProjectionDecl,
+    letDecl] using
+    retainedObjectProjectionStepBinderReady
+      |>.match_retainedObjectProjectionLetStep_ledger
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        sourceState targetState programs frames joins env runtime step
+
 /-- The ordinary transparent traversal also retains the live nullary full
 application exactly; the checked-policy theorem above is a stricter
 conformance statement about the same branch. -/

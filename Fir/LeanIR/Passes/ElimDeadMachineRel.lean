@@ -11981,6 +11981,87 @@ theorem retainedLetValue_binderReadyReachableRelated
     sourceFrameRoots, targetFrameRoots,
     programs, .code continuation joins nextEnv, frames, nextRuntime⟩
 
+/-- Generic ledger-carrying matcher for a retained let whose evaluation
+produces related values without changing either runtime. Projection, unbox,
+copy, and ownership-query matchers only need to establish their local
+evaluation equations and publish the selected values as continuation roots. -/
+theorem match_retainedRuntimeNeutralLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (values : ValueRel rho sourceValue targetValue)
+    (publishedRuntime : ShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceValue ::
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      (targetValue ::
+        (envRootsOn used targetState.env ++ targetFrameRoots)))
+    (sourceEvaluated : evalLetValue
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      declaration = .ok (sourceState.runtime, .value sourceValue))
+    (targetEvaluated : evalLetValue
+      { targetState with
+        control := .code (.let declaration targetContinuation) }
+      declaration = .ok (targetState.runtime, .value targetValue))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let declaration targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let declaration sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let declaration targetContinuation) }
+  let sourceExpected := {
+    sourceState with
+    env := bind sourceState.env declaration.fvarId sourceValue
+    control := .code sourceContinuation }
+  let targetExpected := {
+    targetState with
+    env := bind targetState.env declaration.fvarId targetValue
+    control := .code targetContinuation }
+  have sourceTransition :
+      coreStep sourceCurrent = .next sourceExpected := by
+    simp [sourceCurrent, sourceExpected, coreStep, sourceEvaluated]
+  have targetTransition :
+      coreStep targetCurrent = .next targetExpected := by
+    simp [targetCurrent, targetExpected, coreStep, targetEvaluated]
+  have afterStructural :
+      BinderReadyReachableMachineRelated fuel rho
+        sourceExpected targetExpected := by
+    exact retainedLetValue_binderReadyReachableRelated
+      sourceState targetState sourceState.runtime targetState.runtime
+      programs frames continuation joins env values publishedRuntime
+  have afterRelated :
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceExpected targetExpected := by
+    refine ⟨?_, afterStructural⟩
+    simpa [targetExpected] using runtime.ledger
+  exact ⟨targetExpected,
+    match_internalCoreSteps_binderReady_ledger
+      sourceTransition targetTransition afterRelated
+      (by simpa [sourceCurrent] using step)⟩
+
 /-- A retained erased let takes the same administrative value-producing step
 on both machines.  Publishing `.erased` is sufficient for the newly bound
 continuations because it introduces no heap reachability. -/
@@ -14855,6 +14936,127 @@ theorem match_retainedObjectProjectionLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ledger-carrying hereditary object-projection matcher. Successful field
+selection publishes the related child while the runtime-neutral retained-let
+rule preserves the exact target allocation frontier. -/
+theorem match_retainedObjectProjectionLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let declaration : LCNF.LetDecl .impure := {
+    fvarId, binderName, type, value := .oproj index object }
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let declaration sourceContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } sourceContinuation) } = sourceCurrent by
+            simp [sourceCurrent, declaration]] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } sourceContinuation) } = sourceCurrent by
+            simp [sourceCurrent, declaration]] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceObjectRead :
+    lookupValue sourceState.env object = sourceObjectResult
+  cases sourceObjectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, declaration, coreStep, evalLetValue,
+          sourceObjectRead, fail, Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceObject =>
+      have sourceObjectLookup :=
+        lookupValue_eq_ok_iff.mp sourceObjectRead
+      have objects := env object objectMember
+      rw [sourceObjectLookup] at objects
+      generalize targetObjectLookup :
+        lookup targetState.env object = targetObjectOption at objects
+      cases objects with
+      | some values =>
+          rename_i targetObject
+          have targetObjectRead :
+              lookupValue targetState.env object = .ok targetObject :=
+            lookupValue_eq_ok_iff.mpr targetObjectLookup
+          generalize sourceFieldEq :
+            getObjectField sourceState.runtime sourceObject index =
+              sourceFieldResult
+          cases sourceFieldResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, declaration, coreStep, evalLetValue,
+                  sourceObjectRead, sourceFieldEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceField =>
+              have sourceObjectRoot :
+                  sourceObject ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+              rcases runtime.runtime.getObjectFieldBoth_of_related
+                  sourceObjectRoot values sourceFieldEq with
+                ⟨targetField, targetFieldEq, fields, publishedRuntime⟩
+              have sourceEvaluated :
+                  evalLetValue sourceCurrent declaration =
+                    .ok (sourceState.runtime, .value sourceField) := by
+                simp [sourceCurrent, declaration, evalLetValue,
+                  sourceObjectRead, sourceFieldEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetEvaluated :
+                  evalLetValue
+                    { targetState with
+                      control := .code
+                        (.let declaration targetContinuation) }
+                    declaration =
+                    .ok (targetState.runtime, .value targetField) := by
+                simp [declaration, evalLetValue, targetObjectRead,
+                  targetFieldEq, Bind.bind, Except.bind, Pure.pure,
+                  Except.pure]
+              exact match_retainedRuntimeNeutralLetStep_binderReady_ledger
+                sourceState targetState programs frames continuation joins env
+                runtime fields publishedRuntime sourceEvaluated targetEvaluated
+                (by simpa [sourceCurrent, declaration] using step)
+
 /-- Exact retained object-projection provenance supplies the hereditary
 continuation and promotes the compiler-collected object local to the ambient
 live set. -/
@@ -14969,6 +15171,121 @@ theorem ExactShadowCodeBinderReady.match_deletedObjectProjectionLetStep
         sourceState targetState programs frames
         (ready.letDeleted_continuationGraph fuelBound usedBound)
         joins env ready.letDeleted_ambientAbsent runtime evaluated step
+
+/-- Exact retained object-projection provenance consumed through the
+ledger-preserving runtime-neutral retained-let rule. -/
+theorem ExactShadowCodeBinderReady.match_retainedObjectProjectionLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.oproj index object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .oproj index object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.oproj index object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedObjectProjectionLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime step
+
+/-- Exact deleted object-projection provenance consumed through the generic
+runtime-neutral ledger rule. -/
+theorem ExactShadowCodeBinderReady.match_deletedObjectProjectionLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.oproj index object :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .oproj index object
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .oproj index object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases deletedReady with
+  | runtimeNeutral declaration value evaluated =>
+      exact
+        ready.match_deletedRuntimeNeutralLetStep_ledger
+          fuelBound usedBound sourceState targetState programs frames joins env
+          runtime evaluated step
 
 /-- Complete graph-level matcher for object-field projection lets. -/
 theorem match_objectProjectionLetCodeStep
