@@ -15,6 +15,7 @@ from validation_harness import (
     checked_sha256,
     sha256_bytes,
     validate_backend_name,
+    verify_evidence_file,
     verify_matrix_artifact,
 )
 
@@ -85,6 +86,116 @@ def _checked_named_counts(
     ):
         raise ValidationError(f"{context} must be sorted with unique names")
     return checked
+
+
+def _checked_semantic_coverage(
+    value: object,
+    case_ids: list[str],
+    context: str,
+) -> list[dict]:
+    if not isinstance(value, list):
+        raise ValidationError(f"{context} must be an array")
+    checked: list[dict] = []
+    known_cases = set(case_ids)
+    for item in value:
+        if (
+            not isinstance(item, dict)
+            or set(item) != {"tag", "caseIds"}
+            or not isinstance(item["tag"], str)
+            or not item["tag"]
+        ):
+            raise ValidationError(f"{context} contains malformed tag coverage")
+        covered_cases = _checked_string_list(
+            item["caseIds"], f"{context}/{item['tag']}/caseIds"
+        )
+        if not set(covered_cases) <= known_cases:
+            raise ValidationError(
+                f"{context}/{item['tag']} names cases outside its tier"
+            )
+        checked.append({"tag": item["tag"], "caseIds": covered_cases})
+    if [item["tag"] for item in checked] != sorted(
+        {item["tag"] for item in checked}
+    ):
+        raise ValidationError(
+            f"{context} must be sorted with unique semantic tags"
+        )
+    return checked
+
+
+def semantic_coverage_from_matrix(
+    matrix_path: Path,
+    matrix: dict,
+    context: str,
+) -> list[dict]:
+    """Derive selected-case semantic tags from the matrix's retained corpus."""
+    raw_inputs = matrix.get("inputs")
+    # Small unit fixtures predate retained inputs. A matrix accepted by the real
+    # verifier always has its corpus as the first input.
+    if raw_inputs is None:
+        return []
+    if not isinstance(raw_inputs, list) or not raw_inputs:
+        raise ValidationError(f"{context} matrix has no retained corpus input")
+    corpus_input = raw_inputs[0]
+    if (
+        not isinstance(corpus_input, dict)
+        or set(corpus_input) != {"kind", "name", "sha256", "artifact"}
+        or corpus_input["kind"] != "corpus"
+        or corpus_input["name"] != "corpus.json"
+    ):
+        raise ValidationError(
+            f"{context} matrix first input is not the retained corpus"
+        )
+    digest = checked_sha256(
+        corpus_input["sha256"], f"{context} retained corpus"
+    )
+    content = verify_evidence_file(
+        matrix_path.parent,
+        corpus_input["artifact"],
+        digest,
+        f"{context} retained corpus",
+    )
+    try:
+        corpus = json.loads(content)
+    except (UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(f"{context} retained corpus is not JSON") from error
+    if (
+        not isinstance(corpus, dict)
+        or set(corpus) != {"version", "cases"}
+        or corpus["version"] != PROTOCOL_VERSION
+        or isinstance(corpus["version"], bool)
+        or not isinstance(corpus["cases"], list)
+    ):
+        raise ValidationError(f"{context} retained corpus is malformed")
+    descriptor_by_id: dict[str, dict] = {}
+    for descriptor in corpus["cases"]:
+        if not isinstance(descriptor, dict):
+            raise ValidationError(f"{context} retained corpus is malformed")
+        case_id = validate_backend_name(
+            descriptor.get("id"), f"{context} retained corpus case ID"
+        )
+        if case_id in descriptor_by_id:
+            raise ValidationError(
+                f"{context} retained corpus repeats case {case_id}"
+            )
+        descriptor_by_id[case_id] = descriptor
+
+    selected_cases = matrix["selectedCases"]
+    if any(case_id not in descriptor_by_id for case_id in selected_cases):
+        raise ValidationError(
+            f"{context} selection names a case absent from its retained corpus"
+        )
+    cases_by_tag: dict[str, list[str]] = {}
+    for case_id in selected_cases:
+        tags = _checked_string_list(
+            descriptor_by_id[case_id].get("tags"),
+            f"{context} retained corpus/{case_id}/tags",
+        )
+        for tag in tags:
+            cases_by_tag.setdefault(tag, []).append(case_id)
+    return [
+        {"tag": tag, "caseIds": sorted(cases_by_tag[tag])}
+        for tag in sorted(cases_by_tag)
+    ]
 
 
 def _checked_dict(value: object, context: str) -> dict:
@@ -512,9 +623,11 @@ def coverage_policy_report(
         "tiers",
         "aggregate",
         "machine",
+        "semanticTags",
     }:
         raise ValidationError(
-            "coverage index policy requires tiers, aggregate, and machine"
+            "coverage index policy requires tiers, aggregate, machine, and "
+            "semanticTags"
         )
     raw_tier_policies = raw_policy["tiers"]
     if not isinstance(raw_tier_policies, list):
@@ -763,15 +876,75 @@ def coverage_policy_report(
         "failureCount": machine_failure_count,
         "satisfied": machine_failure_count == 0,
     }
+
+    raw_semantic = raw_policy["semanticTags"]
+    if not isinstance(raw_semantic, list):
+        raise ValidationError(
+            "coverage index semantic tag policy must be an array"
+        )
+    tier_by_id = {tier["id"]: tier for tier in tiers}
+    semantic_reports: list[dict] = []
+    semantic_keys: list[tuple[str, str]] = []
+    for requirement in raw_semantic:
+        if not isinstance(requirement, dict) or set(requirement) != {
+            "tier",
+            "tag",
+            "minimumCases",
+        }:
+            raise ValidationError(
+                "coverage index semantic tag entries require tier, tag, and "
+                "minimumCases"
+            )
+        tier_id = validate_backend_name(
+            requirement["tier"], "coverage semantic tag tier"
+        )
+        tag = validate_backend_name(
+            requirement["tag"], "coverage semantic tag"
+        )
+        minimum = _checked_nat(
+            requirement["minimumCases"],
+            f"coverage semantic tag {tier_id}/{tag} minimumCases",
+        )
+        if tier_id not in tier_by_id:
+            raise ValidationError(
+                f"coverage semantic tag names unknown tier {tier_id}"
+            )
+        semantic_keys.append((tier_id, tag))
+        coverage_by_tag = {
+            item["tag"]: item["caseIds"]
+            for item in tier_by_id[tier_id]["semanticCoverage"]
+        }
+        observed = len(coverage_by_tag.get(tag, []))
+        deficit = max(0, minimum - observed)
+        semantic_reports.append(
+            {
+                "tier": tier_id,
+                "tag": tag,
+                "minimumCases": minimum,
+                "observedCases": observed,
+                "caseDeficit": deficit,
+                "failureCount": int(deficit > 0),
+                "satisfied": deficit == 0,
+            }
+        )
+    if semantic_keys != sorted(set(semantic_keys)):
+        raise ValidationError(
+            "coverage index semantic tag policy must be sorted and unique"
+        )
+    semantic_failure_count = sum(
+        report["failureCount"] for report in semantic_reports
+    )
     failure_count = (
         sum(report["failureCount"] for report in tier_reports)
         + aggregate_failure_count
         + machine_failure_count
+        + semantic_failure_count
     )
     return {
         "tiers": tier_reports,
         "aggregate": aggregate_report,
         "machine": machine_report,
+        "semanticTags": semantic_reports,
         "failureCount": failure_count,
         "satisfied": failure_count == 0,
     }
@@ -870,7 +1043,18 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
         )
         for tier in tiers
     }
+    semantic_tag_contributions = {
+        tier["id"]: [
+            f"{tier['id']}:{item['tag']}"
+            for item in tier.get("semanticCoverage", [])
+        ]
+        for tier in tiers
+    }
     machine_policy = policy["machine"]
+    required_semantic_tags = [
+        f"{item['tier']}:{item['tag']}"
+        for item in policy.get("semanticTags", [])
+    ]
     dimensions = {
         "cases": _attributed_dimension(
             case_contributions, tier_order, []
@@ -895,6 +1079,11 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
             tier_order,
             machine_policy["requiredExternals"],
         ),
+        "semanticTags": _attributed_dimension(
+            semantic_tag_contributions,
+            tier_order,
+            required_semantic_tags,
+        ),
     }
     tier_reports = []
     contribution_maps = {
@@ -903,6 +1092,7 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
         "executedForms": executed_form_contributions,
         "administrativeKinds": administrative_contributions,
         "externals": external_contributions,
+        "semanticTags": semantic_tag_contributions,
     }
     for tier in tiers:
         tier_id = tier["id"]
@@ -1091,6 +1281,9 @@ def _tier_from_config(
             matrix,
             f"coverage tier {tier_id} machine coverage",
         )
+    semantic_coverage = semantic_coverage_from_matrix(
+        matrix_path, matrix, f"coverage tier {tier_id}"
+    )
 
     complete = semantic_complete and (
         machine_coverage is None or machine_coverage["complete"]
@@ -1112,6 +1305,7 @@ def _tier_from_config(
             "providers": list(matrix_coverage.get("providers", [])),
             "consumers": list(matrix_coverage.get("consumers", [])),
             "findingCount": matrix_coverage["findingCount"],
+            "semanticCoverage": semantic_coverage,
             "machineCoverageInput": machine_input,
             "machineCoverage": machine_coverage,
             "complete": complete,
@@ -1138,6 +1332,7 @@ def _checked_snapshot_tiers(value: object) -> list[dict]:
             "providers",
             "consumers",
             "findingCount",
+            "semanticCoverage",
             "machineCoverageInput",
             "machineCoverage",
             "complete",
@@ -1152,6 +1347,15 @@ def _checked_snapshot_tiers(value: object) -> list[dict]:
             raw_tier["kind"], f"coverage index snapshot tier {tier_id} kind"
         )
         tier_ids.append(tier_id)
+        case_ids = _checked_string_list(
+            raw_tier["caseIds"],
+            f"coverage index snapshot tier {tier_id} caseIds",
+        )
+        _checked_semantic_coverage(
+            raw_tier["semanticCoverage"],
+            case_ids,
+            f"coverage index snapshot tier {tier_id} semanticCoverage",
+        )
 
         matrix = raw_tier["matrix"]
         if (
@@ -1389,6 +1593,7 @@ def coverage_policy_declaration(report: object) -> dict:
         "tiers",
         "aggregate",
         "machine",
+        "semanticTags",
         "failureCount",
         "satisfied",
     }:
@@ -1460,6 +1665,26 @@ def coverage_policy_declaration(report: object) -> dict:
     }
     if not isinstance(machine, dict) or set(machine) != machine_keys:
         raise ValidationError("coverage index snapshot machine policy is malformed")
+    semantic_tags = report["semanticTags"]
+    semantic_keys = {
+        "tier",
+        "tag",
+        "minimumCases",
+        "observedCases",
+        "caseDeficit",
+        "failureCount",
+        "satisfied",
+    }
+    if (
+        not isinstance(semantic_tags, list)
+        or any(
+            not isinstance(item, dict) or set(item) != semantic_keys
+            for item in semantic_tags
+        )
+    ):
+        raise ValidationError(
+            "coverage index snapshot semantic tag policy is malformed"
+        )
     return {
         "tiers": [
             {
@@ -1486,6 +1711,14 @@ def coverage_policy_declaration(report: object) -> dict:
             ],
             "requiredExternals": machine["requiredExternals"],
         },
+        "semanticTags": [
+            {
+                "tier": item["tier"],
+                "tag": item["tag"],
+                "minimumCases": item["minimumCases"],
+            }
+            for item in semantic_tags
+        ],
     }
 
 
@@ -1868,6 +2101,14 @@ def coverage_policy_slack(policy: dict) -> dict:
             ),
             "externals": -len(policy["machine"]["missingExternals"]),
         },
+        "semanticTags": [
+            {
+                "tier": item["tier"],
+                "tag": item["tag"],
+                "cases": item["observedCases"] - item["minimumCases"],
+            }
+            for item in policy["semanticTags"]
+        ],
     }
 
 
@@ -1921,6 +2162,30 @@ def _policy_slack_comparison(before: dict, after: dict) -> dict:
         comparable_deltas.extend(item["delta"] for item in result.values())
         return result
 
+    before_semantic = {
+        (item["tier"], item["tag"]): item
+        for item in before["semanticTags"]
+    }
+    after_semantic = {
+        (item["tier"], item["tag"]): item
+        for item in after["semanticTags"]
+    }
+    semantic_tags = []
+    for tier_id, tag in sorted(
+        before_semantic.keys() | after_semantic.keys()
+    ):
+        before_item = before_semantic.get((tier_id, tag))
+        after_item = after_semantic.get((tier_id, tag))
+        cases = _slack_field_delta(
+            None if before_item is None else before_item["cases"],
+            None if after_item is None else after_item["cases"],
+        )
+        if cases["delta"] is not None:
+            comparable_deltas.append(cases["delta"])
+        semantic_tags.append(
+            {"tier": tier_id, "tag": tag, "cases": cases}
+        )
+
     return {
         "before": before,
         "after": after,
@@ -1929,6 +2194,7 @@ def _policy_slack_comparison(before: dict, after: dict) -> dict:
             before["aggregate"], after["aggregate"]
         ),
         "machine": compared_group(before["machine"], after["machine"]),
+        "semanticTags": semantic_tags,
         "increaseCount": sum(delta > 0 for delta in comparable_deltas),
         "decreaseCount": sum(delta < 0 for delta in comparable_deltas),
     }
@@ -1951,6 +2217,7 @@ def compare_coverage_indexes(before: dict, after: dict) -> dict:
         "executedForms",
         "administrativeKinds",
         "externals",
+        "semanticTags",
     )
     dimensions = {
         name: _attribution_dimension_delta(
@@ -2220,6 +2487,8 @@ def render_coverage_index(report: dict) -> list[str]:
         f"administrative kinds "
         f"{attribution['administrativeKinds']['summary']['observedItemCount']}, "
         f"externals {attribution['externals']['summary']['observedItemCount']}, "
+        f"semantic tags "
+        f"{attribution['semanticTags']['summary']['observedItemCount']}, "
         f"unique contributions "
         f"{attribution['summary']['uniqueContributionItemCount']}, "
         f"uncovered required "
@@ -2238,7 +2507,8 @@ def render_coverage_index(report: dict) -> list[str]:
             f"static forms {len(unique['staticForms'])}, "
             f"executed forms {len(unique['executedForms'])}, "
             f"administrative {unique_administrative}, "
-            f"externals {len(unique['externals'])}"
+            f"externals {len(unique['externals'])}, "
+            f"semantic tags {len(unique['semanticTags'])}"
         )
     policy = report["policy"]
     lines.append(
@@ -2283,6 +2553,15 @@ def render_coverage_index(report: dict) -> list[str]:
         f"{len(machine_policy['missingAdministrativeKinds'])}, "
         f"externals {len(machine_policy['missingExternals'])}, "
         f"failures {machine_policy['failureCount']}"
+    )
+    semantic_policy = policy["semanticTags"]
+    lines.append(
+        "coverage policy semantic tags: "
+        f"{sum(int(item['satisfied']) for item in semantic_policy)}/"
+        f"{len(semantic_policy)} floors satisfied, "
+        f"cases {sum(item['observedCases'] for item in semantic_policy)}/"
+        f"{sum(item['minimumCases'] for item in semantic_policy)} minimum, "
+        f"failures {sum(item['failureCount'] for item in semantic_policy)}"
     )
     return lines
 

@@ -187,6 +187,19 @@ The full process-tree trace-path count is operational telemetry and may vary
 with the engine or host toolchain; the receipted/opened product counts are the
 portable validation claim.
 
+The composed coverage index also derives semantic-tag inventories from each
+matrix's retained canonical corpus, restricted to that matrix's exact selected
+case domain. Its policy declares per-tier minimum case counts for semantic
+dimensions such as arithmetic, control flow, ownership, mutation, effects, and
+closure behavior. These are real regression floors rather than descriptive
+labels: removing an ownership case can no longer be hidden by adding unrelated
+numeric cases or by retaining the same instruction-form inventory. Source,
+direct-machine, and Wasm/V8 floors are separate, so the index exposes which
+semantic dimensions have reached the real engine without claiming that the
+compiler-supported subset already equals the larger native/LCNF corpus.
+Relocatable index snapshots retain the exact tag-to-case attribution; current
+input verification rederives it from the content-addressed corpus evidence.
+
 Two immutable executions can be compared after independently verifying both
 complete evidence graphs:
 

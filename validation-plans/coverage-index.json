@@ -412,6 +412,158 @@
         "USize.toUInt8",
         "USize.xor"
       ]
-    }
+    },
+    "semanticTags": [
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "overapplication",
+        "minimumCases": 2
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "ownership",
+        "minimumCases": 7
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "recursive-release",
+        "minimumCases": 2
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "reference-count",
+        "minimumCases": 6
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "reset",
+        "minimumCases": 7
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "tag": "reuse",
+        "minimumCases": 7
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "arithmetic",
+        "minimumCases": 146
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "boundary",
+        "minimumCases": 419
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "closure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "constructor",
+        "minimumCases": 14
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "control-flow",
+        "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "effect",
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "external",
+        "minimumCases": 298
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "heap",
+        "minimumCases": 80
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "mutation",
+        "minimumCases": 26
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "object",
+        "minimumCases": 17
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "ownership",
+        "minimumCases": 15
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "scalar",
+        "minimumCases": 357
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "arithmetic",
+        "minimumCases": 146
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "boundary",
+        "minimumCases": 419
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "closure",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "constructor",
+        "minimumCases": 14
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "control-flow",
+        "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "effect",
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "external",
+        "minimumCases": 298
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "heap",
+        "minimumCases": 80
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "mutation",
+        "minimumCases": 26
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "object",
+        "minimumCases": 17
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "ownership",
+        "minimumCases": 15
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "scalar",
+        "minimumCases": 357
+      }
+    ]
   }
 }

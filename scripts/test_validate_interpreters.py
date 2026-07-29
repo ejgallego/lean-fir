@@ -9297,6 +9297,7 @@ class CoverageIndexTests(unittest.TestCase):
                 ),
                 "requiredExternals": [],
             },
+            "semanticTags": [],
         }
 
     def test_machine_coverage_requires_the_matrix_case_domain(self) -> None:
@@ -9684,6 +9685,7 @@ class CoverageIndexTests(unittest.TestCase):
                         "requiredAdministrativeKinds": [],
                         "requiredExternals": [],
                     },
+                    "semanticTags": [],
                 },
             }
             plan_path = plan_dir / "coverage-index.json"
@@ -9829,6 +9831,100 @@ class CoverageIndexTests(unittest.TestCase):
             attribution["summary"]["uncoveredRequiredItemCount"], 1
         )
         self.assertFalse(attribution["summary"]["complete"])
+
+    def test_semantic_tag_policy_uses_selected_retained_corpus_cases(self) -> None:
+        descriptors = [
+            descriptor("arithmetic-case", tags=["arithmetic", "quick"]),
+            descriptor("ownership-case", tags=["ownership", "quick"]),
+            descriptor(
+                "shared-case",
+                tags=["arithmetic", "ownership", "quick"],
+            ),
+        ]
+        corpus_content = core.corpus_artifact_bytes(descriptors)
+        corpus_digest = core.sha256_bytes(corpus_content)
+        matrix = self.matrix(
+            ["arithmetic-case", "shared-case"],
+            ["native", "lcnf"],
+            [("native", "lcnf")],
+        )
+        matrix["inputs"] = [
+            {
+                "kind": "corpus",
+                "name": "corpus.json",
+                "sha256": corpus_digest,
+                "artifact": f"evidence/inputs/{corpus_digest}",
+            }
+        ]
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            matrix_path = root / "matrix.json"
+            corpus_path = root / "evidence" / "inputs" / corpus_digest
+            corpus_path.parent.mkdir(parents=True)
+            corpus_path.write_bytes(corpus_content)
+            semantic = coverage_index.semantic_coverage_from_matrix(
+                matrix_path, matrix, "fixture"
+            )
+        self.assertEqual(
+            semantic,
+            [
+                {
+                    "tag": "arithmetic",
+                    "caseIds": ["arithmetic-case", "shared-case"],
+                },
+                {
+                    "tag": "ownership",
+                    "caseIds": ["shared-case"],
+                },
+                {
+                    "tag": "quick",
+                    "caseIds": ["arithmetic-case", "shared-case"],
+                },
+            ],
+        )
+
+        tier = {
+            "id": "source",
+            "caseIds": ["arithmetic-case", "shared-case"],
+            "caseCount": 2,
+            "backends": [{"backend": "native"}, {"backend": "lcnf"}],
+            "pairs": [{"comparedCases": 2}],
+            "machineCoverage": None,
+            "semanticCoverage": semantic,
+        }
+        summary = {
+            "uniqueCaseCount": 2,
+            "tierCaseCount": 2,
+            "comparisonCount": 2,
+            "machine": coverage_index.aggregate_machine_coverage([]),
+        }
+        policy = self.policy(
+            "source",
+            ["native", "lcnf"],
+            minimum_cases=2,
+            minimum_comparisons=2,
+            require_machine=False,
+        )
+        policy["semanticTags"] = [
+            {"tier": "source", "tag": "arithmetic", "minimumCases": 2},
+            {"tier": "source", "tag": "ownership", "minimumCases": 2},
+        ]
+        report = coverage_index.coverage_policy_report(
+            policy, [tier], summary
+        )
+        self.assertEqual(report["semanticTags"][0]["caseDeficit"], 0)
+        self.assertEqual(report["semanticTags"][1]["caseDeficit"], 1)
+        self.assertEqual(report["failureCount"], 1)
+        attribution = coverage_index.coverage_attribution([tier], report)
+        self.assertEqual(
+            attribution["semanticTags"]["summary"]["requiredItemCount"], 2
+        )
+        self.assertEqual(
+            attribution["semanticTags"]["summary"][
+                "coveredRequiredItemCount"
+            ],
+            2,
+        )
 
     def test_policy_rejects_ambiguous_required_inventories(self) -> None:
         policy = self.policy("source", ["native", "lcnf"])
