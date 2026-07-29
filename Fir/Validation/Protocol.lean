@@ -98,6 +98,10 @@ inductive ValidationSchema where
   | int
   | usize
   | bits (width : Nat)
+  /-- A source `Float32`, transported and compared by its exact IEEE bits. -/
+  | float32
+  /-- A source `Float`, transported and compared by its exact IEEE bits. -/
+  | float64
   | string
   | bytes
   | seq (element : ValidationSchema)
@@ -112,6 +116,8 @@ partial def ValidationSchema.accepts : ValidationSchema → ValidationDatum → 
   | .int, .int _ => true
   | .usize, .usize _ => true
   | .bits expected, .bits actual _ => expected == actual
+  | .float32, .bits 32 _ => true
+  | .float64, .bits 64 _ => true
   | .string, .string _ => true
   | .bytes, .bytes values => values.all (· < 256)
   | .seq element, .seq values => values.all (element.accepts ·)
@@ -272,6 +278,11 @@ private def protocolRoundTripRequest : CaseRequest := {
 #guard match Jsonl.decodeCaseRequest (Jsonl.encode protocolRoundTripRequest) with
   | .ok request => request == protocolRoundTripRequest
   | .error _ => false
+
+#guard ValidationSchema.float32.accepts (.bits 32 0x7fc00001)
+#guard !ValidationSchema.float32.accepts (.bits 64 0x7fc00001)
+#guard ValidationSchema.float64.accepts (.bits 64 0x7ff8000000000001)
+#guard !ValidationSchema.float64.accepts (.bits 32 0x7fc00001)
 
 #guard toJson (.nat 18446744073709551617 : ValidationDatum) ==
   Json.mkObj [("nat", Json.mkObj [("value", "18446744073709551617")])]

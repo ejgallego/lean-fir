@@ -19,6 +19,10 @@ inductive ScalarValue where
   | uint16 (value : UInt16)
   | uint32 (value : UInt32)
   | uint64 (value : UInt64)
+  /-- An IEEE-754 binary32 value, represented by its exact physical bits. -/
+  | float32Bits (bits : UInt32)
+  /-- An IEEE-754 binary64 value, represented by its exact physical bits. -/
+  | float64Bits (bits : UInt64)
   deriving Inhabited, BEq, Repr
 
 /-- Values in final impure LCNF, including the internal reset/reuse token. -/
@@ -368,11 +372,25 @@ def RuntimeState.setGlobal (runtime : RuntimeState) (name : Name) (value : Value
 
 def maxTaggedPayload : Nat := 9223372036854775807
 
-def ScalarValue.toUInt64 : ScalarValue → UInt64
+def ScalarValue.rawBits : ScalarValue → UInt64
   | .uint8 value => UInt64.ofNat value.toNat
   | .uint16 value => UInt64.ofNat value.toNat
   | .uint32 value => UInt64.ofNat value.toNat
   | .uint64 value => value
+  | .float32Bits bits => UInt64.ofNat bits.toNat
+  | .float64Bits bits => bits
+
+/--
+The physical scalar payload as a `UInt64`.
+
+Kept as the established interface for concrete-runtime consumers; unlike the
+old integer-only domain, float cases return their raw IEEE bits.
+-/
+def ScalarValue.toUInt64 (value : ScalarValue) : UInt64 :=
+  value.rawBits
+
+#guard ScalarValue.rawBits (.float32Bits 0x80000000) == 0x80000000
+#guard ScalarValue.rawBits (.float64Bits 0x7ff8000000000001) == 0x7ff8000000000001
 
 def Value.objectReference? : Value → Option ObjectRef
   | .object reference => some reference

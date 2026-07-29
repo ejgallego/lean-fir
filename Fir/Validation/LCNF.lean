@@ -3093,6 +3093,10 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   | .bits 16, .bits _ value => return (runtime, .scalar (.uint16 value.toUInt16))
   | .bits 32, .bits _ value => return (runtime, .scalar (.uint32 value.toUInt32))
   | .bits 64, .bits _ value => return (runtime, .scalar (.uint64 value))
+  | .float32, .bits 32 value =>
+      return (runtime, .scalar (.float32Bits value.toUInt32))
+  | .float64, .bits 64 value =>
+      return (runtime, .scalar (.float64Bits value))
   | .string, .string value =>
       let (runtime, reference) := alloc runtime (.string value)
       return (runtime, .object reference)
@@ -3211,6 +3215,10 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
   | .bits 16, .scalar (.uint16 value) => return .bits 16 (UInt64.ofNat value.toNat)
   | .bits 32, .scalar (.uint32 value) => return .bits 32 (UInt64.ofNat value.toNat)
   | .bits 64, .scalar (.uint64 value) => return .bits 64 value
+  | .float32, .scalar (.float32Bits bits) =>
+      return .bits 32 (UInt64.ofNat bits.toNat)
+  | .float64, .scalar (.float64Bits bits) =>
+      return .bits 64 bits
   | .string, .object (.heap location) =>
       let cell ← getLiveCell runtime location |>.mapError (fun fault => toString (repr fault))
       let .string value := cell.object | throw "expected a string heap object"
