@@ -872,6 +872,13 @@ observable boundary specifically: it retains the call, takes the paired
 zero. The later foreign response remains a separate allocation-capable
 boundary rather than being hidden inside this theorem.
 
+Join-point installation now carries the ledger through both compiler
+decisions. A retained join takes one paired administrative step, installs the
+related hereditary bodies in both join environments, and preserves the
+target frontier. A deleted join installs only the unreachable source body and
+is matched by target stuttering. The exact retained and deleted traversal
+wrappers expose both rules directly to the future ledger dispatcher.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -950,8 +957,8 @@ its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer. It still has to be threaded through
-retained copies/projections and local-value applications, the remaining
-control steps, existing-address mutations, and allocation-capable external
+retained copies/projections and local-value applications, return/case and
+invocation steps, existing-address mutations, and allocation-capable external
 responses, then assembled into the unified non-lockstep dispatcher and
 compiler-client invariant so arbitrary selected edges receive that history
 rather than only focused fixtures.
@@ -996,9 +1003,9 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Preserve the ledger through retained copies/projections, local-value
-   applications, and the remaining control and existing-address matcher
-   families. Strengthen the foreign-response boundary when an external
-   response allocates, then
+   applications, return/case and invocation steps, and the existing-address
+   matcher families. Strengthen the foreign-response boundary when an
+   external response allocates, then
    assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
