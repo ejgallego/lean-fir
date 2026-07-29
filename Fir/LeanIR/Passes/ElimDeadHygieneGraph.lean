@@ -1082,6 +1082,324 @@ mutual
 
 end
 
+/-! ## Executable-policy completeness -/
+
+/-- If code bodies can be reconstructed from successful checked runs, the
+generic alternative-list traversal reconstructs the corresponding hereditary
+policy graph. This separates list recursion from the fuel induction below. -/
+theorem nullarySafeShadowAltList_run_of_code
+    (codeSound :
+      ∀ {initial final source target},
+        nullarySafeShadowCode? fuel initial source =
+            some (target, final) →
+          NullarySafeShadowCodeRun fuel initial final source target)
+    (result :
+      shadowAltList? (nullarySafeShadowCode? fuel) initial source =
+        some (target, final)) :
+    NullarySafeShadowAltListRun fuel initial final source target := by
+  induction source generalizing initial final target with
+  | nil =>
+      simp [shadowAltList?] at result
+      rcases result with ⟨rfl, rfl⟩
+      exact .nil
+  | cons alternative rest ih =>
+      cases bodyResult :
+          nullarySafeShadowCode? fuel initial alternative.getCode with
+      | none =>
+          simp [shadowAltList?, bodyResult] at result
+      | some bodyOutput =>
+          obtain ⟨targetBody, middle⟩ := bodyOutput
+          cases restResult :
+              shadowAltList? (nullarySafeShadowCode? fuel) middle rest with
+          | none =>
+              simp [shadowAltList?, bodyResult, restResult] at result
+          | some restOutput =>
+              obtain ⟨targetRest, threadedFinal⟩ := restOutput
+              simp [shadowAltList?, bodyResult, restResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              cases alternative with
+              | ctorAlt info sourceBody =>
+                  exact .ctor (codeSound bodyResult) (ih restResult)
+              | default sourceBody =>
+                  exact .default (codeSound bodyResult) (ih restResult)
+              | alt _ _ _ impossible => nomatch impossible
+
+/-- Every successful executable policy check reconstructs the exact
+proof-relevant policy graph. In particular, the checker cannot accept a
+different traversal result or hide a rejected nullary deletion. -/
+theorem nullarySafeShadowCode_run
+    (result :
+      nullarySafeShadowCode? fuel initial source =
+        some (target, final)) :
+    NullarySafeShadowCodeRun fuel initial final source target := by
+  induction fuel generalizing initial final source target with
+  | zero =>
+      cases source with
+      | «let» declaration continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | jp declaration continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | cases caseInfo =>
+          simp [nullarySafeShadowCode?] at result
+      | jmp join arguments =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .jump
+      | «return» returned =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .return
+      | unreach type =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .unreachable
+      | oset object index field continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | uset object index field continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | sset object width offset field type continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | setTag object tag continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | inc object amount check persistent continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | dec object amount check persistent objects continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | del object continuation =>
+          simp [nullarySafeShadowCode?] at result
+      | «fun» _ _ impossible => nomatch impossible
+  | succ nextFuel ih =>
+      cases source with
+      | «let» declaration sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              by_cases keep :
+                  declaration.fvarId ∈ continuationUsed ∨
+                    safeToElim declaration.value = false
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  keep] at result
+                rcases result with ⟨rfl, rfl⟩
+                exact .letRetained (ih continuationResult) keep
+              · by_cases nullary :
+                    isNullaryFap declaration.value = true
+                · simp [nullarySafeShadowCode?, continuationResult,
+                    keep, nullary] at result
+                · simp [nullarySafeShadowCode?, continuationResult,
+                    keep, nullary] at result
+                  rcases result with ⟨rfl, rfl⟩
+                  have absent :
+                      continuationUsed.contains declaration.fvarId =
+                        false := by
+                    cases memberEq :
+                        continuationUsed.contains declaration.fvarId <;>
+                      simp_all
+                  have safe :
+                      safeToElim declaration.value = true := by
+                    cases safeEq :
+                        safeToElim declaration.value <;> simp_all
+                  have notNullary : ¬ ∃ name arguments,
+                      declaration.value = .fap name arguments ∧
+                        arguments.isEmpty = true := by
+                    intro witness
+                    exact nullary
+                      ((isNullaryFap_eq_true_iff
+                        declaration.value).mpr witness)
+                  exact .letDeleted (ih continuationResult)
+                    absent safe notNullary
+      | jp declaration sourceContinuation =>
+          cases declaration with
+          | mk fvarId binderName params type sourceBody =>
+              cases continuationResult :
+                  nullarySafeShadowCode? nextFuel initial
+                    sourceContinuation with
+              | none =>
+                  simp [nullarySafeShadowCode?,
+                    continuationResult] at result
+              | some output =>
+                  obtain ⟨targetContinuation, continuationUsed⟩ := output
+                  by_cases live : fvarId ∈ continuationUsed
+                  · cases bodyResult :
+                        nullarySafeShadowCode? nextFuel
+                          continuationUsed sourceBody with
+                    | none =>
+                        simp [nullarySafeShadowCode?,
+                          continuationResult, live, bodyResult] at result
+                    | some bodyOutput =>
+                        obtain ⟨targetBody, bodyUsed⟩ := bodyOutput
+                        simp [nullarySafeShadowCode?,
+                          continuationResult, live, bodyResult] at result
+                        rcases result with ⟨rfl, rfl⟩
+                        have liveEq :
+                            continuationUsed.contains fvarId = true := by
+                          simpa using live
+                        exact .joinRetained
+                          (ih continuationResult) liveEq (ih bodyResult)
+                  · simp [nullarySafeShadowCode?,
+                      continuationResult, live] at result
+                    rcases result with ⟨rfl, rfl⟩
+                    have absent :
+                        continuationUsed.contains fvarId = false := by
+                      cases memberEq :
+                          continuationUsed.contains fvarId <;> simp_all
+                    exact .joinDeleted (ih continuationResult) absent
+      | cases caseInfo =>
+          cases caseInfo with
+          | mk typeName resultType discr sourceAlternatives =>
+              cases alternativesResult :
+                  shadowAltList? (nullarySafeShadowCode? nextFuel)
+                    initial sourceAlternatives.toList with
+              | none =>
+                  simp [nullarySafeShadowCode?,
+                    alternativesResult] at result
+              | some output =>
+                  obtain ⟨targetAlternatives, beforeDiscr⟩ := output
+                  simp [nullarySafeShadowCode?,
+                    alternativesResult] at result
+                  rcases result with ⟨rfl, rfl⟩
+                  exact .cases
+                    (nullarySafeShadowAltList_run_of_code
+                      (codeSound := fun childResult =>
+                        ih childResult)
+                      alternativesResult)
+      | jmp join arguments =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .jump
+      | «return» returned =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .return
+      | unreach type =>
+          simp [nullarySafeShadowCode?] at result
+          rcases result with ⟨rfl, rfl⟩
+          exact .unreachable
+      | oset object index field sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              by_cases live : object ∈ continuationUsed
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have liveEq :
+                    continuationUsed.contains object = true := by
+                  simpa using live
+                exact .objectSetRetained
+                  (ih continuationResult) liveEq
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have absent :
+                    continuationUsed.contains object = false := by
+                  cases memberEq :
+                      continuationUsed.contains object <;> simp_all
+                exact .objectSetDeleted
+                  (ih continuationResult) absent
+      | uset object index field sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              by_cases live : object ∈ continuationUsed
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have liveEq :
+                    continuationUsed.contains object = true := by
+                  simpa using live
+                exact .usizeSetRetained (ih continuationResult) liveEq
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have absent :
+                    continuationUsed.contains object = false := by
+                  cases memberEq :
+                      continuationUsed.contains object <;> simp_all
+                exact .usizeSetDeleted (ih continuationResult) absent
+      | sset object width offset field type sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              by_cases live : object ∈ continuationUsed
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have liveEq :
+                    continuationUsed.contains object = true := by
+                  simpa using live
+                exact .scalarSetRetained
+                  (ih continuationResult) liveEq
+              · simp [nullarySafeShadowCode?, continuationResult,
+                  live] at result
+                rcases result with ⟨rfl, rfl⟩
+                have absent :
+                    continuationUsed.contains object = false := by
+                  cases memberEq :
+                      continuationUsed.contains object <;> simp_all
+                exact .scalarSetDeleted
+                  (ih continuationResult) absent
+      | setTag object tag sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              simp [nullarySafeShadowCode?, continuationResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              exact .tagSet (ih continuationResult)
+      | inc object amount check persistent sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              simp [nullarySafeShadowCode?, continuationResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              exact .increment (ih continuationResult)
+      | dec object amount check persistent objects sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              simp [nullarySafeShadowCode?, continuationResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              exact .decrement (ih continuationResult)
+      | del object sourceContinuation =>
+          cases continuationResult :
+              nullarySafeShadowCode? nextFuel initial
+                sourceContinuation with
+          | none =>
+              simp [nullarySafeShadowCode?, continuationResult] at result
+          | some output =>
+              obtain ⟨targetContinuation, continuationUsed⟩ := output
+              simp [nullarySafeShadowCode?, continuationResult] at result
+              rcases result with ⟨rfl, rfl⟩
+              exact .delete (ih continuationResult)
+      | «fun» _ _ impossible => nomatch impossible
+
 /- The conservative policy graph is sound for the transparent compiler
 traversal. -/
 mutual
@@ -1146,6 +1464,99 @@ mutual
 
 end
 
+/- The executable checker is also complete for the policy graph: it accepts
+every graph witness with the same exact output. Together with
+`nullarySafeShadowCode_run`, this makes the checker and graph equivalent. -/
+mutual
+
+  theorem NullarySafeShadowCodeRun.checkedResult
+      (run :
+        NullarySafeShadowCodeRun fuel initial final source target) :
+      nullarySafeShadowCode? fuel initial source =
+        some (target, final) := by
+    cases run with
+    | letRetained continuation keep =>
+        simp [nullarySafeShadowCode?, continuation.checkedResult, keep]
+    | @letDeleted nextFuel initial continuationUsed sourceContinuation
+        targetContinuation declaration continuation absent safe
+        notNullary =>
+        have nullaryFalse :
+            isNullaryFap declaration.value = false := by
+          cases nullary : isNullaryFap declaration.value with
+          | false => rfl
+          | true =>
+              exact False.elim
+                (notNullary
+                  ((isNullaryFap_eq_true_iff
+                    declaration.value).mp nullary))
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | joinRetained continuation live body =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult, body.checkedResult]
+    | joinDeleted continuation absent =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | cases alternatives =>
+        simp [nullarySafeShadowCode?, alternatives.checkedResult]
+    | jump =>
+        cases fuel <;> simp [nullarySafeShadowCode?]
+    | «return» =>
+        cases fuel <;> simp [nullarySafeShadowCode?]
+    | unreachable =>
+        cases fuel <;> simp [nullarySafeShadowCode?]
+    | objectSetRetained continuation live =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | objectSetDeleted continuation absent =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | usizeSetRetained continuation live =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | usizeSetDeleted continuation absent =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | scalarSetRetained continuation live =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | scalarSetDeleted continuation absent =>
+        simp_all [nullarySafeShadowCode?,
+          continuation.checkedResult]
+    | tagSet continuation =>
+        simp [nullarySafeShadowCode?, continuation.checkedResult]
+    | increment continuation =>
+        simp [nullarySafeShadowCode?, continuation.checkedResult]
+    | decrement continuation =>
+        simp [nullarySafeShadowCode?, continuation.checkedResult]
+    | delete continuation =>
+        simp [nullarySafeShadowCode?, continuation.checkedResult]
+
+  theorem NullarySafeShadowAltListRun.checkedResult
+      (run :
+        NullarySafeShadowAltListRun fuel initial final source target) :
+      shadowAltList? (nullarySafeShadowCode? fuel) initial source =
+        some (target, final) := by
+    cases run with
+    | nil => simp [shadowAltList?]
+    | ctor body rest =>
+        simp [shadowAltList?, body.checkedResult, rest.checkedResult,
+          LCNF.Alt.getCode, updateAltCode]
+    | default body rest =>
+        simp [shadowAltList?, body.checkedResult, rest.checkedResult,
+          LCNF.Alt.getCode, updateAltCode]
+
+end
+
+/-- Accepted checked and transparent code runs have definitionally the same
+target and liveness result. -/
+theorem nullarySafeShadowCode_result
+    (checked :
+      nullarySafeShadowCode? fuel initial source =
+        some (target, final)) :
+    shadowCode? fuel initial source = some (target, final) :=
+  (nullarySafeShadowCode_run checked).result
+
 /-- Forget the conservative policy while retaining the exact transparent
 compiler equation. -/
 def NullarySafeShadowCodeRun.toExact
@@ -1166,6 +1577,117 @@ was selected for deletion. -/
 def NoDeletedNullaryFapProgramRun (fuel : Nat)
     (source target : ImpureProgram) : Prop :=
   ProgramRelated (NullarySafeExactShadowCodeRelated fuel) source target
+
+/-- One accepted checked declaration simultaneously certifies the ordinary
+transparent result and the proof-relevant conservative policy relation. -/
+theorem nullarySafeShadowDecl_certifies
+    (checked :
+      nullarySafeShadowDecl? fuel source = some target) :
+    shadowDecl? fuel source = some target ∧
+      DeclRelated (NullarySafeExactShadowCodeRelated fuel)
+        source target := by
+  cases valueEq : source.value with
+  | extern metadata =>
+      simp [nullarySafeShadowDecl?, valueEq] at checked
+      subst target
+      constructor
+      · simp [shadowDecl?, valueEq]
+      · exact {
+          name_eq := rfl
+          levelParams_eq := rfl
+          type_eq := rfl
+          params_eq := rfl
+          safe_eq := rfl
+          value := by
+            rw [valueEq]
+            exact .extern metadata
+          recursive_eq := rfl
+          inlineAttr_eq := rfl
+        }
+  | code code =>
+      cases codeResult :
+          nullarySafeShadowCode? fuel {} code with
+      | none =>
+          simp [nullarySafeShadowDecl?, valueEq,
+            codeResult] at checked
+      | some output =>
+          obtain ⟨targetCode, final⟩ := output
+          simp [nullarySafeShadowDecl?, valueEq,
+            codeResult] at checked
+          subst target
+          have run := nullarySafeShadowCode_run codeResult
+          constructor
+          · simp [shadowDecl?, valueEq, run.result]
+          · exact {
+              name_eq := rfl
+              levelParams_eq := rfl
+              type_eq := rfl
+              params_eq := rfl
+              safe_eq := rfl
+              value := by
+                rw [valueEq]
+                exact .code ⟨final, run⟩
+              recursive_eq := rfl
+              inlineAttr_eq := rfl
+            }
+
+/-- Accepted checked declaration lists preserve the ordinary transparent
+result and carry the conservative relation pointwise. -/
+theorem nullarySafeShadowDecls_certify
+    (checked :
+      nullarySafeShadowDecls? fuel sources = some targets) :
+    shadowDecls? fuel sources = some targets ∧
+      ListRel
+        (DeclRelated (NullarySafeExactShadowCodeRelated fuel))
+        sources targets := by
+  induction sources generalizing targets with
+  | nil =>
+      simp [nullarySafeShadowDecls?] at checked
+      subst targets
+      exact ⟨by simp [shadowDecls?], .nil⟩
+  | cons source rest ih =>
+      cases headResult :
+          nullarySafeShadowDecl? fuel source with
+      | none =>
+          simp [nullarySafeShadowDecls?, headResult] at checked
+      | some target =>
+          cases tailResult :
+              nullarySafeShadowDecls? fuel rest with
+          | none =>
+              simp [nullarySafeShadowDecls?, headResult,
+                tailResult] at checked
+          | some targetsRest =>
+              simp [nullarySafeShadowDecls?, headResult,
+                tailResult] at checked
+              subst targets
+              obtain ⟨headShadow, headRelated⟩ :=
+                nullarySafeShadowDecl_certifies headResult
+              obtain ⟨tailShadow, tailRelated⟩ := ih tailResult
+              exact ⟨by
+                  simp [shadowDecls?, headShadow, tailShadow],
+                .cons headRelated tailRelated⟩
+
+/-- A successful whole-program policy check is the compiler-facing
+certificate: it is exactly a successful transparent pass run and proves that
+no nullary full application was selected for deletion. -/
+theorem nullarySafeShadowProgram_certifies
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target) :
+    shadowProgram? fuel source = some target ∧
+      NoDeletedNullaryFapProgramRun fuel source target := by
+  cases declarationsResult :
+      nullarySafeShadowDecls? fuel source.decls.toList with
+  | none =>
+      simp [nullarySafeShadowProgram?, declarationsResult] at checked
+  | some declarations =>
+      simp [nullarySafeShadowProgram?, declarationsResult] at checked
+      subst target
+      obtain ⟨shadow, related⟩ :=
+        nullarySafeShadowDecls_certify declarationsResult
+      constructor
+      · simp [shadowProgram?, shadow]
+      · unfold NoDeletedNullaryFapProgramRun ProgramRelated
+        simpa using related
 
 /-- Every listed binder that is absent from one liveness set remains absent
 from another.  This is the contravariant transport used when backwards

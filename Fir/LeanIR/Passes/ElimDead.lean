@@ -203,6 +203,144 @@ def shadowProgram? (fuel : Nat) (program : ImpureProgram) :
   let declarations ← shadowDecls? fuel program.decls.toList
   return { decls := declarations.toArray }
 
+/-! ## Conservative executable nullary policy -/
+
+/-- Recognize the one syntax-only `safeToElim` case that is not locally
+value-producing under FIR's impure interpreter. -/
+def isNullaryFap : LCNF.LetValue .impure → Bool
+  | .fap _ arguments => arguments.isEmpty
+  | _ => false
+
+/-- Logical characterization used by the checked traversal's proof layer. -/
+theorem isNullaryFap_eq_true_iff
+    (value : LCNF.LetValue .impure) :
+    isNullaryFap value = true ↔
+      ∃ name arguments,
+        value = .fap name arguments ∧ arguments.isEmpty = true := by
+  cases value <;> simp [isNullaryFap]
+
+/-- Pass-aware policy checker for the audited transparent traversal.
+
+This computes exactly the same result as `shadowCode?` on accepted inputs, but
+fails closed when the pass would delete a zero-argument full application.
+Unlike a source-wide ban, retained nullary applications remain accepted. -/
+def nullarySafeShadowCode? :
+    Nat → UsedLocals → LCNF.Code .impure → Option ShadowResult
+  | 0, used, .jmp target arguments =>
+      some (.jmp target arguments,
+        collectArgs (used.insert target) arguments)
+  | 0, used, .return result =>
+      some (.return result, used.insert result)
+  | 0, used, .unreach type => some (.unreach type, used)
+  | 0, _, _ => none
+  | fuel + 1, used, code =>
+      match code with
+      | .let declaration continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          if used.contains declaration.fvarId ||
+              !safeToElim declaration.value then
+            return (.let declaration continuation,
+              collectLetValue used declaration.value)
+          else if isNullaryFap declaration.value then
+            none
+          else
+            return (continuation, used)
+      | .jp (.mk fvarId binderName params type body) continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          if used.contains fvarId then
+            let (body, used) ←
+              nullarySafeShadowCode? fuel used body
+            return (.jp (.mk fvarId binderName params type body)
+              continuation, used)
+          else
+            return (continuation, used)
+      | .cases (.mk typeName resultType discr alternatives) => do
+          let (alternatives, used) ←
+            shadowAltList? (nullarySafeShadowCode? fuel)
+              used alternatives.toList
+          return (.cases
+            (.mk typeName resultType discr alternatives.toArray),
+              used.insert discr)
+      | .jmp target arguments =>
+          some (.jmp target arguments,
+            collectArgs (used.insert target) arguments)
+      | .return result =>
+          some (.return result, used.insert result)
+      | .unreach type => some (.unreach type, used)
+      | .oset object index field continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          if used.contains object then
+            return (.oset object index field continuation,
+              collectArg used field)
+          else
+            return (continuation, used)
+      | .uset object index field continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          if used.contains object then
+            return (.uset object index field continuation,
+              used.insert field)
+          else
+            return (continuation, used)
+      | .sset object width offset field type continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          if used.contains object then
+            return (.sset object width offset field type continuation,
+              used.insert field)
+          else
+            return (continuation, used)
+      | .setTag object tag continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          return (.setTag object tag continuation, used.insert object)
+      | .inc object amount check persistent continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          return (.inc object amount check persistent continuation,
+            used.insert object)
+      | .dec object amount check persistent objects continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          return (.dec object amount check persistent objects continuation,
+            used.insert object)
+      | .del object continuation => do
+          let (continuation, used) ←
+            nullarySafeShadowCode? fuel used continuation
+          return (.del object continuation, used.insert object)
+      | .fun _ _ impossible => nomatch impossible
+
+/-- Lift the executable conservative policy through one declaration. -/
+def nullarySafeShadowDecl? (fuel : Nat)
+    (declaration : LCNF.Decl .impure) :
+    Option (LCNF.Decl .impure) :=
+  match declaration.value with
+  | .extern _ => some declaration
+  | .code code => do
+      let (code, _) ← nullarySafeShadowCode? fuel {} code
+      return { declaration with value := .code code }
+
+/-- Lift the executable conservative policy through declaration lists. -/
+def nullarySafeShadowDecls? (fuel : Nat) :
+    List (LCNF.Decl .impure) →
+      Option (List (LCNF.Decl .impure))
+  | [] => some []
+  | declaration :: rest => do
+      return (← nullarySafeShadowDecl? fuel declaration) ::
+        (← nullarySafeShadowDecls? fuel rest)
+
+/-- Whole-program conservative checker. A successful result is intended to
+serve as the auditable compiler-side certificate consumed by the semantic
+correctness endpoint. -/
+def nullarySafeShadowProgram? (fuel : Nat)
+    (program : ImpureProgram) : Option ImpureProgram := do
+  let declarations ←
+    nullarySafeShadowDecls? fuel program.decls.toList
+  return { decls := declarations.toArray }
+
 /-- State-indexed semantic kernel for an eliminable value whose evaluation is
 successful, returns an ordinary value, and leaves the runtime unchanged.  This
 is the exact subset compatible with FIR's current raw-observation equality. -/

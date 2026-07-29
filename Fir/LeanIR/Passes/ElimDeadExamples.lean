@@ -252,9 +252,19 @@ def deadNullaryFapBefore : LCNF.Code .impure :=
 def deadNullaryFapAfter : LCNF.Code .impure :=
   .let liveDecl <| .return live
 
+def retainedNullaryFapDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.fap `deadNullaryExternal #[])
+
+/-- Control fixture for the conservative policy: the same nullary full
+application remains in the program because its result binder is live. -/
+def retainedNullaryFap : LCNF.Code .impure :=
+  .let retainedNullaryFapDecl <| .return live
+
 #guard safeToElim deadErasedDecl.value
 #guard safeToElim deadCtorDecl.value
 #guard safeToElim deadNullaryFapDecl.value
+#guard isNullaryFap deadNullaryFapDecl.value
+#guard isNullaryFap retainedNullaryFapDecl.value
 #guard !safeToElim deadCopyDecl.value
 
 def fixtureDecl (name : Name) (code : LCNF.Code .impure) :
@@ -310,6 +320,18 @@ def checkActualAgreement (fuel : Nat) (program : ImpureProgram) : CoreM Unit := 
   unless actual == shadow.decls do
     throwError "elimDeadVars program disagreed with the transparent shadow"
 
+/-- Executable boundary check: the fail-closed traversal accepts a retained
+nullary application and rejects the actual pass branch that deletes one. -/
+def checkNullaryPolicyBoundary : CoreM Unit := do
+  let some (retained, _) :=
+      nullarySafeShadowCode? 64 {} retainedNullaryFap |
+    throwError "nullary policy rejected a retained full application"
+  unless retained == retainedNullaryFap do
+    throwError "nullary policy changed a retained full application"
+  unless
+      (nullarySafeShadowCode? 64 {} deadNullaryFapBefore).isNone do
+    throwError "nullary policy accepted a deleted full application"
+
 def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadNeutral neutralBefore neutralAfter
   checkActualElimDead `elimDeadUsed usedBefore usedBefore
@@ -333,6 +355,9 @@ def checkFixtures : CoreM Unit := do
     closedPapBoxBefore closedPapBoxAfter
   checkActualElimDead `elimDeadNullaryFap
     deadNullaryFapBefore deadNullaryFapAfter
+  checkActualElimDead `elimDeadRetainedNullaryFap
+    retainedNullaryFap retainedNullaryFap
+  checkNullaryPolicyBoundary
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -440,6 +465,10 @@ def deadNullaryFapBeforeProgram : ImpureProgram :=
 def deadNullaryFapAfterProgram : ImpureProgram :=
   { decls := #[deadNullaryExternalDecl,
       fixtureDecl `main deadNullaryFapAfter] }
+
+def retainedNullaryFapProgram : ImpureProgram :=
+  { decls := #[deadNullaryExternalDecl,
+      fixtureDecl `main retainedNullaryFap] }
 
 def countedNullaryExternal : ExternalImpl where
   call _ runtime := .ok {
@@ -685,6 +714,28 @@ theorem deadNullaryFapShadowRun :
     collectArgs, collectArgList,
     liveMember, deadAbsent]
 
+/-- The executable policy rejects the same successful transparent branch
+whose semantic counterexample is recorded above. -/
+theorem deadNullaryFapCheckedRejected :
+    nullarySafeShadowCode? 3 {} deadNullaryFapBefore = none := by
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deadNullaryFapBefore, liveDecl, deadNullaryFapDecl,
+    letDecl, nullarySafeShadowCode?, safeToElim,
+    isNullaryFap, collectLetValue, collectArgs, collectArgList,
+    deadAbsent]
+
+/-- A nullary full application is accepted when its result is live. The
+checked traversal and the ordinary pass both retain the node exactly. -/
+theorem retainedNullaryFapCheckedRun :
+    nullarySafeShadowCode? 2 {} retainedNullaryFap =
+      some (retainedNullaryFap, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [retainedNullaryFap, retainedNullaryFapDecl, letDecl,
+    neutralUsed, nullarySafeShadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, liveMember]
+
 theorem deadNullaryFapBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed deadNullaryFapBeforeProgram := by
   refine ⟨?_, ?_⟩
@@ -728,6 +779,31 @@ theorem deadNullaryFapShadowProgramRun :
   simp [shadowProgram?, shadowDecls?,
     deadNullaryFapBeforeProgram, deadNullaryFapAfterProgram,
     externalRun, mainRun]
+
+/-- The program-level checker rejects the pinned pass result rather than
+manufacturing a semantic certificate for the effectful deletion. -/
+theorem deadNullaryFapCheckedProgramRejected :
+    nullarySafeShadowProgram? 3 deadNullaryFapBeforeProgram = none := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, deadNullaryFapBeforeProgram,
+    deadNullaryExternalDecl, fixtureDecl, decl,
+    deadNullaryFapCheckedRejected]
+
+/-- Program-level retained-nullary control. This accepted certificate still
+allows the ordinary actual pass result because no nullary call is deleted. -/
+theorem retainedNullaryFapCheckedProgramRun :
+    nullarySafeShadowProgram? 2 retainedNullaryFapProgram =
+      some retainedNullaryFapProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, retainedNullaryFapProgram,
+    deadNullaryExternalDecl, fixtureDecl, decl,
+    retainedNullaryFapCheckedRun]
+
+theorem retainedNullaryFapPolicyProgramRun :
+    NoDeletedNullaryFapProgramRun 2
+      retainedNullaryFapProgram retainedNullaryFapProgram :=
+  (nullarySafeShadowProgram_certifies
+    retainedNullaryFapCheckedProgramRun).2
 
 /-- Static compiler well-formedness and a successful pinned transparent run
 do not suffice for semantic correctness of the nullary-application rule. -/
@@ -1485,33 +1561,46 @@ theorem neutralNoDeletedNullaryFapCode :
       (declaration := liveDecl) inner (Or.inl (by native_decide))
   simpa [liveDecl, letDecl, collectLetValue] using outer
 
+/-- The executable checker is complete for the same manually audited graph. -/
+theorem neutralCheckedCodeRun :
+    nullarySafeShadowCode? 3 {} neutralBefore =
+      some (neutralAfter, neutralUsed) := by
+  rcases neutralNoDeletedNullaryFapCode with ⟨used, run⟩
+  have ordinary := nullarySafeShadowCode_result run.checkedResult
+  rw [neutralShadowRun] at ordinary
+  have finalEq : neutralUsed = used :=
+    congrArg Prod.snd (Option.some.inj ordinary)
+  simpa [finalEq] using run.checkedResult
+
+/-- A single executable program equation now supplies both the ordinary
+transparent result and the conservative policy certificate. -/
+theorem neutralCheckedProgramRun :
+    nullarySafeShadowProgram? 3 neutralBeforeProgram =
+      some neutralAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, neutralBeforeProgram,
+    neutralAfterProgram, fixtureDecl, decl,
+    neutralCheckedCodeRun]
+
 /-- Program-level conservative nullary policy for the neutral fixture. -/
 theorem neutralNoDeletedNullaryFapProgramRun :
     NoDeletedNullaryFapProgramRun 3
       neutralBeforeProgram neutralAfterProgram := by
-  exact .cons {
-    name_eq := rfl
-    levelParams_eq := rfl
-    type_eq := rfl
-    params_eq := rfl
-    safe_eq := rfl
-    value := .code neutralNoDeletedNullaryFapCode
-    recursive_eq := rfl
-    inlineAttr_eq := rfl
-  } .nil
+  exact (nullarySafeShadowProgram_certifies
+    neutralCheckedProgramRun).2
 
-/-- The first concrete compiler-admissible package keeps the nullary policy
-and source runtime/ownership certificate as separate audited fields. -/
+/-- The first concrete compiler-admissible package is constructed from the
+single checked-pass equation plus the independent source runtime/ownership
+certificate. -/
 theorem neutralCompilerAdmissibleRun
     (externals : ExternalSpec) :
     ElimDeadCompilerAdmissibleRun externals 3
-      neutralBeforeProgram neutralAfterProgram #[`main] := {
-  wellFormed := neutralBeforeProgramElimDeadWellFormed
-  transformed := neutralShadowProgramRun
-  noDeletedNullaryFap := neutralNoDeletedNullaryFapProgramRun
-  runtime := .source
-    (neutralSourceRuntimeOwnershipInitialInvariant externals)
-}
+      neutralBeforeProgram neutralAfterProgram #[`main] :=
+  ElimDeadCompilerAdmissibleRun.ofChecked
+    neutralBeforeProgramElimDeadWellFormed
+    neutralCheckedProgramRun
+    (.source
+      (neutralSourceRuntimeOwnershipInitialInvariant externals))
 
 /-- End-to-end use of the checked strong endpoint on a concrete program.
 Only foreign-response compatibility remains parametric; the source
@@ -1524,7 +1613,12 @@ theorem neutralProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       neutralBeforeProgram neutralAfterProgram #[`main] :=
-  (neutralCompilerAdmissibleRun externals).loweringCorrect compatible
+  nullarySafeShadowProgram_loweringCorrect
+    neutralBeforeProgramElimDeadWellFormed
+    neutralCheckedProgramRun
+    (.source
+      (neutralSourceRuntimeOwnershipInitialInvariant externals))
+    compatible
 
 def liveEnv : Env :=
   bind [] live .erased

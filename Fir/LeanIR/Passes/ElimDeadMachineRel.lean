@@ -26268,6 +26268,26 @@ structure ElimDeadCompilerAdmissibleRun
   runtime :
     ElimDeadRuntimeAdmissibility externals fuel source target entries
 
+/-- Construct the compiler-facing package from one executable policy-check
+equation. The checker soundness theorem supplies both the ordinary transparent
+pass result and the proof-relevant nullary policy graph. -/
+theorem ElimDeadCompilerAdmissibleRun.ofChecked
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (runtime :
+      ElimDeadRuntimeAdmissibility
+        externals fuel source target entries) :
+    ElimDeadCompilerAdmissibleRun
+      externals fuel source target entries :=
+  let certificate := nullarySafeShadowProgram_certifies checked
+  {
+    wellFormed
+    transformed := certificate.1
+    noDeletedNullaryFap := certificate.2
+    runtime
+  }
+
 /-- Forget the explicit conservative compiler policy after it has been
 audited.  The operational endpoint consumes the independent dynamic
 certificate. -/
@@ -26296,5 +26316,25 @@ theorem ElimDeadCompilerAdmissibleRun.loweringCorrect
       (reachablePhaseSimulation externals)
       source target entries :=
   admissible.toSemanticallyAdmissibleRun.loweringCorrect compatible
+
+/-- Direct checked-pass endpoint for compiler clients. A single successful
+fail-closed traversal replaces the previously separate transparent-result and
+nullary-policy premises; runtime ownership and foreign compatibility remain
+explicit and independent. -/
+theorem nullarySafeShadowProgram_loweringCorrect
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (runtime :
+      ElimDeadRuntimeAdmissibility
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries :=
+  (ElimDeadCompilerAdmissibleRun.ofChecked
+    wellFormed checked runtime).loweringCorrect compatible
 
 end Fir.LeanIR.Passes.ElimDead
