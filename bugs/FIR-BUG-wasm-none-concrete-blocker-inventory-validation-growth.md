@@ -1,9 +1,9 @@
 ---
 id: FIR-BUG-wasm-none-concrete-blocker-inventory-validation-growth
-status: confirmed
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.32.0
-lean-revision: a669b51d86af72a7de5634b458ccd0f33755ae3b
+lean-revision: 642ca30ba7cd2d16dfb3421fcdae3c2b45939394
 phase: wasm
 pass: none
 discovered-by: differential-test
@@ -77,6 +77,10 @@ none
 
 ## Resolution and regression
 
-Pending rebase onto the complete signed-scalar validation release. The
-regression remains the exact-set and ByteArray-category assertions in
-`check-concrete-validation-products.mjs`.
+After rebasing onto the complete signed-scalar validation release, the audit
+separated the original 33 ByteArray cases from 129 cases blocked only by
+missing Int32, Int64, and ISize external declarations. The concrete validation
+registry now instantiates its existing signed-width and conversion machinery
+for those three types. All 129 execute against the canonical V8 results, while
+the regression retains both the original exact 33-case set and the independent
+requirement that every remaining blocker expose the ByteArray boundary.

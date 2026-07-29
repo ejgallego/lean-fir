@@ -769,7 +769,7 @@ third Worker. That Worker also executes the concrete initial-runtime
 complete 13-probe compiler source inventory—including both initial-runtime
 `prettyM` invocations and the invocation-free raw-layout module—through the
 same concrete checkers used by Node. The shared-product Worker independently
-executes the 70 non-`ByteArray` products through the concrete host after their
+executes the 548 non-`ByteArray` products through the concrete host after their
 semantic executions and verifies the exact 33-case blocker inventory.
 
 A repository-local alternate validation directory can be supplied as the
