@@ -104,15 +104,23 @@ const numericCoverageEvents = [
   event(3),
 ];
 
+const stressUtf8Bytes = 1024 * 1024;
+const stressText = "λ".repeat(stressUtf8Bytes / 2);
+const stressRepeatedCalls = 32;
+
+function checkTimings(result) {
+  for (const [name, value] of Object.entries(result.timings)) {
+    requireCondition(Number.isFinite(value) && value >= 0,
+      `timing ${name} is invalid`);
+  }
+}
+
 function checkResult(result, previous) {
   requireCondition(result.trace.text === "α β\n. γ\n  δ\n  ε",
     "styled text projection changed");
   requireCondition(equalEvents(result.trace.events, coverageEvents),
     "styled event sequence changed");
-  for (const [name, value] of Object.entries(result.timings)) {
-    requireCondition(Number.isFinite(value) && value >= 0,
-      `timing ${name} is invalid`);
-  }
+  checkTimings(result);
   requireCondition(result.memory.residentAllocationCalls === 1,
     "adapter did not use one bulk resident allocation");
   requireCondition(result.memory.inputBytes > 0 &&
@@ -139,6 +147,49 @@ function checkNumericResult(result, previous) {
   requireCondition(result.memory.frontierBefore >=
     previous.memory.frontierAfterDecode,
   "numeric coverage did not synchronize the resident frontier");
+}
+
+function checkTaggedResult(result, text, tag, previous, label) {
+  requireCondition(result.trace.text === text,
+    `${label} text projection changed`);
+  requireCondition(equalEvents(result.trace.events, [
+    event(2, "", tag),
+    event(0, text),
+    event(3, "", 1n),
+  ]), `${label} styled event sequence changed`);
+  checkTimings(result);
+  requireCondition(result.memory.residentAllocationCalls === 1,
+    `${label} did not use one bulk resident allocation`);
+  requireCondition(result.memory.frontierBefore >=
+    previous.memory.frontierAfterDecode,
+  `${label} did not synchronize the resident frontier`);
+}
+
+function exerciseStress(adapter, previous) {
+  const large = adapter.render({
+    format: F.tag(hugeNumeric, F.text(stressText)),
+    width: hugeNumeric,
+  });
+  checkTaggedResult(large, stressText, hugeNumeric, previous,
+    "1 MiB UTF-8 coverage");
+  requireCondition(large.memory.inputBytes >= stressUtf8Bytes,
+    "1 MiB UTF-8 coverage did not encode the complete input");
+  requireCondition(large.memory.pagesAfterDecode > large.memory.pagesBefore,
+    "1 MiB UTF-8 coverage did not grow module-owned memory");
+
+  let current = large;
+  for (let index = 0; index < stressRepeatedCalls; index += 1) {
+    const text = `repeat-${index}`;
+    const tag = hugeNumeric + BigInt(index);
+    const next = adapter.render({
+      format: F.tag(tag, F.text(text)),
+      width: hugeNumeric,
+    });
+    checkTaggedResult(next, text, tag, current,
+      `repeated coverage call ${index}`);
+    current = next;
+  }
+  return current;
 }
 
 export async function checkPrettyMBrowserAdapter({
@@ -170,7 +221,8 @@ export async function checkPrettyMBrowserAdapter({
   cyclic.body = cyclic;
   expectFailure(() => adapter.prepare({ format: cyclic, width: 80 }),
     "contains a cycle");
-  return "PASS production browser prettyM adapter";
+  exerciseStress(adapter, numeric);
+  return "PASS production browser prettyM adapter with stack-safe stress";
 }
 
 export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
@@ -188,5 +240,6 @@ export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
     width: 80,
   });
   checkNumericResult(numeric, second);
-  return "PASS fetched production browser prettyM adapter";
+  exerciseStress(adapter, numeric);
+  return "PASS fetched production browser prettyM adapter with stack-safe stress";
 }

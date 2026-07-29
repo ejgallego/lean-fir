@@ -708,8 +708,12 @@ input, performs one bulk resident allocation, constructs the Lean 4.32 raw
 graph directly in module memory, synchronizes the monotone frontier across
 repeated calls, decodes the styled `PrettyTrace`, and reports phase timings.
 The plain rendered `String` remains available as the trace's text projection.
-Node and the Chrome Worker exercise this adapter as well as the raw client and
-compare the exact event stream with the native Lean 4.32 oracle.
+Its resident String byte walkers use structured Wasm loops, so their call-stack
+usage is independent of String size. Node and the Chrome Worker exercise this
+adapter as well as the raw client, compare the exact event stream with the
+native Lean 4.32 oracle, render exactly 1 MiB of UTF-8 text while requiring
+module-memory growth, and make 32 additional calls on the same synchronized
+frontier.
 
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:

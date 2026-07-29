@@ -82,6 +82,12 @@ Startup timings (`fetchMs`, `compileMs`, and `instantiateMs`) are exposed as
 `adapter.startupTimings`; each result reports normalization, resident
 allocation, raw encoding, execution, decoding, and aggregate timings.
 
+The resident String byte walkers use structured Wasm loops rather than
+recursive helper calls. The packaged Node and Chrome checks render exactly
+1 MiB of UTF-8 text under a 131-bit tag and width, require module-owned memory
+to grow, compare the full styling event stream, and then perform 32 additional
+frontier-synchronized calls on the same adapter instance.
+
 The adapter borrows the JavaScript input and never mutates it. Each call
 encodes a fresh owned Lean graph and transfers it to the entry point. Returned
 raw addresses are not exposed: `decode` copies the text and exact event stream
@@ -166,11 +172,13 @@ The smoke clients prepare ordinary Lean values directly in the exported
 memory, advance the monotone resident frontier, decode the raw trace graph, and
 check both rendered text and exact tag boundaries against an event oracle also
 guarded by native Lean 4.32. The browser-adapter smoke reuses the same compact
-input across two calls, checks a multi-limb width, verifies one resident bulk
-allocation per input, and checks frontier synchronization. Keeping this
-package separate provides a coherent integration snapshot while allocation
-families move behind the resident boundary; only the explicitly versioned
-adapter capabilities are intended for consumer negotiation.
+input, checks multi-limb Nat/Int values, verifies one resident bulk allocation
+per input, and checks frontier synchronization. Its stack-safety stress case
+additionally covers 1 MiB of UTF-8 text, memory growth, exact styling, and 32
+repeated calls. Keeping this package separate provides a coherent integration
+snapshot while allocation families move behind the resident boundary; only
+the explicitly versioned adapter capabilities are intended for consumer
+negotiation.
 
 The module descriptor also carries the retained `closureDispatch` and
 `closureDescriptors` tables. They assign the target and capture-layout IDs
