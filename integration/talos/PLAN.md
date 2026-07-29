@@ -4257,6 +4257,30 @@ operation theorem and is the next production constant-prefix inversion slice.
 No FIR semantic contract, concrete layout, executable ABI, or W7 helper
 signature changed.
 
+W6.6fr closes that remaining erased object-field branch.
+`instructions_localGet_erased_call_eq` inverts the exact adapted
+`local.get; i32.const 0; call` prefix, and
+`CodeAdapted.objectSetErased_eq` derives it from the production compiler
+together with the independently adapted continuation.
+`ObjectFieldErasedEffectSupported` contains only the semantic lookup/update,
+live-constructor and bounds facts, the source-local compiler equation, and a
+universally quantified source typing premise identifying the selected
+descriptor slot as erased. It admits no numeric local/import slot, target
+program, concrete word, descriptor, witness, or execution certificate.
+
+`effectRuntimeRefines_objectFieldErased` reconstructs those concrete facts
+from production output and `StateRelated`, then consumes the existing
+cursor-preserving erased object-set theorem.
+`ObjectFieldEffectSupported` and `effectRuntimeRefines_objectField` combine
+the FVar and erased forms, while
+`OwnershipTagAndObjectEffectSupported`,
+`effectRuntimeRefines_ownershipTagAndObject`, and
+`correctBudgetedPureExternalOwnershipTagAndObject` extend the mixed
+whole-export theorem across every `LCNF.Arg` form accepted by `objectSet`.
+Compatibility theorems for the earlier FVar-only boundary remain available.
+No FIR semantic contract, concrete layout, executable ABI, or W7 helper
+signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

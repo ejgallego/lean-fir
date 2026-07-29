@@ -2287,6 +2287,193 @@ theorem CodeAdapted.objectSetFVar_eq
                           exact targetEq.symm
 
 /--
+Invert the exact adapter prefix emitted for an erased object-field write.
+
+The erased argument has no source local: compilation emits the canonical
+wasm32 zero between the object local and the runtime call. Successful
+adaptation therefore determines only the object-local and import indices.
+-/
+theorem instructions_localGet_erased_call_eq
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {operation : RuntimeOp}
+    {target : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet objectId, .i32Const .erased 0,
+            .call (.runtime operation)] = .ok target) :
+    ∃ objectIndex callIndex,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        callIndex? sourceModule (.runtime operation) = some callIndex ∧
+        target =
+          [.localGet objectIndex, .const 0, .call callIndex] := by
+  obtain ⟨targetObject, afterObject, objectAdapted, afterObjectAdapted,
+      targetEq⟩ :=
+    instructions_cons_eq_ok adapted
+  cases objectFound :
+      findFVar? (functionBindings sourceFunction) objectId with
+  | none =>
+      have objectFound' :
+          findFVar?
+              (sourceFunction.params.toList ++
+                sourceFunction.locals.toList)
+              objectId = none := by
+        simpa [functionBindings] using objectFound
+      have impossible :
+          Except.error (AdapterError.unknownLocal objectId) =
+            Except.ok targetObject := by
+        simpa [instruction, objectFound', pure, Except.pure,
+          Bind.bind, Except.bind] using objectAdapted
+      cases impossible
+  | some objectIndex =>
+      have objectFound' :
+          findFVar?
+              (sourceFunction.params.toList ++
+                sourceFunction.locals.toList)
+              objectId = some objectIndex := by
+        simpa [functionBindings] using objectFound
+      have objectTargetEq : targetObject = .localGet objectIndex := by
+        simpa [instruction, objectFound', pure, Except.pure,
+          Bind.bind, Except.bind] using objectAdapted.symm
+      obtain ⟨targetZero, afterZero, zeroAdapted, afterZeroAdapted,
+          afterObjectEq⟩ :=
+        instructions_cons_eq_ok afterObjectAdapted
+      have zeroTargetEq : targetZero = .const 0 := by
+        simpa [instruction, pure, Except.pure, Bind.bind, Except.bind] using
+          zeroAdapted.symm
+      obtain ⟨targetCall, afterCall, callAdapted, afterCallAdapted,
+          afterZeroEq⟩ :=
+        instructions_cons_eq_ok afterZeroAdapted
+      have afterCallEq : afterCall = [] := by
+        simpa [instructions, pure, Except.pure, Bind.bind, Except.bind] using
+          afterCallAdapted.symm
+      cases callFound :
+          callIndex? sourceModule (.runtime operation) with
+      | none =>
+          have impossible :
+              Except.error AdapterError.unknownCallTarget =
+                Except.ok targetCall := by
+            simpa [instruction, callFound, pure, Except.pure, Bind.bind,
+              Except.bind] using callAdapted
+          cases impossible
+      | some callIndex =>
+          have callTargetEq : targetCall = .call callIndex := by
+            simpa [instruction, callFound, pure, Except.pure, Bind.bind,
+              Except.bind] using callAdapted.symm
+          exact ⟨objectIndex, callIndex, rfl, rfl, by
+            simp [targetEq, afterObjectEq, afterZeroEq, afterCallEq,
+              objectTargetEq, zeroTargetEq, callTargetEq]⟩
+
+/--
+Production compiler/adaptor inversion for erased object-field mutation.
+
+Successful whole-node adaptation recovers the object-local slot, the erased
+object-set import, the canonical zero prefix, and the independently adapted
+continuation.
+-/
+theorem CodeAdapted.objectSetErased_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {index : Nat}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, .object))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.oset objectId index .erased continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        callIndex? sourceModule (.runtime (.objectSet index .erased)) =
+          some callIndex ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          [.localGet objectIndex, .const 0, .call callIndex] ++ targetRest := by
+  have fieldArgCompiled :
+      Fir.Wasm.compileArg context (.erased : LCNF.Arg .impure) =
+        .ok ([.i32Const .erased 0], .erased) := by
+    rfl
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases restResult :
+      Fir.Wasm.compileCodeCore context continuation with
+  | none =>
+      rw [objectCompiled, fieldArgCompiled, restResult] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some result =>
+      cases result with
+      | error error =>
+          rw [objectCompiled, fieldArgCompiled, restResult] at core
+          change
+            some (Except.error error) = some (Except.ok symbolic) at core
+          have impossible :
+              Except.error error = Except.ok symbolic :=
+            Option.some.inj core
+          cases impossible
+      | ok restCode =>
+          rw [objectCompiled, fieldArgCompiled, restResult] at core
+          change
+            some (Except.ok
+              ([.localGet objectId, .i32Const .erased 0,
+                .call (.runtime (.objectSet index .erased))] ++ restCode)) =
+              some (Except.ok symbolic) at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have restCompiled :
+              Fir.Wasm.compileCode context continuation = .ok restCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+          cases prefixAdapted :
+              instructions sourceModule sourceFunction labels
+                [.localGet objectId, .i32Const .erased 0,
+                  .call (.runtime (.objectSet index .erased))] with
+          | error error =>
+              rw [FirTalos.Correctness.instructions_append, prefixAdapted]
+                at targetCompiled
+              contradiction
+          | ok targetPrefix =>
+              cases restAdapted :
+                  instructions sourceModule sourceFunction labels restCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+                    restAdapted] at targetCompiled
+                  contradiction
+              | ok targetRest =>
+                  have targetEq : targetPrefix ++ targetRest = target := by
+                    rw [FirTalos.Correctness.instructions_append,
+                      prefixAdapted, restAdapted] at targetCompiled
+                    exact Except.ok.inj targetCompiled
+                  obtain ⟨objectIndex, callIndex, objectFound, callFound,
+                      prefixEq⟩ :=
+                    instructions_localGet_erased_call_eq prefixAdapted
+                  obtain ⟨alignedObjectIndex, alignedObjectFound,
+                      objectKindAt⟩ :=
+                    localsAligned objectCompiled
+                  rw [objectFound] at alignedObjectFound
+                  injection alignedObjectFound with objectIndexEq
+                  subst alignedObjectIndex
+                  refine ⟨objectIndex, callIndex, targetRest, objectFound,
+                    objectKindAt, callFound,
+                    ⟨restCode, restCompiled, restAdapted⟩, ?_⟩
+                  rw [prefixEq] at targetEq
+                  exact targetEq.symm
+
+/--
 Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
 continuation.
 
@@ -4568,6 +4755,50 @@ inductive ObjectFieldFVarEffectSupported
         nextRuntime
 
 /--
+Source/compiler-facing admission for successful erased object-field mutation.
+
+The compiler-selected payload kind and value are fixed by `.erased`; the only
+source typing obligation says that the selected constructor descriptor slot is
+also erased. Numeric target indices, the canonical zero instruction, and all
+concrete heap witnesses are reconstructed by compiler inversion and state
+refinement.
+-/
+inductive ObjectFieldErasedEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate where
+  | oset
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (index : Nat)
+      (continuation : LCNF.Code .impure)
+      (location : Location)
+      (cell : HeapCell)
+      (semantic : ConstructorObject)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object))
+      (objectLookup :
+        lookupValue sourceEnv objectId =
+          .ok (.object (.heap location)))
+      (updated :
+        setObjectField sourceRuntime (.object (.heap location)) index .erased =
+          .ok nextRuntime)
+      (found : findCell? sourceRuntime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor semantic)
+      (indexValid : index < semantic.objectFields.size)
+      (fieldKindAligned :
+        ∀ {witness : RefinementWitness} {objectWord : Word32}
+            {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind},
+          ValueRel witness .tobject (.word32 objectWord)
+              (.object (.heap location)) →
+            witness.descriptors.lookup? objectWord =
+                some (.constructor info fieldKinds) →
+              fieldKinds[index]? = some .erased) :
+      ObjectFieldErasedEffectSupported context sourceRuntime sourceEnv
+        (.oset objectId index .erased continuation) continuation nextRuntime
+
+/--
 Disjoint union of two source-facing effect families.
 
 The wrapper contains only the selected source admission. It is the generic
@@ -4624,6 +4855,23 @@ abbrev OwnershipTagAndObjectFVarEffectSupported
     (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
   EffectSupportedOr (OwnershipAndTagEffectSupported context)
     (ObjectFieldFVarEffectSupported context)
+
+/--
+Both source argument forms of successful object-slot mutation.
+-/
+abbrev ObjectFieldEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr (ObjectFieldFVarEffectSupported context)
+    (ObjectFieldErasedEffectSupported context)
+
+/--
+The ownership/tag family extended with both FVar and compiler-erased
+object-slot mutation.
+-/
+abbrev OwnershipTagAndObjectEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr (OwnershipAndTagEffectSupported context)
+    (ObjectFieldEffectSupported context)
 
 /--
 Budgeted successful source evaluation for mixed direct/external code with
@@ -7009,6 +7257,115 @@ theorem
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Successful erased object-field mutation implements the generic effect
+condition for the ownership-aware pure-external frame.
+
+Production inversion recovers the object local, canonical zero, and binary
+object-set call. State refinement recovers the physical object and descriptor;
+the source typing premise identifies the selected slot as erased. The concrete
+write preserves the exact heap frontier and every nonheap invariant.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_objectFieldErased
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId index continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq indexValid fieldKindAligned =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, objectKindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.objectSetErased_eq supportedExport.localsAligned
+          objectCompiled adapted
+      subst targetCode
+      have objectSourceLookup :
+          lookup sourceEnv objectId = some (.object (.heap location)) := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value foundLookup
+          injection objectLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      obtain ⟨physicalObject, hObject, physicalObjectRelated⟩ :=
+        stateRelated.resolve objectSourceLookup objectFound objectKindAt
+      cases physicalObjectRelated with
+      | word32 objectRelated =>
+          have decoded :
+              getConstructor sourceRuntime (.object (.heap location)) =
+                .ok (location, cell, semantic) := by
+            unfold getConstructor
+            simp only [getLiveCell, found, live, if_true, Bind.bind,
+              Except.bind]
+            rw [objectEq]
+            rfl
+          have tobjectRelated := objectRelated.object_to_tobject
+          obtain ⟨info, fieldKinds, descriptorFound⟩ :=
+            ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+              stateRelated.1 tobjectRelated decoded
+          have fieldDescriptorKindAt :=
+            fieldKindAligned tobjectRelated descriptorFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            supportedExport.objectSetCall callFound
+          obtain ⟨heap, step, _capacity, cursor⟩ :=
+            effectStepSimulates_objectSet_erased_with_capacity objectLookup
+              updated stateRelated hObject objectRelated objectCompiled
+              objectFound callFound continuationAdapted imported
+              supportedExport.hostsSatisfy inBounds contracted params results
+              found live objectEq descriptorFound indexValid
+              fieldDescriptorKindAt
+          rcases invariant.1 with
+            ⟨⟨frameAligned, budget⟩, integerImplementation,
+              naturalImplementation, scalarImplementation⟩
+          have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+            constructor
+            · simpa [cursor] using budget.cursorPositive
+            · simpa [cursor] using budget.endWithinAddressSpace
+          have nextBaseInvariant :
+              ConcreteBudgetedPureExternalFrame sourceFunction externals
+                remainingBytes nextRuntime sourceEnv
+                (replaceHeap targetStore heap) targetLocals witness := by
+            have externalsEq :
+                (replaceHeap targetStore heap).host.externals =
+                  targetStore.host.externals := by
+              simp [replaceHeap, clearFailure]
+            refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+            · rw [externalsEq]
+              exact integerImplementation
+            · rw [externalsEq]
+              exact naturalImplementation
+            · rw [externalsEq]
+              exact scalarImplementation
+          have nextInvariant :
+              ConcreteBudgetedPureExternalOwnershipFrame sourceFunction
+                externals remainingBytes nextRuntime sourceEnv
+                (replaceHeap targetStore heap) targetLocals witness := by
+            exact ⟨nextBaseInvariant, by
+              simpa [replaceHeap, clearFailure] using invariant.2⟩
+          exact ⟨targetRest, replaceHeap targetStore heap, witness,
+            continuationAdapted, step, nextInvariant⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 One uniform runtime law for every currently proved successful ownership effect.
 
 The theorem is assembled solely with `EffectRuntimeRefines.or`: persistent
@@ -7119,6 +7476,63 @@ theorem
   · exact supportedExport.effectRuntimeRefines_ownershipAndTag
       (externals := externals)
   · exact supportedExport.effectRuntimeRefines_objectFieldFVar
+      (externals := externals)
+
+/--
+One uniform runtime law for both compiler argument forms accepted by
+object-field mutation.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_objectField
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ObjectFieldEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  apply EffectRuntimeRefines.or
+  · exact supportedExport.effectRuntimeRefines_objectFieldFVar
+      (externals := externals)
+  · exact supportedExport.effectRuntimeRefines_objectFieldErased
+      (externals := externals)
+
+/--
+One uniform runtime law for ownership, tag mutation, and both FVar and erased
+object-field mutation.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ownershipTagAndObject
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (OwnershipTagAndObjectEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  apply EffectRuntimeRefines.or
+  · exact supportedExport.effectRuntimeRefines_ownershipAndTag
+      (externals := externals)
+  · exact supportedExport.effectRuntimeRefines_objectField
       (externals := externals)
 
 /--
@@ -12771,6 +13185,79 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_ownership externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ownershipTagAndObjectFVar
+      (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of the
+ownership family, constructor-tag mutation, both FVar and erased object-field
+mutation, default-only cases, and the direct/pure-external family.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOwnershipTagAndObject
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported
+        (OwnershipTagAndObjectEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ownershipTagAndObject
       (externals := externals))
     parameterCount
 

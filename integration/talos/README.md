@@ -407,8 +407,16 @@ recover descriptor existence, leaving only universally quantified slot-kind
 agreement as a source typing premise.
 `effectRuntimeRefines_objectFieldFVar` preserves the exact frontier and
 ownership-aware frame. The corresponding mixed runtime law and whole-export
-endpoint compose it with ownership and tag mutation. Erased object-slot
-mutation remains the next constant-prefix structural slice.
+endpoint compose it with ownership and tag mutation.
+`CodeAdapted.objectSetErased_eq` now inverts the complementary
+local/constant/call production prefix. The target-free
+`ObjectFieldErasedEffectSupported` admission leaves only erased slot-kind
+agreement as a source typing premise, and
+`effectRuntimeRefines_objectFieldErased` reuses the cursor-preserving concrete
+writer. `ObjectFieldEffectSupported` and
+`OwnershipTagAndObjectEffectSupported` compose both `LCNF.Arg` forms into the
+uniform runtime law and whole-export endpoint; the FVar-only APIs remain as
+compatibility boundaries.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

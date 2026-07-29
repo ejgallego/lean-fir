@@ -591,7 +591,11 @@ acceptance tests pass.
    semantic constructor success plus the runtime relation recover descriptor
    existence, and one universally quantified source typing premise connects
    the selected slot to the field kind. The mixed whole-export endpoint
-   includes this family; erased constant-prefix inversion is next.
+   includes this family. The erased branch now has the complementary
+   production inversion for its exact local/constant/call prefix; its
+   target-free admission identifies the selected descriptor slot as erased.
+   `ObjectFieldEffectSupported` combines both `LCNF.Arg` forms, and the mixed
+   ownership/tag/object whole-export theorem consumes the uniform law.
    Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
