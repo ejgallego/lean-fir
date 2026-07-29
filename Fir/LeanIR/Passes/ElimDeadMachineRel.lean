@@ -24701,6 +24701,159 @@ theorem match_casesStep_binderReady
                         by simpa [targetCurrent] using targetPath,
                         finalRelated⟩
 
+/-- Ledger-carrying hereditary case-table matcher. Tag inspection and
+alternative selection change only control, so the exact target allocation
+frontier and owner ledger are preserved through the paired dispatch step. -/
+theorem match_casesStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (alternatives : BinderReadyShadowAltListRelated fuel used
+      sourceAlternatives.toList targetAlternatives.toList)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (discrMember : used.contains discr = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.cases
+          (.mk typeName resultType discr sourceAlternatives)) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.cases
+            (.mk typeName resultType discr targetAlternatives)) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.cases
+      (.mk typeName resultType discr sourceAlternatives)) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.cases
+      (.mk typeName resultType discr targetAlternatives)) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.cases
+            (.mk typeName resultType discr sourceAlternatives)) } =
+              sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.cases
+            (.mk typeName resultType discr sourceAlternatives)) } =
+              sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize discrRead :
+    lookupValue sourceState.env discr = discrResult
+  cases discrResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, LCNF.Cases.discr, discrRead, fail]
+      exact (noStep done).elim
+  | ok sourceValue =>
+      generalize tagRead :
+        getTag sourceState.runtime sourceValue = tagResult
+      cases tagResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, coreStep, LCNF.Cases.discr, discrRead,
+              tagRead, fail]
+          exact (noStep done).elim
+      | ok tag =>
+          generalize sourceChoiceEq :
+            chooseAlt tag sourceAlternatives.toList = sourceChoice
+          cases sourceChoice with
+          | none =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault .invalidCases)) := by
+                simp [sourceCurrent, coreStep, LCNF.Cases.discr,
+                  LCNF.Cases.alts, discrRead, tagRead, sourceChoiceEq, fail]
+              exact (noStep done).elim
+          | some sourceBody =>
+              have sourceLookup :=
+                lookupValue_eq_ok_iff.mp discrRead
+              have values := env discr discrMember
+              rw [sourceLookup] at values
+              generalize targetLookup :
+                lookup targetState.env discr = targetOption at values
+              cases values with
+              | some discrValues =>
+                  rename_i targetValue
+                  have targetRead :
+                      lookupValue targetState.env discr = .ok targetValue :=
+                    lookupValue_eq_ok_iff.mpr targetLookup
+                  have sourceRoot :
+                      sourceValue ∈
+                        envRootsOn used sourceState.env ++
+                          sourceFrameRoots := by
+                    exact List.mem_append_left _
+                      (lookup_mem_envRootsOn discrMember sourceLookup)
+                  have targetTagRead :=
+                    runtime.runtime.getTagBoth_of_related
+                      sourceRoot discrValues tagRead
+                  generalize targetChoiceEq :
+                    chooseAlt tag targetAlternatives.toList = targetChoice
+                  have selected : OptionalRel
+                      (BinderReadyShadowCodeGraph fuel used)
+                      (some sourceBody) targetChoice := by
+                    rw [← sourceChoiceEq, ← targetChoiceEq]
+                    exact alternatives.choose
+                  cases selected with
+                  | some body =>
+                      rename_i targetBody
+                      let sourceExpected := {
+                        sourceState with control := .code sourceBody }
+                      let targetExpected := {
+                        targetState with control := .code targetBody }
+                      have sourceTransition :
+                          coreStep sourceCurrent = .next sourceExpected := by
+                        simp [sourceCurrent, sourceExpected, coreStep,
+                          LCNF.Cases.discr, LCNF.Cases.alts, discrRead,
+                          tagRead, sourceChoiceEq]
+                      have targetTransition :
+                          coreStep targetCurrent = .next targetExpected := by
+                        simp [targetCurrent, targetExpected, coreStep,
+                          LCNF.Cases.discr, LCNF.Cases.alts, targetRead,
+                          targetTagRead, targetChoiceEq]
+                      have afterStructural :
+                          BinderReadyReachableMachineRelated fuel rho
+                            sourceExpected targetExpected := by
+                        unfold BinderReadyReachableMachineRelated
+                        exact ⟨envRootsOn used sourceState.env,
+                          envRootsOn used targetState.env,
+                          sourceFrameRoots, targetFrameRoots,
+                          programs, .code body joins env, frames,
+                          runtime.runtime⟩
+                      have afterRelated :
+                          LedgerBinderReadyReachableMachineRelated fuel rho
+                            sourceExpected targetExpected := by
+                        refine ⟨?_, afterStructural⟩
+                        simpa [targetExpected] using runtime.ledger
+                      rcases match_internalCoreSteps_binderReady_ledger
+                          sourceTransition targetTransition afterRelated
+                          (by simpa [sourceCurrent] using step) with
+                        ⟨targetPath, finalRelated⟩
+                      exact ⟨targetExpected,
+                        by simpa [targetCurrent] using targetPath,
+                        finalRelated⟩
+
 /-- An exact `cases` branch projects its binder-ready alternative traversal
 and closes the selected-tag machine step without erasing compiler
 provenance. -/
@@ -24748,6 +24901,57 @@ theorem ExactShadowCodeBinderReady.match_casesStep
     apply usedBound discr
     simp
   exact match_casesStep_binderReady sourceState targetState programs frames
+    (ready.cases_alternativesRelated fuelBound usedBound)
+    joins env discrMember runtime step
+
+/-- Exact case provenance consumed through the ledger-preserving tag
+dispatch step. -/
+theorem ExactShadowCodeBinderReady.match_casesStep_ledger
+    {initial beforeDiscr ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceAlternatives : Array (LCNF.Alt .impure)}
+    {targetAlternatives : List (LCNF.Alt .impure)}
+    {discr : FVarId} {typeName : Name} {resultType : Expr}
+    {alternatives :
+      ExactShadowAltListRun nextFuel initial beforeDiscr
+        sourceAlternatives.toList targetAlternatives}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.cases
+          (discr := discr) (typeName := typeName) (resultType := resultType)
+          alternatives))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (beforeDiscr.insert discr) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.cases
+          (.mk typeName resultType discr sourceAlternatives)) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.cases
+            (.mk typeName resultType discr targetAlternatives.toArray)) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have discrMember : ambient.contains discr = true := by
+    apply usedBound discr
+    simp
+  exact match_casesStep_binderReady_ledger
+    sourceState targetState programs frames
     (ready.cases_alternativesRelated fuelBound usedBound)
     joins env discrMember runtime step
 
