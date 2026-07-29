@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 493,
-        "minimumComparisons": 493,
+        "minimumCases": 536,
+        "minimumComparisons": 536,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 493,
-        "minimumComparisons": 986,
+        "minimumCases": 536,
+        "minimumComparisons": 1072,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 502,
-      "minimumTierCases": 995,
-      "minimumComparisons": 1488
+      "minimumUniqueCases": 545,
+      "minimumTierCases": 1081,
+      "minimumComparisons": 1617
     },
     "machine": {
-      "minimumCases": 502,
-      "minimumInterpreterSteps": 4262,
+      "minimumCases": 545,
+      "minimumInterpreterSteps": 4520,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -186,6 +186,7 @@
         "Int16.sub",
         "Int16.toInt",
         "Int16.toInt32",
+        "Int16.toInt64",
         "Int16.toInt8",
         "Int16.xor",
         "Int32.abs",
@@ -207,8 +208,31 @@
         "Int32.sub",
         "Int32.toInt",
         "Int32.toInt16",
+        "Int32.toInt64",
         "Int32.toInt8",
         "Int32.xor",
+        "Int64.abs",
+        "Int64.add",
+        "Int64.complement",
+        "Int64.decEq",
+        "Int64.decLe",
+        "Int64.decLt",
+        "Int64.div",
+        "Int64.land",
+        "Int64.lor",
+        "Int64.mod",
+        "Int64.mul",
+        "Int64.neg",
+        "Int64.ofInt",
+        "Int64.ofNat",
+        "Int64.shiftLeft",
+        "Int64.shiftRight",
+        "Int64.sub",
+        "Int64.toInt",
+        "Int64.toInt16",
+        "Int64.toInt32",
+        "Int64.toInt8",
+        "Int64.xor",
         "Int8.abs",
         "Int8.add",
         "Int8.complement",
@@ -229,6 +253,7 @@
         "Int8.toInt",
         "Int8.toInt16",
         "Int8.toInt32",
+        "Int8.toInt64",
         "Int8.xor",
         "Nat.add",
         "Nat.decEq",

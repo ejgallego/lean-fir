@@ -426,6 +426,106 @@ def int32ToInt8 (value : Int32) : Int8 :=
 def int32ToInt16 (value : Int32) : Int16 :=
   Int32.toInt16 value
 
+@[noinline]
+def addInt64 (left right : Int64) : Int64 :=
+  Int64.add left right
+
+@[noinline]
+def subInt64 (left right : Int64) : Int64 :=
+  Int64.sub left right
+
+@[noinline]
+def mulInt64 (left right : Int64) : Int64 :=
+  Int64.mul left right
+
+@[noinline]
+def divInt64 (left right : Int64) : Int64 :=
+  Int64.div left right
+
+@[noinline]
+def modInt64 (left right : Int64) : Int64 :=
+  Int64.mod left right
+
+@[noinline]
+def landInt64 (left right : Int64) : Int64 :=
+  Int64.land left right
+
+@[noinline]
+def lorInt64 (left right : Int64) : Int64 :=
+  Int64.lor left right
+
+@[noinline]
+def xorInt64 (left right : Int64) : Int64 :=
+  Int64.xor left right
+
+@[noinline]
+def shiftLeftInt64 (value count : Int64) : Int64 :=
+  Int64.shiftLeft value count
+
+@[noinline]
+def shiftRightInt64 (value count : Int64) : Int64 :=
+  Int64.shiftRight value count
+
+@[noinline]
+def complementInt64 (value : Int64) : Int64 :=
+  Int64.complement value
+
+@[noinline]
+def negInt64 (value : Int64) : Int64 :=
+  Int64.neg value
+
+@[noinline]
+def absInt64 (value : Int64) : Int64 :=
+  Int64.abs value
+
+@[noinline]
+def decideInt64Eq (left right : Int64) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideInt64Lt (left right : Int64) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideInt64Le (left right : Int64) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
+def natToInt64 (value : Nat) : Int64 :=
+  Int64.ofNat value
+
+@[noinline]
+def intToInt64 (value : Int) : Int64 :=
+  Int64.ofInt value
+
+@[noinline]
+def int64ToInt (value : Int64) : Int :=
+  Int64.toInt value
+
+@[noinline]
+def int8ToInt64 (value : Int8) : Int64 :=
+  Int8.toInt64 value
+
+@[noinline]
+def int16ToInt64 (value : Int16) : Int64 :=
+  Int16.toInt64 value
+
+@[noinline]
+def int32ToInt64 (value : Int32) : Int64 :=
+  Int32.toInt64 value
+
+@[noinline]
+def int64ToInt8 (value : Int64) : Int8 :=
+  Int64.toInt8 value
+
+@[noinline]
+def int64ToInt16 (value : Int64) : Int16 :=
+  Int64.toInt16 value
+
+@[noinline]
+def int64ToInt32 (value : Int64) : Int32 :=
+  Int64.toInt32 value
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1945,6 +2045,12 @@ private def int16CaseCodec : FixedWidthCaseCodec Int16 where
 private def int32CaseCodec : FixedWidthCaseCodec Int32 where
   schema := .bits 32
   datum value := .bits 32 (UInt64.ofNat value.toUInt32.toNat)
+  externalTag := "fixed-width-signed-external"
+  conversionTag := "fixed-width-signed-conversion"
+
+private def int64CaseCodec : FixedWidthCaseCodec Int64 where
+  schema := .bits 64
+  datum value := .bits 64 value.toUInt64
   externalTag := "fixed-width-signed-external"
   conversionTag := "fixed-width-signed-conversion"
 
@@ -7228,6 +7334,33 @@ private def int32CaseFamily : SignedFixedWidthCaseFamily Int32 where
   decLt := Source.decideInt32Lt
   decLe := Source.decideInt32Le
 
+private def int64CaseFamily : SignedFixedWidthCaseFamily Int64 where
+  typeName := ``Int64
+  typeId := "int64"
+  sourceSuffix := "Int64"
+  width := 64
+  wasmLaneTag := "i64"
+  codec := int64CaseCodec
+  ofNat := Source.natToInt64
+  ofInt := Source.intToInt64
+  toInt := Source.int64ToInt
+  add := Source.addInt64
+  sub := Source.subInt64
+  mul := Source.mulInt64
+  div := Source.divInt64
+  modulo := Source.modInt64
+  land := Source.landInt64
+  lor := Source.lorInt64
+  xor := Source.xorInt64
+  shiftLeft := Source.shiftLeftInt64
+  shiftRight := Source.shiftRightInt64
+  complement := Source.complementInt64
+  neg := Source.negInt64
+  abs := Source.absInt64
+  decEq := Source.decideInt64Eq
+  decLt := Source.decideInt64Lt
+  decLe := Source.decideInt64Le
+
 private def signedCrossConversionCases : Array Case := #[
   exactFixedWidthConversionExternalCase int8CaseCodec int16CaseCodec
     "int8-to-int16-sign-extend" ``Source.int8ToInt16 Source.int8ToInt16
@@ -7264,7 +7397,43 @@ private def signedCrossConversionCases : Array Case := #[
     ``Int32.toInt16 (Int32.ofInt (-32769))
     #["stress", "scalar", "int16", "int32", "signed", "conversion",
       "truncation", "narrowing", "underflow", "boundary", "i32"]
-    "Truncate Int32 negative 32769 to the signed Int16 maximum bit pattern"
+    "Truncate Int32 negative 32769 to the signed Int16 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int8CaseCodec int64CaseCodec
+    "int8-to-int64-sign-extend" ``Source.int8ToInt64 Source.int8ToInt64
+    ``Int8.toInt64 (int8Value (-128))
+    #["stress", "scalar", "int8", "int64", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int8 minimum through the lossless Int8-to-Int64 conversion",
+  exactFixedWidthConversionExternalCase int16CaseCodec int64CaseCodec
+    "int16-to-int64-sign-extend" ``Source.int16ToInt64 Source.int16ToInt64
+    ``Int16.toInt64 (Int16.ofInt (-32768))
+    #["stress", "scalar", "int16", "int64", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int16 minimum through the lossless Int16-to-Int64 conversion",
+  exactFixedWidthConversionExternalCase int32CaseCodec int64CaseCodec
+    "int32-to-int64-sign-extend" ``Source.int32ToInt64 Source.int32ToInt64
+    ``Int32.toInt64 (Int32.ofInt (-2147483648))
+    #["stress", "scalar", "int32", "int64", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int32 minimum through the lossless Int32-to-Int64 conversion",
+  exactFixedWidthConversionExternalCase int64CaseCodec int8CaseCodec
+    "int64-to-int8-truncate" ``Source.int64ToInt8 Source.int64ToInt8
+    ``Int64.toInt8 (Int64.ofInt (-129))
+    #["stress", "scalar", "int8", "int64", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate Int64 negative 129 to the signed Int8 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int64CaseCodec int16CaseCodec
+    "int64-to-int16-truncate" ``Source.int64ToInt16 Source.int64ToInt16
+    ``Int64.toInt16 (Int64.ofInt (-32769))
+    #["stress", "scalar", "int16", "int64", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate Int64 negative 32769 to the signed Int16 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int64CaseCodec int32CaseCodec
+    "int64-to-int32-truncate" ``Source.int64ToInt32 Source.int64ToInt32
+    ``Int64.toInt32 (Int64.ofInt (-2147483649))
+    #["stress", "scalar", "int32", "int64", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate Int64 negative 2147483649 to the signed Int32 maximum bit pattern"
 ]
 
 private def int16Cases : Array Case :=
@@ -7273,9 +7442,13 @@ private def int16Cases : Array Case :=
 private def int32Cases : Array Case :=
   signedFixedWidthCases int32CaseFamily
 
+private def int64Cases : Array Case :=
+  signedFixedWidthCases int64CaseFamily
+
 def cases : Array Case :=
   preConversionCases ++ conversionCases ++ postConversionCases ++
-    int8Cases ++ int16Cases ++ int32Cases ++ signedCrossConversionCases
+    int8Cases ++ int16Cases ++ int32Cases ++ int64Cases ++
+      signedCrossConversionCases
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
 def requiredFinalExecutedForms : Array String :=
@@ -7306,22 +7479,25 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "small-word-nat-conversion").size == 15
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-cross-conversion").size == 26
+  validationCase.tags.contains "fixed-width-cross-conversion").size == 32
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-external").size == 84
+  validationCase.tags.contains "fixed-width-signed-external").size == 112
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-conversion").size == 33
+  validationCase.tags.contains "fixed-width-signed-conversion").size == 48
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 41
+  validationCase.tags.contains "int8").size == 43
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int16").size == 41
+  validationCase.tags.contains "int16").size == 43
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int32").size == 41
+  validationCase.tags.contains "int32").size == 43
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "int64").size == 43
 
 #guard System.Platform.numBits == 64
 
