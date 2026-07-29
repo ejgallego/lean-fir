@@ -987,7 +987,13 @@ steps; ordinary increments replace one existing live cell; delete either
 accepts the erased sentinel without a runtime change or marks one existing
 live cell dead. Frontier lemmas, paired core rules, hereditary semantic
 matchers, and exact-view wrappers cover these cases at `7fca313f`. Recursive
-decrement/release and general reset/reuse updates remain.
+decrement/release now preserves the frontier too. The proof is by induction on
+`decLocationFuel`, with an inner induction over the released object's owned
+children; it lifts through `decLocation`, one checked value decrement, and the
+repeated `decValue` fold. Persistent and ordinary decrement semantic matchers
+then transport the ledger through their administrative or recursively
+mutating paths, and the exact-view wrapper closes the pass edge. This slice is
+integrated at `3f03055b`. General reset/reuse updates remain.
 
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
@@ -1071,11 +1077,10 @@ applications, all three layout-field projection families, unboxing, and
 ownership queries, as well as named and closure external-request suspension.
 It now also covers retained/deleted object, `USize`, and scalar writes plus
 retained constructor-tag updates. The remaining existing-address work is
-recursive decrement/release and general reset/reuse matching;
-allocation-capable external responses remain separate. Those families must
-then be assembled into the unified non-lockstep dispatcher and compiler-client
-invariant so arbitrary selected edges receive that history rather than only
-focused fixtures.
+general reset/reuse matching; allocation-capable external responses remain
+separate. Those families must then be assembled into the unified non-lockstep
+dispatcher and compiler-client invariant so arbitrary selected edges receive
+that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1116,9 +1121,9 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Finish ledger preservation for recursive decrement/release and general
-   reset/reuse matcher families. Strengthen the foreign-response boundary when
-   a response allocates, then assemble the unified
+1. Finish ledger preservation for the general reset/reuse matcher families.
+   Strengthen the foreign-response boundary when a response allocates, then
+   assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
