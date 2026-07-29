@@ -973,10 +973,14 @@ therefore take paired steps, mutate only already-related cells, and transport
 the exact incoming target allocation ledger. Deleted writes take their
 certified source-only step while the target stutters with the same ledger.
 Core, semantic-step, and exact-view ledger wrappers for all six
-retained/deleted cases are integrated at `9519c3d1`. The accompanying
-`setTag` frontier lemma prepares the tag-update family, whose operational
-ledger matcher remains in the queue with reference-count and deletion
-updates.
+retained/deleted cases are integrated at `9519c3d1`.
+
+Retained constructor-tag updates now use the same existing-address argument.
+`setTag_nextLocation_eq_of_ok` transports the target ledger across the paired
+runtime mutation; `match_setTagCodeStep_binderReady_ledger` and
+`ExactShadowCodeBinderReady.match_setTagStep_ledger` carry it through the
+semantic and exact-view boundaries. This slice is integrated at `a70955fd`.
+Reference-count, recursive deletion, and general reset/reuse updates remain.
 
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
@@ -1058,12 +1062,13 @@ matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer, plus retained/deleted local-value
 applications, all three layout-field projection families, unboxing, and
 ownership queries, as well as named and closure external-request suspension.
-It now also covers retained/deleted object, `USize`, and scalar writes. The
-remaining existing-address work is tag, reference-count/deletion, and general
-reset/reuse matching; allocation-capable external responses remain separate.
-Those families must then be assembled into the unified non-lockstep dispatcher
-and compiler-client invariant so arbitrary selected edges receive that history
-rather than only focused fixtures.
+It now also covers retained/deleted object, `USize`, and scalar writes plus
+retained constructor-tag updates. The remaining existing-address work is
+reference-count/deletion and general reset/reuse matching;
+allocation-capable external responses remain separate. Those families must
+then be assembled into the unified non-lockstep dispatcher and compiler-client
+invariant so arbitrary selected edges receive that history rather than only
+focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1104,7 +1109,7 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Finish ledger preservation for tag, reference-count/deletion, and general
+1. Finish ledger preservation for reference-count/deletion and general
    reset/reuse matcher families. Strengthen the foreign-response boundary when
    a response allocates, then assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
