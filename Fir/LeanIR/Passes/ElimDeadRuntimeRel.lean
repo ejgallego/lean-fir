@@ -4555,6 +4555,25 @@ theorem ShadowRuntimeRel.leftUnreachable_of_forward_unmapped
   rw [unmapped] at mapping
   contradiction
 
+/-- A target runtime that has never allocated cannot receive an address
+mapping.  Consequently every source location is unreachable from the roots
+of a related pair.  This is the pair-indexed ownership fact needed when the
+source executes an allocation and subsequent writes that the target erases. -/
+theorem ShadowRuntimeRel.leftUnreachable_of_rightNextLocation_zero
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (rightEmpty : right.nextLocation = 0) (location : Nat) :
+    ¬Reachable left.heap (runtimeRoots left leftExtra) location := by
+  apply related.leftUnreachable_of_forward_unmapped
+  cases mapping : rho.forward location with
+  | none => rfl
+  | some targetLocation =>
+      have inverse := rho.leftInverse mapping
+      have fresh : rho.reverse targetLocation = none :=
+        related.rightMappingFresh targetLocation
+          (by simpa [rightEmpty] using Nat.zero_le targetLocation)
+      rw [fresh] at inverse
+      contradiction
+
 theorem ShadowRuntimeRel.rightUnreachable_of_reverse_unmapped
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
     (unmapped : rho.reverse location = none) :

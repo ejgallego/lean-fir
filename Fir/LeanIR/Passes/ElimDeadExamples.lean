@@ -67,6 +67,31 @@ def deletedWritesBefore : LCNF.Code .impure :=
 def deletedWritesAfter : LCNF.Code .impure :=
   .return live
 
+def closedWritesInfo : LCNF.CtorInfo :=
+  { name := `Dead.layout, cidx := 0, size := 1, usize := 1, ssize := 8 }
+
+def closedWritesObjectDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType (.ctor closedWritesInfo #[.erased])
+
+def closedWritesUSizeDecl : LCNF.LetDecl .impure :=
+  letDecl usizeField usizeType (.lit (.usize 7))
+
+def closedWritesScalarDecl : LCNF.LetDecl .impure :=
+  letDecl scalarField u8Type (.lit (.uint8 9))
+
+/-- Closed compiler-facing counterpart of `deletedWritesBefore`: every
+mutation operand is produced in the declaration before the source-only
+write chain. -/
+def closedWritesBefore : LCNF.Code .impure :=
+  .let liveDecl <|
+  .let closedWritesObjectDecl <|
+  .let closedWritesUSizeDecl <|
+  .let closedWritesScalarDecl <|
+  deletedWritesBefore
+
+def closedWritesAfter : LCNF.Code .impure :=
+  neutralAfter
+
 def deadReuseDecl : LCNF.LetDecl .impure :=
   letDecl dead objType
     (.reuse reuseTokenVar oneFieldInfo true #[.fvar reuseArgVar])
@@ -195,6 +220,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadUnsafe unsafeBefore unsafeBefore
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
+  checkActualElimDead `elimDeadClosedWrites closedWritesBefore closedWritesAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualElimDead `elimDeadLargeNat
@@ -234,6 +260,12 @@ def deletedWritesBeforeProgram : ImpureProgram :=
 
 def deletedWritesAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedWritesAfter] }
+
+def closedWritesBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedWritesBefore] }
+
+def closedWritesAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedWritesAfter] }
 
 def deletedReuseBeforeProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedReuseBefore] }
@@ -352,6 +384,31 @@ theorem deletedWritesShadowRun :
   simp [deletedWritesBefore, deletedWritesAfter, neutralUsed, shadowCode?,
     liveMember, deadAbsent]
 
+/-- The closed setup values and all three writes disappear together; only
+the live erased result binding remains. -/
+theorem closedWritesShadowRun :
+    shadowCode? 8 {} closedWritesBefore =
+      some (closedWritesAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have usizeAbsent : usizeField ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have scalarAbsent : scalarField ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  unfold closedWritesBefore
+  rw [shadowCode?]
+  rw [shadowCode?]
+  rw [shadowCode?]
+  rw [shadowCode?]
+  rw [deletedWritesShadowRun]
+  simp [closedWritesAfter, neutralAfter, neutralUsed, deletedWritesAfter, liveDecl,
+    closedWritesObjectDecl, closedWritesUSizeDecl, closedWritesScalarDecl,
+    letDecl, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, deadAbsent, usizeAbsent, scalarAbsent]
+
 theorem deletedUSizeScalarShadowRun :
     shadowCode? 3 {}
         (.uset dead 1 usizeField <|
@@ -459,6 +516,14 @@ theorem deletedWritesProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     deletedWritesBeforeProgram, deletedWritesAfterProgram,
     fixtureDecl, decl, deletedWritesShadowRun]
+
+theorem closedWritesProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 8)
+      closedWritesBeforeProgram closedWritesAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedWritesBeforeProgram, closedWritesAfterProgram,
+    fixtureDecl, decl, closedWritesShadowRun]
 
 theorem deletedReuseProgramShadowRelated :
     ProgramRelated (ShadowCodeRelated 2)
@@ -2696,6 +2761,13 @@ def deletedWritesExactGraph :
       deletedWritesBefore deletedWritesAfter :=
   ExactShadowCodeGraph.ofResult deletedWritesShadowRun
 
+/-- Exact transparent provenance for the closed setup and deleted-write
+chain. -/
+def closedWritesExactGraph :
+    ExactShadowCodeGraph 8 neutralUsed
+      closedWritesBefore closedWritesAfter :=
+  ExactShadowCodeGraph.ofResult closedWritesShadowRun
+
 /-- Exact transparent provenance for the unboxed/scalar suffix. -/
 def deletedUSizeScalarExactGraph :
     ExactShadowCodeGraph 3 neutralUsed
@@ -2729,6 +2801,56 @@ theorem deletedWritesExactBinderReady :
         · apply ScopedCodeWellFormedTree.ret
           native_decide
   · simp [deletedWritesBefore, codeBinderIds, BinderNamesUnique]
+
+/-- Hereditary static readiness for the closed setup and all three writes. -/
+theorem closedWritesExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      closedWritesExactGraph.view := by
+  apply closedWritesExactGraph.binderReady_of_canonical
+    (index := Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.letE
+      · native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · exact ⟨.object, trivial⟩
+      · apply ScopedCodeWellFormedTree.letE
+        · native_decide
+        · apply freshForScope_of_not_contains
+          native_decide
+        · apply freshForScope_of_not_contains
+          native_decide
+        · exact ⟨.usize, trivial⟩
+        · apply ScopedCodeWellFormedTree.letE
+          · native_decide
+          · apply freshForScope_of_not_contains
+            native_decide
+          · apply freshForScope_of_not_contains
+            native_decide
+          · exact ⟨.uint8, trivial⟩
+          · apply ScopedCodeWellFormedTree.oset
+            · native_decide
+            · native_decide
+            · apply ScopedCodeWellFormedTree.uset
+              · native_decide
+              · native_decide
+              · apply ScopedCodeWellFormedTree.sset
+                · native_decide
+                · native_decide
+                · apply ScopedCodeWellFormedTree.ret
+                  native_decide
+  · simp [closedWritesBefore, deletedWritesBefore, liveDecl,
+      closedWritesObjectDecl, closedWritesUSizeDecl,
+      closedWritesScalarDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead, usizeField, scalarField]
 
 /-- Hereditary static readiness for the exact unboxed/scalar suffix. -/
 theorem deletedUSizeScalarExactBinderReady :
@@ -2849,6 +2971,19 @@ theorem deletedWritesProgramBinderReadyRelated :
       inlineAttr_eq := rfl
     }
   · exact .nil
+
+/-- The closed fixture retains exact hereditary compiler provenance through
+its declaration/program wrapper. -/
+theorem closedWritesProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 8)
+      closedWritesBeforeProgram closedWritesAfterProgram := by
+  simpa [closedWritesBeforeProgram, closedWritesAfterProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨neutralUsed, 8, neutralUsed, Nat.le_refl 8,
+        closedWritesExactGraph, UsedSubset.refl neutralUsed,
+        closedWritesExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 8
+          closedWritesBefore closedWritesAfter)
 
 /-- Full exact-provenance machine readiness at the deleted object write. -/
 theorem deletedObjectSetExactMachineReadyAt :
@@ -5195,6 +5330,45 @@ theorem allocatingProgramLoweringCorrect
     allocatingBeforeProgramElimDeadWellFormed allocatingShadowProgramRun
     compatible
     (allocatingSourceRuntimeOwnershipInitialInvariant externals)
+
+theorem closedWritesBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed closedWritesBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, closedWritesBeforeProgram,
+          fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [closedWritesBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE (.letE (.letE (.oset (.uset (.sset .ret))))))
+    · intro declaration member
+      simp [closedWritesBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩
+          (.letE ⟨.usize, trivial⟩
+            (.letE ⟨.uint8, trivial⟩
+              (.oset (.uset (.sset .ret))))))
+  · intro declaration member
+    simp [closedWritesBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+      closedWritesBefore, deletedWritesBefore, liveDecl,
+      closedWritesObjectDecl, closedWritesUSizeDecl,
+      closedWritesScalarDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds,
+      live, dead, usizeField, scalarField]
+
+theorem closedWritesShadowProgramRun :
+    shadowProgram? 8 closedWritesBeforeProgram =
+      some closedWritesAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedWritesBeforeProgram, closedWritesAfterProgram,
+    fixtureDecl, decl, closedWritesShadowRun]
 
 /-- The liveness-indexed machine relation accepts the concrete environment
 difference introduced by executing and then deleting the dead binding. -/
