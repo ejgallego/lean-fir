@@ -1504,6 +1504,117 @@ theorem invokeDecl_external_withControl
                 cases waitingEq
                 exact ⟨requestEq, rfl, rfl, rfl, rfl, rfl⟩
 
+/-- Declaration invocation does not alter the runtime before suspending for
+an external response. -/
+theorem invokeDecl_external_runtime_eq
+    (state waiting : MachineState)
+    (name : Name)
+    (arguments : Array Value)
+    (request : ExternalRequest)
+    (step : invokeDecl state name arguments =
+      .external request waiting) :
+    waiting.runtime = state.runtime := by
+  cases found : state.program.findDecl? name with
+  | none =>
+      simp [invokeDecl, found, fail] at step
+  | some declaration =>
+      by_cases tooFew : arguments.size < declaration.params.size
+      · simp [invokeDecl, found, tooFew] at step
+      · cases binding : bindParams declaration.params
+            (arguments.extract 0 declaration.params.size) with
+        | error fault =>
+            simp [invokeDecl, found, tooFew, binding, fail] at step
+        | ok env =>
+            cases value : declaration.value with
+            | code code =>
+                simp [invokeDecl, found, tooFew, binding, value] at step
+            | extern metadata =>
+                simp [invokeDecl, found, tooFew, binding, value] at step
+                rcases step with ⟨requestEq, waitingEq⟩
+                cases waitingEq
+                rfl
+
+/-- A named external call likewise preserves the caller runtime in its
+waiting state, including the cache-miss path for empty arguments. -/
+theorem coreStep_invokeName_external_runtime_eq
+    (state waiting : MachineState)
+    (name : Name)
+    (arguments : Array Value)
+    (request : ExternalRequest)
+    (step : coreStep { state with
+      control := .invokeName name arguments } =
+        .external request waiting) :
+    waiting.runtime = state.runtime := by
+  by_cases empty : arguments.isEmpty
+  · cases found : findGlobal? state.runtime.globals name with
+    | none =>
+        have invocation :
+            invokeDecl { state with control := .invokeName name arguments }
+                name arguments = .external request waiting := by
+          simpa [coreStep, empty, found] using step
+        simpa using invokeDecl_external_runtime_eq (step := invocation)
+    | some value =>
+        simp [coreStep, empty, found] at step
+  · have invocation :
+        invokeDecl { state with control := .invokeName name arguments }
+            name arguments = .external request waiting := by
+      simpa [coreStep, empty] using step
+    simpa using invokeDecl_external_runtime_eq (step := invocation)
+
+/-- A value invocation can suspend only after reading a live closure and
+delegating to declaration invocation, which also preserves the runtime. -/
+theorem coreStep_invokeValue_external_runtime_eq
+    (state waiting : MachineState)
+    (function : Value)
+    (arguments : Array Value)
+    (request : ExternalRequest)
+    (step : coreStep { state with
+      control := .invokeValue function arguments } =
+        .external request waiting) :
+    waiting.runtime = state.runtime := by
+  cases function with
+  | object reference =>
+    cases reference with
+    | tagged payload =>
+        simp [coreStep, invokeClosure, fail] at step
+    | heap location =>
+        cases read : getLiveCell state.runtime location with
+        | error fault =>
+            simp [coreStep, invokeClosure, read, fail] at step
+        | ok cell =>
+            cases object : cell.object with
+            | ctor object =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | closure name arity fixed =>
+                have invocation :
+                    invokeDecl { state with
+                      control := .invokeValue (.object (.heap location))
+                        arguments }
+                      name (fixed ++ arguments) =
+                        .external request waiting := by
+                  simpa [coreStep, invokeClosure, read, object] using step
+                simpa using invokeDecl_external_runtime_eq (step := invocation)
+            | boxed type value =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | string value =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | natural value =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | integer value =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | byteArray value =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+            | «opaque» typeName =>
+                simp [coreStep, invokeClosure, read, object, fail] at step
+  | usize value =>
+      simp [coreStep, invokeClosure, fail] at step
+  | scalar value =>
+      simp [coreStep, invokeClosure, fail] at step
+  | erased =>
+      simp [coreStep, invokeClosure, fail] at step
+  | reuseToken location? =>
+      cases location? <;> simp [coreStep, invokeClosure, fail] at step
+
 /-- A declaration-ready named call to an unknown declaration satisfies the
 terminal simulation contract immediately. -/
 theorem coreStep_invokeName_unknown_terminal
@@ -9283,6 +9394,110 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_le
       sourceObject] using sourceStep
   · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
       targetObject] using targetStep
+
+/-- Suspending a declaration-ready named external call preserves the target
+allocation ledger because request construction does not mutate either
+runtime. -/
+theorem coreStep_invokeName_foundExtern_of_declReady_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .extern metadata)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ sourceRequest targetRequest sourceWaiting targetWaiting,
+      ExternalRequestRel rho sourceRequest targetRequest ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } =
+          .external sourceRequest sourceWaiting ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } =
+          .external targetRequest targetWaiting ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceWaiting targetWaiting := by
+  rcases
+      coreStep_invokeName_foundExtern_of_declReady_binderReadyReachableRelated
+        sourceState targetState programs frames arguments sourceReady
+        sourceFound sourceValue sourceEnough sourceBinding runtime.runtime with
+    ⟨sourceRequest, targetRequest, sourceWaiting, targetWaiting, requests,
+      sourceStep, targetStep, waiting⟩
+  have ledger :
+      TargetAllocationLedger rho targetWaiting.runtime.nextLocation := by
+    have runtimeEq :=
+      coreStep_invokeName_external_runtime_eq (step := targetStep)
+    simpa [runtimeEq] using runtime.ledger
+  exact ⟨sourceRequest, targetRequest, sourceWaiting, targetWaiting, requests,
+    sourceStep, targetStep, ledger, waiting⟩
+
+/-- Suspending an external call reached through a mapped live closure also
+preserves the target allocation ledger; closure lookup and request
+construction are runtime-neutral. -/
+theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
+      some sourceCell)
+    (sourceLive : sourceCell.live = true)
+    (sourceObject : sourceCell.object =
+      .closure name arity sourceFixed)
+    (sourceDeclFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceDeclValue : sourceDeclaration.value = .extern metadata)
+    (sourceEnough : ¬ (sourceFixed ++ sourceArguments).size <
+      sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      ((sourceFixed ++ sourceArguments).extract 0
+        sourceDeclaration.params.size) = .ok sourceEnv)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots)) :
+    ∃ sourceRequest targetRequest sourceWaiting targetWaiting,
+      ExternalRequestRel rho sourceRequest targetRequest ∧
+      coreStep { sourceState with
+        control := .invokeValue (.object (.heap sourceLocation))
+          sourceArguments } = .external sourceRequest sourceWaiting ∧
+      coreStep { targetState with
+        control := .invokeValue (.object (.heap targetLocation))
+          targetArguments } = .external targetRequest targetWaiting ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceWaiting targetWaiting := by
+  rcases
+      coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
+        sourceState targetState programs frames arguments mapping
+        sourceCellFound sourceLive sourceObject sourceDeclFound sourceDeclValue
+        sourceEnough sourceBinding runtime.runtime with
+    ⟨sourceRequest, targetRequest, sourceWaiting, targetWaiting, requests,
+      sourceStep, targetStep, waiting⟩
+  have ledger :
+      TargetAllocationLedger rho targetWaiting.runtime.nextLocation := by
+    have runtimeEq :=
+      coreStep_invokeValue_external_runtime_eq (step := targetStep)
+    simpa [runtimeEq] using runtime.ledger
+  exact ⟨sourceRequest, targetRequest, sourceWaiting, targetWaiting, requests,
+    sourceStep, targetStep, ledger, waiting⟩
 
 /-- Root-independent operational shape for a deleted object-field write.
 The compiler ownership argument is deliberately absent: it is supplied later
@@ -24905,6 +25120,140 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeNameExternal
                   simp [coreStep, sourceEmpty, sourceGlobal]
                     at sourceTransition'
 
+/-- Ledger-aware state-level matcher for named external calls. Request
+suspension preserves the exact allocation history selected before the
+foreign implementation runs. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameExternal
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition :
+      coreStep source = .external sourceRequest sourceWaiting) :
+    ∃ rho targetRequest targetWaiting,
+      ExternalRequestRel rho sourceRequest targetRequest ∧
+      coreStep target = .external targetRequest targetWaiting ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceWaiting targetWaiting := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeName name targetArguments } = target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeName name sourceArguments } =
+                  .external sourceRequest sourceWaiting := by
+            simpa only [sourceSame] using sourceTransition
+          have ledgerRuntime : LedgerShadowRuntimeRel rho
+              source.runtime target.runtime
+              (sourceArguments.toList ++ sourceFrameRoots)
+              (targetArguments.toList ++ targetFrameRoots) := {
+            runtime
+            ledger
+          }
+          have matchDeclaration
+              (sourceReady : InvokeNameDeclReady source.runtime
+                name sourceArguments) :
+              ∃ rho targetRequest targetWaiting,
+                ExternalRequestRel rho sourceRequest targetRequest ∧
+                coreStep target = .external targetRequest targetWaiting ∧
+                LedgerBinderReadyReachableMachineRelated fuel rho
+                  sourceWaiting targetWaiting := by
+            cases sourceFound :
+                source.program.findDecl? name with
+            | none =>
+                cases sourceReady with
+                | nonempty nonempty =>
+                    simp [coreStep, nonempty, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+                | cacheMiss empty miss =>
+                    simp [coreStep, empty, miss, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+            | some sourceDeclaration =>
+                by_cases sourceTooFew :
+                    sourceArguments.size < sourceDeclaration.params.size
+                · rcases
+                      coreStep_invokeName_foundPartial_of_declReady_binderReady_ledger
+                        source target programs frames arguments sourceReady
+                        sourceFound sourceTooFew ledgerRuntime with
+                    ⟨larger, sourceNext, targetNext, extension,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  contradiction
+                · cases sourceBinding :
+                      bindParams sourceDeclaration.params
+                        (sourceArguments.extract 0
+                          sourceDeclaration.params.size) with
+                  | error fault =>
+                      cases sourceReady with
+                      | nonempty nonempty =>
+                          simp [coreStep, nonempty, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                      | cacheMiss empty miss =>
+                          simp [coreStep, empty, miss, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                  | ok sourceEnv =>
+                      cases sourceValue : sourceDeclaration.value with
+                      | code sourceCode =>
+                          rcases
+                              coreStep_invokeName_foundCode_of_declReady_binderReady_ledger
+                                source target programs frames arguments
+                                sourceReady sourceFound sourceValue
+                                sourceTooFew sourceBinding ledgerRuntime with
+                            ⟨sourceNext, targetNext, sourceStep, targetStep,
+                              nextRelated⟩
+                          rw [sourceStep] at sourceTransition'
+                          contradiction
+                      | extern sourceInfo =>
+                          rcases
+                              coreStep_invokeName_foundExtern_of_declReady_binderReady_ledger
+                                source target programs frames arguments
+                                sourceReady sourceFound sourceValue
+                                sourceTooFew sourceBinding ledgerRuntime with
+                            ⟨matchedSourceRequest, targetRequest,
+                              matchedSourceWaiting, targetWaiting, requests,
+                              sourceStep, targetStep, waiting⟩
+                          rw [sourceStep] at sourceTransition'
+                          cases sourceTransition'
+                          exact ⟨rho, targetRequest, targetWaiting, requests,
+                            by simpa only [targetSame] using targetStep,
+                            waiting⟩
+          cases sourceEmpty : sourceArguments.isEmpty with
+          | false =>
+              exact matchDeclaration (.nonempty sourceEmpty)
+          | true =>
+              cases sourceGlobal :
+                  findGlobal? source.runtime.globals name with
+              | none =>
+                  exact matchDeclaration
+                    (.cacheMiss sourceEmpty sourceGlobal)
+              | some sourceValue =>
+                  simp [coreStep, sourceEmpty, sourceGlobal]
+                    at sourceTransition'
+
 /-- State-level terminal dispatcher for named calls.  Cache hits, partial
 applications, and internal body entry contradict the terminal premise;
 unknown declarations and binding failures produce related observations, and
@@ -25985,6 +26334,203 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeValueExternal
                                               sourceDeclFound sourceValue
                                               sourceTooFew sourceBinding
                                               runtime with
+                                          ⟨matchedSourceRequest, targetRequest,
+                                            matchedSourceWaiting,
+                                            targetWaiting, requests,
+                                            sourceStep, targetStep, waiting⟩
+                                        rw [sourceStep] at sourceTransition'
+                                        cases sourceTransition'
+                                        exact ⟨rho, targetRequest,
+                                          targetWaiting, requests,
+                                          by simpa only [targetSame] using
+                                            targetStep,
+                                          waiting⟩
+
+/-- Ledger-aware closure-call matcher for external suspension. The live
+closure lookup and foreign request construction retain the exact target
+allocation history. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueExternal
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition :
+      coreStep source = .external sourceRequest sourceWaiting) :
+    ∃ rho targetRequest targetWaiting,
+      ExternalRequestRel rho sourceRequest targetRequest ∧
+      coreStep target = .external targetRequest targetWaiting ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceWaiting targetWaiting := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeValue function arguments =>
+          have sourceSame : { source with
+              control := .invokeValue sourceFunction sourceArguments } =
+                source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeValue targetFunction targetArguments } =
+                target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeValue sourceFunction sourceArguments } =
+                  .external sourceRequest sourceWaiting := by
+            simpa only [sourceSame] using sourceTransition
+          have ledgerRuntime : LedgerShadowRuntimeRel rho
+              source.runtime target.runtime
+              ((sourceFunction :: sourceArguments.toList) ++
+                sourceFrameRoots)
+              ((targetFunction :: targetArguments.toList) ++
+                targetFrameRoots) := {
+            runtime
+            ledger
+          }
+          cases function with
+          | tagged payload =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | usize value =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | scalar value =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | erased =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | reuseNone =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | reuseSome mapping =>
+              simp [coreStep, invokeClosure, fail] at sourceTransition'
+          | @heap sourceLocation targetLocation mapping =>
+              cases sourceCellFound :
+                  findCell? source.runtime.heap sourceLocation with
+              | none =>
+                  simp [coreStep, invokeClosure, getLiveCell,
+                    sourceCellFound, fail] at sourceTransition'
+              | some sourceCell =>
+                  cases sourceLive : sourceCell.live with
+                  | false =>
+                      simp [coreStep, invokeClosure, getLiveCell,
+                        sourceCellFound, sourceLive, fail]
+                        at sourceTransition'
+                  | true =>
+                      cases sourceObject : sourceCell.object with
+                      | ctor object =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | boxed type value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | string value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | natural value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | integer value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | byteArray value =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | «opaque» typeName =>
+                          simp [coreStep, invokeClosure, getLiveCell,
+                            sourceCellFound, sourceLive, sourceObject, fail]
+                            at sourceTransition'
+                      | closure name arity sourceFixed =>
+                          cases sourceDeclFound :
+                              source.program.findDecl? name with
+                          | none =>
+                              simp [coreStep, invokeClosure, getLiveCell,
+                                sourceCellFound, sourceLive, sourceObject,
+                                invokeDecl, sourceDeclFound, fail]
+                                at sourceTransition'
+                          | some sourceDeclaration =>
+                              by_cases sourceTooFew :
+                                  (sourceFixed ++ sourceArguments).size <
+                                    sourceDeclaration.params.size
+                              · rcases
+                                    coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_ledger
+                                      source target programs frames arguments
+                                      mapping sourceCellFound sourceLive
+                                      sourceObject sourceDeclFound sourceTooFew
+                                      ledgerRuntime with
+                                  ⟨larger, sourceNext, targetNext, extension,
+                                    sourceStep, targetStep, nextRelated⟩
+                                rw [sourceStep] at sourceTransition'
+                                contradiction
+                              · cases sourceBinding :
+                                    bindParams sourceDeclaration.params
+                                      ((sourceFixed ++ sourceArguments).extract
+                                        0 sourceDeclaration.params.size) with
+                                | error fault =>
+                                    have sourceInvoke :
+                                        coreStep { source with
+                                          control := .invokeValue
+                                            (.object (.heap sourceLocation))
+                                            sourceArguments } =
+                                          invokeDecl { source with
+                                            control := .invokeValue
+                                              (.object (.heap sourceLocation))
+                                              sourceArguments }
+                                            name
+                                            (sourceFixed ++
+                                              sourceArguments) := by
+                                      simp [coreStep, invokeClosure,
+                                        getLiveCell, sourceCellFound,
+                                        sourceLive, sourceObject]
+                                    rw [sourceInvoke] at sourceTransition'
+                                    unfold invokeDecl at sourceTransition'
+                                    rw [sourceDeclFound] at sourceTransition'
+                                    simp only at sourceTransition'
+                                    rw [if_neg sourceTooFew, sourceBinding]
+                                      at sourceTransition'
+                                    contradiction
+                                | ok sourceEnv =>
+                                    cases sourceValue :
+                                        sourceDeclaration.value with
+                                    | code sourceCode =>
+                                        rcases
+                                            coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledger
+                                              source target programs frames
+                                              arguments mapping sourceCellFound
+                                              sourceLive sourceObject
+                                              sourceDeclFound sourceValue
+                                              sourceTooFew sourceBinding
+                                              ledgerRuntime with
+                                          ⟨sourceNext, targetNext, sourceStep,
+                                            targetStep, nextRelated⟩
+                                        rw [sourceStep] at sourceTransition'
+                                        contradiction
+                                    | extern sourceInfo =>
+                                        rcases
+                                            coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_ledger
+                                              source target programs frames
+                                              arguments mapping sourceCellFound
+                                              sourceLive sourceObject
+                                              sourceDeclFound sourceValue
+                                              sourceTooFew sourceBinding
+                                              ledgerRuntime with
                                           ⟨matchedSourceRequest, targetRequest,
                                             matchedSourceWaiting,
                                             targetWaiting, requests,
