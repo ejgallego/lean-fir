@@ -7354,6 +7354,160 @@ def DeletedScalarSetReadyAt (state : MachineState) (roots : List Value)
     cell.object = .ctor constructor ∧
     ¬Reachable state.runtime.heap roots location
 
+/-- Root-independent operational shape for a deleted object-field write.
+The compiler ownership argument is deliberately absent: it is supplied later
+for the actual active roots of a related machine pair. -/
+structure DeletedObjectSetLocalReadyAt (state : MachineState)
+    (object : FVarId) (index : Nat) (field : LCNF.Arg .impure)
+    (location : Location) where
+  cell : HeapCell
+  constructor : ConstructorObject
+  fieldValue : Value
+  objectRead :
+    lookupValue state.env object = .ok (.object (.heap location))
+  fieldRead : evalArg state.env field = .ok fieldValue
+  found : findCell? state.runtime.heap location = some cell
+  live : cell.live = true
+  objectEq : cell.object = .ctor constructor
+  indexBound : index < constructor.objectFields.size
+
+/-- Root-independent operational shape for a deleted unboxed-word write. -/
+structure DeletedUSizeSetLocalReadyAt (state : MachineState)
+    (object : FVarId) (index : Nat) (field : FVarId)
+    (location : Location) where
+  cell : HeapCell
+  constructor : ConstructorObject
+  fieldValue : UInt64
+  objectRead :
+    lookupValue state.env object = .ok (.object (.heap location))
+  fieldRead : lookupValue state.env field = .ok (.usize fieldValue)
+  found : findCell? state.runtime.heap location = some cell
+  live : cell.live = true
+  objectEq : cell.object = .ctor constructor
+  objectFieldsBound : constructor.objectFields.size ≤ index
+  usizeFieldsBound :
+    index - constructor.objectFields.size < constructor.usizeFields.size
+
+/-- Root-independent operational shape for a deleted packed-scalar write. -/
+structure DeletedScalarSetLocalReadyAt (state : MachineState)
+    (object field : FVarId) (location : Location) where
+  cell : HeapCell
+  constructor : ConstructorObject
+  fieldValue : ScalarValue
+  objectRead :
+    lookupValue state.env object = .ok (.object (.heap location))
+  fieldRead : lookupValue state.env field = .ok (.scalar fieldValue)
+  found : findCell? state.runtime.heap location = some cell
+  live : cell.live = true
+  objectEq : cell.object = .ctor constructor
+
+/-- Add the dynamic root-exclusion fact to a local object-write certificate. -/
+theorem DeletedObjectSetLocalReadyAt.deletedReadyAt
+    (shape : DeletedObjectSetLocalReadyAt
+      state object index field location)
+    (unreachable : ¬Reachable state.runtime.heap roots location) :
+    DeletedObjectSetReadyAt state roots object index field :=
+  ⟨location, shape.cell, shape.constructor, shape.fieldValue,
+    shape.objectRead, shape.fieldRead, shape.found, shape.live,
+    shape.objectEq, shape.indexBound, unreachable⟩
+
+/-- Add the dynamic root-exclusion fact to a local unboxed-word certificate. -/
+theorem DeletedUSizeSetLocalReadyAt.deletedReadyAt
+    (shape : DeletedUSizeSetLocalReadyAt
+      state object index field location)
+    (unreachable : ¬Reachable state.runtime.heap roots location) :
+    DeletedUSizeSetReadyAt state roots object index field :=
+  ⟨location, shape.cell, shape.constructor, shape.fieldValue,
+    shape.objectRead, shape.fieldRead, shape.found, shape.live,
+    shape.objectEq, shape.objectFieldsBound, shape.usizeFieldsBound,
+    unreachable⟩
+
+/-- Add the dynamic root-exclusion fact to a local scalar-write certificate. -/
+theorem DeletedScalarSetLocalReadyAt.deletedReadyAt
+    (shape : DeletedScalarSetLocalReadyAt state object field location)
+    (unreachable : ¬Reachable state.runtime.heap roots location) :
+    DeletedScalarSetReadyAt state roots object field :=
+  ⟨location, shape.cell, shape.constructor, shape.fieldValue,
+    shape.objectRead, shape.fieldRead, shape.found, shape.live,
+    shape.objectEq, unreachable⟩
+
+/-- A local object-write certificate becomes dynamically ready when its source
+location is absent from the related address map. -/
+theorem DeletedObjectSetLocalReadyAt.deletedReadyAt_of_forwardUnmapped
+    (shape : DeletedObjectSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (unmapped : rho.forward location = none) :
+    DeletedObjectSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_forward_unmapped unmapped)
+
+/-- A local unboxed-word certificate becomes dynamically ready when its source
+location is absent from the related address map. -/
+theorem DeletedUSizeSetLocalReadyAt.deletedReadyAt_of_forwardUnmapped
+    (shape : DeletedUSizeSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (unmapped : rho.forward location = none) :
+    DeletedUSizeSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_forward_unmapped unmapped)
+
+/-- A local scalar-write certificate becomes dynamically ready when its source
+location is absent from the related address map. -/
+theorem DeletedScalarSetLocalReadyAt.deletedReadyAt_of_forwardUnmapped
+    (shape : DeletedScalarSetLocalReadyAt state object field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (unmapped : rho.forward location = none) :
+    DeletedScalarSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_forward_unmapped unmapped)
+
+/-- An empty related target frontier proves that every locally valid
+source object-write location is compiler-owned garbage. -/
+theorem DeletedObjectSetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+    (shape : DeletedObjectSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0) :
+    DeletedObjectSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_rightNextLocation_zero
+      rightEmpty location)
+
+/-- Empty-target specialization for a local unboxed-word certificate. -/
+theorem DeletedUSizeSetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+    (shape : DeletedUSizeSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0) :
+    DeletedUSizeSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_rightNextLocation_zero
+      rightEmpty location)
+
+/-- Empty-target specialization for a local packed-scalar certificate. -/
+theorem DeletedScalarSetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+    (shape : DeletedScalarSetLocalReadyAt state object field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0) :
+    DeletedScalarSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object field :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_rightNextLocation_zero
+      rightEmpty location)
+
 theorem coreStep_deletedObjectSet_of_ready
     (sourceState targetState : MachineState)
     (programs : ProgramRelated (ShadowCodeRelated fuel)
@@ -7614,6 +7768,60 @@ inductive DeletedReuseReadyAt (state : MachineState) (roots : List Value)
       (unreachable : ¬Reachable state.runtime.heap roots location) :
       DeletedReuseReadyAt state roots token info arguments
 
+/-- Root-independent operational shape for the concrete-token branch of a
+deleted `reuse`.  Its final ownership premise is supplied for the actual
+control/frame roots of a related pair. -/
+structure DeletedReuseSomeLocalReadyAt (state : MachineState)
+    (token : FVarId) (info : LCNF.CtorInfo)
+    (arguments : Array (LCNF.Arg .impure)) (location : Location) where
+  cell : HeapCell
+  oldObject : ConstructorObject
+  values : Array Value
+  tokenRead : lookupValue state.env token =
+    .ok (.reuseToken (some location))
+  argumentsRead : evalArgs state.env arguments = .ok values
+  found : findCell? state.runtime.heap location = some cell
+  live : cell.live = true
+  objectEq : cell.object = .ctor oldObject
+  arity : values.size = info.size
+
+/-- Add root exclusion to a locally valid concrete-token reuse. -/
+theorem DeletedReuseSomeLocalReadyAt.deletedReadyAt
+    (shape : DeletedReuseSomeLocalReadyAt
+      state token info arguments location)
+    (unreachable : ¬Reachable state.runtime.heap roots location) :
+    DeletedReuseReadyAt state roots token info arguments :=
+  .some location shape.cell shape.oldObject shape.values
+    shape.tokenRead shape.argumentsRead shape.found shape.live
+    shape.objectEq shape.arity unreachable
+
+/-- An unmapped concrete reuse token identifies source-only compiler-owned
+storage, so the local operation shape is dynamically ready. -/
+theorem DeletedReuseSomeLocalReadyAt.deletedReadyAt_of_forwardUnmapped
+    (shape : DeletedReuseSomeLocalReadyAt
+      state token info arguments location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (unmapped : rho.forward location = none) :
+    DeletedReuseReadyAt state
+      (runtimeRoots state.runtime sourceExtra) token info arguments :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_forward_unmapped unmapped)
+
+/-- Empty-target specialization for a concrete-token reuse certificate. -/
+theorem
+    DeletedReuseSomeLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+    (shape : DeletedReuseSomeLocalReadyAt
+      state token info arguments location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0) :
+    DeletedReuseReadyAt state
+      (runtimeRoots state.runtime sourceExtra) token info arguments :=
+  shape.deletedReadyAt
+    (related.leftUnreachable_of_rightNextLocation_zero
+      rightEmpty location)
+
 /-- Machine-level deleted-`reuse` rule.  Both token branches execute one
 source step and preserve the reachable runtime while the target stutters. -/
 theorem coreStep_deletedReuse_of_ready
@@ -7742,6 +7950,77 @@ inductive DeletedResetReadyAt (state : MachineState) (roots : List Value)
         .ok (nextRuntime, token))
       (frame : RuntimeReachableFrame state.runtime nextRuntime roots) :
       DeletedResetReadyAt state roots count object
+
+/-- Root-independent successful reset outcome.  The operational result is
+separated from the ownership frame because the latter depends on the exact
+control and saved-frame roots selected by the related machine pair. -/
+structure DeletedResetLocalReadyAt (state : MachineState)
+    (count : Nat) (object : FVarId) where
+  objectValue : Value
+  token : Value
+  nextRuntime : RuntimeState
+  objectRead : lookupValue state.env object = .ok objectValue
+  effect : reset state.runtime count objectValue =
+    .ok (nextRuntime, token)
+
+/-- Add an independently proved reachable-runtime frame to a successful local
+reset outcome. -/
+theorem DeletedResetLocalReadyAt.deletedReadyAt
+    (shape : DeletedResetLocalReadyAt state count object)
+    (frame : RuntimeReachableFrame
+      state.runtime shape.nextRuntime roots) :
+    DeletedResetReadyAt state roots count object :=
+  .mk shape.objectValue shape.token shape.nextRuntime
+    shape.objectRead shape.effect frame
+
+/-- If a related target has never allocated, no source heap cell can occur in
+the active roots.  Any reset outcome that preserves non-heap observables and
+the allocation frontier is therefore a reachable-runtime frame; its garbage
+heap rewrites may be arbitrary. -/
+theorem ShadowRuntimeRel.leftRuntimeReachableFrame_of_rightNextLocation_zero
+    (related : ShadowRuntimeRel rho before right
+      sourceExtra targetExtra)
+    (rightEmpty : right.nextLocation = 0)
+    (nextLocationEq : after.nextLocation = before.nextLocation)
+    (globalsEq : after.globals = before.globals)
+    (worldEq : after.world = before.world)
+    (traceEq : after.trace = before.trace)
+    (afterFresh : ∀ location, after.nextLocation ≤ location →
+      findCell? after.heap location = none) :
+    RuntimeReachableFrame before after
+      (runtimeRoots before sourceExtra) := {
+  nextLocation_eq := nextLocationEq
+  globals_eq := globalsEq
+  world_eq := worldEq
+  trace_eq := traceEq
+  heap := by
+    intro location reachable
+    exact
+      (related.leftUnreachable_of_rightNextLocation_zero
+        rightEmpty location reachable).elim
+  heapFresh := afterFresh
+}
+
+/-- Empty-target ownership bridge for a locally successful reset. -/
+theorem
+    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+    (shape : DeletedResetLocalReadyAt state count object)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0)
+    (nextLocationEq :
+      shape.nextRuntime.nextLocation = state.runtime.nextLocation)
+    (globalsEq : shape.nextRuntime.globals = state.runtime.globals)
+    (worldEq : shape.nextRuntime.world = state.runtime.world)
+    (traceEq : shape.nextRuntime.trace = state.runtime.trace)
+    (afterFresh : ∀ location,
+      shape.nextRuntime.nextLocation ≤ location →
+        findCell? shape.nextRuntime.heap location = none) :
+    DeletedResetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) count object :=
+  shape.deletedReadyAt
+    (related.leftRuntimeReachableFrame_of_rightNextLocation_zero
+      rightEmpty nextLocationEq globalsEq worldEq traceEq afterFresh)
 
 /-- Machine-level deleted-`reset` rule under the explicit ownership frame. -/
 theorem coreStep_deletedReset_of_ready

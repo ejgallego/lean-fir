@@ -6691,6 +6691,25 @@ theorem closedWritesTargetReachable_runtimeShape
 The target's zero allocation frontier, together with the runtime relation,
 excludes the source object from every actual control/frame root
 decomposition. -/
+def closedWritesObjectSetLocalReady :
+    DeletedObjectSetLocalReadyAt
+      (closedWritesSourceObjectSetState arguments)
+      dead 0 .erased 0 := by
+  refine {
+    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
+    constructor := deletedWriteObject
+    fieldValue := .erased
+    objectRead := ?_
+    fieldRead := rfl
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    indexBound := ?_
+  }
+  · simp [closedWritesSourceObjectSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [deletedWriteObject]
+
 theorem closedWritesObjectSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
       ShadowRuntimeRel rho
@@ -6702,13 +6721,31 @@ theorem closedWritesObjectSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceObjectSetState arguments).runtime sourceRoots)
       dead 0 .erased := by
-  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, .erased, ?_, rfl, ?_, rfl, rfl, ?_, ?_⟩
-  · simp [closedWritesSourceObjectSetState, deletedWriteSourceEnv,
+  exact closedWritesObjectSetLocalReady
+    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
+
+def closedWritesUSizeSetLocalReady :
+    DeletedUSizeSetLocalReadyAt
+      (closedWritesSourceUSizeSetState arguments)
+      dead 1 usizeField 0 := by
+  refine {
+    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
+    constructor := deletedWriteObject
+    fieldValue := 7
+    objectRead := ?_
+    fieldRead := ?_
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    objectFieldsBound := ?_
+    usizeFieldsBound := ?_
+  }
+  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · rfl
+  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
   · simp [deletedWriteObject]
-  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+  · simp [deletedWriteObject]
 
 theorem closedWritesUSizeSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
@@ -6721,19 +6758,34 @@ theorem closedWritesUSizeSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceUSizeSetState arguments).runtime sourceRoots)
       dead 1 usizeField := by
-  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_, ?_⟩
-  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · rfl
-  · simp [deletedWriteObject]
-  · simp [deletedWriteObject]
-  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+  exact closedWritesUSizeSetLocalReady
+    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
 
 def deletedWriteObjectAfterUSize : ConstructorObject :=
   { deletedWriteObject with usizeFields := #[7] }
+
+def closedWritesScalarSetLocalReady :
+    DeletedScalarSetLocalReadyAt
+      (closedWritesSourceScalarSetState arguments)
+      dead scalarField 0 := by
+  refine {
+    cell :=
+      ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
+    constructor := deletedWriteObjectAfterUSize
+    fieldValue := .uint8 9
+    objectRead := ?_
+    fieldRead := ?_
+    found := ?_
+    live := rfl
+    objectEq := rfl
+  }
+  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · change findCell? closedWritesAfterUSizeRuntime.heap 0 =
+      some ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
+    rfl
 
 theorem closedWritesScalarSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
@@ -6746,16 +6798,8 @@ theorem closedWritesScalarSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceScalarSetState arguments).runtime sourceRoots)
       dead scalarField := by
-  refine ⟨0, ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell),
-    deletedWriteObjectAfterUSize, .uint8 9, ?_, ?_, ?_, rfl, rfl, ?_⟩
-  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · change findCell? closedWritesAfterUSizeRuntime.heap 0 =
-      some ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
-    rfl
-  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+  exact closedWritesScalarSetLocalReady
+    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
 
 /-- The exact structural pair determines the deleted object-write edge; the
 target runtime shape supplies its dynamic unreachability certificate. -/
@@ -8018,6 +8062,24 @@ theorem closedConcreteReuseResetEffect :
         .reuseToken (some 0)) := by
   rfl
 
+def closedConcreteReuseResetLocalReady :
+    DeletedResetLocalReadyAt
+      (closedConcreteReuseSourceResetState arguments)
+      1 resetObjectVar := by
+  refine {
+    objectValue := .object (.heap 0)
+    token := .reuseToken (some 0)
+    nextRuntime := closedConcreteReuseResetRuntime
+    objectRead := ?_
+    effect := ?_
+  }
+  · simp [closedConcreteReuseSourceResetState,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup,
+      resetObjectVar, live]
+  · simpa [closedConcreteReuseSourceResetState] using
+      closedConcreteReuseResetEffect
+
 /-- The related target's empty allocation frontier excludes the source-only
 constructor from every actual control/frame root decomposition.  Resetting
 that cell therefore preserves the reachable runtime. -/
@@ -8034,42 +8096,16 @@ theorem closedConcreteReuseResetReady_of_shadowRuntime
         (closedConcreteReuseSourceResetState arguments).runtime
         sourceRoots)
       1 resetObjectVar := by
-  have unreachable :
-      ¬Reachable
-        (closedConcreteReuseSourceResetState arguments).runtime.heap
-        (runtimeRoots
-          (closedConcreteReuseSourceResetState arguments).runtime
-          sourceRoots)
-        0 :=
-    runtime.leftUnreachable_of_rightNextLocation_zero
-      targetEmpty 0
-  have found :
-      findCell?
-          (closedConcreteReuseSourceResetState arguments).runtime.heap
-          0 =
-        some ({ object := .ctor closedReuseAllocatedObject } :
-          HeapCell) := by
-    rfl
-  rcases setCell_reachableFrame_of_unreachable found unreachable
-      runtime.leftHeapFresh closedConcreteReuseResetCell with
-    ⟨after, effect, frame⟩
-  have known :
-      setCell
-          (closedConcreteReuseSourceResetState arguments).runtime
-          0 closedConcreteReuseResetCell =
-        .ok closedConcreteReuseResetRuntime := by
-    rfl
-  rw [known] at effect
-  injection effect with afterEq
-  subst after
-  refine .mk (.object (.heap 0)) (.reuseToken (some 0))
-    closedConcreteReuseResetRuntime ?_ ?_ frame
-  · simp [closedConcreteReuseSourceResetState,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      lookupValue, Impure.bind, lookup,
-      resetObjectVar, live]
-  · simpa [closedConcreteReuseSourceResetState] using
-      closedConcreteReuseResetEffect
+  apply
+    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+      closedConcreteReuseResetLocalReady runtime targetEmpty
+      rfl rfl rfl rfl
+  intro location bounded
+  change 1 ≤ location at bounded
+  have notZero : (0 : Nat) ≠ location :=
+    Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) bounded)
+  change findCell? closedConcreteReuseResetRuntime.heap location = none
+  simp [closedConcreteReuseResetRuntime, findCell?, notZero]
 
 /-- The exact pair supplies both the deleted reset certificate and the saved
 frame roots selected by the compiler residual. -/
@@ -8130,6 +8166,33 @@ theorem closedConcreteReuseResetPairReady
 
 /-- Concrete-token reuse overwrites only the same source-only cell already
 shown unreachable by the related target's empty frontier. -/
+def closedConcreteReuseLocalReady :
+    DeletedReuseSomeLocalReadyAt
+      (closedConcreteReuseSourceReuseState arguments)
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 := by
+  refine {
+    cell := closedConcreteReuseResetCell
+    oldObject := closedConcreteReuseResetObject
+    values := #[.erased]
+    tokenRead := ?_
+    argumentsRead := ?_
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    arity := rfl
+  }
+  · simp [closedConcreteReuseSourceReuseState,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar]
+  · simp [closedConcreteReuseSourceReuseState,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar]
+    rfl
+
 theorem closedConcreteReuseReady_of_shadowRuntime
     (target : MachineState)
     (runtime :
@@ -8143,25 +8206,8 @@ theorem closedConcreteReuseReady_of_shadowRuntime
         (closedConcreteReuseSourceReuseState arguments).runtime
         sourceRoots)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  refine .some 0 closedConcreteReuseResetCell
-    closedConcreteReuseResetObject #[.erased] ?_ ?_ ?_ ?_ ?_ ?_ ?_
-  · simp [closedConcreteReuseSourceReuseState,
-      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar]
-  · simp [closedConcreteReuseSourceReuseState,
-      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar]
-    rfl
-  · rfl
-  · rfl
-  · rfl
-  · rfl
-  · exact runtime.leftUnreachable_of_rightNextLocation_zero
-      targetEmpty 0
+  exact closedConcreteReuseLocalReady
+    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
 
 /-- Exact provenance selects deletion of the concrete reuse because no
 reachable target is headed by the same declaration. -/
@@ -8941,6 +8987,24 @@ theorem closedOwnedReuseTargetReachable_of_reaches
 /-- Recursive child release changes only source cells that the empty target
 frontier proves unreachable.  Both heap rewrites therefore form one
 observable runtime frame. -/
+def closedOwnedReuseResetLocalReady :
+    DeletedResetLocalReadyAt
+      (closedOwnedReuseSourceResetState arguments)
+      1 resetObjectVar := by
+  refine {
+    objectValue := .object (.heap 1)
+    token := .reuseToken (some 1)
+    nextRuntime := closedOwnedReuseResetRuntime
+    objectRead := ?_
+    effect := ?_
+  }
+  · simp [closedOwnedReuseSourceResetState,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+      resetObjectVar, resetChildVar, live]
+  · simpa [closedOwnedReuseSourceResetState] using
+      closedOwnedReuseResetEffect
+
 theorem closedOwnedReuseResetReady_of_shadowRuntime
     (target : MachineState)
     (runtime :
@@ -8954,50 +9018,19 @@ theorem closedOwnedReuseResetReady_of_shadowRuntime
         (closedOwnedReuseSourceResetState arguments).runtime
         sourceRoots)
       1 resetObjectVar := by
-  have noSourceLocation (location : Location) :
-      ¬Reachable
-        (closedOwnedReuseSourceResetState arguments).runtime.heap
-        (runtimeRoots
-          (closedOwnedReuseSourceResetState arguments).runtime
-          sourceRoots)
-        location :=
-    runtime.leftUnreachable_of_rightNextLocation_zero
-      targetEmpty location
-  have frame :
-      RuntimeReachableFrame
-        (closedOwnedReuseSourceResetState arguments).runtime
-        closedOwnedReuseResetRuntime
-        (runtimeRoots
-          (closedOwnedReuseSourceResetState arguments).runtime
-          sourceRoots) := by
-    refine {
-      nextLocation_eq := rfl
-      globals_eq := rfl
-      world_eq := rfl
-      trace_eq := rfl
-      heap := ?_
-      heapFresh := ?_ }
-    · intro location reachable
-      exact (noSourceLocation location reachable).elim
-    · intro location bounded
-      have twoLe : 2 ≤ location := by
-        simpa [closedOwnedReuseResetRuntime,
-          closedOwnedReuseParentRuntime, closedReuseAllocation,
-          alloc] using bounded
-      have notZero : (0 : Nat) ≠ location :=
-        Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) twoLe)
-      have notOne : (1 : Nat) ≠ location :=
-        Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) twoLe)
-      simp [closedOwnedReuseResetRuntime, findCell?,
-        notZero, notOne]
-  refine .mk (.object (.heap 1)) (.reuseToken (some 1))
-    closedOwnedReuseResetRuntime ?_ ?_ frame
-  · simp [closedOwnedReuseSourceResetState,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
-      resetObjectVar, resetChildVar, live]
-  · simpa [closedOwnedReuseSourceResetState] using
-      closedOwnedReuseResetEffect
+  apply
+    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+      closedOwnedReuseResetLocalReady runtime targetEmpty
+      rfl rfl rfl rfl
+  intro location bounded
+  change 2 ≤ location at bounded
+  have notZero : (0 : Nat) ≠ location :=
+    Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) bounded)
+  have notOne : (1 : Nat) ≠ location :=
+    Nat.ne_of_lt (Nat.lt_of_lt_of_le (by decide) bounded)
+  change findCell? closedOwnedReuseResetRuntime.heap location = none
+  simp [closedOwnedReuseResetRuntime, findCell?,
+    notZero, notOne]
 
 theorem closedOwnedReuseResetPairReady
     (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
@@ -9054,6 +9087,33 @@ theorem closedOwnedReuseResetPairReady
       rw [targetControl] at control
       cases control
 
+def closedOwnedReuseLocalReady :
+    DeletedReuseSomeLocalReadyAt
+      (closedOwnedReuseSourceReuseState arguments)
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
+  refine {
+    cell := closedOwnedReuseClearedParentCell
+    oldObject := closedOwnedReuseClearedParentObject
+    values := #[.erased]
+    tokenRead := ?_
+    argumentsRead := ?_
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    arity := rfl
+  }
+  · simp [closedOwnedReuseSourceReuseState,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+  · simp [closedOwnedReuseSourceReuseState,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+    rfl
+
 theorem closedOwnedReuseReady_of_shadowRuntime
     (target : MachineState)
     (runtime :
@@ -9067,26 +9127,8 @@ theorem closedOwnedReuseReady_of_shadowRuntime
         (closedOwnedReuseSourceReuseState arguments).runtime
         sourceRoots)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  refine .some 1 closedOwnedReuseClearedParentCell
-    closedOwnedReuseClearedParentObject #[.erased]
-    ?_ ?_ ?_ ?_ ?_ ?_ ?_
-  · simp [closedOwnedReuseSourceReuseState,
-      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
-  · simp [closedOwnedReuseSourceReuseState,
-      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
-    rfl
-  · rfl
-  · rfl
-  · rfl
-  · rfl
-  · exact runtime.leftUnreachable_of_rightNextLocation_zero
-      targetEmpty 1
+  exact closedOwnedReuseLocalReady
+    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
 
 theorem closedOwnedReusePairReady
     (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
