@@ -344,3 +344,24 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled String module: {repr error}"
+  let closedArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeFallbacks stringArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to close resident styled fallbacks: {repr error}"
+  unless closedArtifact.module.imports.isEmpty do
+    throwError "closed resident styled Format module retained imports"
+  unless Fir.Wasm.Emit.ResidentFallback.helperNames.all
+      closedArtifact.module.exports.contains do
+    throwError "closed resident styled fallback exports changed"
+  unless closedArtifact.module.closureDispatch ==
+      stringArtifact.module.closureDispatch &&
+      closedArtifact.module.closureDescriptors ==
+        stringArtifact.module.closureDescriptors &&
+      closedArtifact.formattedLcnf == stringArtifact.formattedLcnf do
+    throwError "resident styled fallback linking changed source or closure metadata"
+  match ← closedArtifact.write
+      "_build/source-pretty-format-trace-resident-closed.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write closed resident styled module: {repr error}"

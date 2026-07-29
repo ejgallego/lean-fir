@@ -644,6 +644,29 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident String Format module: {repr error}"
+  let closedArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeFallbacks
+        residentStringArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to close resident Format fallbacks: {repr error}"
+  unless closedArtifact.module.imports.isEmpty do
+    throwError "closed resident Format module retained imports"
+  unless Fir.Wasm.Emit.ResidentFallback.helperNames.all
+      closedArtifact.module.exports.contains do
+    throwError "closed resident Format fallback exports changed"
+  unless closedArtifact.module.closureDispatch ==
+      residentStringArtifact.module.closureDispatch &&
+      closedArtifact.module.closureDescriptors ==
+        residentStringArtifact.module.closureDescriptors &&
+      closedArtifact.formattedLcnf ==
+        residentStringArtifact.formattedLcnf do
+    throwError "resident fallback linking changed source or closure metadata"
+  match ← closedArtifact.write
+      "_build/source-pretty-format-resident-closed.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError "failed to write closed resident Format module: {repr error}"
   let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
       ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with

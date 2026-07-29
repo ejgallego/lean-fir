@@ -5,9 +5,6 @@ import {
   checkConcretePrettyFormatTraceModule,
 } from "./runtime/integration/talos/artifact/check-concrete-pretty-format-trace-module.mjs";
 import {
-  concreteArtifactExternalRegistry,
-} from "./runtime/integration/talos/artifact/concrete-artifact-external-registry.mjs";
-import {
   ConcreteHost,
 } from "./runtime/integration/talos/artifact/concrete-host.mjs";
 import {
@@ -29,6 +26,8 @@ assert.equal(
 );
 const functionImportCount =
   imports.filter((entry) => entry.kind === "function").length;
+assert.equal(imports.length, 0);
+assert.equal(functionImportCount, 0);
 assert.equal(build.compatibility.status, "experimental-unversioned");
 assert.equal(build.compatibility.abiVersion, null);
 assert.equal(build.capabilities.memoryOwner, "module");
@@ -71,7 +70,7 @@ for (const [name, kind] of requiredExports) {
 const host = new ConcreteHost(
   manifest.imports,
   undefined,
-  concreteArtifactExternalRegistry,
+  {},
   manifest.closureDispatch,
   manifest.closureDescriptors,
 );

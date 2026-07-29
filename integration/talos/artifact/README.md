@@ -114,6 +114,10 @@ node run-resident-numeric.mjs _build/resident-numeric.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm
+
+lake exe fir-wasm-artifact resident-fallbacks \
+  _build/resident-fallbacks.wasm
+node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 ```
 
 W7 also emits the first standalone Wasm-resident runtime slice. Its module
@@ -243,11 +247,12 @@ The same report preflights all 13 compiler-produced source artifacts, and all
 13 are concrete-resolvable. A shared Node/browser inventory gate also executes
 all 11 invocation manifests and both invocation-free modules through the
 concrete memory ABI, checking frozen results and exact initial-heap round trips.
-The concrete registry executes all five integer, five
-natural, eight UTF-8/string, and two unreachable-fallback declarations retained
-by `prettyM`; focused tests cover immediate/heap integer boundaries, large heap
-naturals, Unicode byte/code-point navigation, fresh results, stale inputs, and
-exact fallback traps. Packed initial-constructor loading validates the
+The historical concrete registry executes all five integer, five natural,
+eight UTF-8/string, and two unreachable-fallback declarations from the
+pre-resident frontier; focused tests cover immediate/heap integer boundaries,
+large heap naturals, Unicode byte/code-point navigation, fresh results, stale
+inputs, and exact fallback traps. The closed artifact imports none of them.
+Packed initial-constructor loading validates the
 compiler-shaped fixed-slot coordinate and scalar range, derives the minimal
 packed extent, and writes all four integer widths little-endian. The
 all-constructor `prettyM` manifest now round-trips its 23-cell initial heap and
@@ -400,7 +405,13 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-trace-resident-releases.wasm \
   _build/source-pretty-format-trace-resident-tag-setters.wasm \
   _build/source-pretty-format-resident-cache.wasm \
-  _build/source-pretty-format-trace-resident-cache.wasm
+  _build/source-pretty-format-trace-resident-cache.wasm \
+  _build/source-pretty-format-resident-numeric.wasm \
+  _build/source-pretty-format-trace-resident-numeric.wasm \
+  _build/source-pretty-format-resident-string.wasm \
+  _build/source-pretty-format-trace-resident-string.wasm \
+  _build/source-pretty-format-resident-closed.wasm \
+  _build/source-pretty-format-trace-resident-closed.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 ```
@@ -651,9 +662,17 @@ without changing final LCNF or closure metadata. The remaining imports are the
 two unreachable panic/inhabited fallbacks. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2`.
 
+The final checkpoint replaces those two failure-only declarations with
+exported resident functions whose bodies are unconditional Wasm traps. This
+preserves their fail-closed behavior while removing the last host dependency.
+Standalone and linked Node/Chrome checks assert both traps, zero imports, and
+unchanged final LCNF and closure metadata. Plain and styled artifacts therefore
+advance from 2 to 0 function imports. The complete text audit is
+`351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2 → 0`.
+
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
-self-contained copy of the current JavaScript-hosted runtime, raw-layout smoke
+self-contained copy of the Wasm-resident runtime, raw-layout smoke
 client, descriptor, final LCNF, checksums, and capability metadata. The
 canonical `_build/prettyM-current` symlink is moved only after its immutable
 release has passed the checksum and smoke gates:
@@ -665,13 +684,12 @@ node smoke.mjs
 ```
 
 This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and currently has 2 function imports, the same frontier
-as the text-only checkpoint while preserving the exact `MonadPrettyFormat`
+memory and allocator and has zero imports while preserving the exact
+`MonadPrettyFormat`
 output/newline/start-tag/end-tags event stream. The plain
 rendered `String` remains available as the trace's text projection. Node and
 the Chrome Worker decode the resident result constructor directly and compare
-the exact event stream with the native Lean 4.32 oracle; zero imports is the
-later W7 closure milestone.
+the exact event stream with the native Lean 4.32 oracle.
 
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:
@@ -761,5 +779,5 @@ actual declaration-level runtime primitives. The manifest contains more
 imports because semantic heap, closure, and call operations receive distinct
 metadata-bearing import identities; those are instances of the frozen
 semantic runtime ABI, not additional source helpers. The unreachable panic
-fallback remains a trapping import and is asserted absent from the successful
-execution trace.
+and weak-inhabited fallbacks are resident traps and are asserted absent from
+every successful execution trace.

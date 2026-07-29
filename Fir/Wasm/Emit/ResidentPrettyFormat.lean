@@ -3,6 +3,7 @@ import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentCache
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
+import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentNumeric
@@ -201,6 +202,20 @@ def internalizeStringLiterals (artifact : Source.ModuleArtifact) :
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
 
+def internalizeFallbacks (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ←
+    match Fir.Wasm.Emit.ResidentFallback.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest
+          s!"failed to internalize resident fallbacks: {repr error}")
+  let bytes ←
+    match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
 def internalizeGetTag (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact :=
   linkRuntime "getTag" Fir.Wasm.Emit.ResidentRuntime.internalizeGetTag artifact
@@ -381,9 +396,18 @@ def compileStringModule (entry : Name) :
   let result ← compileNumericModule entry
   return result.bind internalizeStringOperations |>.bind internalizeStringLiterals
 
+/--
+Close the last two failure-only declarations with unconditional resident traps.
+The resulting module owns its memory and has no function imports.
+-/
+def compileClosedModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileStringModule entry
+  return result.bind internalizeFallbacks
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileStringModule entry
+  compileClosedModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

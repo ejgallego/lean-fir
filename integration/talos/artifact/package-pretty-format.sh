@@ -9,7 +9,7 @@ if [[ "${1:-}" == "--no-build" ]]; then
   shift
 fi
 out="${1:-$here/_build/prettyM-current}"
-source_artifact="$here/_build/source-pretty-format-trace-resident-string.wasm"
+source_artifact="$here/_build/source-pretty-format-trace-resident-closed.wasm"
 
 if [[ "$build" == true ]]; then
   lake -d "$root" build Fir.Wasm.Emit.ResidentPrettyFormat
@@ -62,10 +62,7 @@ install -m 0644 "$here/prettyM-package/README.md" "$stage/README.md"
 install -m 0644 "$here/prettyM-package/smoke.mjs" "$stage/smoke.mjs"
 
 runtime_files=(
-  artifact-external-registry.mjs
   check-concrete-pretty-format-module.mjs
-  concrete-artifact-external-registry.mjs
-  concrete-format-external-registry.mjs
   concrete-host.mjs
   check-concrete-pretty-format-trace-module.mjs
   module-client.mjs
@@ -76,8 +73,6 @@ for file in "${runtime_files[@]}"; do
 done
 install -m 0644 "$root/scripts/wasm_assert.mjs" \
   "$stage/runtime/scripts/wasm_assert.mjs"
-install -m 0644 "$root/scripts/wasm_format_external_algorithms.mjs" \
-  "$stage/runtime/scripts/wasm_format_external_algorithms.mjs"
 
 node --input-type=module - "$stage" "$root" <<'NODE'
 import { createHash } from "node:crypto";
@@ -98,6 +93,10 @@ const memoryExports = exports.filter((item) => item.kind === "memory").length;
 if (memoryImports !== 0 || memoryExports !== 1) {
   throw new Error(
     `prettyM package requires module-owned memory; got ${memoryImports} imports and ${memoryExports} exports`);
+}
+if (imports.length !== 0 || functionImports !== 0) {
+  throw new Error(
+    `prettyM package must be self-contained; got ${imports.length} total imports and ${functionImports} function imports`);
 }
 const build = {
   format: "fir-prettyM-package-metadata-v2",
@@ -141,7 +140,7 @@ const build = {
       taggedSegments: true,
     },
   },
-  runtime: "Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete/lazy-cache publication/one-limb Nat+Int/UTF-8 String operations and String literals plus concrete JavaScript unreachable-fallback handlers",
+  runtime: "Self-contained Wasm-resident allocator/raw stores/constructors/immediate Naturals/closure allocations/setters/tag mutation/reference increments/recursive releases/delete/lazy-cache publication/one-limb Nat+Int/UTF-8 String operations/String literals/fail-closed fallbacks",
   test: "node smoke.mjs",
 };
 fs.writeFileSync(

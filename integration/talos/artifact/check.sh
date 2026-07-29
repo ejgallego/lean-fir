@@ -46,6 +46,9 @@ node run-resident-numeric.mjs _build/resident-numeric.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm
+lake exe fir-wasm-artifact resident-fallbacks \
+  _build/resident-fallbacks.wasm
+node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm
 lake exe fir-wasm-artifact resident-get-tag _build/resident-get-tag.wasm
 node run-resident-get-tag.mjs _build/resident-get-tag.wasm
 lake exe fir-wasm-artifact resident-is-shared _build/resident-is-shared.wasm
@@ -97,6 +100,7 @@ resident_pretties=(
   "source-pretty-format-resident-cache"
   "source-pretty-format-resident-numeric"
   "source-pretty-format-resident-string"
+  "source-pretty-format-resident-closed"
   "source-pretty-format-trace-resident-constructors"
   "source-pretty-format-trace-resident-naturals"
   "source-pretty-format-trace-resident-partial-applications"
@@ -107,6 +111,7 @@ resident_pretties=(
   "source-pretty-format-trace-resident-cache"
   "source-pretty-format-trace-resident-numeric"
   "source-pretty-format-trace-resident-string"
+  "source-pretty-format-trace-resident-closed"
 )
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
@@ -160,6 +165,8 @@ cmp _build/source-pretty-format-resident-cache.wasm.lcnf \
   _build/source-pretty-format-resident-numeric.wasm.lcnf
 cmp _build/source-pretty-format-resident-numeric.wasm.lcnf \
   _build/source-pretty-format-resident-string.wasm.lcnf
+cmp _build/source-pretty-format-resident-string.wasm.lcnf \
+  _build/source-pretty-format-resident-closed.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-naturals.wasm.lcnf \
   _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-partial-applications.wasm.lcnf \
@@ -176,6 +183,8 @@ cmp _build/source-pretty-format-trace-resident-cache.wasm.lcnf \
   _build/source-pretty-format-trace-resident-numeric.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-numeric.wasm.lcnf \
   _build/source-pretty-format-trace-resident-string.wasm.lcnf
+cmp _build/source-pretty-format-trace-resident-string.wasm.lcnf \
+  _build/source-pretty-format-trace-resident-closed.wasm.lcnf
 node check-resident-pretty-format.mjs \
   _build/source-pretty-format-module.wasm \
   _build/source-pretty-format-resident-get-tag.wasm \
@@ -197,7 +206,9 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-resident-numeric.wasm \
   _build/source-pretty-format-trace-resident-numeric.wasm \
   _build/source-pretty-format-resident-string.wasm \
-  _build/source-pretty-format-trace-resident-string.wasm
+  _build/source-pretty-format-trace-resident-string.wasm \
+  _build/source-pretty-format-resident-closed.wasm \
+  _build/source-pretty-format-trace-resident-closed.wasm
 node run-resident-numeric.mjs \
   _build/source-pretty-format-resident-numeric.wasm
 node run-resident-numeric.mjs \
@@ -206,6 +217,14 @@ node run-resident-string.mjs \
   _build/source-pretty-format-resident-string.wasm
 node run-resident-string.mjs \
   _build/source-pretty-format-trace-resident-string.wasm
+node run-resident-string.mjs \
+  _build/source-pretty-format-resident-closed.wasm
+node run-resident-string.mjs \
+  _build/source-pretty-format-trace-resident-closed.wasm
+node run-resident-fallbacks.mjs \
+  _build/source-pretty-format-resident-closed.wasm
+node run-resident-fallbacks.mjs \
+  _build/source-pretty-format-trace-resident-closed.wasm
 node --input-type=module -e '
   import assert from "node:assert/strict";
   import fs from "node:fs";
@@ -334,6 +353,8 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-cache.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-numeric.wasm
+node call-concrete-pretty-format.mjs \
+  _build/source-pretty-format-resident-closed.wasm
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
@@ -458,6 +479,13 @@ lake exe fir-wasm-artifact resident-string \
 cmp "$first/resident/string.wasm" "$second/resident/string.wasm"
 cmp "$first/resident/string.wasm.json" \
   "$second/resident/string.wasm.json"
+lake exe fir-wasm-artifact resident-fallbacks \
+  "$first/resident/fallbacks.wasm"
+lake exe fir-wasm-artifact resident-fallbacks \
+  "$second/resident/fallbacks.wasm"
+cmp "$first/resident/fallbacks.wasm" "$second/resident/fallbacks.wasm"
+cmp "$first/resident/fallbacks.wasm.json" \
+  "$second/resident/fallbacks.wasm.json"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$first"
 lake -d .. env lean --run ../FirWasmOracleMain.lean all "$second"
 

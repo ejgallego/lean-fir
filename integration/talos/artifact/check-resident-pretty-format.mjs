@@ -22,6 +22,8 @@ const residentNumericPath = process.argv[19];
 const styledNumericPath = process.argv[20];
 const residentStringPath = process.argv[21];
 const styledStringPath = process.argv[22];
+const residentClosedPath = process.argv[23];
+const styledClosedPath = process.argv[24];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
   residentAllocatorPath && residentConstructorPath && residentNaturalPath &&
@@ -29,7 +31,8 @@ assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentIncrementPath && residentReleasePath && styledReleasePath &&
   styledTagSetterPath && residentCachePath && styledCachePath &&
   residentNumericPath && styledNumericPath &&
-  residentStringPath && styledStringPath,
+  residentStringPath && styledStringPath &&
+  residentClosedPath && styledClosedPath,
   "usage: node check-resident-pretty-format.mjs " +
   "BASELINE.wasm GET_TAG.wasm RESIDENT_RUNTIME.wasm RESIDENT_PROJECTIONS.wasm " +
   "RESIDENT_CLOSURES.wasm RESIDENT_MATCHES.wasm RESIDENT_ALLOCATOR.wasm " +
@@ -39,7 +42,8 @@ assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   "STYLED_RELEASES.wasm STYLED_TAG_SETTERS.wasm " +
   "RESIDENT_CACHE.wasm STYLED_CACHE.wasm " +
   "RESIDENT_NUMERIC.wasm STYLED_NUMERIC.wasm " +
-  "RESIDENT_STRING.wasm STYLED_STRING.wasm");
+  "RESIDENT_STRING.wasm STYLED_STRING.wasm " +
+  "RESIDENT_CLOSED.wasm STYLED_CLOSED.wasm");
 
 function readArtifact(path) {
   const bytes = fs.readFileSync(path);
@@ -76,6 +80,8 @@ const residentNumeric = readArtifact(residentNumericPath);
 const styledNumeric = readArtifact(styledNumericPath);
 const residentString = readArtifact(residentStringPath);
 const styledString = readArtifact(styledStringPath);
+const residentClosed = readArtifact(residentClosedPath);
+const styledClosed = readArtifact(styledClosedPath);
 const operationCount = ({ manifest }, kind) =>
   manifest.imports.filter(({ operation }) => operation?.kind === kind).length;
 const functionImportCount = ({ imports }) =>
@@ -376,6 +382,24 @@ assert.equal(
   "resident styled String descriptor and Wasm imports disagree",
 );
 assert.equal(
+  functionImportCount(residentClosed) + 2,
+  functionImportCount(residentString),
+  "resident fallback closure did not remove exactly two function imports",
+);
+assert.equal(functionImportCount(residentClosed), 0,
+  "closed resident prettyM retained function imports");
+assert.equal(residentClosed.manifest.imports.length, 0,
+  "closed resident prettyM descriptor retained imports");
+assert.equal(
+  functionImportCount(styledClosed) + 2,
+  functionImportCount(styledString),
+  "resident styled fallback closure did not remove exactly two function imports",
+);
+assert.equal(functionImportCount(styledClosed), 0,
+  "closed resident styled prettyM retained function imports");
+assert.equal(styledClosed.manifest.imports.length, 0,
+  "closed resident styled prettyM descriptor retained imports");
+assert.equal(
   residentRuntime.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident-runtime prettyM imports memory",
@@ -467,6 +491,10 @@ assert.equal(
   0,
   "resident styled String prettyM imports memory",
 );
+assert.equal(residentClosed.imports.length, 0,
+  "closed resident prettyM retained Wasm imports");
+assert.equal(styledClosed.imports.length, 0,
+  "closed resident styled prettyM retained Wasm imports");
 for (const artifact of [
   getTagResident,
   residentRuntime,
@@ -555,6 +583,26 @@ assert.deepStrictEqual(
   styledNumeric.manifest.closureDescriptors,
   "resident styled String linking changed the closure-descriptor table",
 );
+assert.deepStrictEqual(
+  residentClosed.manifest.closureDispatch,
+  residentString.manifest.closureDispatch,
+  "resident fallback linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  residentClosed.manifest.closureDescriptors,
+  residentString.manifest.closureDescriptors,
+  "resident fallback linking changed the closure-descriptor table",
+);
+assert.deepStrictEqual(
+  styledClosed.manifest.closureDispatch,
+  styledString.manifest.closureDispatch,
+  "resident styled fallback linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  styledClosed.manifest.closureDescriptors,
+  styledString.manifest.closureDescriptors,
+  "resident styled fallback linking changed the closure-descriptor table",
+);
 for (const [artifact, count, label] of [
   [residentCache, 20, "resident cache"],
   [styledCache, 21, "resident styled cache"],
@@ -590,6 +638,25 @@ for (const [artifact, label] of [
     assert.ok(artifact.exports.some((entry) =>
       entry.name === name && entry.kind === "function"),
     `${label} helper export ${name} is missing`);
+  }
+  assert.ok(artifact.exports.some(({ name, kind }) =>
+    name === artifact.manifest.entry && kind === "function"),
+  `${label} entry export is missing`);
+  assert.ok(artifact.exports.some(({ name, kind }) =>
+    name === "memory" && kind === "memory"),
+  `${label} memory export is missing`);
+}
+for (const [artifact, label] of [
+  [residentClosed, "closed resident"],
+  [styledClosed, "closed resident styled"],
+]) {
+  for (const name of [
+    "fir_ext_panicCore",
+    "fir_ext_instInhabitedOfMonad__redArg",
+  ]) {
+    assert.ok(artifact.exports.some((entry) =>
+      entry.name === name && entry.kind === "function"),
+    `${label} fallback export ${name} is missing`);
   }
   assert.ok(artifact.exports.some(({ name, kind }) =>
     name === artifact.manifest.entry && kind === "function"),
@@ -803,7 +870,8 @@ console.log(
   `then installed its allocator and internalized constructors, immediate Naturals, ` +
   `closure allocations, setters, increments, recursive releases, and the ` +
   `styled constructor-tag write, lazy-cache publication, and one-limb ` +
-  `resident Nat/Int operations, then UTF-8 String operations and literals ` +
+  `resident Nat/Int operations, then UTF-8 String operations/literals and ` +
+  `fail-closed fallback traps ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
   `${functionImportCount(residentProjections)} → ` +
@@ -818,10 +886,12 @@ console.log(
   `${functionImportCount(residentReleases)} → ` +
   `${functionImportCount(residentCache)} → ` +
   `${functionImportCount(residentNumeric)} → ` +
-  `${functionImportCount(residentString)} function imports; styled ` +
+  `${functionImportCount(residentString)} → ` +
+  `${functionImportCount(residentClosed)} function imports; styled ` +
   `${functionImportCount(styledReleases)} → ` +
   `${functionImportCount(styledTagSetters)} → ` +
   `${functionImportCount(styledCache)} → ` +
   `${functionImportCount(styledNumeric)} → ` +
-  `${functionImportCount(styledString)})`,
+  `${functionImportCount(styledString)} → ` +
+  `${functionImportCount(styledClosed)})`,
 );
