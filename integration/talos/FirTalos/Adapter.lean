@@ -104,6 +104,8 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .i32WrapI64 _ => return .wrapI64
   | .block label body => do
       return .block 0 0 (← instructions module function (label :: labels) body)
+  | .loop label body => do
+      return .loop 0 0 (← instructions module function (label :: labels) body)
   | .ifElse thenBody elseBody => do
       return .iff 0 0
         (← instructions module function labels thenBody)
