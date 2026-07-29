@@ -82,6 +82,28 @@ const coverageEvents = [
   event(3),
 ];
 
+const hugeNumeric = (1n << 130n) + 17n;
+
+function numericCoverageFormat() {
+  return F.append(
+    F.tag(hugeNumeric, F.text("tag")),
+    F.append(
+      F.nest(hugeNumeric, F.text("+")),
+      F.nest(-hugeNumeric, F.text("-")),
+    ),
+  );
+}
+
+const numericCoverageEvents = [
+  event(2, "", hugeNumeric),
+  event(0, "tag"),
+  event(3, "", 1n),
+  event(0, "+"),
+  event(3),
+  event(0, "-"),
+  event(3),
+];
+
 function checkResult(result, previous) {
   requireCondition(result.trace.text === "α β\n. γ\n  δ\n  ε",
     "styled text projection changed");
@@ -107,6 +129,18 @@ function checkResult(result, previous) {
   }
 }
 
+function checkNumericResult(result, previous) {
+  requireCondition(result.trace.text === "tag+-",
+    "arbitrary-precision numeric text projection changed");
+  requireCondition(equalEvents(result.trace.events, numericCoverageEvents),
+    "arbitrary-precision styled event sequence changed");
+  requireCondition(result.memory.residentAllocationCalls === 1,
+    "numeric coverage did not use one bulk resident allocation");
+  requireCondition(result.memory.frontierBefore >=
+    previous.memory.frontierAfterDecode,
+  "numeric coverage did not synchronize the resident frontier");
+}
+
 export async function checkPrettyMBrowserAdapter({
   bytes,
   manifest,
@@ -125,6 +159,11 @@ export async function checkPrettyMBrowserAdapter({
   const executed = adapter.execute(prepared);
   const second = adapter.decode(executed);
   checkResult(second, first);
+  const numeric = adapter.render({
+    format: numericCoverageFormat(),
+    width: 80,
+  });
+  checkNumericResult(numeric, second);
   expectFailure(() => adapter.execute(prepared), "already been consumed");
   expectFailure(() => adapter.decode(executed), "already been decoded");
   const cyclic = { kind: "group", body: undefined };
@@ -144,5 +183,10 @@ export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
   });
   const second = adapter.decode(adapter.execute(prepared));
   checkResult(second, first);
+  const numeric = adapter.render({
+    format: numericCoverageFormat(),
+    width: 80,
+  });
+  checkNumericResult(numeric, second);
   return "PASS fetched production browser prettyM adapter";
 }
