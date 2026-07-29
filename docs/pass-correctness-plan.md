@@ -716,6 +716,23 @@ then combines one of those dynamic certificates with
 whole-program endpoint; address-parametric foreign compatibility remains a
 separate, explicit consumer premise.
 
+The client-facing ownership bridge is now inductive rather than
+reachability-quantified. `ElimDeadSourceOwnershipContract` asks for an
+entry-indexed one-machine predicate, its initial case, preservation by one
+source step, and active-edge readiness. `ElimDeadExactOwnershipContract`
+provides the corresponding source/target pair interface for ownership facts
+that depend on the exact compiler residual and target heap shape. Generic
+finite-path induction turns either contract into
+`ElimDeadRuntimeAdmissibility`; `ElimDeadOwnershipContract` retains the
+choice, and the checked correctness endpoint consumes it directly.
+
+The neutral fixture instantiates the source-only interface. The deleted
+owned-child reset/reuse fixture instantiates the exact pair interface:
+separate finite source and target graphs preserve the contract, while the
+target's empty frontier certifies that the concrete source reuse token names
+an unreachable compiler-owned cell. These two fixtures check both branches
+of the public bridge end to end.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -756,9 +773,11 @@ pins the actual Lean 4.32 pass to the transparent target while proving that
 both unreachable allocations may be omitted.
 
 The remaining general problem is therefore not an operational matcher, a
-missing whole-program theorem, an implicit nullary-purity assumption, or an
-unauditable policy graph. It is to derive `ElimDeadRuntimeAdmissibility` for
-arbitrary compiler-produced entry states from auditable ownership invariants.
+missing whole-program theorem, an implicit nullary-purity assumption, an
+unauditable policy graph, or a reachability-shaped client API. It is to
+instantiate the inductive ownership contract for arbitrary compiler-produced
+entry states from auditable static ownership facts, especially concrete reuse
+token reachability and source-only reset/write unreachability.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -798,14 +817,14 @@ regression.
 
 ## Immediate proof queue
 
-1. State and prove the ownership contract-to-`ElimDeadRuntimeAdmissibility`
-   bridge, using the source-machine form where possible and exact provenance
-   for ownership-sensitive reset/reuse paths.
-2. Continue actual-pass conformance and closed execution-graph fixtures at
+1. Continue actual-pass conformance and closed execution-graph fixtures at
    semantic boundaries that refine or falsify those compiler-facing
    contracts.
+2. Generalize the closed ownership fixtures into reusable static-to-dynamic
+   laws for deleted writes, resets, and concrete reuse tokens.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
-   contract before that shared validation stack lands.
+   contract and prove the queued closure-application preservation consumers
+   before that shared validation stack lands.
 
 In parallel, the Wasm lane continues from the same final-impure semantic
 boundary and runs constructor/projection artifacts through the shared
