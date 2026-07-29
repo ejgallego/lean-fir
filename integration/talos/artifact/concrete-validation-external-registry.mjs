@@ -198,6 +198,7 @@ const fixedWidthCodecs = {
 
 const signedFixedWidthCodecs = {
   Int8: signedScalarFixedWidthCodec("uint8", 8),
+  Int16: signedScalarFixedWidthCodec("uint16", 16),
 };
 
 function codecFixedWidthBinary(declaration, codec, operation) {
@@ -321,6 +322,20 @@ function fixedWidthConversionFamily(sourceTypeName) {
       }));
 }
 
+function signedFixedWidthConversionFamily(sourceTypeName) {
+  const sourceCodec = signedFixedWidthCodecs[sourceTypeName];
+  return Object.fromEntries(
+    Object.entries(signedFixedWidthCodecs)
+      .filter(([targetTypeName]) => targetTypeName !== sourceTypeName)
+      .map(([targetTypeName, targetCodec]) => {
+        const declaration = `${sourceTypeName}.to${targetTypeName}`;
+        return [
+          declaration,
+          fixedWidthConversion(declaration, sourceCodec, targetCodec),
+        ];
+      }));
+}
+
 function naturalDivision(left, right) {
   return right === 0n ? 0n : left / right;
 }
@@ -411,6 +426,15 @@ export const concreteValidationExternalRegistry = Object.freeze({
   "Int8.ofNat": naturalToFixedWidth("Int8.ofNat", signedFixedWidthCodecs.Int8),
   "Int8.ofInt": integerToFixedWidth("Int8.ofInt", signedFixedWidthCodecs.Int8),
   "Int8.toInt": fixedWidthToInteger("Int8.toInt", signedFixedWidthCodecs.Int8),
+  ...signedFixedWidthConversionFamily("Int8"),
+  ...signedFixedWidthExternalFamily("Int16", 16, signedFixedWidthCodecs.Int16),
+  "Int16.ofNat": naturalToFixedWidth(
+    "Int16.ofNat", signedFixedWidthCodecs.Int16),
+  "Int16.ofInt": integerToFixedWidth(
+    "Int16.ofInt", signedFixedWidthCodecs.Int16),
+  "Int16.toInt": fixedWidthToInteger(
+    "Int16.toInt", signedFixedWidthCodecs.Int16),
+  ...signedFixedWidthConversionFamily("Int16"),
   ...fixedWidthExternalFamily("UInt8", "uint8", 8),
   "UInt8.ofNat": naturalToFixedWidth("UInt8.ofNat", fixedWidthCodecs.UInt8),
   "UInt8.toNat": fixedWidthToNatural("UInt8.toNat", fixedWidthCodecs.UInt8),
