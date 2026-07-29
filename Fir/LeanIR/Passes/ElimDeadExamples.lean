@@ -320,17 +320,57 @@ def checkActualAgreement (fuel : Nat) (program : ImpureProgram) : CoreM Unit := 
   unless actual == shadow.decls do
     throwError "elimDeadVars program disagreed with the transparent shadow"
 
-/-- Executable boundary check: the fail-closed traversal accepts a retained
-nullary application and rejects the actual pass branch that deletes one. -/
-def checkNullaryPolicyBoundary : CoreM Unit := do
-  let some (retained, _) :=
-      nullarySafeShadowCode? 64 {} retainedNullaryFap |
-    throwError "nullary policy rejected a retained full application"
-  unless retained == retainedNullaryFap do
-    throwError "nullary policy changed a retained full application"
-  unless
-      (nullarySafeShadowCode? 64 {} deadNullaryFapBefore).isNone do
-    throwError "nullary policy accepted a deleted full application"
+/-- Expected result of the fail-closed policy after the ordinary pinned pass
+has been checked against the transparent traversal. -/
+inductive NullaryPolicyExpectation where
+  | accepted
+  | rejected
+
+structure ElimDeadPolicyFixture where
+  name : Name
+  before : LCNF.Code .impure
+  expected : LCNF.Code .impure
+  policy : NullaryPolicyExpectation
+
+/-- Boundary matrix spanning retained unsafe values, ordinary deleted values,
+allocations, writes, reset/reuse, and the unique nullary-application
+rejection. Every row is also compared with Lean 4.32's actual pass. -/
+def elimDeadPolicyFixtures : Array ElimDeadPolicyFixture := #[
+  ⟨`policyNeutral, neutralBefore, neutralAfter, .accepted⟩,
+  ⟨`policyUsed, usedBefore, usedBefore, .accepted⟩,
+  ⟨`policyUnsafe, unsafeBefore, unsafeBefore, .accepted⟩,
+  ⟨`policyAllocation, allocatingBefore, allocatingAfter, .accepted⟩,
+  ⟨`policyWrites, deletedWritesBefore, deletedWritesAfter, .accepted⟩,
+  ⟨`policyReuse, deletedReuseBefore, deletedReuseAfter, .accepted⟩,
+  ⟨`policyReset, deletedResetBefore, deletedResetAfter, .accepted⟩,
+  ⟨`policyPap, deletedPapBefore, deletedPapAfter, .accepted⟩,
+  ⟨`policyBox, deletedBoxBefore, deletedBoxAfter, .accepted⟩,
+  ⟨`policyDeletedNullaryFap,
+    deadNullaryFapBefore, deadNullaryFapAfter, .rejected⟩,
+  ⟨`policyRetainedNullaryFap,
+    retainedNullaryFap, retainedNullaryFap, .accepted⟩
+]
+
+def checkActualPolicyFixture (fixture : ElimDeadPolicyFixture) :
+    CoreM Unit := do
+  checkActualElimDead fixture.name fixture.before fixture.expected
+  match fixture.policy, nullarySafeShadowCode? 64 {} fixture.before with
+  | .accepted, some (checked, _) =>
+      unless checked == fixture.expected do
+        throwError
+          "nullary policy fixture {fixture.name} changed the pinned pass result"
+  | .accepted, none =>
+      throwError
+        "nullary policy fixture {fixture.name} rejected an expected pass branch"
+  | .rejected, none =>
+      pure ()
+  | .rejected, some _ =>
+      throwError
+        "nullary policy fixture {fixture.name} accepted a forbidden pass branch"
+
+def checkActualPolicyMatrix : CoreM Unit := do
+  for fixture in elimDeadPolicyFixtures do
+    checkActualPolicyFixture fixture
 
 def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadNeutral neutralBefore neutralAfter
@@ -357,7 +397,7 @@ def checkFixtures : CoreM Unit := do
     deadNullaryFapBefore deadNullaryFapAfter
   checkActualElimDead `elimDeadRetainedNullaryFap
     retainedNullaryFap retainedNullaryFap
-  checkNullaryPolicyBoundary
+  checkActualPolicyMatrix
   checkActualAgreement 128 traversalCorpus
 
 elab "#check_elim_dead_fixtures" : command =>
@@ -735,6 +775,42 @@ theorem retainedNullaryFapCheckedRun :
   simp [retainedNullaryFap, retainedNullaryFapDecl, letDecl,
     neutralUsed, nullarySafeShadowCode?, safeToElim,
     collectLetValue, collectArgs, collectArgList, liveMember]
+
+/-- A dead but operationally unsafe copy is retained by both the checked
+traversal and the pinned pass. -/
+theorem unsafeCheckedRun :
+    nullarySafeShadowCode? 3 {} unsafeBefore =
+      some (unsafeBefore,
+        (({} : UsedLocals).insert live).insert live) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [unsafeBefore, liveDecl, deadCopyDecl, letDecl,
+    nullarySafeShadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, liveMember]
+
+/-- Ordinary source-only allocation deletion remains accepted by the
+conservative policy. -/
+theorem allocatingCheckedRun :
+    nullarySafeShadowCode? 3 {} allocatingBefore =
+      some (allocatingAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [allocatingBefore, allocatingAfter, neutralAfter, liveDecl,
+    deadCtorDecl, letDecl, neutralUsed, nullarySafeShadowCode?,
+    safeToElim, isNullaryFap, collectLetValue,
+    collectArgs, collectArgList, collectArg,
+    liveMember, deadAbsent]
+
+/-- Deleted unreachable writes are unaffected by the nullary-call policy. -/
+theorem deletedWritesCheckedRun :
+    nullarySafeShadowCode? 4 {} deletedWritesBefore =
+      some (deletedWritesAfter, neutralUsed) := by
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deletedWritesBefore, deletedWritesAfter, neutralUsed,
+    nullarySafeShadowCode?, deadAbsent]
 
 theorem deadNullaryFapBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed deadNullaryFapBeforeProgram := by
@@ -6042,6 +6118,27 @@ theorem allocatingShadowProgramRun :
     allocatingBeforeProgram, allocatingAfterProgram, fixtureDecl, decl,
     allocatingShadowRun]
 
+/-- Program-level accepted row from the actual-pass policy matrix. -/
+theorem allocatingCheckedProgramRun :
+    nullarySafeShadowProgram? 3 allocatingBeforeProgram =
+      some allocatingAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, allocatingBeforeProgram,
+    allocatingAfterProgram, fixtureDecl, decl,
+    allocatingCheckedRun]
+
+/-- The accepted allocation row reaches the strict compiler-facing package
+once its independent source ownership invariant is supplied. -/
+theorem allocatingCompilerAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadCompilerAdmissibleRun externals 3
+      allocatingBeforeProgram allocatingAfterProgram #[`main] :=
+  ElimDeadCompilerAdmissibleRun.ofChecked
+    allocatingBeforeProgramElimDeadWellFormed
+    allocatingCheckedProgramRun
+    (.source
+      (allocatingSourceRuntimeOwnershipInitialInvariant externals))
+
 /-- Checked whole-program lowering correctness for the allocating
 dead-constructor fixture.  The source may allocate an unreachable cell that
 the target omits; `ObservationRel` identifies the resulting executions. -/
@@ -6053,10 +6150,7 @@ theorem allocatingProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       allocatingBeforeProgram allocatingAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_sourceMachineInvariant
-    allocatingBeforeProgramElimDeadWellFormed allocatingShadowProgramRun
-    compatible
-    (allocatingSourceRuntimeOwnershipInitialInvariant externals)
+  (allocatingCompilerAdmissibleRun externals).loweringCorrect compatible
 
 theorem closedWritesBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed closedWritesBeforeProgram := by
