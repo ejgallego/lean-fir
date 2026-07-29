@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 452,
-        "minimumComparisons": 452,
+        "minimumCases": 493,
+        "minimumComparisons": 493,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 452,
-        "minimumComparisons": 904,
+        "minimumCases": 493,
+        "minimumComparisons": 986,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 461,
-      "minimumTierCases": 913,
-      "minimumComparisons": 1365
+      "minimumUniqueCases": 502,
+      "minimumTierCases": 995,
+      "minimumComparisons": 1488
     },
     "machine": {
-      "minimumCases": 461,
-      "minimumInterpreterSteps": 4016,
+      "minimumCases": 502,
+      "minimumInterpreterSteps": 4262,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -185,8 +185,30 @@
         "Int16.shiftRight",
         "Int16.sub",
         "Int16.toInt",
+        "Int16.toInt32",
         "Int16.toInt8",
         "Int16.xor",
+        "Int32.abs",
+        "Int32.add",
+        "Int32.complement",
+        "Int32.decEq",
+        "Int32.decLe",
+        "Int32.decLt",
+        "Int32.div",
+        "Int32.land",
+        "Int32.lor",
+        "Int32.mod",
+        "Int32.mul",
+        "Int32.neg",
+        "Int32.ofInt",
+        "Int32.ofNat",
+        "Int32.shiftLeft",
+        "Int32.shiftRight",
+        "Int32.sub",
+        "Int32.toInt",
+        "Int32.toInt16",
+        "Int32.toInt8",
+        "Int32.xor",
         "Int8.abs",
         "Int8.add",
         "Int8.complement",
@@ -206,6 +228,7 @@
         "Int8.sub",
         "Int8.toInt",
         "Int8.toInt16",
+        "Int8.toInt32",
         "Int8.xor",
         "Nat.add",
         "Nat.decEq",

@@ -334,6 +334,98 @@ def int8ToInt16 (value : Int8) : Int16 :=
 def int16ToInt8 (value : Int16) : Int8 :=
   Int16.toInt8 value
 
+@[noinline]
+def addInt32 (left right : Int32) : Int32 :=
+  Int32.add left right
+
+@[noinline]
+def subInt32 (left right : Int32) : Int32 :=
+  Int32.sub left right
+
+@[noinline]
+def mulInt32 (left right : Int32) : Int32 :=
+  Int32.mul left right
+
+@[noinline]
+def divInt32 (left right : Int32) : Int32 :=
+  Int32.div left right
+
+@[noinline]
+def modInt32 (left right : Int32) : Int32 :=
+  Int32.mod left right
+
+@[noinline]
+def landInt32 (left right : Int32) : Int32 :=
+  Int32.land left right
+
+@[noinline]
+def lorInt32 (left right : Int32) : Int32 :=
+  Int32.lor left right
+
+@[noinline]
+def xorInt32 (left right : Int32) : Int32 :=
+  Int32.xor left right
+
+@[noinline]
+def shiftLeftInt32 (value count : Int32) : Int32 :=
+  Int32.shiftLeft value count
+
+@[noinline]
+def shiftRightInt32 (value count : Int32) : Int32 :=
+  Int32.shiftRight value count
+
+@[noinline]
+def complementInt32 (value : Int32) : Int32 :=
+  Int32.complement value
+
+@[noinline]
+def negInt32 (value : Int32) : Int32 :=
+  Int32.neg value
+
+@[noinline]
+def absInt32 (value : Int32) : Int32 :=
+  Int32.abs value
+
+@[noinline]
+def decideInt32Eq (left right : Int32) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideInt32Lt (left right : Int32) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideInt32Le (left right : Int32) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
+def natToInt32 (value : Nat) : Int32 :=
+  Int32.ofNat value
+
+@[noinline]
+def intToInt32 (value : Int) : Int32 :=
+  Int32.ofInt value
+
+@[noinline]
+def int32ToInt (value : Int32) : Int :=
+  Int32.toInt value
+
+@[noinline]
+def int8ToInt32 (value : Int8) : Int32 :=
+  Int8.toInt32 value
+
+@[noinline]
+def int16ToInt32 (value : Int16) : Int32 :=
+  Int16.toInt32 value
+
+@[noinline]
+def int32ToInt8 (value : Int32) : Int8 :=
+  Int32.toInt8 value
+
+@[noinline]
+def int32ToInt16 (value : Int32) : Int16 :=
+  Int32.toInt16 value
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -1847,6 +1939,12 @@ private def int8CaseCodec : FixedWidthCaseCodec Int8 where
 private def int16CaseCodec : FixedWidthCaseCodec Int16 where
   schema := .bits 16
   datum value := .bits 16 (UInt64.ofNat value.toUInt16.toNat)
+  externalTag := "fixed-width-signed-external"
+  conversionTag := "fixed-width-signed-conversion"
+
+private def int32CaseCodec : FixedWidthCaseCodec Int32 where
+  schema := .bits 32
+  datum value := .bits 32 (UInt64.ofNat value.toUInt32.toNat)
   externalTag := "fixed-width-signed-external"
   conversionTag := "fixed-width-signed-conversion"
 
@@ -7103,6 +7201,33 @@ private def int16CaseFamily : SignedFixedWidthCaseFamily Int16 where
   decLt := Source.decideInt16Lt
   decLe := Source.decideInt16Le
 
+private def int32CaseFamily : SignedFixedWidthCaseFamily Int32 where
+  typeName := ``Int32
+  typeId := "int32"
+  sourceSuffix := "Int32"
+  width := 32
+  wasmLaneTag := "i32"
+  codec := int32CaseCodec
+  ofNat := Source.natToInt32
+  ofInt := Source.intToInt32
+  toInt := Source.int32ToInt
+  add := Source.addInt32
+  sub := Source.subInt32
+  mul := Source.mulInt32
+  div := Source.divInt32
+  modulo := Source.modInt32
+  land := Source.landInt32
+  lor := Source.lorInt32
+  xor := Source.xorInt32
+  shiftLeft := Source.shiftLeftInt32
+  shiftRight := Source.shiftRightInt32
+  complement := Source.complementInt32
+  neg := Source.negInt32
+  abs := Source.absInt32
+  decEq := Source.decideInt32Eq
+  decLt := Source.decideInt32Lt
+  decLe := Source.decideInt32Le
+
 private def signedCrossConversionCases : Array Case := #[
   exactFixedWidthConversionExternalCase int8CaseCodec int16CaseCodec
     "int8-to-int16-sign-extend" ``Source.int8ToInt16 Source.int8ToInt16
@@ -7115,15 +7240,42 @@ private def signedCrossConversionCases : Array Case := #[
     ``Int16.toInt8 (Int16.ofInt (-129))
     #["stress", "scalar", "int8", "int16", "signed", "conversion",
       "truncation", "narrowing", "underflow", "boundary", "i32"]
-    "Truncate Int16 negative 129 to the signed Int8 maximum bit pattern"
+    "Truncate Int16 negative 129 to the signed Int8 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int8CaseCodec int32CaseCodec
+    "int8-to-int32-sign-extend" ``Source.int8ToInt32 Source.int8ToInt32
+    ``Int8.toInt32 (int8Value (-128))
+    #["stress", "scalar", "int8", "int32", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i32"]
+    "Sign-extend the Int8 minimum through the lossless Int8-to-Int32 conversion",
+  exactFixedWidthConversionExternalCase int16CaseCodec int32CaseCodec
+    "int16-to-int32-sign-extend" ``Source.int16ToInt32 Source.int16ToInt32
+    ``Int16.toInt32 (Int16.ofInt (-32768))
+    #["stress", "scalar", "int16", "int32", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i32"]
+    "Sign-extend the Int16 minimum through the lossless Int16-to-Int32 conversion",
+  exactFixedWidthConversionExternalCase int32CaseCodec int8CaseCodec
+    "int32-to-int8-truncate" ``Source.int32ToInt8 Source.int32ToInt8
+    ``Int32.toInt8 (Int32.ofInt (-129))
+    #["stress", "scalar", "int8", "int32", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i32"]
+    "Truncate Int32 negative 129 to the signed Int8 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int32CaseCodec int16CaseCodec
+    "int32-to-int16-truncate" ``Source.int32ToInt16 Source.int32ToInt16
+    ``Int32.toInt16 (Int32.ofInt (-32769))
+    #["stress", "scalar", "int16", "int32", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i32"]
+    "Truncate Int32 negative 32769 to the signed Int16 maximum bit pattern"
 ]
 
 private def int16Cases : Array Case :=
-  signedFixedWidthCases int16CaseFamily ++ signedCrossConversionCases
+  signedFixedWidthCases int16CaseFamily
+
+private def int32Cases : Array Case :=
+  signedFixedWidthCases int32CaseFamily
 
 def cases : Array Case :=
   preConversionCases ++ conversionCases ++ postConversionCases ++
-    int8Cases ++ int16Cases
+    int8Cases ++ int16Cases ++ int32Cases ++ signedCrossConversionCases
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
 def requiredFinalExecutedForms : Array String :=
@@ -7154,19 +7306,22 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "small-word-nat-conversion").size == 15
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-cross-conversion").size == 22
+  validationCase.tags.contains "fixed-width-cross-conversion").size == 26
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-external").size == 56
+  validationCase.tags.contains "fixed-width-signed-external").size == 84
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-conversion").size == 20
+  validationCase.tags.contains "fixed-width-signed-conversion").size == 33
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 39
+  validationCase.tags.contains "int8").size == 41
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int16").size == 39
+  validationCase.tags.contains "int16").size == 41
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "int32").size == 41
 
 #guard System.Platform.numBits == 64
 
