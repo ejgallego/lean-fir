@@ -24055,6 +24055,62 @@ theorem match_returnStep_binderReady
         ⟨targetPath, finalRelated⟩
       exact ⟨_, targetPath, finalRelated⟩
 
+/-- Ledger-carrying retained return. Yielding narrows the published control
+roots to the returned related values but does not change either runtime, so
+the target allocation history is preserved verbatim. -/
+theorem match_returnStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (member : used.contains result = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.return result) } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.return result) } targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  generalize sourceReadEq :
+    lookup sourceState.env result = sourceRead
+  cases sourceRead with
+  | none =>
+      have sourceDone :
+          coreStep { sourceState with control := .code (.return result) } =
+            .done (observe
+              { sourceState with control := .code (.return result) }
+              (.fault (.unknownVar result))) := by
+        simp [coreStep, lookupValue, sourceReadEq, fail]
+      cases step with
+      | internal actual =>
+          rw [sourceDone] at actual
+          contradiction
+      | external actual externalProof =>
+          rw [sourceDone] at actual
+          contradiction
+  | some sourceValue =>
+      rcases coreStep_return_binderReadyReachableRelated
+          sourceState targetState programs frames env member sourceReadEq
+          runtime.runtime with
+        ⟨targetValue, targetRead, values,
+          sourceTransition, targetTransition, afterStructural⟩
+      have afterRelated :
+          LedgerBinderReadyReachableMachineRelated fuel rho
+            { sourceState with control := .yielded sourceValue }
+            { targetState with control := .yielded targetValue } := by
+        refine ⟨?_, afterStructural⟩
+        simpa using runtime.ledger
+      rcases match_internalCoreSteps_binderReady_ledger
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨_, targetPath, finalRelated⟩
+
 /-- Terminal exact-return view lifted end to end into the hereditary machine
 relation.  Its active graph disappears after yielding the value, so only
 coverage of the result local and the already-strong saved state remain. -/
@@ -24093,6 +24149,45 @@ theorem ExactShadowCodeBinderReady.match_returnStep
     | ret member => exact member
   exact match_returnStep_binderReady sourceState targetState programs frames
     env member runtime step
+
+/-- Exact retained-return provenance consumed through the ledger-preserving
+yield step. -/
+theorem ExactShadowCodeBinderReady.match_returnStep_ledger
+    {initial ambient : UsedLocals}
+    {terminalFuel fuel : Nat}
+    {result : FVarId}
+    (_ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.return
+          (initial := initial) (fuel := terminalFuel) (result := result)))
+    (fuelBound : terminalFuel ≤ fuel)
+    (usedBound : UsedSubset (initial.insert result) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.return result) } sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.return result) } targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let graph :=
+    (ExactShadowCodeView.return
+      (initial := initial) (fuel := terminalFuel) (result := result)).toGraph
+      |>.toShadowCodeGraphAt fuelBound usedBound
+  have member : ambient.contains result = true := by
+    cases graph.covered with
+    | ret member => exact member
+  exact match_returnStep_binderReady_ledger
+    sourceState targetState programs frames env member runtime step
 
 /-- Graph-level semantic-step dispatcher for retained jumps.  Every failure
 branch is terminal and contradicts the `Step` premise; successful lookup,
