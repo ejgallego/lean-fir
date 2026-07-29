@@ -26188,6 +26188,137 @@ theorem shadowProgram_loweringCorrect_sourceMachineInvariant
   exact
     (initialSourceRuntime entry member sourceArguments).binderReady
 
+/-! ## Inductive runtime/ownership contracts -/
+
+/-- A step-closed predicate holds after every finite source execution.
+This small bridge keeps compiler clients in ordinary invariant-induction
+style rather than making them manipulate existential step counts. -/
+theorem stepInvariant_of_reaches
+    {predicate : MachineState → Prop}
+    (initial : predicate before)
+    (preserved : ∀ {first second},
+      predicate first → Step externals first second → predicate second)
+    (path : NonLockstep.Reaches externals before after) :
+    predicate after := by
+  rcases path with ⟨count, execution⟩
+  induction execution with
+  | refl state =>
+      exact initial
+  | step head tail ih =>
+      exact ih (preserved initial head)
+
+/-- Source-only ownership interface for compiler clients.  The client names
+an ordinary entry-indexed machine invariant, proves it initially and
+step-closed, and shows that it supplies the exact active-edge certificates
+selected by the audited compiler graph. -/
+structure ElimDeadSourceOwnershipContract
+    (externals : ExternalSpec) (fuel : Nat)
+    (source : ImpureProgram) (entries : Array Name) : Type where
+  invariant : Name → Array Value → MachineState → Prop
+  initial : ∀ entry, entry ∈ entries → ∀ arguments,
+    invariant entry arguments
+      (initialState source entry arguments)
+  preserved : ∀ {entry arguments before after},
+    invariant entry arguments before →
+    Step externals before after →
+      invariant entry arguments after
+  ready : ∀ {entry arguments state},
+    invariant entry arguments state →
+      SourceRuntimeOwnershipMachineReadyAt fuel state
+
+/-- The source-only inductive contract discharges the hereditary entry
+invariant consumed by `ElimDeadRuntimeAdmissibility`. -/
+theorem ElimDeadSourceOwnershipContract.initialInvariant
+    (contract :
+      ElimDeadSourceOwnershipContract
+        externals fuel source entries) :
+    SourceRuntimeOwnershipInitialInvariantOn
+      externals fuel source entries := by
+  intro entry member arguments sourceAfter path
+  apply contract.ready
+  exact stepInvariant_of_reaches
+    (contract.initial entry member arguments)
+    (fun ready step => contract.preserved ready step)
+    path
+
+/-- Exact-provenance ownership interface for reset/reuse/write programs whose
+dynamic facts depend on both sides of a related execution.  Separate source
+and target preservation laws give an ordinary rectangular invariant; the
+readiness law is invoked only when the future states carry the exact audited
+compiler relation. -/
+structure ElimDeadExactOwnershipContract
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Type where
+  invariant :
+    Name → Array Value → Array Value →
+      MachineState → MachineState → Prop
+  initial : ∀ entry, entry ∈ entries →
+    ∀ sourceArguments targetArguments,
+      ArrayRel (ValueRel emptyAddressRenaming)
+        sourceArguments targetArguments →
+      invariant entry sourceArguments targetArguments
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments)
+  sourcePreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceBefore sourceAfter targetState},
+      invariant entry sourceArguments targetArguments
+        sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant entry sourceArguments targetArguments
+          sourceAfter targetState
+  targetPreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceState targetBefore targetAfter},
+      invariant entry sourceArguments targetArguments
+        sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant entry sourceArguments targetArguments
+          sourceState targetAfter
+  ready :
+    ∀ {entry sourceArguments targetArguments sourceState targetState},
+      invariant entry sourceArguments targetArguments
+        sourceState targetState →
+      SomeBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        BinderReadyReachableMachineReadyAt
+          fuel sourceState targetState
+
+/-- The exact inductive contract supplies the weakest supported hereditary
+runtime/ownership entry form: readiness is required only for future pairs
+that retain exact compiler provenance. -/
+theorem ElimDeadExactOwnershipContract.initialInvariant
+    (contract :
+      ElimDeadExactOwnershipContract
+        externals fuel source target entries) :
+    ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries := by
+  intro entry member sourceArguments targetArguments argumentsRelated
+  intro sourceAfter targetAfter sourcePath targetPath related
+  have sourceInvariant :
+      contract.invariant entry sourceArguments targetArguments
+        sourceAfter (initialState target entry targetArguments) :=
+    stepInvariant_of_reaches
+      (predicate := fun state =>
+        contract.invariant entry sourceArguments targetArguments
+          state (initialState target entry targetArguments))
+      (contract.initial entry member
+        sourceArguments targetArguments argumentsRelated)
+      (fun ready step => contract.sourcePreserved ready step)
+      sourcePath
+  have targetInvariant :
+      contract.invariant entry sourceArguments targetArguments
+        sourceAfter targetAfter :=
+    stepInvariant_of_reaches
+      (predicate := fun state =>
+        contract.invariant entry sourceArguments targetArguments
+          sourceAfter state)
+      sourceInvariant
+      (fun ready step => contract.targetPreserved ready step)
+      targetPath
+  exact contract.ready targetInvariant related
+
 /-! ## Compiler-facing semantic admissibility -/
 
 /-- Dynamic admissibility for a checked `elimDeadVars` run.  Exact
@@ -26212,6 +26343,39 @@ inductive ElimDeadRuntimeAdmissibility
         externals fuel source entries) :
       ElimDeadRuntimeAdmissibility externals fuel source target entries
 
+/-- Inductive compiler-client form of the runtime/ownership obligation.
+It retains the choice between a convenient source-only invariant and an exact
+pair invariant for ownership-sensitive residuals. -/
+inductive ElimDeadOwnershipContract
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Type where
+  | ofExact
+      (contract :
+        ElimDeadExactOwnershipContract
+          externals fuel source target entries) :
+      ElimDeadOwnershipContract
+        externals fuel source target entries
+  | ofSource
+      (contract :
+        ElimDeadSourceOwnershipContract
+          externals fuel source entries) :
+      ElimDeadOwnershipContract
+        externals fuel source target entries
+
+/-- Bridge the ordinary inductive ownership interface to the hereditary
+semantic admissibility package consumed by the non-lockstep proof. -/
+theorem ElimDeadOwnershipContract.runtimeAdmissibility
+    (contract :
+      ElimDeadOwnershipContract
+        externals fuel source target entries) :
+    ElimDeadRuntimeAdmissibility
+      externals fuel source target entries := by
+  cases contract with
+  | ofExact contract =>
+      exact .exact contract.initialInvariant
+  | ofSource contract =>
+      exact .source contract.initialInvariant
+
 /-- Complete compiler-facing package for one semantically admissible
 transparent pass run.  Foreign-response compatibility remains a separate
 consumer contract so the compiler package never quantifies over target
@@ -26223,6 +26387,21 @@ structure ElimDeadSemanticallyAdmissibleRun
   transformed : shadowProgram? fuel source = some target
   runtime :
     ElimDeadRuntimeAdmissibility externals fuel source target entries
+
+/-- Construct the semantic package from the ordinary inductive ownership
+interface rather than a hereditary reachability predicate. -/
+theorem ElimDeadSemanticallyAdmissibleRun.ofOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (transformed : shadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadOwnershipContract
+        externals fuel source target entries) :
+    ElimDeadSemanticallyAdmissibleRun
+      externals fuel source target entries := {
+  wellFormed
+  transformed
+  runtime := ownership.runtimeAdmissibility
+}
 
 /-- Corrected general whole-program theorem.  The package makes the exact
 additional semantic premise visible, while accepting either exact-provenance
@@ -26288,6 +26467,19 @@ theorem ElimDeadCompilerAdmissibleRun.ofChecked
     runtime
   }
 
+/-- Checked compiler package using the inductive ownership interface. -/
+theorem ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadOwnershipContract
+        externals fuel source target entries) :
+    ElimDeadCompilerAdmissibleRun
+      externals fuel source target entries :=
+  ElimDeadCompilerAdmissibleRun.ofChecked
+    wellFormed checked ownership.runtimeAdmissibility
+
 /-- Forget the explicit conservative compiler policy after it has been
 audited.  The operational endpoint consumes the independent dynamic
 certificate. -/
@@ -26336,5 +26528,23 @@ theorem nullarySafeShadowProgram_loweringCorrect
       source target entries :=
   (ElimDeadCompilerAdmissibleRun.ofChecked
     wellFormed checked runtime).loweringCorrect compatible
+
+/-- Direct checked-pass endpoint from an ordinary inductive ownership
+contract.  Hereditary reachability is discharged by the generic bridge. -/
+theorem nullarySafeShadowProgram_loweringCorrect_of_ownership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadOwnershipContract
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries :=
+  (ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    wellFormed checked ownership).loweringCorrect compatible
 
 end Fir.LeanIR.Passes.ElimDead

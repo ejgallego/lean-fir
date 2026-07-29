@@ -1481,6 +1481,28 @@ theorem neutralSourceReachable_ready
       intro sourceCode control
       simp [neutralSourceInvokingState] at control
 
+/-- Ordinary inductive ownership contract for the neutral compiler fixture.
+The chosen predicate is source-only and indexed by the entry arguments; the
+generic bridge below supplies the hereditary non-lockstep premise. -/
+def neutralSourceOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadSourceOwnershipContract externals 3
+      neutralBeforeProgram #[`main] where
+  invariant := fun _ arguments state =>
+    NeutralSourceReachable arguments state
+  initial := by
+    intro entry member arguments
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact .entry
+  preserved := by
+    intro entry arguments before after reachable step
+    exact neutralSourceReachable_step reachable step
+  ready := by
+    intro entry arguments state reachable
+    exact neutralSourceReachable_ready state reachable
+
 /-- The first complete concrete source invariant: every state reachable from
 the neutral entry satisfies the dynamic contract consumed by the strong
 non-lockstep simulation. -/
@@ -1497,11 +1519,7 @@ theorem neutralSourceRuntimeOwnershipInitialInvariant
     (externals : ExternalSpec) :
     SourceRuntimeOwnershipInitialInvariantOn externals 3
       neutralBeforeProgram #[`main] := by
-  intro entry member arguments
-  have entryEq : entry = `main := by
-    simpa using member
-  subst entry
-  exact neutralSourceRuntimeOwnershipMachineInvariant externals arguments
+  exact (neutralSourceOwnershipContract externals).initialInvariant
 
 theorem neutralBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed neutralBeforeProgram := by
@@ -1596,11 +1614,11 @@ theorem neutralCompilerAdmissibleRun
     (externals : ExternalSpec) :
     ElimDeadCompilerAdmissibleRun externals 3
       neutralBeforeProgram neutralAfterProgram #[`main] :=
-  ElimDeadCompilerAdmissibleRun.ofChecked
+  ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
     neutralBeforeProgramElimDeadWellFormed
     neutralCheckedProgramRun
-    (.source
-      (neutralSourceRuntimeOwnershipInitialInvariant externals))
+    (ElimDeadOwnershipContract.ofSource
+      (neutralSourceOwnershipContract externals))
 
 /-- End-to-end use of the checked strong endpoint on a concrete program.
 Only foreign-response compatibility remains parametric; the source
@@ -1613,11 +1631,11 @@ theorem neutralProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       neutralBeforeProgram neutralAfterProgram #[`main] :=
-  nullarySafeShadowProgram_loweringCorrect
+  nullarySafeShadowProgram_loweringCorrect_of_ownership
     neutralBeforeProgramElimDeadWellFormed
     neutralCheckedProgramRun
-    (.source
-      (neutralSourceRuntimeOwnershipInitialInvariant externals))
+    (ElimDeadOwnershipContract.ofSource
+      (neutralSourceOwnershipContract externals))
     compatible
 
 def liveEnv : Env :=
@@ -9212,26 +9230,60 @@ theorem closedOwnedReuseSourceReachable_pairReady
       intro sourceCode control
       simp [closedOwnedReuseSourceInvokingState] at control
 
+/-- Exact pair contract for the ownership-sensitive reset/reuse fixture.
+The source graph tracks recursive child release and token use, while the
+target graph supplies the empty-frontier heap shape that proves the concrete
+reuse cell unreachable. -/
+def closedOwnedReuseExactOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadExactOwnershipContract externals 7
+      closedOwnedReuseBeforeProgram
+      closedOwnedReuseAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    ClosedOwnedReuseSourceReachable sourceArguments source ∧
+      ClosedConcreteReuseTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    constructor
+    · exact .entry
+    · simpa [closedOwnedReuseAfterProgram,
+        closedConcreteReuseAfterProgram,
+        closedOwnedReuseAfter, closedConcreteReuseAfter] using
+        (ClosedConcreteReuseTargetReachable.entry
+          (arguments := targetArguments))
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨closedOwnedReuseSourceReachable_step
+      sourceReachable step, targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      closedConcreteReuseTargetReachable_step targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ related
+    exact closedOwnedReuseSourceReachable_pairReady
+      sourceReachable
+      (closedConcreteReuseTargetReachable_runtimeShape
+        targetReachable)
+      related
+
 theorem closedOwnedReuseExactRuntimeOwnershipInitialInvariant
     (externals : ExternalSpec) :
     ReachableInitialInvariantOn
       (BinderReadyExactRuntimeOwnershipInvariant externals 7)
       closedOwnedReuseBeforeProgram
       closedOwnedReuseAfterProgram #[`main] := by
-  intro entry member sourceArguments targetArguments argumentsRelated
-  have entryEq : entry = `main := by
-    simpa using member
-  subst entry
-  intro sourceAfter targetAfter sourcePath targetPath related
-  have sourceReachable :=
-    closedOwnedReuseSourceReachable_of_reaches sourcePath
-  have targetReachable :=
-    closedOwnedReuseTargetReachable_of_reaches targetPath
-  exact closedOwnedReuseSourceReachable_pairReady
-    sourceReachable
-    (closedConcreteReuseTargetReachable_runtimeShape
-      targetReachable)
-    related
+  exact
+    (closedOwnedReuseExactOwnershipContract
+      externals).initialInvariant
 
 theorem closedOwnedReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed
@@ -9282,13 +9334,12 @@ theorem closedOwnedReuseSemanticallyAdmissibleRun
     (externals : ExternalSpec) :
     ElimDeadSemanticallyAdmissibleRun externals 7
       closedOwnedReuseBeforeProgram
-      closedOwnedReuseAfterProgram #[`main] := {
-  wellFormed := closedOwnedReuseBeforeProgramElimDeadWellFormed
-  transformed := closedOwnedReuseShadowProgramRun
-  runtime := .exact
-    (closedOwnedReuseExactRuntimeOwnershipInitialInvariant
-      externals)
-}
+      closedOwnedReuseAfterProgram #[`main] :=
+  ElimDeadSemanticallyAdmissibleRun.ofOwnership
+    closedOwnedReuseBeforeProgramElimDeadWellFormed
+    closedOwnedReuseShadowProgramRun
+    (ElimDeadOwnershipContract.ofExact
+      (closedOwnedReuseExactOwnershipContract externals))
 
 /-- Whole-program correctness for deleted reset/reuse with a real owned
 child.  The source recursively releases the child and overwrites the parent;
