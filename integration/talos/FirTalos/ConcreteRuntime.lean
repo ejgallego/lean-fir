@@ -5828,19 +5828,20 @@ theorem usizeSetStep_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases objectRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
           obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated, capacity⟩ :=
+              semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
             runtimeRelated.heap.writeUSizeSlot_refines_with_capacity mapped found
               live objectEq index field slotStart slotEnd
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
-          refine ⟨heap, ?_, ?_, capacity⟩
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
           · simp [usizeSetStep, clearFailure, Word32.ofUInt32_ofNat_value,
               concreteOperation, replaceHeap]
           · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -5870,7 +5871,7 @@ theorem usizeSetStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     usizeSetStep_of_refines_with_capacity runtimeRelated objectRelated found live
       objectEq slotStart slotEnd updated
   exact ⟨heap, concrete, finalRelated⟩
@@ -8489,7 +8490,8 @@ theorem effectStepSimulates_usizeSet_with_capacity
         (.uset objectId index fieldId continuation) continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   have objectSourceLookup : lookup sourceEnv objectId =
       some (.object (.heap location)) := by
     unfold lookupValue at objectLookup
@@ -8517,10 +8519,10 @@ theorem effectStepSimulates_usizeSet_with_capacity
       | word64 fieldRelated =>
           cases fieldRelated with
           | usize =>
-              obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+              obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
                 usizeSetStep_of_refines_with_capacity initialRelated.1
                   objectRelated found live objectEq slotStart slotEnd updated
-              refine ⟨heap, ?_, capacity⟩
+              refine ⟨heap, ?_, capacity, cursor⟩
               apply effectStepSimulates_binaryHost (step := usizeSetStep index)
               · intro externals
                 simp [executeStep, coreStep, objectLookup, fieldLookup, updated]
@@ -8597,7 +8599,7 @@ theorem effectStepSimulates_usizeSet
         (.uset objectId index fieldId continuation) continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_usizeSet_with_capacity objectLookup fieldLookup updated
       initialRelated objectCompiled fieldCompiled objectFound fieldFound
       objectKindAt fieldKindAt callFound continuationAdapted hImp hSat hi

@@ -4281,6 +4281,27 @@ Compatibility theorems for the earlier FVar-only boundary remain available.
 No FIR semantic contract, concrete layout, executable ABI, or W7 helper
 signature changed.
 
+W6.6fs lifts successful `USize` field mutation through the same structural
+boundary. The concrete `writeUSizeField`/`writeUSizeSlot`, Talos operation, and
+generated effect theorems now expose exact `heapCursor` preservation from
+their existing payload-mutation frame. `CodeAdapted.usizeSet_eq` recovers both
+numeric locals, the `usizeSet` import, exact binary prefix, and continuation
+from production output; `ConcreteSupportedExport.usizeSetCall` recovers the
+installed concrete contract.
+
+`USizeFieldEffectSupported` admits only source lookups/update, live-constructor
+bounds, and the two source-local compiler equations. It contains no target
+syntax, numeric index, physical value, witness, or simulation proof.
+`effectRuntimeRefines_usizeField` reconstructs those facts and preserves the
+ownership-aware budget and descriptor agreement.
+`FieldMutationEffectSupported`,
+`effectRuntimeRefines_fieldMutation`,
+`OwnershipTagAndFieldMutationEffectSupported`, and
+`correctBudgetedPureExternalOwnershipTagAndFieldMutation` extend the mixed
+whole-export endpoint across object and `USize` mutation. Packed-scalar
+mutation is the next adjacent successful field family. No FIR semantic
+contract, concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -417,6 +417,14 @@ writer. `ObjectFieldEffectSupported` and
 `OwnershipTagAndObjectEffectSupported` compose both `LCNF.Arg` forms into the
 uniform runtime law and whole-export endpoint; the FVar-only APIs remain as
 compatibility boundaries.
+`CodeAdapted.usizeSet_eq` and `ConcreteSupportedExport.usizeSetCall` now add
+the production `USize` setter prefix and installed host contract.
+`USizeFieldEffectSupported` remains target-free, while the strengthened
+concrete boundary preserves the heap frontier exactly.
+`FieldMutationEffectSupported` and
+`OwnershipTagAndFieldMutationEffectSupported` compose object and `USize`
+mutation into the mixed whole-export theorem. Packed-scalar mutation is the
+next structural field family.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

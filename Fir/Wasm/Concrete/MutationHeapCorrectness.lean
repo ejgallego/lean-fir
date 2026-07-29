@@ -590,7 +590,8 @@ theorem LiveHeapRel.writeUSizeField_refines_with_capacity
       Fir.LeanIR.Impure.setUSizeField runtime (.object (.heap location)) index
         (.usize value) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -640,7 +641,7 @@ theorem LiveHeapRel.writeUSizeField_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           targetFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -675,7 +676,7 @@ theorem LiveHeapRel.writeUSizeField_refines
       Fir.LeanIR.Impure.setUSizeField runtime (.object (.heap location)) index
         (.usize value) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeUSizeField_refines_with_capacity mapped found live objectEq index
       value indexValid
   exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
@@ -700,13 +701,14 @@ theorem LiveHeapRel.writeUSizeSlot_refines_with_capacity
       Fir.LeanIR.Impure.setUSizeSlot runtime (.object (.heap location)) slot
         (.usize value) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   let index := slot - semantic.objectFields.size
   have indexValid : index < semantic.usizeFields.size := by
     dsimp [index]
     omega
   obtain ⟨result, nextRuntime, concreteField, semanticField, finalRelated,
-      capacity⟩ :=
+      capacity, cursor⟩ :=
     related.writeUSizeField_refines_with_capacity mapped found live objectEq index
       value indexValid
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
@@ -754,7 +756,7 @@ theorem LiveHeapRel.writeUSizeSlot_refines_with_capacity
         simp only [Bind.bind, Except.bind]
         simp [slotStart, indexValid, index]
       exact ⟨result, nextRuntime, concreteSlot.trans concreteField,
-        semanticSlot.trans semanticField, finalRelated, capacity⟩
+        semanticSlot.trans semanticField, finalRelated, capacity, cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -790,7 +792,7 @@ theorem LiveHeapRel.writeUSizeSlot_refines
       Fir.LeanIR.Impure.setUSizeSlot runtime (.object (.heap location)) slot
         (.usize value) = .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeUSizeSlot_refines_with_capacity mapped found live objectEq slot
       value slotStart slotEnd
   exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩

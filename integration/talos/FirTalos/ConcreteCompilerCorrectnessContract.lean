@@ -1432,6 +1432,51 @@ example
   spec.effectRuntimeRefines_objectField
 
 /--
+Successful `USize` field mutation satisfies the generic effect condition using
+only source lookups, update/bounds facts, and source-local compiler equations.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (USizeFieldEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.effectRuntimeRefines_usizeField
+
+/--
+Object and `USize` field writes satisfy one structural effect law.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (FieldMutationEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.effectRuntimeRefines_fieldMutation
+
+/--
 All currently proved ownership operations satisfy one uniform effect condition
 and may therefore be interleaved in a single structural source evaluation.
 -/
@@ -1524,6 +1569,30 @@ example
         (OwnershipTagAndObjectEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
   spec.effectRuntimeRefines_ownershipTagAndObject
+
+/--
+Ownership, tag mutation, object mutation, and `USize` mutation satisfy one
+uniform effect condition and may be interleaved structurally.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (OwnershipTagAndFieldMutationEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.effectRuntimeRefines_ownershipTagAndFieldMutation
 
 /--
 The mixed whole-export theorem admits arbitrary nesting of sole-default cases
@@ -2094,6 +2163,71 @@ example
             callerTail) :=
   spec.correctBudgetedPureExternalOwnershipTagAndObject evaluation stateRelated
     frameAligned budget integerImplementation naturalImplementation
+    scalarImplementation descriptorAgreement parameterCount
+
+/--
+The mixed whole-export theorem admits object and `USize` field writes alongside
+ownership, tag mutation, default cases, direct operations, and pure externals.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported
+        (OwnershipTagAndFieldMutationEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedPureExternalOwnershipTagAndFieldMutation evaluation
+    stateRelated frameAligned budget integerImplementation naturalImplementation
     scalarImplementation descriptorAgreement parameterCount
 
 /--
