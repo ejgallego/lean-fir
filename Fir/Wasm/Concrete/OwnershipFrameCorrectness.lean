@@ -3038,9 +3038,11 @@ theorem LiveHeapRel.deleteObject_erased_refines_with_capacity
       deleteObject state Word32.zero = .ok result ∧
       Fir.LeanIR.Impure.deleteValue runtime .erased = .ok runtime ∧
       LiveHeapRel result witness runtime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   exact ⟨state, deleteObject_zero state,
-    Fir.LeanIR.Impure.deleteValue_erased runtime, related, .refl state witness⟩
+    Fir.LeanIR.Impure.deleteValue_erased runtime, related, .refl state witness,
+    rfl⟩
 
 theorem LiveHeapRel.deleteObject_erased_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
@@ -3049,7 +3051,7 @@ theorem LiveHeapRel.deleteObject_erased_refines
       deleteObject state Word32.zero = .ok result ∧
       Fir.LeanIR.Impure.deleteValue runtime .erased = .ok runtime ∧
       LiveHeapRel result witness runtime := by
-  obtain ⟨result, concrete, semantic, finalRelated, _⟩ :=
+  obtain ⟨result, concrete, semantic, finalRelated, _, _⟩ :=
     related.deleteObject_erased_refines_with_capacity
   exact ⟨result, concrete, semantic, finalRelated⟩
 
@@ -3066,7 +3068,8 @@ theorem LiveHeapRel.deleteObject_refines_with_capacity
     ∃ result,
       deleteObject state address = .ok result ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨cell, found, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   have live : cell.live = true := by
@@ -3126,7 +3129,8 @@ theorem LiveHeapRel.deleteObject_refines_with_capacity
   have capacity :=
     related.mappedHeaderCapacity_of_headerWrite descriptorFound rawRead releasedEq
       headerInBounds headerWrite rfl
-  exact ⟨released, concreteDelete, finalRelated, capacity⟩
+  exact ⟨released, concreteDelete, finalRelated, capacity, by
+    simp [releasedEq]⟩
 
 theorem LiveHeapRel.deleteObject_refines
     {state : MemoryState} {witness : RefinementWitness}
@@ -3139,7 +3143,7 @@ theorem LiveHeapRel.deleteObject_refines
     ∃ result,
       deleteObject state address = .ok result ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, concrete, finalRelated, _⟩ :=
+  obtain ⟨result, concrete, finalRelated, _, _⟩ :=
     related.deleteObject_refines_with_capacity mapped semanticOperation
   exact ⟨result, concrete, finalRelated⟩
 

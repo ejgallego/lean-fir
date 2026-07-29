@@ -4546,14 +4546,15 @@ theorem deleteStep_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases valueRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
-          obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+          obtain ⟨heap, concreteOperation, finalHeapRelated, capacity, cursor⟩ :=
             runtimeRelated.heap.deleteObject_refines_with_capacity mapped updated
-          refine ⟨heap, ?_, ?_, capacity⟩
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
           · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
               concreteOperation, replaceHeap]
           · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -4563,10 +4564,11 @@ theorem deleteStep_of_refines_with_capacity
       | heap heapRelated =>
           cases heapRelated with
           | mapped mapped =>
-              obtain ⟨heap, concreteOperation, finalHeapRelated, capacity⟩ :=
+              obtain ⟨heap, concreteOperation, finalHeapRelated, capacity,
+                  cursor⟩ :=
                 runtimeRelated.heap.deleteObject_refines_with_capacity mapped
                   updated
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, capacity, cursor⟩
               · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
                   concreteOperation, replaceHeap]
               · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -4574,11 +4576,11 @@ theorem deleteStep_of_refines_with_capacity
       | tagged taggedRelated => simp [deleteValue] at updated
   | erased =>
       obtain ⟨heap, concreteOperation, semanticOperation, finalHeapRelated,
-          capacity⟩ :=
+          capacity, cursor⟩ :=
         runtimeRelated.heap.deleteObject_erased_refines_with_capacity
       have runtimeEq := Except.ok.inj (semanticOperation.symm.trans updated)
       subst nextRuntime
-      refine ⟨heap, ?_, ?_, capacity⟩
+      refine ⟨heap, ?_, ?_, capacity, cursor⟩
       · simp [deleteStep, clearFailure, Word32.ofUInt32_ofNat_value,
           concreteOperation, replaceHeap]
       · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -4603,7 +4605,7 @@ theorem deleteStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     deleteStep_of_refines_with_capacity runtimeRelated valueRelated updated
   exact ⟨heap, concrete, finalRelated⟩
 
@@ -7885,7 +7887,8 @@ theorem effectStepSimulates_delete_with_capacity
         hostEnv sourceRuntime nextRuntime sourceEnv (.del objectId continuation)
         continuation ([.localGet objectIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
     unfold lookupValue at objectLookup
     split at objectLookup
@@ -7898,9 +7901,9 @@ theorem effectStepSimulates_delete_with_capacity
     initialRelated.resolve sourceLookup objectFound kindAt
   cases physicalRelated with
   | word32 valueRelated =>
-      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+      obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
         deleteStep_of_refines_with_capacity initialRelated.1 valueRelated updated
-      refine ⟨heap, ?_, capacity⟩
+      refine ⟨heap, ?_, capacity, cursor⟩
       apply effectStepSimulates_unaryHost (step := deleteStep)
       · intro externals
         simp [executeStep, coreStep, objectLookup, updated]
@@ -7958,7 +7961,7 @@ theorem effectStepSimulates_delete
         hostEnv sourceRuntime nextRuntime sourceEnv (.del objectId continuation)
         continuation ([.localGet objectIndex, .call id] ++ targetRest)
         targetRest initial (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_delete_with_capacity objectLookup updated initialRelated
       objectCompiled objectFound kindAt callFound continuationAdapted hImp hSat hi
       hContract hParams hResults

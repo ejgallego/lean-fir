@@ -375,6 +375,15 @@ recursive release step, while the executable `decrementReference` frontier
 theorem retains the allocation budget exactly.
 `correctBudgetedPureExternalOrdinaryDecrements` is the corresponding
 whole-export endpoint.
+`OrdinaryDeleteEffectSupported` adds explicit deletion without a descriptor
+premise. `CodeAdapted.del_eq` and
+`ConcreteSupportedExport.deleteCall` recover the production unary call, while
+the strengthened concrete delete boundary proves that both canonical
+live-object release and the erased/physical-zero no-op preserve the heap
+frontier exactly. `effectRuntimeRefines_ordinaryDelete` retains the ordinary
+budgeted pure-external frame, and
+`correctBudgetedPureExternalOrdinaryDeletes` is the corresponding
+whole-export endpoint.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

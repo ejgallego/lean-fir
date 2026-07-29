@@ -1941,6 +1941,108 @@ theorem CodeAdapted.dec_eq
                       exact targetEq.symm
 
 /--
+Production compiler/adaptor inversion for explicit deletion.
+
+The source-local compiler equation and successful whole-node adaptation
+determine the numeric object/import slots, the exact generated unary delete
+prefix, and the independently adapted continuation.
+-/
+theorem CodeAdapted.del_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {objectKind : AbiKind}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.del objectId continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some objectKind ∧
+        callIndex? sourceModule (.runtime .delete) = some callIndex ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases restResult :
+      Fir.Wasm.compileCodeCore context continuation with
+  | none =>
+      rw [objectCompiled, restResult] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some result =>
+      cases result with
+      | error error =>
+          rw [objectCompiled, restResult] at core
+          change
+            some (Except.error error) = some (Except.ok symbolic) at core
+          have impossible :
+              Except.error error = Except.ok symbolic :=
+            Option.some.inj core
+          cases impossible
+      | ok restCode =>
+          rw [restResult, objectCompiled] at core
+          change
+            some (Except.ok
+              ([.localGet objectId,
+                .call (.runtime .delete)] ++ restCode)) =
+              some (Except.ok symbolic) at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have restCompiled :
+              Fir.Wasm.compileCode context continuation = .ok restCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+          cases prefixAdapted :
+              instructions sourceModule sourceFunction labels
+                [.localGet objectId, .call (.runtime .delete)] with
+          | error error =>
+              rw [FirTalos.Correctness.instructions_append, prefixAdapted]
+                at targetCompiled
+              contradiction
+          | ok targetPrefix =>
+              cases restAdapted :
+                  instructions sourceModule sourceFunction labels restCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+                    restAdapted] at targetCompiled
+                  contradiction
+              | ok targetRest =>
+                  have targetEq : targetPrefix ++ targetRest = target := by
+                    rw [FirTalos.Correctness.instructions_append,
+                      prefixAdapted, restAdapted] at targetCompiled
+                    exact Except.ok.inj targetCompiled
+                  obtain ⟨indices, callIndex, found, callFound, prefixEq⟩ :=
+                    instructions_localGets_call_eq
+                      (fvarIds := [objectId])
+                      (operation := .delete) prefixAdapted
+                  cases found with
+                  | cons objectFound noMore =>
+                      cases noMore
+                      obtain ⟨alignedIndex, alignedFound, kindAt⟩ :=
+                        localsAligned objectCompiled
+                      rw [objectFound] at alignedFound
+                      injection alignedFound with indexEq
+                      subst alignedIndex
+                      refine ⟨_, callIndex, targetRest, objectFound, kindAt,
+                        callFound, ⟨restCode, restCompiled, restAdapted⟩, ?_⟩
+                      rw [prefixEq] at targetEq
+                      exact targetEq.symm
+
+/--
 Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
 continuation.
 
@@ -4108,6 +4210,33 @@ inductive OrdinaryDecrementEffectSupported
         continuation nextRuntime
 
 /--
+Source/compiler-facing admission for one successful explicit deletion.
+
+Deletion accepts either an ordinary heap object or the exact erased reset
+token. The semantic lookup/update decides that distinction. The admission
+therefore needs only the source local's ABI kind and contains no target
+program, numeric index, concrete word, or translation witness.
+-/
+inductive OrdinaryDeleteEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate where
+  | del
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (continuation : LCNF.Code .impure)
+      (objectKind : AbiKind)
+      (sourceObject : Value)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectLookup :
+        lookupValue sourceEnv objectId = .ok sourceObject)
+      (updated :
+        deleteValue sourceRuntime sourceObject = .ok nextRuntime) :
+      OrdinaryDeleteEffectSupported context sourceRuntime sourceEnv
+        (.del objectId continuation) continuation nextRuntime
+
+/--
 Budgeted successful source evaluation for mixed direct/external code with
 selected case branches and admitted no-result effects.
 
@@ -5745,6 +5874,45 @@ theorem ConcreteSupportedExport.decrementCall
     exact results
 
 /--
+Resolver/adaptor alignment specialized to the concrete explicit-delete host
+selected by the compiler-derived runtime-call slot.
+-/
+theorem ConcreteSupportedExport.deleteCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime .delete) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some deleteContract ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 0 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    supportedExport.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = deleteStep initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, deleteFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 0 at results
+    exact results
+
+/--
 The compiler-erased persistent ownership family implements the generic effect
 condition for every invariant.
 
@@ -5922,6 +6090,75 @@ theorem
             targetLocals witness := by
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
+/--
+Successful explicit deletion implements the generic effect condition for the
+complete budgeted pure-external frame.
+
+Production inversion and resolver alignment recover the generated unary
+delete call. Both an ordinary header release and the erased/zero no-op preserve
+the heap frontier exactly, so deletion consumes no allocation budget and
+retains all installed pure-external laws.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDelete
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
+      (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | del sourceRuntime nextRuntime sourceEnv objectId continuation objectKind
+      sourceObject objectCompiled objectLookup updated =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.del_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.deleteCall callFound
+      obtain ⟨heap, step, _capacity, cursor⟩ :=
+        effectStepSimulates_delete_with_capacity objectLookup updated
+          stateRelated objectCompiled objectFound kindAt callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results
+      rcases invariant with
+        ⟨⟨frameAligned, budget⟩, integerImplementation,
+          naturalImplementation, scalarImplementation⟩
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextInvariant :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        have externalsEq :
+            (replaceHeap targetStore heap).host.externals =
+              targetStore.host.externals := by
+          simp [replaceHeap, clearFailure]
+        refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact integerImplementation
+        · rw [externalsEq]
+          exact naturalImplementation
+        · rw [externalsEq]
+          exact scalarImplementation
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, nextInvariant⟩
 
@@ -11279,6 +11516,79 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_ownership externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ordinaryDecrement (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of
+successful explicit deletions, default-only cases, and the complete current
+direct/pure-external family.
+
+The source admission permits both ordinary heap deletion and the exact erased
+reset token. Compiler inversion and resolver alignment derive the generated
+unary call, while exact frontier preservation keeps the allocation budget
+unchanged.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOrdinaryDeletes
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported (OrdinaryDeleteEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ordinaryDelete (externals := externals))
     parameterCount
 
 /--

@@ -4169,6 +4169,25 @@ and the ten resident numeric externals. The contract harness checks both
 boundaries. This is a proof-surface extension only: no FIR semantic contract,
 concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6fn adds successful explicit deletion to the same structural proof. The
+concrete erased-token and ordinary live-object refinement branches now expose
+exact `heapCursor` preservation through `deleteStep` and the generated effect
+simulation. `OrdinaryDeleteEffectSupported` contains only the source lookup,
+successful semantic deletion, and source-local compiler equation; it does not
+admit a physical word, target index, or per-node translation witness.
+
+`CodeAdapted.del_eq` reconstructs the numeric object/import slots and adapted
+continuation from the production compiler and adapter.
+`ConcreteSupportedExport.deleteCall` supplies the exact resolver-installed
+unary contract. `effectRuntimeRefines_ordinaryDelete` then preserves the
+complete budgeted pure-external frame at zero allocation cost for both the
+ordinary canonical-header release and the exact erased/physical-zero no-op.
+`correctBudgetedPureExternalOrdinaryDeletes` packages arbitrary successful
+deletions interleaved with default-only cases, all current direct operations,
+and the ten resident numeric externals. The contract harness checks the
+operation-family law and whole-export endpoint. No FIR semantic contract,
+concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
