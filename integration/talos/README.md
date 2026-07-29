@@ -292,22 +292,22 @@ unstable.
 Natural-result externals use a separate representation-polymorphic law.
 `NaturalResultRefines` and its budgeted invocation/Talos-step theorems
 construct an immediate, promoted tag, or limb object together with the
-appropriate post-witness. `PureNaturalExternalSupported` initially admits
-`Int.natAbs`, and `correctBudgetedNaturalExternalSpine` proves arbitrary
-finite direct/`natAbs` spines without caller-supplied target or representation
-witnesses. Scalar results such as `Int.decLt` remain outside this family.
+appropriate post-witness. `PureNaturalExternalSupported` admits `Int.natAbs`,
+`Nat.add`, and `Nat.sub`, and `correctBudgetedNaturalExternalSpine` proves
+arbitrary finite direct/natural-result spines without caller-supplied target
+or representation witnesses. Scalar decisions remain outside this family.
 They use the separate nonallocating `ScalarResultRefines` law.
-`PureScalarExternalSupported` initially admits `Int.decLt` at the exact
-`.uint8` ABI kind, and `correctBudgetedScalarExternalSpine` proves arbitrary
-finite direct/decision spines while preserving the heap budget and witness.
+`PureScalarExternalSupported` admits `Int.decLt`, `Nat.decEq`, `Nat.decLt`,
+and `Nat.decLe` at the exact `.uint8` ABI kind, and
+`correctBudgetedScalarExternalSpine` proves arbitrary finite direct/decision
+spines while preserving the heap budget and witness.
 The three families also compose without restricting a source spine to one
 result kind. `PureExternalSupported` admits their union,
 `ConcreteBudgetedPureExternalFrame` retains all three installed handler laws,
 and `correctBudgetedPureExternalSpine` proves arbitrary finite interleavings
-of the full direct family with integer construction/arithmetic, `Int.natAbs`,
-and `Int.decLt`. Its caller supplies the three family laws once and no
-per-node runtime law, target witness, allocation result, or representation
-choice.
+of the full direct family with the ten current W7 resident numeric
+declarations. Its caller supplies the three family laws once and no per-node
+runtime law, target witness, allocation result, or representation choice.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

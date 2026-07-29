@@ -103,13 +103,16 @@ Cross-cutting W6.5 state:
   `NaturalResultRefines` and
   `invoke_pure_natural_result_refines_of_budget` select the immediate,
   promoted-tag, or limb-object representation and construct the corresponding
-  post-witness. `PureNaturalExternalSupported` initially admits `Int.natAbs`;
+  post-witness. `PureNaturalExternalSupported` admits `Int.natAbs`,
+  `Nat.add`, and `Nat.sub`;
   `externalLetRuntimeRefinesWithCost_pureNatural` and
-  `correctBudgetedNaturalExternalSpine` derive its compiler-shaped host step
-  and arbitrary finite direct/`natAbs` whole-export spines without target or
-  representation witnesses. `Int.decLt` remains a separate scalar lane.
+  `correctBudgetedNaturalExternalSpine` derive their compiler-shaped host
+  steps and arbitrary finite direct/natural-result whole-export spines without
+  target or representation witnesses. Decisions remain a separate scalar
+  lane.
   That lane is now covered by the nonallocating `ScalarResultRefines` family:
-  `PureScalarExternalSupported` admits `Int.decLt` only as `.uint8`, and
+  `PureScalarExternalSupported` admits `Int.decLt`, `Nat.decEq`, `Nat.decLt`,
+  and `Nat.decLe` only as `.uint8`, and
   `externalLetRuntimeRefinesWithCost_pureScalar` plus
   `correctBudgetedScalarExternalSpine` derive zero-cost compiler-shaped calls
   and arbitrary finite direct/decision spines with unchanged heap budget and
@@ -118,10 +121,10 @@ Cross-cutting W6.5 state:
   source admissions. The external-step contract records exact preservation
   of the installed handler table, so generic invariant composition retains
   all three operation-family laws across every direct or external node.
-  `correctBudgetedPureExternalSpine` closes arbitrary finite spines mixing
-  all current direct operations with integer construction/arithmetic,
-  `Int.natAbs`, and `Int.decLt`, from one path budget and the three initially
-  installed family laws.
+  `correctBudgetedPureExternalSpine` closes arbitrary finite spines mixing all
+  current direct operations with the ten current W7 resident numeric
+  declarations, from one path budget and the three initially installed family
+  laws.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

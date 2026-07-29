@@ -3080,6 +3080,8 @@ representations.
 -/
 inductive PureNaturalExternalName : Lean.Name → Prop where
   | intNatAbs : PureNaturalExternalName ``Int.natAbs
+  | natAdd : PureNaturalExternalName ``Nat.add
+  | natSub : PureNaturalExternalName ``Nat.sub
 
 /--
 Source/compiler admission for pure natural-result externals.
@@ -3140,6 +3142,9 @@ is indexed explicitly so admitting a name cannot silently reinterpret an
 inductive PureScalarExternalName :
     Lean.Name → BoxedScalarKind → Prop where
   | intDecLt : PureScalarExternalName ``Int.decLt .uint8
+  | natDecEq : PureScalarExternalName ``Nat.decEq .uint8
+  | natDecLt : PureScalarExternalName ``Nat.decLt .uint8
+  | natDecLe : PureScalarExternalName ``Nat.decLe .uint8
 
 /--
 Source/compiler admission for pure nonallocating scalar-result externals.

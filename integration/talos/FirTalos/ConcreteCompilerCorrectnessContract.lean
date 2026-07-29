@@ -363,11 +363,14 @@ example
   spec.externalLetRuntimeRefinesWithCost_pureInteger externals
 
 /--
-`Int.natAbs` is admitted through the representation-polymorphic natural-result
-family. The compiler law constructs all adapted code, indices, allocation
-artifacts, and the post-witness internally.
+`Int.natAbs`, `Nat.add`, and `Nat.sub` are admitted through the
+representation-polymorphic natural-result family. The compiler law constructs
+all adapted code, indices, allocation artifacts, and the post-witness
+internally.
 -/
 example : PureNaturalExternalName ``Int.natAbs := .intNatAbs
+example : PureNaturalExternalName ``Nat.add := .natAdd
+example : PureNaturalExternalName ``Nat.sub := .natSub
 
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -434,11 +437,14 @@ example
       semanticCalled budget fits
 
 /--
-`Int.decLt` is admitted only at its exact `UInt8` result kind. The generic
-scalar runtime law preserves the heap and witness and returns the canonical
-unboxed lane.
+The resident Int/Nat decisions are admitted only at their exact `UInt8`
+result kind. The generic scalar runtime law preserves the heap and witness and
+returns the canonical unboxed lane.
 -/
 example : PureScalarExternalName ``Int.decLt .uint8 := .intDecLt
+example : PureScalarExternalName ``Nat.decEq .uint8 := .natDecEq
+example : PureScalarExternalName ``Nat.decLt .uint8 := .natDecLt
+example : PureScalarExternalName ``Nat.decLe .uint8 := .natDecLe
 
 example
     {program : Fir.LeanIR.ImpureProgram}
