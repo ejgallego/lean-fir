@@ -483,7 +483,8 @@ theorem LiveHeapRel.writeTag_refines_with_capacity
       Fir.LeanIR.Impure.setTag runtime (.object (.heap location)) tag =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -533,7 +534,7 @@ theorem LiveHeapRel.writeTag_refines_with_capacity
         related.mappedHeaderCapacity_of_headerWrite descriptor oldRawRead resultEq
           headerInBounds headerWrite (by simp [updatedEq])
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, by simp [resultEq]⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -567,7 +568,7 @@ theorem LiveHeapRel.writeTag_refines
       Fir.LeanIR.Impure.setTag runtime (.object (.heap location)) tag =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeTag_refines_with_capacity mapped found live objectEq tag tagFits
   exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩
 

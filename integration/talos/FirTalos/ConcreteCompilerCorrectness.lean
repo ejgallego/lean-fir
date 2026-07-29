@@ -2043,6 +2043,108 @@ theorem CodeAdapted.del_eq
                       exact targetEq.symm
 
 /--
+Production compiler/adaptor inversion for constructor-tag mutation.
+
+The source compiler accepts only an object local for this operation. Successful
+whole-node adaptation determines the numeric object/import slots, the exact
+generated unary tag-setter prefix, and the independently adapted continuation.
+-/
+theorem CodeAdapted.setTag_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {tag : Nat}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, .object))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.setTag objectId tag continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        callIndex? sourceModule (.runtime (.setTag tag)) = some callIndex ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases restResult :
+      Fir.Wasm.compileCodeCore context continuation with
+  | none =>
+      rw [objectCompiled, restResult] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some result =>
+      cases result with
+      | error error =>
+          rw [objectCompiled, restResult] at core
+          change
+            some (Except.error error) = some (Except.ok symbolic) at core
+          have impossible :
+              Except.error error = Except.ok symbolic :=
+            Option.some.inj core
+          cases impossible
+      | ok restCode =>
+          rw [restResult, objectCompiled] at core
+          change
+            some (Except.ok
+              ([.localGet objectId,
+                .call (.runtime (.setTag tag))] ++ restCode)) =
+              some (Except.ok symbolic) at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have restCompiled :
+              Fir.Wasm.compileCode context continuation = .ok restCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+          cases prefixAdapted :
+              instructions sourceModule sourceFunction labels
+                [.localGet objectId, .call (.runtime (.setTag tag))] with
+          | error error =>
+              rw [FirTalos.Correctness.instructions_append, prefixAdapted]
+                at targetCompiled
+              contradiction
+          | ok targetPrefix =>
+              cases restAdapted :
+                  instructions sourceModule sourceFunction labels restCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+                    restAdapted] at targetCompiled
+                  contradiction
+              | ok targetRest =>
+                  have targetEq : targetPrefix ++ targetRest = target := by
+                    rw [FirTalos.Correctness.instructions_append,
+                      prefixAdapted, restAdapted] at targetCompiled
+                    exact Except.ok.inj targetCompiled
+                  obtain ⟨indices, callIndex, found, callFound, prefixEq⟩ :=
+                    instructions_localGets_call_eq
+                      (fvarIds := [objectId])
+                      (operation := .setTag tag) prefixAdapted
+                  cases found with
+                  | cons objectFound noMore =>
+                      cases noMore
+                      obtain ⟨alignedIndex, alignedFound, kindAt⟩ :=
+                        localsAligned objectCompiled
+                      rw [objectFound] at alignedFound
+                      injection alignedFound with indexEq
+                      subst alignedIndex
+                      refine ⟨_, callIndex, targetRest, objectFound, kindAt,
+                        callFound, ⟨restCode, restCompiled, restAdapted⟩, ?_⟩
+                      rw [prefixEq] at targetEq
+                      exact targetEq.symm
+
+/--
 Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
 continuation.
 
@@ -4237,6 +4339,41 @@ inductive OrdinaryDeleteEffectSupported
         (.del objectId continuation) continuation nextRuntime
 
 /--
+Source/compiler-facing admission for one successful constructor-tag mutation.
+
+The admission records exactly the semantic live-constructor facts required by
+the concrete header refinement and the compiler's object-local equation. It
+contains no target program, numeric local/import index, concrete address, or
+simulation derivation.
+-/
+inductive ConstructorTagEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate where
+  | setTag
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (tag : Nat)
+      (continuation : LCNF.Code .impure)
+      (location : Location)
+      (cell : HeapCell)
+      (semantic : ConstructorObject)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, .object))
+      (objectLookup :
+        lookupValue sourceEnv objectId =
+          .ok (.object (.heap location)))
+      (updated :
+        setTag sourceRuntime (.object (.heap location)) tag =
+          .ok nextRuntime)
+      (found : findCell? sourceRuntime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq : cell.object = .ctor semantic)
+      (tagFits : tag < UInt32.size) :
+      ConstructorTagEffectSupported context sourceRuntime sourceEnv
+        (.setTag objectId tag continuation) continuation nextRuntime
+
+/--
 Disjoint union of two source-facing effect families.
 
 The wrapper contains only the selected source admission. It is the generic
@@ -4273,6 +4410,16 @@ abbrev OwnershipEffectSupported
     (EffectSupportedOr (OrdinaryIncrementEffectSupported context)
       (EffectSupportedOr (OrdinaryDecrementEffectSupported context)
         (OrdinaryDeleteEffectSupported context)))
+
+/--
+The complete ownership family extended with successful constructor-tag
+mutation. This source-facing union is intentionally assembled from reusable
+operation families and carries no generated-target evidence.
+-/
+abbrev OwnershipAndTagEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr (OwnershipEffectSupported context)
+    (ConstructorTagEffectSupported context)
 
 /--
 Budgeted successful source evaluation for mixed direct/external code with
@@ -5987,6 +6134,45 @@ theorem ConcreteSupportedExport.deleteCall
     exact results
 
 /--
+Resolver/adaptor alignment specialized to the concrete constructor-tag host
+selected by the compiler-derived runtime-call slot.
+-/
+theorem ConcreteSupportedExport.setTagCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {tag id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime (.setTag tag)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (setTagContract tag) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 0 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    supportedExport.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = setTagStep tag initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, setTagFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 0 at results
+    exact results
+
+/--
 The compiler-erased persistent ownership family implements the generic effect
 condition for every invariant.
 
@@ -6384,6 +6570,83 @@ theorem
         continuationAdapted, step, nextInvariant⟩
 
 /--
+Successful constructor-tag mutation implements the generic effect condition
+for the ownership-aware pure-external frame.
+
+Production inversion recovers the generated unary call from the source node,
+and resolver alignment supplies its concrete host contract. The checked header
+write preserves the exact heap frontier, all installed pure-external laws, and
+the immutable closure-descriptor agreement used by recursive ownership steps.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_constructorTag
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ConstructorTagEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | setTag sourceRuntime nextRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.setTag_eq supportedExport.localsAligned objectCompiled
+          adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.setTagCall callFound
+      obtain ⟨heap, step, _capacity, cursor⟩ :=
+        effectStepSimulates_setTag_with_capacity objectLookup updated
+          stateRelated objectCompiled objectFound kindAt callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results found live objectEq tagFits
+      rcases invariant.1 with
+        ⟨⟨frameAligned, budget⟩, integerImplementation,
+          naturalImplementation, scalarImplementation⟩
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextBaseInvariant :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        have externalsEq :
+            (replaceHeap targetStore heap).host.externals =
+              targetStore.host.externals := by
+          simp [replaceHeap, clearFailure]
+        refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact integerImplementation
+        · rw [externalsEq]
+          exact naturalImplementation
+        · rw [externalsEq]
+          exact scalarImplementation
+      have nextInvariant :
+          ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        exact ⟨nextBaseInvariant, by
+          simpa [replaceHeap, clearFailure] using invariant.2⟩
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
+/--
 One uniform runtime law for every currently proved successful ownership effect.
 
 The theorem is assembled solely with `EffectRuntimeRefines.or`: persistent
@@ -6436,6 +6699,36 @@ theorem
   apply EffectRuntimeRefines.or
   · exact effectRuntimeRefines_persistentOwnership
   · exact incrementRest
+
+/--
+One uniform runtime law for the ownership family plus constructor-tag
+mutation. The generic union theorem is the only composition step, so
+structural source evaluations may interleave the operation families without
+storing operation-specific target witnesses.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ownershipAndTag
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  apply EffectRuntimeRefines.or
+  · exact supportedExport.effectRuntimeRefines_ownership
+      (externals := externals)
+  · exact supportedExport.effectRuntimeRefines_constructorTag
+      (externals := externals)
 
 /--
 A postcondition is stable for a generated case arm when any selected-arm
@@ -11940,6 +12233,81 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_ownership externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ownership (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of the
+complete current ownership family, successful constructor-tag mutation,
+default-only cases, and the direct/pure-external family.
+
+All effect nodes are admitted solely by source/compiler facts. The production
+compiler/adaptor inversion, resolver alignment, and executable runtime
+refinement are recovered by the uniform effect law.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOwnershipAndTag
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported (OwnershipAndTagEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ownershipAndTag (externals := externals))
     parameterCount
 
 /--

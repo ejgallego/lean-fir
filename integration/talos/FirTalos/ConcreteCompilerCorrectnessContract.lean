@@ -1339,6 +1339,29 @@ example
   spec.effectRuntimeRefines_ordinaryDelete
 
 /--
+Successful constructor-tag mutation satisfies the generic effect condition
+without a caller-supplied target prefix, numeric index, or simulation witness.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ConstructorTagEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.effectRuntimeRefines_constructorTag
+
+/--
 All currently proved ownership operations satisfy one uniform effect condition
 and may therefore be interleaved in a single structural source evaluation.
 -/
@@ -1360,6 +1383,29 @@ example
       target.wasmModule hosts.env (OwnershipEffectSupported context)
       (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
   spec.effectRuntimeRefines_ownership
+
+/--
+The ownership family and constructor-tag mutation satisfy one uniform effect
+condition and may be interleaved in a single structural source evaluation.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.effectRuntimeRefines_ownershipAndTag
 
 /--
 The mixed whole-export theorem admits arbitrary nesting of sole-default cases
@@ -1732,6 +1778,71 @@ example
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctBudgetedPureExternalOwnership evaluation stateRelated
+    frameAligned budget integerImplementation naturalImplementation
+    scalarImplementation descriptorAgreement parameterCount
+
+/--
+The mixed ownership-and-tag endpoint admits successful constructor-tag
+mutation together with every proved ownership effect, default cases, direct
+operations, and pure externals.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported (OwnershipAndTagEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedPureExternalOwnershipAndTag evaluation stateRelated
     frameAligned budget integerImplementation naturalImplementation
     scalarImplementation descriptorAgreement parameterCount
 

@@ -580,7 +580,13 @@ acceptance tests pass.
    `EffectRuntimeRefines.or` now combine these reusable laws;
    `OwnershipEffectSupported` and the corresponding whole-export endpoint
    allow persistent increment/decrement, ordinary increment, recursive
-   decrement, and delete to occur in any order. Reuse the
+   decrement, and delete to occur in any order.
+   `ConstructorTagEffectSupported` now adds successful `setTag`; production
+   inversion and resolver alignment reconstruct its generated unary call, and
+   exact frontier preservation retains the ownership-aware invariant.
+   `OwnershipAndTagEffectSupported` and its whole-export endpoint therefore
+   permit arbitrary interleavings of tag mutation with the ownership family.
+   Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
 5. Lift from the current source evaluation view to canonical

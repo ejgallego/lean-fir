@@ -4209,6 +4209,28 @@ operation-specific target witnesses or runtime-law premises at the whole-
 export boundary. No FIR semantic contract, concrete layout, executable ABI,
 or W7 helper signature changed.
 
+W6.6fp extends that compositional endpoint with successful constructor-tag
+mutation. The concrete `writeTag` refinement, Talos step, and generated effect
+simulation now expose exact `heapCursor` preservation in addition to retained
+mapped-header capacity. `ConstructorTagEffectSupported` records only the
+object-local compiler equation, semantic lookup/update, live-constructor
+facts, and wasm32 tag bound; it contains no target program, numeric index,
+concrete address, or simulation witness.
+
+`CodeAdapted.setTag_eq` reconstructs the generated unary prefix and adapted
+continuation from production compilation. `ConcreteSupportedExport.setTagCall`
+derives the resolver-installed concrete contract.
+`effectRuntimeRefines_constructorTag` threads the ownership-aware budget,
+installed pure-external laws, and closure-descriptor agreement through the
+heap-only header mutation. The general union theorem then yields
+`effectRuntimeRefines_ownershipAndTag`, and
+`correctBudgetedPureExternalOwnershipAndTag` permits arbitrary interleavings
+of all proved ownership effects and tag mutations around default-only cases,
+the current direct family, and ten resident numeric externals. The contract
+harness checks both reusable laws and the whole-export endpoint. No FIR
+semantic contract, concrete layout, executable ABI, or W7 helper signature
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

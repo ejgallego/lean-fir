@@ -5647,19 +5647,20 @@ theorem setTagStep_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   cases objectRelated with
   | object heapRelated =>
       cases heapRelated with
       | mapped mapped =>
           obtain ⟨heap, semanticAfter, concreteOperation,
-              semanticOperation, finalHeapRelated, capacity⟩ :=
+              semanticOperation, finalHeapRelated, capacity, cursor⟩ :=
             runtimeRelated.heap.writeTag_refines_with_capacity mapped found live
               objectEq tag tagFits
           rw [updated] at semanticOperation
           have afterEq := Except.ok.inj semanticOperation
           subst semanticAfter
-          refine ⟨heap, ?_, ?_, capacity⟩
+          refine ⟨heap, ?_, ?_, capacity, cursor⟩
           · simp [setTagStep, clearFailure, Word32.ofUInt32_ofNat_value,
               concreteOperation, replaceHeap]
           · apply ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -5686,7 +5687,7 @@ theorem setTagStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     setTagStep_of_refines_with_capacity runtimeRelated objectRelated found live
       objectEq updated tagFits
   exact ⟨heap, concrete, finalRelated⟩
@@ -8015,7 +8016,8 @@ theorem effectStepSimulates_setTag_with_capacity
         (.setTag objectId tag continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness ∧
-      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
+      MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor := by
   have sourceLookup : lookup sourceEnv objectId =
       some (.object (.heap location)) := by
     unfold lookupValue at objectLookup
@@ -8029,10 +8031,10 @@ theorem effectStepSimulates_setTag_with_capacity
     initialRelated.resolve sourceLookup objectFound kindAt
   cases physicalRelated with
   | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+      obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
         setTagStep_of_refines_with_capacity initialRelated.1 objectRelated found
           live objectEq updated tagFits
-      refine ⟨heap, ?_, capacity⟩
+      refine ⟨heap, ?_, capacity, cursor⟩
       apply effectStepSimulates_unaryHost (step := setTagStep tag)
       · intro externals
         simp [executeStep, coreStep, objectLookup, updated]
@@ -8097,7 +8099,7 @@ theorem effectStepSimulates_setTag
         (.setTag objectId tag continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_setTag_with_capacity objectLookup updated initialRelated
       objectCompiled objectFound kindAt callFound continuationAdapted hImp hSat hi
       hContract hParams hResults found live objectEq tagFits

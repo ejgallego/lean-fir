@@ -392,6 +392,14 @@ their heap-only transitions.
 `effectRuntimeRefines_ownership` composes the four reusable laws, and
 `correctBudgetedPureExternalOwnership` admits arbitrary interleavings of the
 four families in one generated export.
+`ConstructorTagEffectSupported` adds successful `setTag` using only
+source/compiler facts. `CodeAdapted.setTag_eq` and
+`ConcreteSupportedExport.setTagCall` recover the exact production unary call;
+the strengthened concrete boundary preserves the heap frontier exactly.
+`effectRuntimeRefines_constructorTag` retains the ownership-aware frame, and
+the generic union theorem yields `effectRuntimeRefines_ownershipAndTag`.
+`correctBudgetedPureExternalOwnershipAndTag` admits arbitrary interleavings of
+tag mutation and all four ownership families in one generated export.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
