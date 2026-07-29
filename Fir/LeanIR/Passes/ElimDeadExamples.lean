@@ -26,6 +26,8 @@ def resetObjectVar : FVarId := ⟨`resetObject⟩
 def resetChildVar : FVarId := ⟨`resetChild⟩
 def papArgVar : FVarId := ⟨`papArg⟩
 def boxInputVar : FVarId := ⟨`boxInput⟩
+def papGarbageVar : FVarId := ⟨`papGarbage⟩
+def boxGarbageVar : FVarId := ⟨`boxGarbage⟩
 
 def liveDecl : LCNF.LetDecl .impure :=
   letDecl live objType .erased
@@ -213,6 +215,34 @@ def closedBoxBefore : LCNF.Code .impure :=
 def closedBoxAfter : LCNF.Code .impure :=
   .return live
 
+def closedPapBoxPapArgDecl : LCNF.LetDecl .impure :=
+  letDecl papArgVar objType .erased
+
+def closedPapBoxPapDecl : LCNF.LetDecl .impure :=
+  letDecl papGarbageVar objType
+    (.pap `first #[.fvar papArgVar])
+
+def closedPapBoxInputDecl : LCNF.LetDecl .impure :=
+  letDecl boxInputVar u64Type
+    (.lit (.uint64 18446744073709551615))
+
+def closedPapBoxBoxDecl : LCNF.LetDecl .impure :=
+  letDecl boxGarbageVar objType (.box u64Type boxInputVar)
+
+/-- Closed allocation-family fixture.  The deleted partial application
+allocates a closure and the deleted scalar box allocates another source-only
+heap cell before the live tagged result is returned. -/
+def closedPapBoxBefore : LCNF.Code .impure :=
+  .let closedReuseLiveDecl <|
+  .let closedPapBoxPapArgDecl <|
+  .let closedPapBoxPapDecl <|
+  .let closedPapBoxInputDecl <|
+  .let closedPapBoxBoxDecl <|
+  .return live
+
+def closedPapBoxAfter : LCNF.Code .impure :=
+  closedReuseAfter
+
 def deadNullaryFapDecl : LCNF.LetDecl .impure :=
   letDecl dead objType (.fap `deadNullaryExternal #[])
 
@@ -299,6 +329,8 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadPap deletedPapBefore deletedPapAfter
   checkActualElimDead `elimDeadBox deletedBoxBefore deletedBoxAfter
   checkActualElimDead `elimDeadClosedBox closedBoxBefore closedBoxAfter
+  checkActualElimDead `elimDeadClosedPapBox
+    closedPapBoxBefore closedPapBoxAfter
   checkActualElimDead `elimDeadNullaryFap
     deadNullaryFapBefore deadNullaryFapAfter
   checkActualAgreement 128 traversalCorpus
@@ -391,6 +423,12 @@ def closedBoxBeforeProgram : ImpureProgram :=
 
 def closedBoxAfterProgram : ImpureProgram :=
   { decls := #[decl `main #[param live] objType (.code closedBoxAfter)] }
+
+def closedPapBoxBeforeProgram : ImpureProgram :=
+  { decls := #[firstDecl, fixtureDecl `main closedPapBoxBefore] }
+
+def closedPapBoxAfterProgram : ImpureProgram :=
+  { decls := #[firstDecl, fixtureDecl `main closedPapBoxAfter] }
 
 def deadNullaryExternalDecl : LCNF.Decl .impure :=
   decl `deadNullaryExternal #[] objType (.extern { entries := [] })
@@ -597,6 +635,32 @@ theorem closedOwnedReuseShadowRun :
     collectLetValue, collectArgs, collectArgList, collectArg,
     liveMember, childAbsent, objectAbsent, tokenAbsent,
     argumentAbsent, deadAbsent]
+
+theorem closedPapBoxShadowRun :
+    shadowCode? 6 {} closedPapBoxBefore =
+      some (closedPapBoxAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have papArgAbsent :
+      papArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have papGarbageAbsent :
+      papGarbageVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have boxInputAbsent :
+      boxInputVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have boxGarbageAbsent :
+      boxGarbageVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedPapBoxBefore, closedPapBoxAfter,
+    closedReuseAfter, closedReuseLiveDecl,
+    closedPapBoxPapArgDecl, closedPapBoxPapDecl,
+    closedPapBoxInputDecl, closedPapBoxBoxDecl,
+    letDecl, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, papArgAbsent, papGarbageAbsent,
+    boxInputAbsent, boxGarbageAbsent]
 
 theorem deletedResetShadowRun :
     shadowCode? 2 {} deletedResetBefore =
@@ -8760,5 +8824,556 @@ theorem closedOwnedReuseProgramLoweringCorrect
     closedOwnedReuseShadowProgramRun compatible
     (closedOwnedReuseExactRuntimeOwnershipInitialInvariant
       externals)
+
+/-! ## Closed partial-application and box allocation correctness -/
+
+def closedPapBoxPapArgEnv : Env :=
+  bind closedReuseLiveEnv papArgVar .erased
+
+def closedPapBoxPapRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState)
+    (.closure `first 2 #[.erased])).1
+
+def closedPapBoxPapEnv : Env :=
+  bind closedPapBoxPapArgEnv papGarbageVar
+    (.object (.heap 0))
+
+def closedPapBoxInputEnv : Env :=
+  bind closedPapBoxPapEnv boxInputVar
+    (.scalar (.uint64 18446744073709551615))
+
+def closedPapBoxFinalRuntime : RuntimeState :=
+  (alloc closedPapBoxPapRuntime
+    (.boxed u64Type
+      (.scalar (.uint64 18446744073709551615)))).1
+
+def closedPapBoxFinalEnv : Env :=
+  bind closedPapBoxInputEnv boxGarbageVar
+    (.object (.heap 1))
+
+def closedPapBoxAfterLiveCode : LCNF.Code .impure :=
+  .let closedPapBoxPapArgDecl <|
+  .let closedPapBoxPapDecl <|
+  .let closedPapBoxInputDecl <|
+  .let closedPapBoxBoxDecl <|
+  .return live
+
+def closedPapBoxAfterPapArgCode : LCNF.Code .impure :=
+  .let closedPapBoxPapDecl <|
+  .let closedPapBoxInputDecl <|
+  .let closedPapBoxBoxDecl <|
+  .return live
+
+def closedPapBoxAfterPapCode : LCNF.Code .impure :=
+  .let closedPapBoxInputDecl <|
+  .let closedPapBoxBoxDecl <|
+  .return live
+
+def closedPapBoxAfterInputCode : LCNF.Code .impure :=
+  .let closedPapBoxBoxDecl <| .return live
+
+def closedPapBoxSourceOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code closedPapBoxBefore
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourcePapArgState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code closedPapBoxAfterLiveCode
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourcePapState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code closedPapBoxAfterPapArgCode
+    env := closedPapBoxPapArgEnv
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourceInputState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code closedPapBoxAfterPapCode
+    env := closedPapBoxPapEnv
+    runtime := closedPapBoxPapRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourceBoxState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code closedPapBoxAfterInputCode
+    env := closedPapBoxInputEnv
+    runtime := closedPapBoxPapRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourceReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .code (.return live)
+    env := closedPapBoxFinalEnv
+    runtime := closedPapBoxFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourceYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := closedPapBoxFinalEnv
+    runtime := closedPapBoxFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedPapBoxSourceCachedState : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := closedPapBoxFinalEnv
+    runtime := closedPapBoxFinalRuntime.setGlobal `main
+      (.object (.tagged 0)) }
+
+def closedPapBoxSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedPapBoxBeforeProgram
+    control := .invokeValue (.object (.tagged 0)) arguments
+    env := closedPapBoxFinalEnv
+    runtime := closedPapBoxFinalRuntime }
+
+theorem closedPapBoxSourceEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState closedPapBoxBeforeProgram `main arguments) =
+      .next (closedPapBoxSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedPapBoxBeforeProgram,
+      Program.findDecl?, invokeDecl, closedPapBoxSourceOuterState,
+      neutralEntryFrames, firstDecl, fixtureDecl, decl,
+      bindParams, findGlobal?]
+
+theorem closedPapBoxSourceOuterStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourceOuterState arguments) =
+      .next (closedPapBoxSourcePapArgState arguments) := by
+  rfl
+
+theorem closedPapBoxSourcePapArgStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourcePapArgState arguments) =
+      .next (closedPapBoxSourcePapState arguments) := by
+  rfl
+
+theorem closedPapBoxSourcePapStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourcePapState arguments) =
+      .next (closedPapBoxSourceInputState arguments) := by
+  have evaluated :
+      evalLetValue (closedPapBoxSourcePapState arguments)
+          closedPapBoxPapDecl =
+        .ok (closedPapBoxPapRuntime,
+          .value (.object (.heap 0))) := by
+    simp [evalLetValue, closedPapBoxSourcePapState,
+      closedPapBoxAfterPapArgCode,
+      closedPapBoxPapDecl, letDecl,
+      closedPapBoxPapArgEnv, closedReuseLiveEnv,
+      closedPapBoxBeforeProgram, firstDecl, fixtureDecl, decl,
+      Program.findDecl?, evalArgs, evalArg,
+      Impure.bind, lookup, papArgVar,
+      closedPapBoxPapRuntime, alloc,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      closedPapBoxSourcePapState arguments with
+      control := .code
+        (.let closedPapBoxPapDecl
+          closedPapBoxAfterPapCode) } =
+    .next (closedPapBoxSourceInputState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedPapBoxSourceInputStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourceInputState arguments) =
+      .next (closedPapBoxSourceBoxState arguments) := by
+  rfl
+
+theorem closedPapBoxSourceBoxStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourceBoxState arguments) =
+      .next (closedPapBoxSourceReturnState arguments) := by
+  have evaluated :
+      evalLetValue (closedPapBoxSourceBoxState arguments)
+          closedPapBoxBoxDecl =
+        .ok (closedPapBoxFinalRuntime,
+          .value (.object (.heap 1))) := by
+    have large :
+        ¬(ScalarValue.uint64 18446744073709551615).toUInt64.toNat ≤
+          9223372036854775807 := by
+      native_decide
+    simp [evalLetValue, closedPapBoxSourceBoxState,
+      closedPapBoxAfterInputCode,
+      closedPapBoxBoxDecl, letDecl,
+      closedPapBoxInputEnv, closedPapBoxPapEnv,
+      closedPapBoxPapArgEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup,
+      boxInputVar, papGarbageVar, papArgVar,
+      box, maxTaggedPayload, large,
+      closedPapBoxFinalRuntime, closedPapBoxPapRuntime, alloc,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+  change coreStep {
+      closedPapBoxSourceBoxState arguments with
+      control := .code
+        (.let closedPapBoxBoxDecl (.return live)) } =
+    .next (closedPapBoxSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedPapBoxSourceReturnStep
+    (arguments : Array Value) :
+    coreStep (closedPapBoxSourceReturnState arguments) =
+      .next (closedPapBoxSourceYieldedState arguments) := by
+  rfl
+
+theorem closedPapBoxSourceYieldedStepEmpty :
+    coreStep (closedPapBoxSourceYieldedState #[]) =
+      .next closedPapBoxSourceCachedState := by
+  rfl
+
+theorem closedPapBoxSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedPapBoxSourceYieldedState arguments) =
+      .next (closedPapBoxSourceInvokingState arguments) := by
+  simp [coreStep, closedPapBoxSourceYieldedState,
+    neutralEntryFrames, notEmpty,
+    closedPapBoxSourceInvokingState]
+
+inductive ClosedPapBoxSourceReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      ClosedPapBoxSourceReachable arguments
+        (initialState closedPapBoxBeforeProgram `main arguments)
+  | outer :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceOuterState arguments)
+  | papArg :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourcePapArgState arguments)
+  | pap :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourcePapState arguments)
+  | input :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceInputState arguments)
+  | box :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceBoxState arguments)
+  | ret :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceReturnState arguments)
+  | yielded :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedPapBoxSourceReachable arguments
+        closedPapBoxSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedPapBoxSourceReachable arguments
+        (closedPapBoxSourceInvokingState arguments)
+
+theorem closedPapBoxSourceReachable_step
+    (reachable :
+      ClosedPapBoxSourceReachable arguments before)
+    (step : Step externals before after) :
+    ClosedPapBoxSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedPapBoxSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedPapBoxSourceOuterStep arguments) .papArg step
+  | papArg =>
+      exact predicate_of_step_next
+        (closedPapBoxSourcePapArgStep arguments) .pap step
+  | pap =>
+      exact predicate_of_step_next
+        (closedPapBoxSourcePapStep arguments) .input step
+  | input =>
+      exact predicate_of_step_next
+        (closedPapBoxSourceInputStep arguments) .box step
+  | box =>
+      exact predicate_of_step_next
+        (closedPapBoxSourceBoxStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedPapBoxSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          closedPapBoxSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedPapBoxSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedPapBoxSourceCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [closedPapBoxSourceCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedPapBoxSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedPapBoxSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+
+theorem closedPapBoxBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      closedPapBoxBefore := by
+  unfold closedPapBoxBefore closedReuseLiveDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedPapBoxPapArgSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedPapBoxSourcePapArgState arguments)
+      sourceFrameRoots closedPapBoxAfterLiveCode := by
+  unfold closedPapBoxAfterLiveCode
+    closedPapBoxPapArgDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem closedPapBoxPapReadyAt
+    (arguments : Array Value) :
+    DeletedPapReadyAt
+      (closedPapBoxSourcePapState arguments)
+      `first #[.fvar papArgVar] := by
+  refine .mk firstDecl #[.erased] ?_ ?_ ?_
+  · simp [closedPapBoxSourcePapState,
+      closedPapBoxPapArgEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      papArgVar, live]
+    rfl
+  · rfl
+  · simp [firstDecl, decl]
+
+theorem closedPapBoxPapSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedPapBoxSourcePapState arguments)
+      sourceFrameRoots closedPapBoxAfterPapArgCode := by
+  unfold closedPapBoxAfterPapArgCode
+    closedPapBoxPapDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_partialApplication
+    (closedPapBoxPapReadyAt arguments)
+
+theorem closedPapBoxInputSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedPapBoxSourceInputState arguments)
+      sourceFrameRoots closedPapBoxAfterPapCode := by
+  unfold closedPapBoxAfterPapCode
+    closedPapBoxInputDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedPapBoxBoxReadyAt
+    (arguments : Array Value) :
+    DeletedBoxReadyAt
+      (closedPapBoxSourceBoxState arguments)
+      boxInputVar := by
+  apply DeletedBoxReadyAt.scalar
+    (.uint64 18446744073709551615)
+  simp [closedPapBoxSourceBoxState,
+    closedPapBoxInputEnv, closedPapBoxPapEnv,
+    closedPapBoxPapArgEnv, closedReuseLiveEnv,
+    lookupValue, Impure.bind, lookup,
+    boxInputVar, papGarbageVar, papArgVar, live]
+
+theorem closedPapBoxBoxSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedPapBoxSourceBoxState arguments)
+      sourceFrameRoots closedPapBoxAfterInputCode := by
+  unfold closedPapBoxAfterInputCode
+    closedPapBoxBoxDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_box
+    (closedPapBoxBoxReadyAt arguments)
+
+theorem closedPapBoxReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+theorem closedPapBoxSourceReachable_ready
+    (state : MachineState)
+    (reachable : ClosedPapBoxSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 6 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedPapBoxBefore :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxBeforeSourceRuntimeReadyAt
+        (closedPapBoxSourceOuterState arguments)
+        sourceFrameRoots bounded exact subset static
+  | papArg =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedPapBoxAfterLiveCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxPapArgSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | pap =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedPapBoxAfterPapArgCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxPapSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | input =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedPapBoxAfterPapCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxInputSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | box =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedPapBoxAfterInputCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxBoxSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | ret =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = .return live :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedPapBoxReturnSourceRuntimeReadyAt
+        (closedPapBoxSourceReturnState arguments)
+        sourceFrameRoots bounded exact subset static
+  | yielded =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedPapBoxSourceYieldedState] at control
+  | cached empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedPapBoxSourceCachedState] at control
+  | invoking notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedPapBoxSourceInvokingState] at control
+
+theorem closedPapBoxSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 6
+      (initialState closedPapBoxBeforeProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (ClosedPapBoxSourceReachable arguments)
+    .entry closedPapBoxSourceReachable_step
+    closedPapBoxSourceReachable_ready
+
+theorem closedPapBoxSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 6
+      closedPapBoxBeforeProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact closedPapBoxSourceRuntimeOwnershipMachineInvariant
+    externals arguments
+
+theorem closedPapBoxBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed closedPapBoxBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, closedPapBoxBeforeProgram,
+          firstDecl, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [closedPapBoxBeforeProgram] at member
+      rcases member with rfl | rfl
+      · exact .ret
+      · exact .letE
+          (.letE (.letE (.letE (.letE .ret))))
+    · intro declaration member
+      simp [closedPapBoxBeforeProgram] at member
+      rcases member with rfl | rfl
+      · exact .ret
+      · exact .letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩
+            (.letE ⟨.object, trivial⟩
+              (.letE ⟨.uint64, trivial⟩
+                (.letE ⟨.object, .uint64⟩ .ret))))
+  · intro declaration member
+    simp [closedPapBoxBeforeProgram] at member
+    rcases member with rfl | rfl
+    · simp [DeclCodeBinderNamesUnique, firstDecl, decl,
+        param, codeBinderIds, BinderNamesUnique,
+        ImpureHygiene.paramIds, x, y]
+    · simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+        closedPapBoxBefore, closedReuseLiveDecl,
+        closedPapBoxPapArgDecl, closedPapBoxPapDecl,
+        closedPapBoxInputDecl, closedPapBoxBoxDecl,
+        letDecl, codeBinderIds, BinderNamesUnique,
+        ImpureHygiene.paramIds, live, papArgVar,
+        papGarbageVar, boxInputVar, boxGarbageVar]
+
+theorem closedPapBoxShadowProgramRun :
+    shadowProgram? 6 closedPapBoxBeforeProgram =
+      some closedPapBoxAfterProgram := by
+  have firstRun : shadowDecl? 6 firstDecl = some firstDecl := by
+    simp [shadowDecl?, firstDecl, decl, shadowCode?]
+  have mainRun :
+      shadowDecl? 6 (fixtureDecl `main closedPapBoxBefore) =
+        some (fixtureDecl `main closedPapBoxAfter) := by
+    simp [shadowDecl?, fixtureDecl, decl, closedPapBoxShadowRun]
+  simp [shadowProgram?, shadowDecls?,
+    closedPapBoxBeforeProgram, closedPapBoxAfterProgram,
+    firstRun, mainRun]
+
+/-- Whole-program correctness for deleting both a heap-allocating partial
+application and a heap-backed scalar box.  The source performs both
+unobservable allocations; the target omits them and returns the same tagged
+literal. -/
+theorem closedPapBoxProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 6) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedPapBoxBeforeProgram closedPapBoxAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    closedPapBoxBeforeProgramElimDeadWellFormed
+    closedPapBoxShadowProgramRun compatible
+    (closedPapBoxSourceRuntimeOwnershipInitialInvariant externals)
 
 end Fir.LeanIR.Passes.ElimDeadExamples
