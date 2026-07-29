@@ -236,8 +236,11 @@ compiler. `codeWP_of_directValueEvaluates_withCost` and
 structural law, and the String instance proves arbitrary finite String-literal
 spines from one source-computed budget. The nonempty-constructor instance now
 does the same for arbitrary constructor spines, deriving mixed local/erased
-physical arguments and every concrete allocation internally. Mixed
-cost-zero/read-only paths are the next composition step.
+physical arguments and every concrete allocation internally.
+`BudgetedDirectSupported` now permits arbitrary interleavings of these two
+allocating families with cost-zero local aliases and immediate integer/`USize`
+literals under one source path budget. Successful projection families are the
+next cost-zero instances.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

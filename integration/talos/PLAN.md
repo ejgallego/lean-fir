@@ -3739,6 +3739,21 @@ certificate. Cost-zero read-only instances and their union with String and
 constructor allocation are next. No FIR semantic contract or executable ABI
 changed.
 
+W6.6er proves the first mixed cost-indexed direct fragment.
+The local-alias and immediate integer/`USize` runtime laws now have indexed
+variants: their generated local operations leave the concrete heap unchanged,
+so `directLetAllocationCost = 0` preserves the complete remaining budget.
+`BudgetedDirectSupported` composes those families with UTF-8 Strings and
+nonempty constructors through `DirectLetRuntimeRefinesWithCost.or`.
+The contract harness therefore accepts arbitrary finite interleavings of all
+four families from one source-computed path cost. Target instructions, numeric
+slots, physical constructor arguments, concrete allocation results, and
+per-node budget witnesses are all derived inside the proof. The next slice
+lifts the three successful projection families into the same cost-zero
+indexed invariant, then turns the structural `CodeWP` into the whole-export
+partial-correctness endpoint. No FIR semantic contract or executable ABI
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

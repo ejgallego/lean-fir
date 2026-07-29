@@ -3816,6 +3816,112 @@ theorem directLetRuntimeRefines_localAlias
       resultKindAt sourcePhysical physicalRelated targetSet,
     nextFrameAligned⟩
 
+/-- Cost-zero indexed instance for local aliases. The generated local copy
+leaves the concrete heap and therefore the complete address-space budget
+unchanged. -/
+theorem directLetRuntimeRefinesWithCost_localAlias
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction) :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      module hostEnv (LocalAliasSupported context) directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨sourceId, kind, valueEq, resultKind, sourceCompiled, resultCompiled⟩
+  have sourceFacts :
+      nextRuntime = sourceRuntime ∧
+        lookup sourceEnv sourceId = some sourceValue := by
+    unfold SourceLetResult at sourceStep
+    simp only [evalLetValue, valueEq] at sourceStep
+    have emptyArgs : evalArgs sourceEnv #[] = .ok #[] := by
+      unfold evalArgs
+      simp
+      rfl
+    cases sourceLookupEq : lookup sourceEnv sourceId with
+    | none =>
+        have lookupFailed :
+            lookupValue sourceEnv sourceId =
+              .error (.unknownVar sourceId) := by
+          simp [lookupValue, sourceLookupEq]
+        rw [lookupFailed] at sourceStep
+        contradiction
+    | some actual =>
+        have lookupSucceeded :
+            lookupValue sourceEnv sourceId = .ok actual := by
+          simp [lookupValue, sourceLookupEq]
+        rw [lookupSucceeded, emptyArgs] at sourceStep
+        have pairEq :
+            (sourceRuntime, LetAction.value actual) =
+              (nextRuntime, LetAction.value sourceValue) := by
+          change
+            Except.ok (sourceRuntime, LetAction.value actual) =
+              Except.ok (nextRuntime, LetAction.value sourceValue)
+            at sourceStep
+          exact Except.ok.inj sourceStep
+        have runtimeEq : sourceRuntime = nextRuntime :=
+          congrArg Prod.fst pairEq
+        have actionEq :
+            LetAction.value actual = LetAction.value sourceValue :=
+          congrArg Prod.snd pairEq
+        have actualEq : actual = sourceValue :=
+          LetAction.value.inj actionEq
+        exact ⟨runtimeEq.symm, congrArg some actualEq⟩
+  rcases sourceFacts with ⟨rfl, sourceLookup⟩
+  obtain ⟨sourceIndex, sourceFound, sourceKindAt⟩ :=
+    localsAligned sourceCompiled
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨physical, sourcePhysical, physicalRelated⟩ :=
+    stateRelated.resolve sourceLookup sourceFound sourceKindAt
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet sourceId] := by
+    have emptyCompiled :
+        Fir.Wasm.compileArgs context #[] = .ok ([], #[]) := by
+      rfl
+    simp [Fir.Wasm.compileLetValue, valueEq, resultKind, sourceCompiled,
+      emptyCompiled]
+    rfl
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  have expectedAdapted :
+      instructions sourceModule sourceFunction labels [.localGet sourceId] =
+        .ok [.localGet sourceIndex] := by
+    have sourceFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            sourceId =
+          some sourceIndex := by
+      simpa [functionBindings] using sourceFound
+    simp [instructions, instruction, sourceFound']
+    rfl
+  rw [expectedAdapted] at valueAdapted
+  injection valueAdapted with targetValueEq
+  subst targetValue
+  obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+    budgeted.1.set? (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := targetStore) (nextWitness := witness)
+      (physical := physical) resultFound
+  have costZero : directLetAllocationCost decl = 0 := by
+    simp [directLetAllocationCost, valueEq]
+  exact ⟨targetStore, updated, witness,
+    letStepSimulates_localAlias valueEq sourceLookup stateRelated resultFound
+      resultKindAt sourcePhysical physicalRelated targetSet,
+    nextFrameAligned, by simpa [costZero] using budgeted.2⟩
+
 /--
 Uniform runtime-law instance for every nonallocating integer or `USize`
 literal.
@@ -3878,6 +3984,67 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_immediateLiteral
     letStepSimulates_immediateLiteral shape sourceStep stateRelated resultFound
       resultKindAt targetSet,
     nextFrameAligned⟩
+
+/-- Cost-zero indexed instance for immediate integer and `USize` literals.
+The generated constant/local write preserves the entire heap budget. -/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_immediateLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ImmediateLiteralSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨literal, resultKind, valueEq, valueKind, resultCompiled, shape⟩
+  obtain ⟨rfl, rfl⟩ :=
+    sourceLetResult_immediateLiteral_eq shape valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [shape.symbolicInstruction] :=
+    shape.compileLetValue_eq valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  have expectedAdapted :
+      instructions sourceModule sourceFunction labels
+          [shape.symbolicInstruction] =
+        .ok [shape.targetInstruction] :=
+    shape.instructions_eq
+  rw [expectedAdapted] at valueAdapted
+  injection valueAdapted with targetValueEq
+  subst targetValue
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+    budgeted.1.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId shape.sourceValue)
+      (nextStore := targetStore)
+      (nextWitness := witness)
+      (physical := shape.physical) resultFound
+  have costZero : directLetAllocationCost decl = 0 := by
+    cases shape <;> simp [directLetAllocationCost, valueEq]
+  exact ⟨targetStore, updated, witness,
+    letStepSimulates_immediateLiteral shape sourceStep stateRelated resultFound
+      resultKindAt targetSet,
+    nextFrameAligned, by simpa [costZero] using budgeted.2⟩
 
 /--
 Cost-indexed runtime-law instance for allocating UTF-8 String literals.
@@ -4072,6 +4239,56 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
     ⟨lengths.1.trans budgeted.1.1, lengths.2.trans budgeted.1.2⟩
   exact ⟨nextStore, updated, nextWitness, step, nextFrame, by
     simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
+
+/--
+Current mixed allocating structural fragment: local aliases, immediate
+integer/`USize` literals, UTF-8 String literals, and nonempty constructors.
+-/
+def BudgetedDirectSupported (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure) : Prop :=
+  LocalAliasSupported context decl ∨
+    ImmediateLiteralSupported context decl ∨
+      StringLiteralSupported context decl ∨
+        NonemptyConstructorSupported context decl
+
+/--
+The cost-indexed runtime law composes allocating String/constructor steps with
+cost-zero aliases and immediate literals. One source-path budget is preserved
+across nonallocating nodes and consumed exactly at allocating nodes.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (fun decl =>
+          LocalAliasSupported context decl ∨
+            (ImmediateLiteralSupported context decl ∨
+              (StringLiteralSupported context decl ∨
+                NonemptyConstructorSupported context decl)))
+      directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
+  apply DirectLetRuntimeRefinesWithCost.or
+  · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
+  · apply DirectLetRuntimeRefinesWithCost.or
+    · exact spec.directLetRuntimeRefinesWithCost_immediateLiteral
+    · apply DirectLetRuntimeRefinesWithCost.or
+      · exact spec.directLetRuntimeRefines_stringLiteral
+      · exact spec.directLetRuntimeRefines_nonemptyConstructor
 
 /--
 Uniform runtime-law instance for direct `USize` projections in any concrete
