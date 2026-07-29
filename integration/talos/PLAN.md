@@ -4231,6 +4231,32 @@ harness checks both reusable laws and the whole-export endpoint. No FIR
 semantic contract, concrete layout, executable ABI, or W7 helper signature
 changed.
 
+W6.6fq adds successful FVar object-field mutation as the next compositional
+effect family. `writeObjectField_refines_with_capacity`, the Talos operation
+step, and the generated effect simulation now expose exact `heapCursor`
+preservation from their existing target-mutation frame.
+`ObjectFieldFVarEffectSupported` contains only semantic lookup/update and
+live-constructor facts, source-local compiler equations, the object-field kind
+gate, bounds, and one universally quantified source typing premise connecting
+the selected constructor slot to the compiler-selected field kind. It chooses
+no witness, physical word, descriptor, numeric index, target program, or
+simulation derivation.
+
+`CodeAdapted.objectSetFVar_eq` derives both numeric locals, the object-set
+import, exact binary prefix, and continuation from production output.
+`ConcreteSupportedExport.objectSetCall` supplies the resolver-installed
+contract. The runtime law recovers the physical object and constructor
+descriptor from `StateRelated` and the successful semantic constructor decode;
+the source typing premise supplies only slot-kind agreement.
+`effectRuntimeRefines_objectFieldFVar` preserves the ownership-aware budget,
+installed pure-external laws, and descriptor-table agreement.
+`effectRuntimeRefines_ownershipTagAndObjectFVar` and
+`correctBudgetedPureExternalOwnershipTagAndObjectFVar` extend the mixed
+endpoint accordingly. The erased object-field argument retains its existing
+operation theorem and is the next production constant-prefix inversion slice.
+No FIR semantic contract, concrete layout, executable ABI, or W7 helper
+signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -389,7 +389,8 @@ theorem LiveHeapRel.writeObjectField_refines_with_capacity
       Fir.LeanIR.Impure.setObjectField runtime (.object (.heap location)) index value =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
-      MappedHeaderCapacityTransport state result witness := by
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -443,7 +444,7 @@ theorem LiveHeapRel.writeObjectField_refines_with_capacity
         related.mappedHeaderCapacity_of_targetMutation descriptor targetRawRead
           physicalFrame
       exact ⟨result, nextRuntime, operation, sourceOperation, heapRelated,
-        capacity⟩
+        capacity, targetFrame.cursor⟩
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -483,7 +484,7 @@ theorem LiveHeapRel.writeObjectField_refines
       Fir.LeanIR.Impure.setObjectField runtime (.object (.heap location)) index value =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semanticOperation, finalRelated, _, _⟩ :=
     related.writeObjectField_refines_with_capacity mapped found live objectEq
       descriptorFound index kind value word indexValid kindAt valueRelated
   exact ⟨result, nextRuntime, concrete, semanticOperation, finalRelated⟩

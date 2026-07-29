@@ -586,6 +586,12 @@ acceptance tests pass.
    exact frontier preservation retains the ownership-aware invariant.
    `OwnershipAndTagEffectSupported` and its whole-export endpoint therefore
    permit arbitrary interleavings of tag mutation with the ownership family.
+   Successful FVar object-field mutation now supplies the same boundary:
+   production inversion recovers both numeric locals and the binary call,
+   semantic constructor success plus the runtime relation recover descriptor
+   existence, and one universally quantified source typing premise connects
+   the selected slot to the field kind. The mixed whole-export endpoint
+   includes this family; erased constant-prefix inversion is next.
    Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

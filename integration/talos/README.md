@@ -400,6 +400,15 @@ the strengthened concrete boundary preserves the heap frontier exactly.
 the generic union theorem yields `effectRuntimeRefines_ownershipAndTag`.
 `correctBudgetedPureExternalOwnershipAndTag` admits arbitrary interleavings of
 tag mutation and all four ownership families in one generated export.
+`ObjectFieldFVarEffectSupported` adds successful FVar object-slot mutation.
+`CodeAdapted.objectSetFVar_eq` derives both local indices and the generated
+binary call; the successful semantic constructor decode and runtime relation
+recover descriptor existence, leaving only universally quantified slot-kind
+agreement as a source typing premise.
+`effectRuntimeRefines_objectFieldFVar` preserves the exact frontier and
+ownership-aware frame. The corresponding mixed runtime law and whole-export
+endpoint compose it with ownership and tag mutation. Erased object-slot
+mutation remains the next constant-prefix structural slice.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
