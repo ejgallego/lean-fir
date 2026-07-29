@@ -7604,6 +7604,199 @@ noncomputable def LedgerShadowRuntimeRel.allocBoth
     }
   }
 
+/-- Publishing covered constructor arguments changes only the direct-root
+index of a ledger-carrying runtime relation. The target allocation frontier
+and its owner ledger are unchanged. -/
+def LedgerShadowRuntimeRel.publishEvalArgs
+    (related : LedgerShadowRuntimeRel rho left right
+      (envRootsOn used leftEnv ++ leftTail)
+      (envRootsOn used rightEnv ++ rightTail))
+    (covered : ArgsCovered used arguments)
+    (leftEvaluated : evalArgs leftEnv arguments = .ok leftValues)
+    (rightEvaluated : evalArgs rightEnv arguments = .ok rightValues)
+    (values : ArrayRel (ValueRel rho) leftValues rightValues) :
+    LedgerShadowRuntimeRel rho left right
+      (leftValues.toList ++ (envRootsOn used leftEnv ++ leftTail))
+      (rightValues.toList ++ (envRootsOn used rightEnv ++ rightTail)) where
+  runtime := related.runtime.publishEvalArgs covered leftEvaluated
+    rightEvaluated values
+  ledger := related.ledger
+
+/-- Proof-relevant result of evaluating one retained constructor on both
+related runtimes. Nullary constructors keep the current renaming and ledger;
+heap-backed constructors carry the extension selected by the actual paired
+allocation. -/
+structure LedgerCtorBothResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (info : LCNF.CtorInfo)
+    (leftArguments rightArguments : Array Value) : Type where
+  larger : AddressRenaming
+  leftRuntime : RuntimeState
+  leftValue : Value
+  rightRuntime : RuntimeState
+  rightValue : Value
+  extension : RenamingExtends rho larger
+  leftEffect :
+    allocCtor left info leftArguments = .ok (leftRuntime, leftValue)
+  rightEffect :
+    allocCtor right info rightArguments = .ok (rightRuntime, rightValue)
+  values : ValueRel larger leftValue rightValue
+  runtime :
+    LedgerShadowRuntimeRel larger leftRuntime rightRuntime
+      (leftValue :: leftExtra) (rightValue :: rightExtra)
+
+/-- Related, published constructor arguments produce either the same
+immediate nullary tag or one ledger-recorded paired heap allocation. -/
+noncomputable def LedgerShadowRuntimeRel.allocCtorBoth
+    (related : LedgerShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (tail : ListRel (ValueRel rho) leftExtra rightExtra)
+    (info : LCNF.CtorInfo)
+    (arity : leftArguments.size = info.size) :
+    LedgerCtorBothResult rho left right leftExtra rightExtra info
+      leftArguments rightArguments := by
+  have rightArity : rightArguments.size = info.size := by
+    rw [← arity, arrayRel_size_eq arguments]
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · have leftEmpty : leftArguments = #[] :=
+      Array.size_eq_zero_iff.mp (arity.trans empty.1.1)
+    have rightEmpty : rightArguments = #[] :=
+      Array.size_eq_zero_iff.mp (rightArity.trans empty.1.1)
+    have base : LedgerShadowRuntimeRel rho left right
+        leftExtra rightExtra := by
+      simpa [leftEmpty, rightEmpty] using related
+    let value : Value := .object (.tagged (UInt64.ofNat info.cidx))
+    exact {
+      larger := rho
+      leftRuntime := left
+      leftValue := value
+      rightRuntime := right
+      rightValue := value
+      extension := RenamingExtends.refl rho
+      leftEffect := by
+        simp [allocCtor, arity, empty.1.1, empty.1.2, empty.2, value,
+          Pure.pure, Except.pure]
+      rightEffect := by
+        simp [allocCtor, rightArity, empty.1.1, empty.1.2, empty.2, value,
+          Pure.pure, Except.pure]
+      values := .tagged _
+      runtime := {
+        runtime := base.runtime.prependNonHeap (.tagged _)
+          (by intro location; simp [value])
+          (by intro location; simp [value])
+        ledger := base.ledger
+      }
+    }
+  · let leftObject : ConstructorObject := {
+      tag := info.cidx
+      objectFields := leftArguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    let rightObject : ConstructorObject := {
+      tag := info.cidx
+      objectFields := rightArguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    have objects : HeapObjectRel rho (.ctor leftObject) (.ctor rightObject) :=
+      .ctor rfl arguments rfl rfl
+    have leftOwned : RootSubset
+        (HeapObject.ownedValues (.ctor leftObject)).toList
+        (runtimeRoots left (leftArguments.toList ++ leftExtra)) := by
+      intro value member
+      apply extra_subset_runtimeRoots
+      apply List.mem_append_left
+      simpa [leftObject, HeapObject.ownedValues] using member
+    have rightOwned : RootSubset
+        (HeapObject.ownedValues (.ctor rightObject)).toList
+        (runtimeRoots right (rightArguments.toList ++ rightExtra)) := by
+      intro value member
+      apply extra_subset_runtimeRoots
+      apply List.mem_append_left
+      simpa [rightObject, HeapObject.ownedValues] using member
+    let allocated := related.allocBoth objects leftOwned rightOwned false
+    let leftRuntime := (alloc left (.ctor leftObject)).1
+    let rightRuntime := (alloc right (.ctor rightObject)).1
+    let leftValue : Value := .object (alloc left (.ctor leftObject)).2
+    let rightValue : Value := .object (alloc right (.ctor rightObject)).2
+    have leftSubset : RootSubset
+        (leftValue :: leftExtra)
+        (leftValue :: (leftArguments.toList ++ leftExtra)) := by
+      intro value member
+      simp only [List.mem_cons] at member ⊢
+      rcases member with same | member
+      · exact Or.inl same
+      · exact Or.inr (List.mem_append_right _ member)
+    have rightSubset : RootSubset
+        (rightValue :: rightExtra)
+        (rightValue :: (rightArguments.toList ++ rightExtra)) := by
+      intro value member
+      simp only [List.mem_cons] at member ⊢
+      rcases member with same | member
+      · exact Or.inl same
+      · exact Or.inr (List.mem_append_right _ member)
+    exact {
+      larger := allocated.larger
+      leftRuntime
+      leftValue
+      rightRuntime
+      rightValue
+      extension := allocated.extension
+      leftEffect := by
+        simp [allocCtor, arity, empty, leftRuntime, leftValue, leftObject]
+        rfl
+      rightEffect := by
+        simp [allocCtor, rightArity, empty, rightRuntime, rightValue,
+          rightObject]
+        rfl
+      values := allocated.values
+      runtime := {
+        runtime := allocated.runtime.runtime.restrictExtra
+          (.cons allocated.values
+            (listRel_mono (valueRel_mono allocated.extension) tail))
+          leftSubset rightSubset
+        ledger := allocated.runtime.ledger
+      }
+    }
+
+/-- Proof-relevant result of one deleted constructor evaluation. -/
+structure LedgerCtorLeftGarbageResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (info : LCNF.CtorInfo) (arguments : Array Value) : Type where
+  nextRuntime : RuntimeState
+  value : Value
+  effect :
+    allocCtor left info arguments = .ok (nextRuntime, value)
+  runtime :
+    LedgerShadowRuntimeRel rho nextRuntime right leftExtra rightExtra
+
+/-- A deleted constructor either creates no heap cell or adds one source-only
+cell. In both cases the target frontier, renaming, and allocation ledger are
+unchanged. -/
+noncomputable def LedgerShadowRuntimeRel.allocCtorLeftGarbage
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (info : LCNF.CtorInfo) (arguments : Array Value)
+    (arity : arguments.size = info.size) :
+    LedgerCtorLeftGarbageResult rho left right leftExtra rightExtra info
+      arguments := by
+  let witness :=
+    related.runtime.allocCtorLeftGarbage info arguments arity
+  let nextRuntime := Classical.choose witness
+  have valueWitness := Classical.choose_spec witness
+  let value := Classical.choose valueWitness
+  have specification := Classical.choose_spec valueWitness
+  exact {
+    nextRuntime
+    value
+    effect := specification.1
+    runtime := { runtime := specification.2, ledger := related.ledger }
+  }
+
 /-- Proof-relevant result of evaluating one literal on both related
 runtimes. Immediate literals retain the current renaming and ledger;
 heap-backed literals return the extended pair selected by `allocBoth`. -/
@@ -12408,6 +12601,198 @@ theorem match_deletedCtorLetStep_binderReady
     ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
   exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying hereditary retained-constructor matcher. Successful
+nullary construction keeps the incoming ledger; successful heap construction
+returns the ledger extension selected by the paired allocation itself. -/
+theorem match_retainedCtorLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .ctor info arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .ctor info arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceArgumentsEq :
+    evalArgs sourceState.env arguments = sourceEvaluation
+  cases sourceEvaluation with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceArgumentsEq, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceArguments =>
+      have evaluated := evalArgs_relOn env covered
+      rw [sourceArgumentsEq] at evaluated
+      generalize targetArgumentsEq :
+        evalArgs targetState.env arguments = targetEvaluation at evaluated
+      cases evaluated with
+      | ok argumentsRelated =>
+          rename_i targetArguments
+          by_cases arity : sourceArguments.size = info.size
+          · let publishedArguments := runtime.publishEvalArgs covered
+              sourceArgumentsEq targetArgumentsEq argumentsRelated
+            have tail : ListRel (ValueRel rho)
+                (envRootsOn used sourceState.env ++ sourceFrameRoots)
+                (envRootsOn used targetState.env ++ targetFrameRoots) :=
+              listRel_append (envRootsOn_related env) frames.roots
+            let allocated := publishedArguments.allocCtorBoth
+              argumentsRelated tail info arity
+            let sourceExpected := {
+              sourceState with
+              runtime := allocated.leftRuntime
+              env := bind sourceState.env fvarId allocated.leftValue
+              control := .code sourceContinuation }
+            let targetExpected := {
+              targetState with
+              runtime := allocated.rightRuntime
+              env := bind targetState.env fvarId allocated.rightValue
+              control := .code targetContinuation }
+            have sourceTransition :
+                coreStep sourceCurrent = .next sourceExpected := by
+              simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                sourceArgumentsEq, allocated.leftEffect, Bind.bind,
+                Except.bind, Pure.pure, Except.pure]
+            have targetTransition :
+                coreStep targetCurrent = .next targetExpected := by
+              simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                targetArgumentsEq, allocated.rightEffect, Bind.bind,
+                Except.bind, Pure.pure, Except.pure]
+            have afterRelated :
+                BinderReadyReachableMachineRelated fuel allocated.larger
+                  sourceExpected targetExpected := by
+              exact retainedLetValue_binderReadyReachableRelated
+                sourceState targetState
+                allocated.leftRuntime allocated.rightRuntime programs
+                (frames.monoRenaming allocated.extension) continuation joins
+                (envRelOn_monoRenaming allocated.extension env)
+                allocated.values allocated.runtime.runtime
+            have afterLedger :
+                TargetAllocationLedger allocated.larger
+                  targetExpected.runtime.nextLocation := by
+              simpa [targetExpected] using allocated.runtime.ledger
+            rcases match_internalCoreSteps_binderReady
+                sourceTransition targetTransition afterRelated
+                (by simpa [sourceCurrent] using step) with
+              ⟨targetPath, relatedAfter⟩
+            exact ⟨allocated.larger, targetExpected, allocated.extension,
+              targetPath, afterLedger, relatedAfter⟩
+          · generalize evaluatedEq :
+              evalLetValue sourceState {
+                fvarId, binderName, type, value := .ctor info arguments
+              } = evaluation
+            cases evaluation with
+            | error fault =>
+                have currentEvaluated :
+                    evalLetValue sourceCurrent {
+                      fvarId, binderName, type,
+                      value := .ctor info arguments
+                    } = .error fault := by
+                  simpa [sourceCurrent, evalLetValue] using evaluatedEq
+                have done : coreStep sourceCurrent =
+                    .done (observe sourceCurrent (.fault fault)) := by
+                  simp [sourceCurrent, coreStep, currentEvaluated, fail]
+                exact (noStep done).elim
+            | ok result =>
+                simp [evalLetValue, sourceArgumentsEq, allocCtor, arity,
+                  Bind.bind, Except.bind] at evaluatedEq
+
+/-- Ledger-carrying hereditary deleted-constructor matcher. The target
+stutters, so its allocation frontier and incoming owner ledger are unchanged
+even when the source allocates a dead constructor object. -/
+theorem match_deletedCtorLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .ctor info arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_deletedCtor_of_letReady_binderReady
+      sourceState targetState programs frames continuation joins env absent
+      runtime.runtime ready with
+    ⟨nextRuntime, value, transition, afterRelated⟩
+  rcases match_sourceOnlyCoreStep_binderReady
+      transition afterRelated step with
+    ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+  subst targetAfter
+  exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+
 /-- Exact retained-constructor provenance supplies the hereditary
 continuation graph, while its compiler liveness bound covers every
 constructor argument used by the paired allocation. -/
@@ -12528,6 +12913,133 @@ theorem ExactShadowCodeBinderReady.match_deletedCtorLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedCtorLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
+
+/-- Exact retained-constructor provenance consumed through the
+ledger-carrying matcher. The compiler-facing result distinguishes a nullary
+no-allocation step from a heap constructor's proof-relevant ledger
+extension without weakening the exact graph. -/
+theorem ExactShadowCodeBinderReady.match_retainedCtorLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.ctor info arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .ctor info arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedCtorLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime step
+
+/-- Exact deleted-constructor provenance consumed through the ledger-carrying
+source-only matcher. The target stutters at the exact compiler-selected
+continuation and retains the incoming ledger verbatim. -/
+theorem ExactShadowCodeBinderReady.match_deletedCtorLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.ctor info arguments :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .ctor info arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .ctor info arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedCtorLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime deletedReady step

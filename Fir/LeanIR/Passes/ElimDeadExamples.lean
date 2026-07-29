@@ -3781,8 +3781,145 @@ theorem retainedLargeNatExactStepLedgerPreserved
     retainedLargeNatStepBinderReady.match_retainedLiteralLetStep_ledger
       (fuelBound := Nat.le_refl 2)
       (usedBound := UsedSubset.refl neutralUsed)
-      retainedLargeNatState retainedLargeNatState programs frames joins env
+    retainedLargeNatState retainedLargeNatState programs frames joins env
       runtime step
+
+/-- A retained one-field constructor forces the paired heap-allocation branch
+of the ledger-aware constructor matcher. -/
+def retainedCtorDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.ctor oneFieldInfo #[.erased])
+
+def retainedCtorCode : LCNF.Code .impure :=
+  .let retainedCtorDecl (.return live)
+
+theorem retainedCtorShadowRun :
+    shadowCode? 2 {} retainedCtorCode =
+      some (retainedCtorCode, neutralUsed) := by
+  simp [retainedCtorCode, retainedCtorDecl, letDecl, oneFieldInfo,
+    neutralUsed, shadowCode?, safeToElim, collectLetValue,
+    collectArgs, collectArgList, collectArg, live]
+
+def retainedCtorExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed retainedCtorCode retainedCtorCode :=
+  ExactShadowCodeGraph.ofResult retainedCtorShadowRun
+
+theorem retainedCtorExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      retainedCtorExactGraph.view := by
+  apply retainedCtorExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [retainedCtorCode, retainedCtorDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live]
+
+theorem retainedCtorStepBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedCtorDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedCtorDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+def retainedCtorState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedCtorCode }
+
+/-- Compiler-facing regression for retained constructors: the one-field
+constructor takes one source and one target step and exposes the enlarged
+allocation ledger selected by their paired heap allocation. -/
+theorem retainedCtorExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedCtorState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedCtorState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedCtorState.program retainedCtorState.program := by
+    simpa [retainedCtorState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedCtorState.frames retainedCtorState.frames [] [] := by
+    simpa [retainedCtorState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedCtorState.joins retainedCtorState.joins := by
+    simpa [retainedCtorState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedCtorState.env retainedCtorState.env := by
+    simpa [retainedCtorState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedCtorState.runtime retainedCtorState.runtime
+        (envRootsOn neutralUsed retainedCtorState.env ++ [])
+        (envRootsOn neutralUsed retainedCtorState.env ++ []) := by
+    have emptyRoots (used : UsedLocals) :
+        envRootsOn used ([] : Env) = [] := by
+      unfold envRootsOn
+      induction used.toList with
+      | nil => rfl
+      | cons head tail ih =>
+          simp [lookup]
+    simpa [retainedCtorState, emptyRoots] using
+      LedgerShadowRuntimeRel.empty
+  simpa [retainedCtorState, retainedCtorCode,
+    retainedCtorDecl, letDecl] using
+    retainedCtorStepBinderReady.match_retainedCtorLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      (usedBound := UsedSubset.refl neutralUsed)
+      retainedCtorState retainedCtorState programs frames joins env runtime
+      step
+
+/-- A nullary constructor is immediate: the ledger-aware constructor runtime
+result keeps both empty runtimes, the empty renaming, and target frontier
+zero. This covers the retained constructor matcher's no-allocation branch. -/
+def nullaryCtorInfo : LCNF.CtorInfo :=
+  { name := `Retained.nullary, cidx := 3, size := 0, usize := 0, ssize := 0 }
+
+noncomputable def retainedNullaryCtorResult :
+    LedgerCtorBothResult emptyAddressRenaming
+      ({} : RuntimeState) ({} : RuntimeState) [] []
+      nullaryCtorInfo #[] #[] :=
+  LedgerShadowRuntimeRel.empty.allocCtorBoth
+    (show ArrayRel (ValueRel emptyAddressRenaming) #[] #[] from .nil)
+    (show ListRel (ValueRel emptyAddressRenaming) [] [] from .nil)
+    nullaryCtorInfo rfl
+
+theorem retainedNullaryCtorKeepsAllocationLedger :
+    retainedNullaryCtorResult.larger = emptyAddressRenaming ∧
+    retainedNullaryCtorResult.leftRuntime = ({} : RuntimeState) ∧
+    retainedNullaryCtorResult.rightRuntime = ({} : RuntimeState) ∧
+    retainedNullaryCtorResult.runtime.ledger.owner = fun _ => 0 := by
+  simp [retainedNullaryCtorResult,
+    LedgerShadowRuntimeRel.allocCtorBoth, nullaryCtorInfo,
+    LedgerShadowRuntimeRel.empty, TargetAllocationLedger.empty]
 
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
