@@ -23754,6 +23754,56 @@ theorem match_retainedJoinStep_binderReady
   exact ⟨_, match_internalCoreSteps_binderReady
     sourceTransition targetTransition related step⟩
 
+/-- Ledger-carrying retained-join rule. Installing paired join declarations
+changes only join environments and control, so the target frontier and owner
+ledger are unchanged. -/
+theorem match_retainedJoinStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (declaration : BinderReadyShadowFunDeclRelated fuel used
+      sourceDeclaration targetDeclaration)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.jp sourceDeclaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.jp targetDeclaration targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_retainedJoin_binderReadyReachableRelated
+      sourceState targetState programs frames declaration continuation joins
+      env runtime.runtime with
+    ⟨sourceTransition, targetTransition, afterStructural⟩
+  have afterRelated :
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        { sourceState with
+          joins := (sourceDeclaration.fvarId, sourceDeclaration) ::
+            sourceState.joins
+          control := .code sourceContinuation }
+        { targetState with
+          joins := (targetDeclaration.fvarId, targetDeclaration) ::
+            targetState.joins
+          control := .code targetContinuation } := by
+    refine ⟨?_, afterStructural⟩
+    simpa using runtime.ledger
+  exact ⟨_, match_internalCoreSteps_binderReady_ledger
+    sourceTransition targetTransition afterRelated step⟩
+
 /-- An exact retained-join view projects both hereditary children: its body
 becomes the new related join entry and its continuation becomes active after
 the matched administrative steps. -/
@@ -23815,6 +23865,71 @@ theorem ExactShadowCodeBinderReady.match_retainedJoinStep
     value := ready.joinRetained_bodyGraph fuelBound usedBound
   }
   exact match_retainedJoinStep_binderReady
+    sourceState targetState programs frames declaration
+    (ready.joinRetained_continuationGraph fuelBound usedBound)
+    joins env runtime step
+
+/-- Exact retained-join provenance consumed through the ledger-preserving
+paired administrative step. -/
+theorem ExactShadowCodeBinderReady.match_retainedJoinStep_ledger
+    {initial continuationUsed bodyUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation sourceBody targetBody :
+      LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {live : continuationUsed.contains fvarId = true}
+    {body :
+      ExactShadowCodeRun nextFuel continuationUsed bodyUsed
+        sourceBody targetBody}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinRetained
+          (binderName := binderName) (params := params) (type := type)
+          continuation live body))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset bodyUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code
+            (.jp (.mk fvarId binderName params type targetBody)
+              targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let declaration :
+      BinderReadyShadowFunDeclRelated fuel ambient
+        (.mk fvarId binderName params type sourceBody)
+        (.mk fvarId binderName params type targetBody) := {
+    fvarId_eq := rfl
+    binderName_eq := rfl
+    params_eq := rfl
+    type_eq := rfl
+    value := ready.joinRetained_bodyGraph fuelBound usedBound
+  }
+  exact match_retainedJoinStep_binderReady_ledger
     sourceState targetState programs frames declaration
     (ready.joinRetained_continuationGraph fuelBound usedBound)
     joins env runtime step
@@ -24680,6 +24795,51 @@ theorem match_deletedJoinStep_binderReady
     ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
   exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying deleted-join rule. The target stutters while the source
+installs an unreachable join declaration, leaving the target frontier and
+owner ledger unchanged. -/
+theorem match_deletedJoinStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.jp declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have progress := coreStep_deletedJoin_binderReadyReachableRelated
+    sourceState targetState programs frames continuation joins env absent
+      runtime.runtime
+  have afterRelated :
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        { sourceState with
+          joins := (declaration.fvarId, declaration) :: sourceState.joins
+          control := .code sourceContinuation }
+        { targetState with control := .code targetContinuation } := by
+    refine ⟨?_, progress.2⟩
+    simpa using runtime.ledger
+  rcases match_sourceOnlyCoreStep_binderReady_ledger
+      progress.1 afterRelated step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter⟩
+
 /-- An exact deleted-join view supplies both the hereditary continuation and
 ambient join-binder absence, closing the source-only administrative step. -/
 theorem ExactShadowCodeBinderReady.match_deletedJoinStep
@@ -24723,6 +24883,55 @@ theorem ExactShadowCodeBinderReady.match_deletedJoinStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedJoinStep_binderReady
+    (declaration := .mk fvarId binderName params type sourceBody)
+    sourceState targetState programs frames
+    (ready.joinDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.joinDeleted_ambientAbsent runtime step
+
+/-- Exact deleted-join provenance consumed through the ledger-preserving
+source-only administrative step. -/
+theorem ExactShadowCodeBinderReady.match_deletedJoinStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation sourceBody : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name}
+    {params : Array (LCNF.Param .impure)} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.joinDeleted
+          (binderName := binderName) (params := params) (type := type)
+          (sourceBody := sourceBody) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedJoinStep_binderReady_ledger
     (declaration := .mk fvarId binderName params type sourceBody)
     sourceState targetState programs frames
     (ready.joinDeleted_continuationGraph fuelBound usedBound)
