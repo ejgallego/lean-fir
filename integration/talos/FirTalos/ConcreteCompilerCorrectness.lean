@@ -238,6 +238,95 @@ theorem CodeAdapted.defaultOnlyCases_selected
   simpa [Fir.Wasm.compileCaseFallbackWithM,
     Fir.Wasm.compileCaseChainWithM, Fir.Wasm.isDefaultAlt] using core
 
+/--
+Invert production compilation and adaptation of a singleton constructor case.
+The selected arm, discriminator local, concrete `getTag` import, and exact
+generated test are recovered from the compiler result; none is supplied by a
+source evaluation or a translation certificate.
+-/
+theorem CodeAdapted.singleObjectConstructorCases_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List FVarId}
+    {cases : LCNF.Cases .impure} {info : LCNF.CtorInfo}
+    {selected : LCNF.Code .impure} {target : Wasm.Program}
+    (altsEq : cases.alts.toList = [.ctorAlt info selected])
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels
+      (.cases cases) target) :
+    ∃ selectedTarget discrIndex getTagIndex,
+      CodeAdapted context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+      findFVar? (functionBindings sourceFunction) cases.discr =
+        some discrIndex ∧
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
+      target = [.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 selectedTarget [.unreachable]] := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  rw [altsEq] at core
+  simp only [Fir.Wasm.compileCaseFallbackWithM,
+    Fir.Wasm.compileCaseChainWithM, Fir.Wasm.isDefaultAlt,
+    Fir.Wasm.caseConstructorTagFits, modeEq, fits, ↓reduceIte] at core
+  cases selectedCore : Fir.Wasm.compileCodeCore context selected with
+  | none =>
+      rw [selectedCore] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some selectedResult =>
+      cases selectedResult with
+      | error error =>
+          rw [selectedCore] at core
+          change some (Except.error error) = some (Except.ok symbolic) at core
+          cases core
+      | ok selectedCode =>
+          rw [selectedCore] at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have selectedCompiled :
+              Fir.Wasm.compileCode context selected = .ok selectedCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr selectedCore
+          cases discrFound :
+              findFVar? (functionBindings sourceFunction) cases.discr with
+          | none =>
+              change findFVar?
+                (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+                cases.discr = none at discrFound
+              simp [Fir.Wasm.caseTagTest, instructions, instruction, discrFound,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at targetCompiled
+          | some discrIndex =>
+              change findFVar?
+                (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+                cases.discr = some discrIndex at discrFound
+              cases getTagFound :
+                  callIndex? sourceModule (.runtime .getTag) with
+              | none =>
+                  simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                    discrFound, getTagFound, Bind.bind, Except.bind,
+                    Pure.pure, Except.pure] at targetCompiled
+              | some getTagIndex =>
+                  cases selectedAdapted :
+                      instructions sourceModule sourceFunction labels
+                        selectedCode with
+                  | error error =>
+                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                        discrFound, getTagFound, selectedAdapted,
+                        Bind.bind, Except.bind, Pure.pure, Except.pure]
+                        at targetCompiled
+                  | ok selectedTarget =>
+                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                        discrFound, getTagFound, selectedAdapted,
+                        Bind.bind, Except.bind, Pure.pure, Except.pure]
+                        at targetCompiled
+                      exact ⟨selectedTarget, discrIndex, getTagIndex,
+                        ⟨selectedCode, selectedCompiled, selectedAdapted⟩,
+                        rfl, rfl, targetCompiled.symm⟩
+
 /-- Invert one successful adapter sequence step. -/
 theorem instructions_cons_eq_ok
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -2970,7 +3059,8 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
     (ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop)
-    (CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop)
+    (CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
     (directCost : LCNF.LetDecl .impure → Nat) :
     RuntimeState → Env → LCNF.Code .impure → RuntimeState → Value → Nat → Prop where
   | ret
@@ -3009,7 +3099,7 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
         (.let decl continuation) resultRuntime resultValue
         (stepCost + continuationCost)
   | caseOf
-      (supported : CaseSupported cases selected)
+      (supported : CaseSupported sourceRuntime sourceEnv cases selected)
       (sourceStep :
         SourceCaseResult sourceRuntime sourceEnv cases selected)
       (continued :
@@ -3028,7 +3118,8 @@ theorem BudgetedCodeEvaluates.execEvaluates
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
-    {CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {directCost : LCNF.LetDecl .impure → Nat}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -3060,7 +3151,8 @@ theorem BudgetedSpineEvaluates.toBudgetedCodeEvaluates
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
-    {CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {directCost : LCNF.LetDecl .impure → Nat}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -3084,8 +3176,32 @@ theorem BudgetedSpineEvaluates.toBudgetedCodeEvaluates
 
 /-- First case admission: a case node whose only alternative is its default. -/
 def DefaultOnlyCaseSupported
+    (_sourceRuntime : RuntimeState) (_sourceEnv : Env)
     (cases : LCNF.Cases .impure) (selected : LCNF.Code .impure) : Prop :=
   cases.alts.toList = [.default selected]
+
+/--
+Source-facing admission for the first real generated case family.
+
+The case has one object-constructor arm and no default. Static fields record
+only compiler facts. The dynamic range law is stated over source lookup and
+`getTag`; it ensures that the concrete i32 comparison does not wrap, without
+mentioning a target local, import index, physical word, or Wasm instruction.
+-/
+def SingleObjectConstructorCaseSupported
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (cases : LCNF.Cases .impure) (selected : LCNF.Code .impure) : Prop :=
+  ∃ info : LCNF.CtorInfo,
+    cases.alts.toList = [.ctorAlt info selected] ∧
+    Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
+    Fir.Wasm.constructorTagFitsI32 info = true ∧
+    Fir.Wasm.getLocal context cases.discr =
+      .ok (.localGet cases.discr, .tobject) ∧
+    ∀ {sourceObject : Value} {actualTag : Nat},
+      lookupValue sourceEnv cases.discr = .ok sourceObject →
+      getTag sourceRuntime sourceObject = .ok actualTag →
+      actualTag < UInt32.size
 
 /--
 Static admission for a direct local alias.
@@ -4274,13 +4390,24 @@ def ExternalLetRuntimeRefinesWithCost
             nextWitness
 
 /--
+A postcondition is stable for a generated case arm when any selected-arm
+result satisfying it also satisfies the case resumption wrapper. Explicit
+returns, traps, and nonzero breaks are stable; unrestricted fallthrough is not.
+-/
+def CaseResumptionStable (module : Wasm.Module) (hostEnv : Wasm.HostEnv Host)
+    (tail : List Wasm.Value) (Q : Wasm.Assertion Host) : Prop :=
+  Q ⇛ CaseResumePost module hostEnv [] Q tail
+
+/--
 Uniform runtime condition for a selected source case branch.
 
 The full and selected target programs are universally quantified outputs of
 the production compiler and adapter. An operation-family instance recovers
 the selected target and turns correctness of that branch into correctness of
-the complete generated case chain; no per-program translation certificate is
-an input to the structural theorem.
+the complete generated case chain whenever the enclosing postcondition is
+stable under the generated arm's resumption boundary. This control condition
+is semantic and reusable; no target program or per-program translation
+certificate occurs in source admission.
 -/
 def CaseRuntimeRefines
     (context : Fir.Wasm.Context)
@@ -4289,7 +4416,9 @@ def CaseRuntimeRefines
     (labels : List FVarId)
     (module : Wasm.Module)
     (hostEnv : Wasm.HostEnv Host)
-    (CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop) : Prop :=
+    (CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop) :
+    Prop :=
   ∀ {sourceRuntime : RuntimeState}
       {sourceEnv : Env}
       {cases : LCNF.Cases .impure}
@@ -4298,7 +4427,7 @@ def CaseRuntimeRefines
       {targetStore : Wasm.Store Host}
       {targetLocals : Wasm.Locals}
       {witness : RefinementWitness},
-    CaseSupported cases selected →
+    CaseSupported sourceRuntime sourceEnv cases selected →
       SourceCaseResult sourceRuntime sourceEnv cases selected →
       StateRelated sourceFunction sourceRuntime sourceEnv targetStore
         targetLocals witness →
@@ -4307,9 +4436,15 @@ def CaseRuntimeRefines
       ∃ selectedTarget,
         CodeAdapted context sourceModule sourceFunction labels selected
             selectedTarget ∧
-          ConcreteCasesStepSimulates context sourceModule sourceFunction labels
-            module hostEnv sourceRuntime sourceEnv cases selected target
-            selectedTarget targetStore targetLocals witness
+          SourceCaseResult sourceRuntime sourceEnv cases selected ∧
+          ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
+            CaseResumptionStable module hostEnv tail Q →
+            CodeWP context sourceModule sourceFunction labels module hostEnv
+                sourceRuntime sourceEnv selected selectedTarget targetStore
+                targetLocals witness tail Q →
+              CodeWP context sourceModule sourceFunction labels module hostEnv
+                sourceRuntime sourceEnv (.cases cases) target targetStore
+                targetLocals witness tail Q
 
 /--
 Default-only cases satisfy the generic case runtime condition without a host
@@ -4329,8 +4464,142 @@ theorem caseRuntimeRefines_defaultOnly
   have selectedAdapted :=
     CodeAdapted.defaultOnlyCases_selected supported adapted
   refine ⟨target, selectedAdapted, sourceStep, ?_⟩
-  intro tail Q continued
+  intro tail Q _stable continued
   exact ⟨adapted, stateRelated, continued.2.2⟩
+
+/--
+The concrete `getTag` host implements singleton object-constructor dispatch.
+
+All target structure is recovered from the production compiler and adapter.
+The source admission contributes only the singleton shape, compiler ABI facts,
+and the dynamic guarantee that the semantic tag fits the generated i32 lane.
+-/
+theorem ConcreteSupportedExport.caseRuntimeRefines_singleObjectConstructor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (SingleObjectConstructorCaseSupported context) := by
+  intro sourceRuntime sourceEnv cases selected fullTarget targetStore
+    targetLocals witness supported sourceStep stateRelated adapted
+  rcases supported with
+    ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled, actualTagFits⟩
+  rcases sourceStep with
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup :
+      lookup sourceEnv cases.discr = some sourceObject := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none =>
+        simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceObject := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  have tagEq : actualTag = info.cidx := by
+    rw [altsEq] at chosen
+    simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
+    omega
+  have actualFits : actualTag < UInt32.size :=
+    actualTagFits lookupFound tagged
+  have expectedFits : info.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using expectedTagFits
+  obtain ⟨selectedTarget, discrIndex, getTagIndex, selectedAdapted,
+      discrFound, getTagFound, targetEq⟩ :=
+    CodeAdapted.singleObjectConstructorCases_eq altsEq modeEq expectedTagFits
+      adapted
+  obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+    spec.localsAligned discrCompiled
+  rw [discrFound] at alignedFound
+  injection alignedFound with indexEq
+  subst alignedIndex
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned getTagFound
+  have getTagContracted :
+      hosts.spec.contracts[getTagIndex]? = some getTagContract := by
+    change hosts.spec.contracts[getTagIndex]? =
+      some (fun initial args result => result = getTagStep initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, getTagFn]
+      using contracted
+  have parameterCount : imp.params.length = 1 := by
+    change imp.params.length = 1 at params
+    exact params
+  have resultCount : imp.results.length = 1 := by
+    change imp.results.length = 1 at results
+    exact results
+  have fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context cases.alts.toList =
+        .ok [.unreachable] := by
+    rw [altsEq]
+    rfl
+  have fallbackAdapted :
+      instructions sourceModule sourceFunction labels [.unreachable] =
+        .ok [.unreachable] := by
+    simp [instructions, instruction, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  have emptyChain :
+      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+        [] [.unreachable] [.unreachable] :=
+    caseChainAdapted_nil fallbackAdapted
+  refine ⟨selectedTarget, selectedAdapted,
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
+  intro tail Q stable continued
+  have selectedResumed :
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+        hosts.env sourceRuntime sourceEnv selected selectedTarget targetStore
+        targetLocals witness tail
+        (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+    continued.conseq stable
+  have branchWP :
+      Wasm.wp target.wasmModule
+        (if actualTag = info.cidx then selectedTarget else [.unreachable])
+        (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
+        { targetLocals with values := tail } hosts.env := by
+    rw [tagEq]
+    simpa using selectedResumed.2.2
+  have chain :
+      CaseChainWP context sourceModule sourceFunction labels target.wasmModule
+        hosts.env sourceRuntime sourceEnv cases.discr
+        [.ctorAlt info selected] [.unreachable]
+        [.localGet discrIndex, .call getTagIndex,
+          .const (UInt32.ofNat info.cidx), .eq,
+          .iff 0 0 selectedTarget [.unreachable]]
+        targetStore targetLocals witness tail Q := by
+    apply caseChainWP_constructor
+      (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+      (actualTag := actualTag)
+    · exact modeEq
+    · exact expectedTagFits
+    · exact selectedAdapted
+    · exact emptyChain
+    · exact discrFound
+    · exact discrKind
+    · exact getTagFound
+    · exact stateRelated
+    · exact sourceLookup
+    · exact imported
+    · exact spec.hostsSatisfy
+    · exact inBounds
+    · exact getTagContracted
+    · exact parameterCount
+    · exact resultCount
+    · exact tagged
+    · exact actualFits
+    · exact expectedFits
+    · exact branchWP
+  rw [targetEq]
+  apply codeWP_cases fallbackCompiled
+  simpa only [altsEq] using chain
 
 /--
 The production compiler, adapter, concrete resolver, and reusable external
@@ -7259,13 +7528,14 @@ theorem codeWP_of_budgetedSpineEvaluates
 
 /--
 Cost-indexed structural partial correctness for mixed direct/external code
-with selected case branches.
+with selected case branches, retaining the exact explicit Wasm return.
 
-`CaseRuntimeRefines` is the sole additional theorem condition over the spine
-theorem. It is uniform over production compiler/adapter outputs and therefore
-remains an implementation law rather than a per-program certificate.
+The return-only postcondition is the natural compositional boundary for
+generated case arms: it is unchanged by the arm-resumption wrapper. The public
+body theorem below weakens this exact control result to
+`ConcreteFunctionBodyPost` only after the syntax induction is complete.
 -/
-theorem codeWP_of_budgetedCodeEvaluates
+theorem codeWP_of_budgetedCodeEvaluates_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
@@ -7282,13 +7552,12 @@ theorem codeWP_of_budgetedCodeEvaluates
     {witness : RefinementWitness}
     {resultValue : Value}
     {requiredBytes : Nat}
-    {targetFunction : Wasm.Function}
-    {parameters callerTail : List Wasm.Value}
     {DirectSupported : LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
-    {CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {directCost : LCNF.LetDecl .impure → Nat}
     {Invariant :
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
@@ -7312,15 +7581,11 @@ theorem codeWP_of_budgetedCodeEvaluates
         labels module hostEnv externals ExternalSupported Invariant)
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv CaseSupported)
-    (parameterCount : parameters.length = targetFunction.numParams)
-    (resultCount : targetFunction.results.length = 1) :
+        hostEnv CaseSupported) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels module hostEnv
           sourceRuntime sourceEnv sourceCode target initial locals witness []
-          (ConcreteFunctionBodyPost targetFunction
-            (parameters ++ callerTail)
-            (ExactReturnPost resultStore physical callerTail)) ∧
+          (ExactReturnControlPost resultStore physical) ∧
         ConcreteRuntimeRel resultStore.host.runtime resultWitness
           resultRuntime ∧
         resultStore.host.failure? = none ∧
@@ -7334,9 +7599,8 @@ theorem codeWP_of_budgetedCodeEvaluates
         stateRelated.resolve sourceLookup resultFound kindAt
       subst target
       exact ⟨initial, witness, kind, physical,
-        codeWP_return_to_exactBodyPost
-          (callerTail := callerTail) localCompiled resultFound kindAt
-          sourceLookup stateRelated targetLookup parameterCount resultCount,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
         stateRelated.1, stateRelated.2.1, valueRelated⟩
   | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
       continuation _ _ continuationCost supported sourceStep continued ih =>
@@ -7401,15 +7665,102 @@ theorem codeWP_of_budgetedCodeEvaluates
           continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
   | caseOf supported sourceStep continued ih =>
-      obtain ⟨selectedTarget, selectedAdapted, step⟩ :=
+      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
         caseRuntimeRefines supported sourceStep stateRelated adapted
       obtain ⟨resultStore, resultWitness, resultKind, physical,
           continuationWP, resultRuntimeRelated, failureClear,
           valueRelated⟩ :=
         ih selectedAdapted stateRelated invariant
       exact ⟨resultStore, resultWitness, resultKind, physical,
-        codeWP_caseOf step continuationWP,
+        lift [] (ExactReturnControlPost resultStore physical)
+          (by
+            intro continuation returned
+            subst continuation
+            rfl)
+          continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
+
+/--
+Public cost-indexed structural partial correctness for mixed direct/external
+code with selected case branches.
+
+`CaseRuntimeRefines` is the sole additional theorem condition over the spine
+theorem. It is uniform over production compiler/adapter outputs and therefore
+remains an implementation law rather than a per-program certificate.
+-/
+theorem codeWP_of_budgetedCodeEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      BudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant :
+      Invariant requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (directRuntimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv DirectSupported directCost Invariant)
+    (externalRuntimeRefines :
+      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+        labels module hostEnv externals ExternalSupported Invariant)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv CaseSupported)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
+      runtimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedCodeEvaluates_exactReturn evaluation adapted localsAligned
+      stateRelated invariant directRuntimeRefines externalRuntimeRefines
+      caseRuntimeRefines
+  refine ⟨resultStore, resultWitness, resultKind, physical, ?_,
+    runtimeRelated, failureClear, valueRelated⟩
+  apply exactWP.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+    ← parameterCount]
 
 /--
 Whole-export partial correctness for a mixed budgeted direct/external spine.
@@ -7538,7 +7889,8 @@ theorem ConcreteSupportedExport.correctBudgetedCode
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
-    {CaseSupported : LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {directCost : LCNF.LetDecl .impure → Nat}
     {Invariant :
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
@@ -8023,6 +8375,76 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalDefaultCases
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
     caseRuntimeRefines_defaultOnly parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary nesting of singleton
+object-constructor cases around the complete current direct/pure-external
+family.
+
+Each selected branch is established by the source evaluator. Production
+compiler inversion recovers the exact `getTag` test, and the concrete resolver,
+heap relation, and stable-return boundary discharge its execution.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalSingleObjectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (SingleObjectConstructorCaseSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    spec.caseRuntimeRefines_singleObjectConstructor parameterCount
 
 /--
 Whole-export partial correctness for the current budgeted direct-value

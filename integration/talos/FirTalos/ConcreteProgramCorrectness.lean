@@ -9,6 +9,97 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/--
+Exact control-flow postcondition used by syntax-directed case composition.
+
+Unlike `ConcreteFunctionBodyPost`, this assertion admits only an explicit
+Wasm `return`. It is therefore invariant under the resumption wrapper installed
+around generated case arms: returns pass through unchanged, while fallthrough
+and branch continuations are deliberately unavailable.
+-/
+def ExactReturnControlPost (afterCall : Wasm.Store Host)
+    (physical : Wasm.Value) : Wasm.Assertion Host :=
+  fun continuation =>
+    continuation = .Return afterCall [physical]
+
+/-- Weakening the target continuation preserves the concrete code judgment. -/
+theorem CodeWP.conseq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q Q' : Wasm.Assertion Host}
+    (post : Q ⇛ Q')
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals witness
+        tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv code target targetStore targetLocals witness
+      tail Q' :=
+  ⟨correct.1, correct.2.1, Wasm.wp.conseq post correct.2.2⟩
+
+/--
+Concrete-host return rule with the exact control result exposed directly.
+This is the terminal leaf used internally by case-aware structural proofs.
+-/
+theorem codeWP_return_to_exactControlPost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {result : Lean.FVarId}
+    {sourceValue : Value}
+    {kind : AbiKind}
+    {resultIndex : Nat}
+    {physical : Wasm.Value}
+    (localCompiled :
+      Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (sourceLookup : lookup sourceEnv result = some sourceValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (targetLookup : targetLocals.get resultIndex = some physical) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv sourceRuntime
+      sourceEnv (.return result) [.localGet resultIndex, .ret]
+      targetStore targetLocals witness []
+      (ExactReturnControlPost targetStore physical) := by
+  obtain ⟨actual, actualLookup, _⟩ :=
+    stateRelated.resolve sourceLookup resultFound kindAt
+  rw [targetLookup] at actualLookup
+  injection actualLookup with physicalEq
+  subst actual
+  refine ⟨codeAdapted_return localCompiled resultFound, stateRelated, ?_⟩
+  rw [Wasm.wp_localGet_cons]
+  have targetLookupWithStack :
+      ({ targetLocals with values := [] } : Wasm.Locals).get resultIndex =
+        some physical := by
+    simpa [Wasm.Locals.get] using targetLookup
+  simp only [targetLookupWithStack]
+  rw [Wasm.wp_ret_cons]
+  rfl
+
 /-- Concrete-host return rule for an arbitrary generated function and caller
 operand remainder. The compiler-selected local contains the exact related
 physical result, and Talos's body postcondition restores the caller tail. -/

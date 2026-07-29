@@ -130,8 +130,16 @@ Cross-cutting W6.5 state:
   through selected case nodes. The first constructive instance is
   `DefaultOnlyCaseSupported`: compilation erases the wrapper, and
   `correctBudgetedPureExternalDefaultCases` closes arbitrary nesting around
-  mixed direct/resident-numeric code. Constructor-tag and scalar case-chain
-  implementation laws remain the next control-flow coverage gap.
+  mixed direct/resident-numeric code.
+  `CaseResumptionStable` and `ExactReturnControlPost` make the generated arm
+  boundary explicit. `SingleObjectConstructorCaseSupported`,
+  `singleObjectConstructorCases_eq`, and
+  `caseRuntimeRefines_singleObjectConstructor` derive and execute the
+  production `getTag` test for a singleton object-constructor hit, while
+  `correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
+  nesting around the same direct/resident family. Multi-arm
+  hit/miss/default chains and scalar comparisons remain the next
+  control-flow coverage gap.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

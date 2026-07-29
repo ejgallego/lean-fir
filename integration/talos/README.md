@@ -313,8 +313,15 @@ case nodes. `CaseRuntimeRefines` states the reusable dispatcher theorem
 condition over all production compiler/adapter outputs, and
 `correctBudgetedPureExternalDefaultCases` instantiates it for arbitrary
 nesting of sole-default cases around the same mixed direct/resident-numeric
-code. The next control-flow instances will discharge constructor-tag and
-scalar case chains against their concrete comparison steps.
+code. The case law now exposes the precise `CaseResumptionStable` condition,
+and the syntax induction preserves an explicit return-only post until the
+function boundary. `SingleObjectConstructorCaseSupported` admits singleton
+object-constructor hits without target evidence;
+`caseRuntimeRefines_singleObjectConstructor` derives the generated `getTag`
+test and executes it against the concrete heap; and
+`correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
+nesting around the same mixed direct/resident-numeric family. Multi-arm
+hit/miss/default and scalar comparison chains remain next.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

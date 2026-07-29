@@ -4007,6 +4007,32 @@ comparison rules. These proof-facing admission surfaces remain deliberately
 unstable. No FIR semantic contract, concrete layout, or executable ABI
 changed.
 
+W6.6fg closes the first real certificate-free dispatcher. The earlier
+unrestricted selected-branch transformer was stronger than generated Wasm
+control flow requires: an `if` arm installs a resumption wrapper for
+fallthrough and breaks. `CaseResumptionStable` now states that exact semantic
+condition. The mixed syntax induction proves
+`ExactReturnControlPost` internally—an explicit Wasm return, which is stable
+under arm resumption—and weakens it to `ConcreteFunctionBodyPost` only after
+the complete body proof has been assembled.
+
+Case admission is now indexed by the current source runtime and environment.
+This permits `SingleObjectConstructorCaseSupported` to state the one dynamic
+fact needed by the concrete i32 tag test: every successfully selected
+semantic tag fits `UInt32`, without exposing physical words, numeric locals,
+import indices, or target instructions. Production inversion
+`singleObjectConstructorCases_eq` derives the selected target, discriminator
+index, `getTag` import, and exact singleton test. Resolver alignment,
+`StateRelated`, and `caseChainWP_constructor` then prove
+`caseRuntimeRefines_singleObjectConstructor`.
+`correctBudgetedPureExternalSingleObjectConstructorCases` consequently closes
+arbitrary nesting of singleton constructor hits around all current direct
+operations and ten resident numeric externals. The contract harness checks
+the stable-post law, runtime instance, and whole-export application. Multi-arm
+hit/miss/default and scalar comparison chains are next. These proof-facing
+surfaces remain deliberately unstable. No FIR semantic contract, concrete
+layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

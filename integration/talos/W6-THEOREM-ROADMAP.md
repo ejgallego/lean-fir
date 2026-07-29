@@ -208,7 +208,17 @@ existing direct/external laws. The first instance,
 `correctBudgetedPureExternalDefaultCases`, handles arbitrary nesting of
 sole-default cases because production compilation erases each wrapper. This
 is a theorem condition over compiler outputs, not a per-program certificate.
-The next instances are constructor-tag and scalar comparison chains.
+The first concrete dispatcher instance is now closed as well.
+`CaseResumptionStable` states the precise arm-control condition, and the
+structural induction retains `ExactReturnControlPost` until the outer function
+boundary. `SingleObjectConstructorCaseSupported` admits a singleton object
+constructor arm using only source/compiler facts plus a semantic tag-range
+law. `singleObjectConstructorCases_eq` derives the exact test and indices;
+`caseRuntimeRefines_singleObjectConstructor` composes the concrete `getTag`
+contract; and
+`correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
+nesting of selected singleton hits. Multi-arm hit/miss/default chains and
+scalar comparisons are the next control-flow instances.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
