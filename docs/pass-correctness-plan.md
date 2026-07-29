@@ -1017,6 +1017,17 @@ request suspension, take one related target external step, and return the
 larger post-response ledger. This boundary is integrated at `63750e62`; it
 does not assume that foreign calls are allocation-free.
 
+The completed families are now assembled into one ledger-aware non-lockstep
+dispatcher at `9d290b7f`. `LedgerBinderReadyReachableMachineReadyAt` aligns
+the exact active compiler edge, hereditary environments and frames, runtime
+relation, and target owner table under the same address renaming.
+`ExactShadowCodeBinderReady.match_codeStep_ledger` exhausts every transparent
+compiler view, including failed/concrete reuse and retained jumps. Yielded
+bind/apply/cache restoration preserves the same history, while the unified
+`SomeLedgerBinderReadyReachableMachineRelated.matchStep_of_ready` selects
+internal matching or allocation-capable foreign resumption for an arbitrary
+source semantic step.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -1100,9 +1111,10 @@ ownership queries, as well as named and closure external-request suspension.
 It now also covers retained/deleted object, `USize`, and scalar writes plus
 retained constructor-tag updates, the complete reference-count/delete family,
 retained/deleted reset/reuse, and allocation-capable external response
-resumption. The completed families must now be assembled into the unified
-non-lockstep dispatcher and compiler-client invariant so arbitrary selected
-edges receive that history rather than only focused fixtures.
+resumption. Those families are now assembled into the unified non-lockstep
+dispatcher. The remaining compiler-client work is to derive its aligned
+ledger readiness for arbitrary selected entry edges rather than only focused
+fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1143,15 +1155,13 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Assemble the unified
-   `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
-2. Define the ledger-aware entry-indexed exact ownership contract and use it
+1. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
    write/reset/reuse edges, leaving only their local compiler
    typing/heap-shape certificates.
-3. Extend the actual-pass matrix when new ownership laws or semantic
+2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
-4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
+3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract and prove the queued closure-application preservation consumers
    before that shared validation stack lands.
 
