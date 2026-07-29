@@ -4006,7 +4006,8 @@ theorem ConcreteRuntimeRel.replaceHeap_of_transportAux
 /-- Successful concrete reference-count increment refines the exact semantic
 operation for both ordinary heap objects and checked tagged/promoted-tag
 values. `fits` is the wasm32 header-count side condition for the ordinary
-branch and is vacuous for tagged values. -/
+branch and is vacuous for tagged values. Successful increments preserve the
+heap frontier as well as every mapped allocation's physical capacity. -/
 theorem incrementStep_of_refines_with_capacity
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {sourceObject : Value}
@@ -4026,6 +4027,7 @@ theorem incrementStep_of_refines_with_capacity
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   cases objectRelated with
   | tobject referenceRelated =>
@@ -4049,13 +4051,13 @@ theorem incrementStep_of_refines_with_capacity
                 cases impossible
               have countFits := fits _ cell rfl found
               obtain ⟨heap, semanticAfter, concreteOperation,
-                  semanticOperation, finalHeapRelated, capacity⟩ :=
+                  semanticOperation, finalHeapRelated, cursor, capacity⟩ :=
                 runtimeRelated.heap.incrementReference_refines_with_capacity
                   mapped found live amount countFits check
               rw [updated] at semanticOperation
               have afterEq := Except.ok.inj semanticOperation
               subst semanticAfter
-              refine ⟨heap, ?_, ?_, capacity⟩
+              refine ⟨heap, ?_, ?_, cursor, capacity⟩
               · simp [incrementStep, clearFailure,
                   Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
               · exact ConcreteRuntimeRel.replaceHeap_of_heapOnly runtimeRelated
@@ -4071,7 +4073,7 @@ theorem incrementStep_of_refines_with_capacity
           have afterEq : nextRuntime = runtime := by
             simpa [incValue] using updated.symm
           subst nextRuntime
-          refine ⟨initial.host.runtime.heap, ?_, ?_,
+          refine ⟨initial.host.runtime.heap, ?_, ?_, rfl,
             .refl initial.host.runtime.heap witness⟩
           · simp [incrementStep, clearFailure,
               Word32.ofUInt32_ofNat_value, concreteOperation, replaceHeap]
@@ -4096,7 +4098,7 @@ theorem incrementStep_of_refines
         .Return [] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
         nextRuntime := by
-  obtain ⟨heap, concrete, finalRelated, _⟩ :=
+  obtain ⟨heap, concrete, finalRelated, _, _⟩ :=
     incrementStep_of_refines_with_capacity runtimeRelated objectRelated updated fits
   exact ⟨heap, concrete, finalRelated⟩
 
@@ -7517,7 +7519,8 @@ theorem effectStepSimulates_elided
     fun _ _ continued => continued⟩
 
 /-- Nonpersistent source increment composed through the real compiler,
-adapter, concrete runtime, and exact generated unary host-call prefix. -/
+adapter, concrete runtime, and exact generated unary host-call prefix. The
+returned frontier equation supports zero-cost budget transport. -/
 theorem effectStepSimulates_inc_with_capacity
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -7561,6 +7564,7 @@ theorem effectStepSimulates_inc_with_capacity
         (.inc objectId amount check false continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
   have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
     unfold lookupValue at objectLookup
@@ -7575,10 +7579,10 @@ theorem effectStepSimulates_inc_with_capacity
   have tobjectRelated := physicalRelated.toTObject objectRefines
   cases tobjectRelated with
   | word32 objectRelated =>
-      obtain ⟨heap, operation, runtimeRelated, capacity⟩ :=
+      obtain ⟨heap, operation, runtimeRelated, cursor, capacity⟩ :=
         incrementStep_of_refines_with_capacity initialRelated.1 objectRelated
           updated fits
-      refine ⟨heap, ?_, capacity⟩
+      refine ⟨heap, ?_, cursor, capacity⟩
       apply effectStepSimulates_unaryHost
         (step := incrementStep amount check)
       · intro externals
@@ -7643,7 +7647,7 @@ theorem effectStepSimulates_inc
         (.inc objectId amount check false continuation) continuation
         ([.localGet objectIndex, .call id] ++ targetRest) targetRest initial
         (replaceHeap initial heap) locals witness witness := by
-  obtain ⟨heap, step, _⟩ :=
+  obtain ⟨heap, step, _, _⟩ :=
     effectStepSimulates_inc_with_capacity objectLookup updated initialRelated
       objectCompiled objectFound kindAt objectRefines callFound
       continuationAdapted hImp hSat hi hContract hParams hResults fits

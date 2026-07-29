@@ -159,6 +159,15 @@ Cross-cutting W6.5 state:
   budget. `correctBudgetedPureExternalPersistentOwnership` composes arbitrary
   such effects with default cases and the complete current
   direct/resident-numeric family.
+  `OrdinaryIncrementEffectSupported` is the first generated-host-call
+  instance. `CodeAdapted.inc_eq` derives numeric local/import slots and the
+  continuation from production output; resolver alignment supplies the exact
+  concrete contract; and the concrete increment theorem preserves the heap
+  frontier and mapped capacities.
+  `effectRuntimeRefines_ordinaryIncrement` retains the complete budgeted
+  pure-external frame, while
+  `correctBudgetedPureExternalOrdinaryIncrements` closes arbitrary finite
+  interleavings with default cases and the direct/resident-numeric family.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

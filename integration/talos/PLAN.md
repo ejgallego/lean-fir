@@ -4119,6 +4119,30 @@ effect law and whole-export endpoint. The proof-facing admission surface is
 deliberately unstable. No FIR semantic contract, concrete layout, executable
 ABI, or W7 helper signature changed.
 
+W6.6fl closes the first generated-host-call effect family under that generic
+condition. `OrdinaryIncrementEffectSupported` admits a successful
+nonpersistent increment using only its semantic lookup/update, source-local
+ABI kind, and wasm32 reference-count headroom. `CodeAdapted.inc_eq` inverts
+the production compiler and adapter to recover the numeric object/import
+slots and independently adapted continuation.
+`ConcreteSupportedExport.incrementCall` derives the executable increment
+contract from whole-module resolver alignment.
+
+The underlying concrete increment refinement now exposes its exact
+heap-frontier preservation in addition to mapped-allocation capacity.
+`effectRuntimeRefines_ordinaryIncrement` composes those facts into the
+complete budgeted pure-external frame: the generated unary host call changes
+the related ownership header and semantic runtime while preserving allocation
+budget, locals, witness, handler table, world, and trace according to their
+existing relations. `correctBudgetedPureExternalOrdinaryIncrements`
+therefore closes arbitrary interleavings of successful ordinary increments,
+default-only cases, all current direct operations, and the ten resident
+numeric externals. The contract harness checks the reusable effect law and
+whole-export endpoint. No target instructions, numeric indices, concrete
+addresses, or per-program simulation certificates cross the public boundary.
+No FIR semantic contract, concrete layout, executable ABI, or W7 helper
+signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

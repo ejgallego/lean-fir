@@ -1950,7 +1950,8 @@ theorem LiveCellRel.incValue_persistent_eq
 /-- Whole-heap source/concrete increment refinement. Persistent cells are
 exact no-ops in both runtimes; ordinary cells rewrite only the target common
 header and use the generic frame assembler for every other allocation. Both
-branches preserve the physical capacity of every mapped allocation. -/
+branches preserve the heap frontier and physical capacity of every mapped
+allocation. -/
 theorem LiveHeapRel.incrementReference_refines_with_capacity
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {location : Location} {address : Word32} {cell : HeapCell}
@@ -1964,6 +1965,7 @@ theorem LiveHeapRel.incrementReference_refines_with_capacity
       Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime ∧
+      result.heapCursor = state.heapCursor ∧
       MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
@@ -1976,7 +1978,7 @@ theorem LiveHeapRel.incrementReference_refines_with_capacity
       targetRelated.incrementReference_persistent_eq persistentCase amount check,
       targetRelated.incValue_persistent_eq persistentCase runtime location found amount
         check,
-      related, .refl state witness⟩
+      related, rfl, .refl state witness⟩
   · have ordinary : cell.persistent = false := by
       cases value : cell.persistent
       · rfl
@@ -2006,7 +2008,7 @@ theorem LiveHeapRel.incrementReference_refines_with_capacity
       related.mappedHeaderCapacity_of_headerWrite targetDescriptorFound rawRead
         resultEq headerInBounds headerWrite sameExtent
     exact ⟨result, nextRuntime, operation, by rw [semanticEq, semanticUpdate],
-      finalRelated, capacity⟩
+      finalRelated, by simp [resultEq], capacity⟩
 
 theorem LiveHeapRel.incrementReference_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
@@ -2021,7 +2023,7 @@ theorem LiveHeapRel.incrementReference_refines
       Fir.LeanIR.Impure.incValue runtime (.object (.heap location)) amount check =
         .ok nextRuntime ∧
       LiveHeapRel result witness nextRuntime := by
-  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _⟩ :=
+  obtain ⟨result, nextRuntime, concrete, semantic, finalRelated, _, _⟩ :=
     related.incrementReference_refines_with_capacity mapped found live amount fits
       check
   exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩

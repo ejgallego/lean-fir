@@ -258,9 +258,19 @@ the exact no-op simulation for every invariant.
 `correctBudgetedPureExternalPersistentOwnership` therefore covers arbitrary
 finite nesting and interleaving of these effects with default cases, current
 direct operations, and resident numeric externals at unchanged allocation
-budget. The next effect instances should reuse this structural condition for
-generated host-call prefixes rather than introduce program-specific
-certificates.
+budget.
+The first generated-host-call instance now follows the same boundary.
+`OrdinaryIncrementEffectSupported` carries only successful source increment
+facts, the source-local ABI kind, and reference-count headroom.
+`CodeAdapted.inc_eq` derives the exact unary prefix and continuation from
+production output, `ConcreteSupportedExport.incrementCall` supplies the
+resolver-selected host contract, and the strengthened concrete refinement
+proves exact frontier preservation.
+`effectRuntimeRefines_ordinaryIncrement` retains the complete budgeted
+pure-external frame; `correctBudgetedPureExternalOrdinaryIncrements` exposes
+arbitrary finite interleavings at the whole-export boundary. Subsequent
+effect families should reuse this pattern rather than introduce
+program-specific certificates.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

@@ -1723,6 +1723,113 @@ theorem instructions_localGets_call_eq
             callFound, by simp [targetEq, targetHeadEq, restEq]⟩
 
 /--
+Production compiler/adaptor inversion for an ordinary reference-count
+increment.
+
+Given the source-local compiler equation, successful whole-node adaptation
+determines the numeric object slot, runtime-import slot, exact generated unary
+call prefix, and independently adapted continuation.
+-/
+theorem CodeAdapted.inc_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectKind : AbiKind}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.inc objectId amount check false continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId =
+          some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some objectKind ∧
+        callIndex? sourceModule (.runtime (.inc amount check)) =
+          some callIndex ∧
+        CodeAdapted context sourceModule sourceFunction labels continuation
+          targetRest ∧
+        target =
+          [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases restResult :
+      Fir.Wasm.compileCodeCore context continuation with
+  | none =>
+      rw [restResult] at core
+      change none = some (Except.ok symbolic) at core
+      cases core
+  | some result =>
+      cases result with
+      | error error =>
+          rw [restResult] at core
+          change
+            some (Except.error error) = some (Except.ok symbolic) at core
+          have impossible :
+              Except.error error = Except.ok symbolic :=
+            Option.some.inj core
+          cases impossible
+      | ok restCode =>
+          rw [restResult, objectCompiled] at core
+          change
+            some (Except.ok
+              ([.localGet objectId,
+                .call (.runtime (.inc amount check))] ++ restCode)) =
+              some (Except.ok symbolic) at core
+          injection core with symbolicEq
+          injection symbolicEq with symbolicEq
+          subst symbolic
+          have restCompiled :
+              Fir.Wasm.compileCode context continuation = .ok restCode :=
+            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr restResult
+          cases prefixAdapted :
+              instructions sourceModule sourceFunction labels
+                [.localGet objectId,
+                  .call (.runtime (.inc amount check))] with
+          | error error =>
+              rw [FirTalos.Correctness.instructions_append, prefixAdapted]
+                at targetCompiled
+              contradiction
+          | ok targetPrefix =>
+              cases restAdapted :
+                  instructions sourceModule sourceFunction labels restCode with
+              | error error =>
+                  rw [FirTalos.Correctness.instructions_append, prefixAdapted,
+                    restAdapted] at targetCompiled
+                  contradiction
+              | ok targetRest =>
+                  have targetEq : targetPrefix ++ targetRest = target := by
+                    rw [FirTalos.Correctness.instructions_append,
+                      prefixAdapted, restAdapted] at targetCompiled
+                    exact Except.ok.inj targetCompiled
+                  obtain ⟨indices, callIndex, found, callFound, prefixEq⟩ :=
+                    instructions_localGets_call_eq
+                      (fvarIds := [objectId])
+                      (operation := .inc amount check) prefixAdapted
+                  cases found with
+                  | cons objectFound noMore =>
+                      cases noMore
+                      obtain ⟨alignedIndex, alignedFound, kindAt⟩ :=
+                        localsAligned objectCompiled
+                      rw [objectFound] at alignedFound
+                      injection alignedFound with indexEq
+                      subst alignedIndex
+                      refine ⟨_, callIndex, targetRest, objectFound, kindAt,
+                        callFound, ⟨restCode, restCompiled, restAdapted⟩, ?_⟩
+                      rw [prefixEq] at targetEq
+                      exact targetEq.symm
+
+/--
 Natural-literal specialization of `CodeAdapted.let_eq` with an arbitrary
 continuation.
 
@@ -3817,6 +3924,42 @@ inductive PersistentOwnershipEffectSupported : EffectSupportedPredicate where
         continuation sourceRuntime
 
 /--
+Source/compiler-facing admission for one successful ordinary reference-count
+increment.
+
+The constructor records the semantic lookup/update and the exact wasm32 count
+headroom needed by the concrete header write. The only compiler fact is the
+source local's ABI kind; no target program, numeric local/import index,
+concrete address, or simulation derivation is admitted.
+-/
+inductive OrdinaryIncrementEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate where
+  | inc
+      (sourceRuntime nextRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (amount : Nat)
+      (check : Bool)
+      (continuation : LCNF.Code .impure)
+      (objectKind : AbiKind)
+      (sourceObject : Value)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (objectLookup :
+        lookupValue sourceEnv objectId = .ok sourceObject)
+      (updated :
+        incValue sourceRuntime sourceObject amount check = .ok nextRuntime)
+      (fits : ∀ (location : Location) (cell : HeapCell),
+        sourceObject = .object (.heap location) →
+        findCell? sourceRuntime.heap location = some cell →
+        cell.rc + amount < UInt32.size) :
+      OrdinaryIncrementEffectSupported context sourceRuntime sourceEnv
+        (.inc objectId amount check false continuation) continuation
+        nextRuntime
+
+/--
 Budgeted successful source evaluation for mixed direct/external code with
 selected case branches and admitted no-result effects.
 
@@ -5346,6 +5489,47 @@ theorem effectRuntimeRefines_noEffects
   exact False.elim supported
 
 /--
+Resolver/adaptor alignment specialized to the concrete reference-count
+increment host selected by a compiler-derived runtime-call slot.
+-/
+theorem ConcreteSupportedExport.incrementCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {amount : Nat}
+    {check : Bool}
+    {id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime (.inc amount check)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (incrementContract amount check) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 0 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    supportedExport.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = incrementStep amount check initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, incrementFn]
+      using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 0 at results
+    exact results
+
+/--
 The compiler-erased persistent ownership family implements the generic effect
 condition for every invariant.
 
@@ -5379,6 +5563,76 @@ theorem effectRuntimeRefines_persistentOwnership
       exact ⟨target, targetStore, witness, continuationAdapted,
         effectStepSimulates_dec_persistent stateRelated continuationAdapted,
         invariant⟩
+
+/--
+Ordinary reference-count increment implements the generic effect condition
+for the complete budgeted pure-external frame.
+
+Compiler inversion and resolver alignment recover the generated local/import
+indices and concrete increment contract. The successful header update
+preserves the heap frontier, so it consumes no allocation budget while
+retaining local-frame shape, witness, and all installed external family laws.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+      (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      fits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.inc_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.incrementCall callFound
+      obtain ⟨heap, step, cursor, _capacity⟩ :=
+        effectStepSimulates_inc_with_capacity objectLookup updated stateRelated
+          objectCompiled objectFound kindAt objectRefines callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results fits
+      rcases invariant with
+        ⟨⟨frameAligned, budget⟩, integerImplementation,
+          naturalImplementation, scalarImplementation⟩
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextInvariant :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        have externalsEq :
+            (replaceHeap targetStore heap).host.externals =
+              targetStore.host.externals := by
+          simp [replaceHeap, clearFailure]
+        refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact integerImplementation
+        · rw [externalsEq]
+          exact naturalImplementation
+        · rw [externalsEq]
+          exact scalarImplementation
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
 
 /--
 A postcondition is stable for a generated case arm when any selected-arm
@@ -10410,6 +10664,79 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
     caseRuntimeRefines_defaultOnly
     effectRuntimeRefines_persistentOwnership parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of
+successful ordinary reference-count increments, default-only cases, and the
+complete current direct/pure-external family.
+
+The source admission supplies only the semantic increment result, compiler
+local kind, and count headroom. Production inversion and resolver alignment
+recover and execute the generated unary host-call prefix. Header-only updates
+preserve the heap frontier and therefore consume zero allocation budget.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOrdinaryIncrements
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported (OrdinaryIncrementEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ordinaryIncrement (externals := externals))
+    parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of normalized

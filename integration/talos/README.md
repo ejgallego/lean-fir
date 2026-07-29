@@ -354,6 +354,15 @@ every invariant, and
 `correctBudgetedPureExternalPersistentOwnership` closes arbitrary
 interleavings with default cases, all current direct operations, and the ten
 resident numeric declarations at zero additional heap budget.
+`OrdinaryIncrementEffectSupported` adds the first generated-host-call
+instance. `CodeAdapted.inc_eq` and resolver alignment recover the concrete
+unary call from production output, while the strengthened increment
+refinement preserves the heap frontier exactly.
+`effectRuntimeRefines_ordinaryIncrement` therefore retains the complete
+budgeted pure-external frame, and
+`correctBudgetedPureExternalOrdinaryIncrements` closes arbitrary successful
+ordinary increments mixed with default cases and the same direct/resident
+families without a target witness or per-node simulation premise.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
