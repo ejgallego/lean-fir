@@ -267,9 +267,13 @@ arbitrary-precision result size can depend on the response.
 `codeWP_of_budgetedSpineEvaluates`, and
 `ConcreteSupportedExport.correctBudgetedSpine` then compose reusable external
 operation-family theorems with the production compiler/adapter and preserve
-the source's exact trace. Pure `Int.ofNat`/`Int.neg` construction is the first
-planned concrete instance. This proof-facing surface is intentionally
-unstable.
+the source's exact trace. `integerAllocationBytes` and
+`allocateInteger_eq_ok_of_budget` now provide the first constructive part of
+the planned pure `Int.ofNat`/`Int.neg` instance: one source-facing budget
+constructs the current heap-`Int` representation, proves its limb count fits
+wasm32 metadata, and returns exact unused headroom without a caller-supplied
+allocation result. The external-call family itself is still the next layer.
+This proof-facing surface is intentionally unstable.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

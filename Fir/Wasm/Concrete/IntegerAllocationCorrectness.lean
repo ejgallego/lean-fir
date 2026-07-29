@@ -10,6 +10,18 @@ open Fir.LeanIR.Impure
 @[simp] theorem integerMagnitude_negSucc (value : Nat) :
     integerMagnitude (.negSucc value) = value + 1 := rfl
 
+/--
+Exact wasm32 frontier cost of constructing one concrete heap integer.
+
+Unlike naturals, the current arbitrary-precision `Int` representation always
+uses an ordinary sign-magnitude heap object, including for zero and small
+values. The cost is therefore exactly the aligned header-plus-limb extent.
+-/
+def integerAllocationBytes (value : Int) : Nat :=
+  align8
+    (headerBytes + target.semanticSlotBytes *
+      (naturalLimbs (integerMagnitude value)).length)
+
 theorem integerOfSignMagnitude_roundtrip (value : Int) :
     integerOfSignMagnitude (integerSign value == 1)
       (integerMagnitude value) = value := by
@@ -21,6 +33,106 @@ theorem integerMagnitude_ne_zero_of_negative {value : Int}
   cases value with
   | ofNat value => simp [integerSign] at negative
   | negSucc value => simp [integerMagnitude]
+
+/--
+One exact source-path budget makes heap-integer construction constructive and
+transports the residual address-space budget across the allocation and
+little-endian magnitude write.
+-/
+theorem MemoryState.FrontierInvariant.allocateInteger_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant) (value : Int)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : integerAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateInteger state value = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - integerAllocationBytes value) := by
+  let limbs := naturalLimbs (integerMagnitude value)
+  have allocationFits :
+      align8 (headerBytes + target.semanticSlotBytes * limbs.length) ≤
+        remainingBytes := by
+    simpa [integerAllocationBytes, limbs] using fits
+  have limbCountFits : limbs.length < UInt32.size := by
+    have endWithin :
+        state.heapCursor +
+            align8
+              (align8
+                (headerBytes + target.semanticSlotBytes * limbs.length)) ≤
+          wordModulus := by
+      simpa [limbs] using
+        (budget.allocationCapacity (by
+          simpa only [align8_align8] using allocationFits)).endWithinAddressSpace
+    simp only [align8_align8] at endWithin
+    have extent :=
+      align8_ge (headerBytes + target.semanticSlotBytes * limbs.length)
+    have cursorPositive := budget.cursorPositive
+    have belowWordModulus : limbs.length < wordModulus := by
+      simp [target] at endWithin extent
+      omega
+    simpa [wordModulus] using belowWordModulus
+  have limbCount :
+      uint32Field "integer limb count" limbs.length =
+        .ok (UInt32.ofNat limbs.length) := by
+    simp [uint32Field, limbCountFits]
+  obtain ⟨middle, address, objectAllocation⟩ :=
+    state.allocateObject_eq_ok_of_capacity .integer
+      (target.semanticSlotBytes * limbs.length) false
+      integerSignMagnitudeMarker (UInt32.ofNat limbs.length)
+      (integerSign value) 0 valid.cursorAligned
+      (budget.allocationCapacity (by
+        simpa only [align8_align8] using allocationFits))
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have payloadInBounds :
+      address.value + headerBytes +
+          target.semanticSlotBytes * (0 + limbs.length) ≤
+        middle.memory.size := by
+    have payloadEnd :
+        address.value + headerBytes +
+            target.semanticSlotBytes * (0 + limbs.length) ≤
+          middle.heapCursor := by
+      simp only [Nat.zero_add]
+      rw [middleExtent]
+      have extent :=
+        align8_ge (headerBytes + target.semanticSlotBytes * limbs.length)
+      simpa [Nat.add_assoc] using Nat.add_le_add_left extent address.value
+    exact Nat.le_trans payloadEnd middleValid.cursorInBounds
+  obtain ⟨memory, payloadWrite, _⟩ :=
+    writeNaturalLimbs_spec middle.memory address.value 0 limbs payloadInBounds
+  let result : MemoryState := { middle with memory }
+  have allocated :
+      allocateInteger state value = .ok (result, address) := by
+    unfold allocateInteger
+    dsimp only
+    change
+      (do
+        let limbCount ← uint32Field "integer limb count" limbs.length
+        let (state, address) ← liftMemory <|
+          state.allocateObject .integer
+            (target.semanticSlotBytes * limbs.length) false
+            integerSignMagnitudeMarker limbCount (integerSign value) 0
+        let memory ← liftMemory <|
+          Fir.Wasm.Concrete.writeNaturalLimbs
+            state.memory address.value 0 limbs
+        return ({ state with memory }, address)) =
+        .ok (result, address)
+    rw [limbCount]
+    simp only [Bind.bind, Except.bind]
+    rw [objectAllocation]
+    simp only [liftMemory]
+    rw [payloadWrite]
+    rfl
+  have middleBudget :=
+    budget.allocateObject valid.cursorAligned allocationFits objectAllocation
+  have resultBudget :
+      result.AddressSpaceBudget
+        (remainingBytes -
+          align8 (headerBytes + target.semanticSlotBytes * limbs.length)) := {
+    cursorPositive := middleBudget.cursorPositive
+    endWithinAddressSpace := middleBudget.endWithinAddressSpace }
+  exact ⟨result, address, allocated, by
+    simpa [integerAllocationBytes, limbs] using resultBudget⟩
 
 /-- A successful heap-Int allocation is one checked ordinary object allocation
 followed by the shared little-endian magnitude writer. -/

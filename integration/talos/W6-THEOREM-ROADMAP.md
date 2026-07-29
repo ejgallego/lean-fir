@@ -156,8 +156,12 @@ expressible without target evidence. `ExternalLetRuntimeRefinesWithCost` is
 the reusable implementation-law boundary, while
 `codeWP_of_budgetedSpineEvaluates` and `correctBudgetedSpine` reconstruct the
 compiler/adapter body and preserve exact external traces across arbitrary
-mixed spines. Concrete `Int.ofNat`/`Int.neg` instances remain the next proof
-slice.
+mixed spines. `integerAllocationBytes` and
+`allocateInteger_eq_ok_of_budget` now make the result-allocation half
+constructive: the semantic `Int` fixes the current aligned heap extent, one
+wasm32 source budget constructs the allocation and limb writes, and the same
+proof derives metadata encodability plus exact residual headroom. Concrete
+`Int.ofNat`/`Int.neg` operation-family instances remain the next proof slice.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

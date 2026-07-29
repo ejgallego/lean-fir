@@ -950,6 +950,15 @@ allowed to evolve; clients should depend on `allocateInteger_objectRel` and
             value == .negSucc UInt64.size
       | _, _ => false
 
+/- The proof-facing source cost tracks the exact frontier delta for both
+signs and a multi-limb magnitude. -/
+#guard match allocateInteger MemoryState.initial (.negSucc UInt64.size) with
+  | .error _ => false
+  | .ok (state, _) =>
+      state.heapCursor ==
+        MemoryState.initial.heapCursor +
+          integerAllocationBytes (.negSucc UInt64.size)
+
 def semanticMixedConstructor :=
   Fir.LeanIR.Impure.allocCtor (runtime := {}) mixedConstructorInfo
     #[.object (.tagged 11)]

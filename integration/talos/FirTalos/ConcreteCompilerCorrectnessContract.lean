@@ -272,6 +272,22 @@ example
     spec.singleResult
 
 /--
+The arbitrary-precision integer boundary is constructive from one exact
+source-facing allocation budget; callers do not supply an allocation result,
+limb-count encoding, or representation witness.
+-/
+example
+    {state : MemoryState} {value : Int} {remainingBytes : Nat}
+    (valid : state.FrontierInvariant)
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : integerAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateInteger state value = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - integerAllocationBytes value) :=
+  valid.allocateInteger_eq_ok_of_budget value budget fits
+
+/--
 An arbitrary finite natural-literal spine uses one source-computed budget
 across immediate, promoted-tag, and heap-limb representations.
 -/

@@ -3824,6 +3824,21 @@ construction calls, starting from constructive heap-Int allocation capacity.
 The cost and admission relations remain deliberately unstable. No FIR
 semantic contract or executable ABI changed.
 
+W6.6ew supplies that constructive heap-`Int` capacity boundary.
+`integerAllocationBytes` computes the current aligned header-plus-magnitude
+limb extent directly from the semantic result. From `FrontierInvariant`, one
+`AddressSpaceBudget`, and a proof that this exact cost fits,
+`allocateInteger_eq_ok_of_budget` constructs the ordinary sign-magnitude
+object, derives `UInt32` limb-count encodability from the same wasm32 budget,
+writes every limb, and returns the exact residual budget. Callers supply no
+allocation equation, encoded count, address, or representation witness. The
+contract harness checks this public shape and an executable multi-limb
+negative regression checks that the classifier equals the concrete frontier
+delta. This is the constructive allocation base for the forthcoming
+`Int.ofNat`/`Int.neg` external-family theorem; it does not yet admit those
+calls. The classifier and heap layout remain deliberately unstable. No FIR
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

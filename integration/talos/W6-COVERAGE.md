@@ -84,7 +84,11 @@ Cross-cutting W6.5 state:
   `correctBudgetedSpine` packages exact source trace execution and concrete
   export termination from reusable direct/external runtime laws. No concrete
   pure-Int call family is admitted by this framework slice yet; `Int.ofNat`
-  and `Int.neg` are the next instances.
+  and `Int.neg` are the next instances. Their allocation base is now
+  constructive: `integerAllocationBytes` gives the exact current
+  header-plus-limb cost and `allocateInteger_eq_ok_of_budget` constructs the
+  heap result with the exact residual budget, deriving limb-count
+  encodability without an extra premise.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
