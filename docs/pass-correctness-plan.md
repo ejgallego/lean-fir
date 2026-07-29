@@ -759,9 +759,17 @@ counterexample cannot inhabit it. No suitable purity field was found in the
 audited Lean 4.32 input to `elimDeadVars`; `Decl.safe` records termination
 safety, not observational purity. A future semantics may replace this
 conservative rejection with a stuttering certificate for selected constants.
-Executable and actual-pass fixtures reject deletion of the effectful nullary
-application, accept a retained nullary application, and confirm that Lean
-4.32's pinned pass retains the control case.
+An executable 11-row conformance matrix now checks Lean 4.32's pinned pass,
+the transparent traversal, the fail-closed policy decision, and the exact
+accepted target together. It covers neutral deletion, retained used and unsafe
+bindings, deleted allocation/write/reset/reuse/PAP/box bindings, and both sides
+of the nullary-application boundary. The pinned pass agrees on every row; the
+only rejected policy row remains deletion of the effectful nullary
+application. Kernel theorems pin representative retained-unsafe,
+deleted-allocation, deleted-write, retained-nullary, and rejected-nullary
+decisions. The accepted allocation row is also lifted through declarations and
+programs into `ElimDeadCompilerAdmissibleRun`, then consumed by the strict
+whole-program correctness endpoint.
 
 Closed end-to-end fixtures now discharge those premises for deleted object and
 scalar writes, failed-token reuse, concrete-token reuse, reset/reuse with an
@@ -813,15 +821,15 @@ contract.
 
 Actual-pass fixtures compare the transparent `elimDeadVars` shadow with Lean
 4.32 and preserve every discovered mismatch as a textual bug card and
-regression.
+regression. The systematic policy matrix found no additional mismatch beyond
+the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Continue actual-pass conformance and closed execution-graph fixtures at
-   semantic boundaries that refine or falsify those compiler-facing
-   contracts.
-2. Generalize the closed ownership fixtures into reusable static-to-dynamic
+1. Generalize the closed ownership fixtures into reusable static-to-dynamic
    laws for deleted writes, resets, and concrete reuse tokens.
+2. Extend the actual-pass matrix when new ownership laws or semantic
+   boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract and prove the queued closure-application preservation consumers
    before that shared validation stack lands.
