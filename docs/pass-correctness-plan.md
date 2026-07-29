@@ -895,6 +895,15 @@ successful selection changes only control, the target frontier and owner
 ledger are unchanged; the exact case view supplies the related alternative
 table directly.
 
+Retained local-value applications now carry the ledger through both immediate
+semantics. The nullary `.fvar` branch binds the related function value into
+both exact continuations; nonempty arguments publish the related function and
+argument roots, push paired bind frames, and enter related `invokeValue`
+controls. Neither branch changes either runtime. A dynamically certified
+deleted `.fvar` is necessarily the runtime-neutral nullary copy, so the source
+steps while the target stutters and retains the incoming ledger. Exact
+retained/deleted wrappers expose the whole family to the future dispatcher.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -972,12 +981,12 @@ ledger now solves the address-map part without assuming an empty target, and
 its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
-runtime-neutral erased/deleted layer. It still has to be threaded through
-retained copies/projections and local-value applications, invocation steps,
-existing-address mutations, and allocation-capable external responses, then
-assembled into the unified non-lockstep dispatcher and compiler-client
-invariant so arbitrary selected edges receive that history rather than only
-focused fixtures.
+runtime-neutral erased/deleted layer, plus retained/deleted local-value
+applications. It still has to be threaded through retained projections, the
+remaining invocation steps, existing-address mutations, and
+allocation-capable external responses, then assembled into the unified
+non-lockstep dispatcher and compiler-client invariant so arbitrary selected
+edges receive that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1018,10 +1027,9 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through retained copies/projections, local-value
-   applications, invocation steps, and the existing-address matcher
-   families. Strengthen the foreign-response boundary when an external
-   response allocates, then
+1. Preserve the ledger through retained projections, invocation steps, and
+   the existing-address matcher families. Strengthen the foreign-response
+   boundary when an external response allocates, then
    assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
