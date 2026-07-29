@@ -3722,6 +3722,23 @@ followed by composition with the cost-zero read-only families. The cost and
 invariant interfaces remain deliberately unstable. No FIR semantic contract
 or executable ABI changed.
 
+W6.6eq adds nonempty constructors to the indexed structural proof.
+`NonemptyConstructorSupported` contains only source/compiler layout facts:
+the constructor shape, successful argument/result compilation, generated ABI
+well-formedness, and representable nonempty counts.
+`sourceLetResult_constructor_eq` recovers the exact semantic argument array
+and source allocation from ordinary successful source evaluation.
+`constructorNonemptyStep_of_budget` combines production argument decoding with
+the concrete host theorem and returns the residual `ConstructorLayout` budget
+on the resulting store. The indexed runtime-law instance then derives numeric
+argument/import/result slots, mixed local/erased physical fields, checked
+destination update, witness extension, and source/target agreement.
+The contract harness proves arbitrary finite nonempty-constructor spines from
+one `DirectValuePathCost`, without per-node concrete steps or a translation
+certificate. Cost-zero read-only instances and their union with String and
+constructor allocation are next. No FIR semantic contract or executable ABI
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

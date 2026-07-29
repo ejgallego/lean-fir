@@ -59,7 +59,9 @@ Cross-cutting W6.5 state:
   `DirectLetRuntimeRefinesWithCost`, and
   `codeWP_of_directValueEvaluates_withCost` lift this transport to the
   structural theorem. The contract harness checks arbitrary finite
-  String-literal spines using one exact source-computed budget.
+  String-literal spines and arbitrary finite nonempty-constructor spines using
+  one exact source-computed budget. Constructor nodes derive mixed
+  local/erased physical arguments and concrete host steps internally.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

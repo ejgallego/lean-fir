@@ -324,6 +324,60 @@ example
     spec.directLetRuntimeRefines_stringLiteral parameterCount spec.singleResult
 
 /--
+The same indexed structural theorem covers arbitrary finite nonempty
+constructor spines. Source/compiler admission contains layout bounds only;
+each mixed local/erased physical prefix and concrete allocation step is
+derived at its source node.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {parameters callerTail : List Wasm.Value}
+    (evaluation :
+      DirectValueEvaluates context (NonemptyConstructorSupported context)
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        locals witness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget
+        (DirectValuePathCost directLetAllocationCost sourceCode))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          locals witness []
+          (ConcreteFunctionBodyPost spec.targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue :=
+  codeWP_of_directValueEvaluates_withCost evaluation spec.bodyAdapted
+    spec.localsAligned stateRelated ⟨frameAligned, budget⟩
+    spec.directLetRuntimeRefines_nonemptyConstructor parameterCount
+    spec.singleResult
+
+/--
 The recursive direct-`let` API is likewise certificate-free: its only
 recursive premise is correctness of the compiler-selected continuation.
 -/

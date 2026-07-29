@@ -234,8 +234,10 @@ constructor allocation expose the same exact residual boundary below the
 compiler. `codeWP_of_directValueEvaluates_withCost` and
 `DirectLetRuntimeRefinesWithCost` now provide the before/after indexed
 structural law, and the String instance proves arbitrary finite String-literal
-spines from one source-computed budget. Nonempty constructors and mixed
-cost-zero/read-only paths are the next instances.
+spines from one source-computed budget. The nonempty-constructor instance now
+does the same for arbitrary constructor spines, deriving mixed local/erased
+physical arguments and every concrete allocation internally. Mixed
+cost-zero/read-only paths are the next composition step.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

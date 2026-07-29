@@ -128,8 +128,10 @@ transport and supplies the exact residual budget to an arbitrary
 compiler-selected continuation. The indexed
 `codeWP_of_directValueEvaluates_withCost` structural theorem now automates
 that composition for arbitrary finite String-literal spines from one
-source-computed `DirectValuePathCost`. Constructor and mixed read-only
-instances remain.
+source-computed `DirectValuePathCost`. The nonempty-constructor runtime
+instance now derives mixed arguments and exact residual layout cost, so
+arbitrary finite constructor spines use the same theorem. Mixed read-only
+composition remains.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
@@ -421,8 +423,9 @@ acceptance tests pass.
    object, String, and nonempty-constructor allocation; the String recursive
    compiler theorem passes its remainder to the continuation. The structural
    runtime law now has before/after resource indices and an arbitrary finite
-   String-spine instance. Add the constructor instance and compose cost-zero
-   read-only steps next.
+   String-spine instance. Nonempty constructors now have the corresponding
+   indexed runtime law and arbitrary-spine contract. Compose cost-zero
+   read-only steps with both allocating families next.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
