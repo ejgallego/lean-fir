@@ -177,7 +177,9 @@ Cross-cutting W6.5 state:
   header-capacity transport is instantiated for nonempty constructor
   allocation, empty immediate/promoted constructor allocation, both
   empty-token reuse allocation branches, actual in-place reuse, and unique
-  reset;
+  reset; fresh nonempty constructor allocation additionally derives its exact
+  checked heap/address result from static `ConstructorLayout` address-space
+  capacity rather than an opaque successful-allocation equation;
   reset carries the retained constructor bound to its returned nonempty token;
 - the full per-operation failure matrix is not yet proved; and
 - natural and string literals, `allocCtor`, `partialApply`, `getTag`, `objectProj`,

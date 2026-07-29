@@ -221,7 +221,10 @@ headroom plus the alignment already present in `StateRelated`.
 only String allocation capacity and derive `allocateString = .ok ...`
 internally. The boundary is deliberately unstable while the structural
 source-path budget is developed; clients should expect to adapt as
-constructor and heap-Nat cases join it.
+constructor and heap-Nat cases join it. Nonempty constructor allocation now
+also constructs its heap/address result from exact `ConstructorLayout`
+capacity at both the memory and concrete-operation refinement boundaries; the
+remaining compiler lift is argument decoding plus recursive budget threading.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

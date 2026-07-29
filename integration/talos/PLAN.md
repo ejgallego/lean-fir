@@ -3653,6 +3653,20 @@ allocating direct-value evaluation, then applies the same boundary to
 constructors and heap-backed naturals. No FIR semantic contract or executable
 ABI changed.
 
+W6.6em applies the same finite-resource boundary to nonempty constructors.
+`allocateConstructor_nonempty_eq_ok_of_capacity` computes the exact aligned
+request from `ConstructorLayout`, constructs the checked object allocation,
+and proves every decoded object-field write lies inside that extent.
+`allocCtorNonemptyStep_of_refines_of_capacity` lifts this result through the
+concrete host/source refinement boundary: the resulting heap, address,
+witness extension, target return, and source `allocCtor` step are all
+constructed from the static layout capacity. The older equation-driven
+operation theorem remains an internal factoring lemma; compiler clients no
+longer need it once their argument relation supplies decoded fields. The next
+slice strengthens that relation and replaces the recursive compiler theorem's
+opaque constructor-step premise. This resource surface remains experimental,
+and no FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

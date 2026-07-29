@@ -83,6 +83,78 @@ theorem allocateConstructor_nonempty_decompose
           subst address
           exact ⟨middle, rfl, fieldWrite, rfl⟩
 
+/--
+A nonempty constructor allocation is constructive from the exact static
+`ConstructorLayout` address-space capacity. Header metadata and every object
+slot write are then in-bounds inside that allocated extent.
+-/
+theorem MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_capacity
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (info : LCNF.CtorInfo) (fields : Array Word32)
+    (arity : fields.size = info.size)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (capacity :
+      state.AllocationCapacity (ConstructorLayout.ofInfo info).allocationBytes) :
+    ∃ result address,
+      allocateConstructor state info fields = .ok (result, address) := by
+  let layout := ConstructorLayout.ofInfo info
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    simp only [ConstructorLayout.ofInfo]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa [target, layout] using ConstructorLayout.ofInfo_allocation_aligned info
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  obtain ⟨middle, address, objectAllocation⟩ :=
+    state.allocateObject_eq_ok_of_capacity .constructor
+      (layout.allocationBytes - headerBytes) false
+      (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+      (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize)
+      valid.cursorAligned (by simpa [layout, allocationEq] using capacity)
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have fieldsEnd :
+      objectFieldAddress address.value fields.toList.length ≤
+        middle.heapCursor := by
+    rw [middleExtent, allocationEq]
+    simp [objectFieldAddress, target, layout, ConstructorLayout.ofInfo, arity]
+    have aligned := align8_ge
+      (headerBytes +
+        target.semanticSlotBytes * (info.size + info.usize) + info.ssize)
+    simp [target] at aligned
+    omega
+  obtain ⟨memory, fieldWrite, _⟩ :=
+    writeObjectFields_spec middle.memory address.value 0 fields.toList
+      (Nat.le_trans (by simpa using fieldsEnd) middleValid.cursorInBounds)
+  refine ⟨{ middle with memory }, address, ?_⟩
+  unfold allocateConstructor
+  simp [arity, uint32Field, tagFits, objectFieldsFit, usizeFieldsFit,
+    scalarBytesFit, nonempty]
+  change
+    (do
+      let (middle, address) ← liftMemory <|
+        state.allocateObject .constructor
+          (layout.allocationBytes - headerBytes) false
+          (UInt32.ofNat info.cidx) (UInt32.ofNat info.size)
+          (UInt32.ofNat info.usize) (UInt32.ofNat info.ssize)
+      let memory ← liftMemory <|
+        Fir.Wasm.Concrete.writeObjectFields middle.memory address.value 0
+          fields.toList
+      return ({ middle with memory }, address)) =
+        .ok ({ middle with memory }, address)
+  rw [objectAllocation]
+  simp only [liftMemory, Bind.bind, Except.bind]
+  rw [fieldWrite]
+  rfl
+
 /-- A public nonempty constructor allocation preserves every byte owned below
 the old frontier, so all previously decoded heap cells can be framed. -/
 theorem allocateConstructor_nonempty_prefixExtension
