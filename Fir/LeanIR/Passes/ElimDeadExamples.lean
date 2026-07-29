@@ -3756,6 +3756,295 @@ theorem allocatingOuterExactStepPreserved
     |>.matchCodeStep_of_ready
       (allocatingOuterExactMachineReadyAt argumentsRelated) rfl step
 
+/-- Target state after resolving the neutral fixture's `main` declaration. -/
+def neutralTargetOuterState (arguments : Array Value) : MachineState :=
+  { program := neutralAfterProgram
+    control := .code neutralAfter
+    frames := neutralEntryFrames arguments }
+
+/-- Target state after both machines evaluate the retained outer erased
+binding.  The source still has its dead erased let; the target is at return. -/
+def neutralTargetInnerState (arguments : Array Value) : MachineState :=
+  { program := neutralAfterProgram
+    control := .code (.return live)
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+/-- Transparent exact run for the deleted inner erased binding. -/
+theorem neutralInnerShadowRun :
+    shadowCode? 2 {} (.let deadErasedDecl (.return live)) =
+      some (.return live, neutralUsed) := by
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deadErasedDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
+    deadAbsent]
+
+/-- Exact compiler provenance for the complete retained/deleted neutral
+fixture. -/
+def neutralExactGraph :
+    ExactShadowCodeGraph 3 neutralUsed neutralBefore neutralAfter :=
+  ExactShadowCodeGraph.ofResult neutralShadowRun
+
+/-- Exact compiler provenance for the inner source-only erased let. -/
+def neutralInnerExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      (.let deadErasedDecl (.return live)) (.return live) :=
+  ExactShadowCodeGraph.ofResult neutralInnerShadowRun
+
+/-- Hereditary static readiness for the complete neutral graph. -/
+theorem neutralExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed neutralExactGraph.view := by
+  apply neutralExactGraph.binderReady_of_canonical
+    (index := Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.letE
+      · native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · exact ⟨.object, trivial⟩
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+  · simp [neutralBefore, liveDecl, deadErasedDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the deleted inner erased let. -/
+theorem neutralInnerExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      neutralInnerExactGraph.view := by
+  apply neutralInnerExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deadErasedDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Exact hereditary relation for the neutral fixture's single declaration. -/
+theorem neutralProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 3)
+      neutralBeforeProgram neutralAfterProgram := by
+  simpa [neutralBeforeProgram, neutralAfterProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨neutralUsed, 3, neutralUsed, Nat.le_refl 3,
+        neutralExactGraph, UsedSubset.refl neutralUsed,
+        neutralExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 3 neutralBefore neutralAfter)
+
+/-- Exact active-code readiness at the retained outer erased let. -/
+theorem neutralOuterExactCodeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      (neutralSourceOuterState arguments)
+      (runtimeRoots (neutralSourceOuterState arguments).runtime
+        (envRootsOn neutralUsed
+          (neutralSourceOuterState arguments).env ++ sourceFrameRoots))
+      neutralBefore neutralAfter := by
+  refine ⟨3, neutralUsed, Nat.le_refl 3,
+    neutralExactGraph, UsedSubset.refl neutralUsed,
+    neutralExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt (neutralSourceOuterState arguments)
+        (runtimeRoots (neutralSourceOuterState arguments).runtime
+          (envRootsOn neutralUsed
+            (neutralSourceOuterState arguments).env ++ sourceFrameRoots))
+        liveDecl := by
+    exact .runtimeNeutral liveDecl .erased rfl
+  have kept :
+      RetainedLetReadyAt (neutralSourceOuterState arguments)
+        (runtimeRoots (neutralSourceOuterState arguments).runtime
+          (envRootsOn neutralUsed
+            (neutralSourceOuterState arguments).env ++ sourceFrameRoots))
+        liveDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+/-- Exact active-code readiness at the deleted inner erased let. -/
+theorem neutralInnerExactCodeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      (neutralSourceInnerState arguments)
+      (runtimeRoots (neutralSourceInnerState arguments).runtime
+        (envRootsOn neutralUsed
+          (neutralSourceInnerState arguments).env ++ sourceFrameRoots))
+      (.let deadErasedDecl (.return live)) (.return live) := by
+  refine ⟨2, neutralUsed, by omega,
+    neutralInnerExactGraph, UsedSubset.refl neutralUsed,
+    neutralInnerExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt (neutralSourceInnerState arguments)
+        (runtimeRoots (neutralSourceInnerState arguments).runtime
+          (envRootsOn neutralUsed
+            (neutralSourceInnerState arguments).env ++ sourceFrameRoots))
+        deadErasedDecl := by
+    exact .runtimeNeutral deadErasedDecl .erased rfl
+  have decision :
+      neutralInnerExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      neutralInnerExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp)
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
+/-- Exact readiness at the canonical invocation control. -/
+theorem neutralInitialExactMachineReadyAt
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (initialState neutralBeforeProgram `main arguments)
+      (initialState neutralAfterProgram `main arguments) :=
+  initialState_binderReadyReachableMachineReadyAt
+    neutralProgramBinderReadyRelated argumentsRelated
+
+/-- Full exact-provenance readiness at the retained outer let. -/
+theorem neutralOuterExactMachineReadyAt
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (neutralSourceOuterState arguments)
+      (neutralTargetOuterState arguments) := by
+  rcases allocatingEntryFramesBinderReadyRelated argumentsRelated with
+    ⟨frameRoots, frames⟩
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed (neutralSourceOuterState arguments).env,
+    envRootsOn neutralUsed (neutralTargetOuterState arguments).env,
+    frameRoots, frameRoots, ?_, ?_, frames, ?_⟩
+  · simpa [neutralSourceOuterState, neutralTargetOuterState] using
+      neutralProgramBinderReadyRelated
+  · exact .code (neutralOuterExactCodeReadyAt arguments frameRoots)
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (EnvRelOn.empty emptyAddressRenaming neutralUsed)
+  · simpa [neutralSourceOuterState, neutralTargetOuterState] using
+      emptyRuntime_shadowRelated_of_roots
+        (listRel_append
+          (envRootsOn_related
+            (EnvRelOn.empty emptyAddressRenaming neutralUsed))
+          frames.roots)
+
+/-- Full exact-provenance readiness at the deleted inner erased let. -/
+theorem neutralInnerExactMachineReadyAt
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    BinderReadyReachableMachineReadyAt 3
+      (neutralSourceInnerState arguments)
+      (neutralTargetInnerState arguments) := by
+  rcases allocatingEntryFramesBinderReadyRelated argumentsRelated with
+    ⟨frameRoots, frames⟩
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed (neutralSourceInnerState arguments).env,
+    envRootsOn neutralUsed (neutralTargetInnerState arguments).env,
+    frameRoots, frameRoots, ?_, ?_, frames, ?_⟩
+  · simpa [neutralSourceInnerState, neutralTargetInnerState] using
+      neutralProgramBinderReadyRelated
+  · exact .code (neutralInnerExactCodeReadyAt arguments frameRoots)
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by
+        simpa [neutralSourceInnerState, neutralTargetInnerState,
+          liveEnv] using liveEnvReachableRelated)
+  · simpa [neutralSourceInnerState, neutralTargetInnerState,
+      liveEnv] using
+        emptyRuntime_shadowRelated_of_roots
+          (listRel_append
+            (envRootsOn_related liveEnvReachableRelated) frames.roots)
+
+/-- Resolving `main` preserves exact provenance and reaches the ready retained
+outer let pair. -/
+theorem neutralInitialExactStepPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (initialState neutralAfterProgram `main arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3
+        (neutralSourceOuterState arguments) targetAfter :=
+  (neutralInitialExactMachineReadyAt argumentsRelated).related
+    |>.matchNextStep_of_ready
+      (neutralInitialExactMachineReadyAt argumentsRelated)
+      (neutralSourceEntryStep arguments)
+
+/-- Concrete target step across the retained outer erased let. -/
+theorem neutralTargetOuterStep (arguments : Array Value) :
+    coreStep (neutralTargetOuterState arguments) =
+      .next (neutralTargetInnerState arguments) := by
+  rfl
+
+/-- The dispatcher preserves exact provenance across the retained outer let. -/
+theorem neutralOuterExactStepPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments)
+    {sourceAfter : MachineState}
+    (step : Step externals
+      (neutralSourceOuterState arguments) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (neutralTargetOuterState arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  (neutralOuterExactMachineReadyAt argumentsRelated).related
+    |>.matchCodeStep_of_ready
+      (neutralOuterExactMachineReadyAt argumentsRelated) rfl step
+
+/-- The dispatcher preserves exact provenance across the source-only inner
+erased let while the target stutters at return. -/
+theorem neutralInnerExactStepPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments)
+    {sourceAfter : MachineState}
+    (step : Step externals
+      (neutralSourceInnerState arguments) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (neutralTargetInnerState arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  (neutralInnerExactMachineReadyAt argumentsRelated).related
+    |>.matchCodeStep_of_ready
+      (neutralInnerExactMachineReadyAt argumentsRelated) rfl step
+
+/-- Composed exact neutral regression: one retained lockstep edge followed by
+one source-only deleted edge reaches related endpoints. -/
+theorem neutralTwoActiveStepsExactPreserved
+    (externals : ExternalSpec)
+    (argumentsRelated :
+      ArrayRel (ValueRel emptyAddressRenaming) arguments arguments) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (neutralSourceOuterState arguments)
+        (neutralSourceReturnState arguments) ∧
+      NonLockstep.Reaches externals
+        (neutralTargetOuterState arguments) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3
+        (neutralSourceReturnState arguments) targetAfter := by
+  rcases neutralInnerExactStepPreserved externals argumentsRelated
+      (.internal (neutralSourceInnerStep arguments)) with
+    ⟨targetAfter, targetTail, endpoint⟩
+  refine ⟨targetAfter, ?_, ?_, endpoint⟩
+  · exact
+      (NonLockstep.reaches_of_step
+        (.internal (neutralSourceOuterStep arguments))).trans
+      (NonLockstep.reaches_of_step
+        (.internal (neutralSourceInnerStep arguments)))
+  · exact
+      (NonLockstep.reaches_of_step
+        (.internal (neutralTargetOuterStep arguments))).trans targetTail
+
 theorem allocatingSourceInnerStep (arguments : Array Value) :
     ∃ nextRuntime deadValue,
       coreStep (allocatingSourceInnerStateAt arguments) =
