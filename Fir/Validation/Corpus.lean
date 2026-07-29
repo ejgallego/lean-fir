@@ -2294,6 +2294,10 @@ def effectCapturedByteArrayRetainedUse
   (updated, before, after)
 
 @[noinline]
+def recordAliasedByteArrays (first second : ByteArray) : ByteArray × ByteArray :=
+  (recordByteArray first 42, second)
+
+@[noinline]
 def idByteArray (value : ByteArray) : ByteArray :=
   value
 
@@ -9172,6 +9176,39 @@ private def postConversionCases : Array Case := #[
       resultSchema := some .bytes }]
     provenance := firProvenance
       "Preserve two mutable heap arguments and results at their external event-time states" },
+  { id := "effect-record-aliased-byte-array-arguments"
+    entry := ``Source.recordAliasedByteArrays
+    args := #[.bytes #[0, 127, 128, 255], .bytes #[0, 127, 128, 255]]
+    argSchemas := #[.bytes, .bytes]
+    argumentAliases := #[{ source := 0, target := 1 }]
+    resultSchema := byteArrayPairSchema
+    native := fun _ =>
+      let shared : ByteArray := ⟨#[0, 127, 128, 255]⟩
+      byteArrayPairDatum (Source.recordAliasedByteArrays shared shared)
+    nativeBefore := NativeEffects.reset
+    nativeEffects := fun _ => NativeEffects.take
+    tags :=
+      #["stress", "effect", "external", "bytes", "heap", "mutation", "ownership",
+        "shared", "copy-on-write", "alias", "argument-alias"]
+    requiredLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfForms := #["lit", "fap", "extern", "ctor", "return"]
+    requiredExecutedLcnfFormCounts :=
+      exactExecutedFormCounts
+        #[("lit", 1), ("fap", 1), ("extern", 1), ("ctor", 1), ("return", 1)]
+    requiredExecutedLcnfFormTrace := some #["lit", "fap", "extern", "ctor", "return"]
+    requiredAdministrativeStepKinds := #["admin:yield-bind", "admin:yield-done"]
+    requiredExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternals := #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``NativeEffects.recordByteArrayImpl]
+    requiredExecutedExternalTrace := some #[``NativeEffects.recordByteArrayImpl]
+    effectProjections := #[{
+      external := ``NativeEffects.recordByteArrayImpl
+      operation := "validation.recordByteArray"
+      argSchemas := #[.bytes, .bits 8]
+      resultSchema := some .bytes }]
+    provenance := firProvenance
+      "Materialize one runner-supplied ByteArray as two owned arguments and preserve its original alias" },
   { id := "byte-array-roundtrip"
     entry := ``Source.idByteArray
     args := #[.bytes #[0, 127, 128, 255]]
