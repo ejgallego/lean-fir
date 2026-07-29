@@ -7725,6 +7725,80 @@ theorem setTag_nextLocation_eq_of_ok
   exact modifyConstructor_nextLocation_eq_of_ok
     (effect := by simpa [setTag] using effect)
 
+/-- Incrementing one live heap cell, or observing a persistent cell, never
+advances the allocation frontier. -/
+theorem incLocation_nextLocation_eq_of_ok
+    (effect : incLocation runtime location amount = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  generalize cellEq : getLiveCell runtime location = cellResult
+  cases cellResult with
+  | error fault =>
+      simp [incLocation, cellEq, Bind.bind, Except.bind] at effect
+  | ok cell =>
+      by_cases persistent : cell.persistent = true
+      · have noop :
+            incLocation runtime location amount = .ok runtime := by
+          unfold incLocation
+          rw [cellEq]
+          simp only [Bind.bind, Except.bind]
+          rw [if_pos persistent]
+          rfl
+        rw [noop] at effect
+        have resultEq := Except.ok.inj effect
+        subst result
+        rfl
+      · exact setCell_nextLocation_eq_of_ok
+          (effect := by simpa [incLocation, cellEq, Bind.bind, Except.bind,
+            persistent] using effect)
+
+/-- Every successful value increment is either runtime-neutral or an
+existing-cell replacement. -/
+theorem incValue_nextLocation_eq_of_ok
+    (effect : incValue runtime value amount check = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact incLocation_nextLocation_eq_of_ok
+            (effect := by simpa [incValue] using effect)
+      | tagged payload =>
+          simp only [incValue] at effect
+          split at effect
+          · have resultEq := Except.ok.inj effect
+            subst result
+            rfl
+          · simp at effect
+  | usize value => simp [incValue] at effect
+  | scalar value => simp [incValue] at effect
+  | erased => simp [incValue] at effect
+  | reuseToken location? => simp [incValue] at effect
+
+/-- A successful delete is a no-op for the erased sentinel or replaces one
+existing live cell. -/
+theorem deleteValue_nextLocation_eq_of_ok
+    (effect : deleteValue runtime value = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | erased =>
+      have resultEq := Except.ok.inj effect
+      subst result
+      rfl
+  | object reference =>
+      cases reference with
+      | heap location =>
+          unfold deleteValue at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime location = cellResult at effect
+          cases cellResult with
+          | error fault => simp at effect
+          | ok cell => exact setCell_nextLocation_eq_of_ok effect
+      | tagged payload => simp [deleteValue] at effect
+  | usize value => simp [deleteValue] at effect
+  | scalar value => simp [deleteValue] at effect
+  | reuseToken location? => simp [deleteValue] at effect
+
 /-- Reusing a concrete token updates an existing cell and therefore
 preserves the allocation frontier on every successful result. -/
 theorem reuseSome_nextLocation_eq_of_ok
@@ -9798,6 +9872,118 @@ theorem coreStep_setTag_binderReadyReachableRelated_ledger
   have ledger :
       TargetAllocationLedger rho targetNextRuntime.nextLocation := by
     rw [setTag_nextLocation_eq_of_ok targetEffect]
+    exact runtime.ledger
+  exact ⟨sourceStep, targetStep, ledger, related⟩
+
+/-- A successful non-persistent reference-count increment preserves the
+target allocation ledger. -/
+theorem coreStep_increment_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : incValue sourceState.runtime objectValue amount check =
+      .ok sourceNextRuntime)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      incValue targetState.runtime targetObjectValue amount check =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.inc object amount check false sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.inc object amount check false targetContinuation)) =
+          .next targetAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  rcases coreStep_increment_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectMember objectRead effect runtime.runtime with
+    ⟨targetObjectValue, targetNextRuntime, targetObjectRead, targetEffect,
+      nextRelated⟩
+  refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+    targetEffect, ?_⟩
+  dsimp only at nextRelated ⊢
+  rcases nextRelated with ⟨sourceStep, targetStep, related⟩
+  have ledger :
+      TargetAllocationLedger rho targetNextRuntime.nextLocation := by
+    rw [incValue_nextLocation_eq_of_ok targetEffect]
+    exact runtime.ledger
+  exact ⟨sourceStep, targetStep, ledger, related⟩
+
+/-- A successful retained delete preserves the target allocation frontier
+and ledger. -/
+theorem coreStep_delete_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : deleteValue sourceState.runtime objectValue =
+      .ok sourceNextRuntime)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      deleteValue targetState.runtime targetObjectValue =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.del object sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.del object targetContinuation)) =
+          .next targetAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  rcases coreStep_delete_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectMember objectRead effect runtime.runtime with
+    ⟨targetObjectValue, targetNextRuntime, targetObjectRead, targetEffect,
+      nextRelated⟩
+  refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+    targetEffect, ?_⟩
+  dsimp only at nextRelated ⊢
+  rcases nextRelated with ⟨sourceStep, targetStep, related⟩
+  have ledger :
+      TargetAllocationLedger rho targetNextRuntime.nextLocation := by
+    rw [deleteValue_nextLocation_eq_of_ok targetEffect]
     exact runtime.ledger
   exact ⟨sourceStep, targetStep, ledger, related⟩
 
@@ -31092,6 +31278,111 @@ theorem match_incrementCodeStep_binderReady
                 ⟨targetPath, finalRelated⟩
               exact ⟨_, targetPath, finalRelated⟩
 
+/-- Ledger-aware hereditary semantic matcher for reference-count
+increments. Persistent instructions are runtime-neutral; ordinary increments
+mutate one existing cell. -/
+theorem match_incrementCodeStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.inc object amount check persistent sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.inc object amount check persistent targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases persistent with
+  | true =>
+      let sourceNext := {
+        sourceState with control := .code sourceContinuation }
+      let targetNext := {
+        targetState with control := .code targetContinuation }
+      have sourceTransition :
+          coreStep (withCodeControl sourceState
+            (.inc object amount check true sourceContinuation)) =
+            .next sourceNext := by
+        simp [sourceNext, withCodeControl, coreStep]
+      have targetTransition :
+          coreStep (withCodeControl targetState
+            (.inc object amount check true targetContinuation)) =
+            .next targetNext := by
+        simp [targetNext, withCodeControl, coreStep]
+      have afterRelated :
+          LedgerBinderReadyReachableMachineRelated fuel rho
+            sourceNext targetNext :=
+        ⟨runtime.ledger,
+          continueCode_binderReadyReachableRelated
+            sourceState targetState programs frames continuation joins env
+            runtime.runtime⟩
+      rcases match_internalCoreSteps_binderReady_ledger
+          sourceTransition targetTransition afterRelated step with
+        ⟨targetPath, finalRelated⟩
+      exact ⟨targetNext, targetPath, finalRelated⟩
+  | false =>
+      let sourceCurrent := withCodeControl sourceState
+        (.inc object amount check false sourceContinuation)
+      have noStep {observation : Observation}
+          (done : coreStep sourceCurrent = .done observation) : False := by
+        cases step with
+        | internal transition =>
+            rw [show withCodeControl sourceState
+              (.inc object amount check false sourceContinuation) =
+                sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+        | external transition externalProof =>
+            rw [show withCodeControl sourceState
+              (.inc object amount check false sourceContinuation) =
+                sourceCurrent by rfl] at transition
+            rw [done] at transition
+            contradiction
+      generalize objectRead :
+        lookupValue sourceState.env object = objectResult
+      cases objectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+          exact (noStep done).elim
+      | ok objectValue =>
+          generalize effect :
+            incValue sourceState.runtime objectValue amount check = effectResult
+          cases effectResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+                  effect, fail]
+              exact (noStep done).elim
+          | ok sourceNextRuntime =>
+              rcases coreStep_increment_binderReadyReachableRelated_ledger
+                  sourceState targetState programs frames continuation joins
+                  env objectMember objectRead effect runtime with
+                ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+                  targetEffect, sourceTransition, targetTransition,
+                  afterRelated⟩
+              rcases match_internalCoreSteps_binderReady_ledger
+                  sourceTransition targetTransition afterRelated step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨_, targetPath, finalRelated⟩
+
 /-- An exact increment view supplies its live operand and hereditary
 continuation to the persistent or runtime-updating matcher. -/
 theorem ExactShadowCodeBinderReady.match_incrementStep
@@ -31136,6 +31427,53 @@ theorem ExactShadowCodeBinderReady.match_incrementStep
     simp
   exact match_incrementCodeStep_binderReady sourceState targetState programs
     frames (ready.increment_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
+/-- Ledger-aware exact matcher for a reference-count increment. -/
+theorem ExactShadowCodeBinderReady.match_incrementStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel amount : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId} {check persistent : Bool}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.increment
+          (object := object) (amount := amount)
+          (check := check) (persistent := persistent) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.inc object amount check persistent sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.inc object amount check persistent targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_incrementCodeStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.increment_continuationGraph fuelBound usedBound) joins env
     objectMember runtime step
 
 /-- Complete graph-level matcher for reference-count decrements. Persistent
@@ -31536,6 +31874,77 @@ theorem match_deleteCodeStep_binderReady
             ⟨targetPath, finalRelated⟩
           exact ⟨_, targetPath, finalRelated⟩
 
+/-- Ledger-aware hereditary semantic matcher for retained deletes. -/
+theorem match_deleteCodeStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState (.del object sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState (.del object targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.del object sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.del object sourceContinuation) = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.del object sourceContinuation) = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize effect :
+        deleteValue sourceState.runtime objectValue = effectResult
+      cases effectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              effect, fail]
+          exact (noStep done).elim
+      | ok sourceNextRuntime =>
+          rcases coreStep_delete_binderReadyReachableRelated_ledger
+              sourceState targetState programs frames continuation joins env
+              objectMember objectRead effect runtime with
+            ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+              targetEffect, sourceTransition, targetTransition,
+              afterRelated⟩
+          rcases match_internalCoreSteps_binderReady_ledger
+              sourceTransition targetTransition afterRelated step with
+            ⟨targetPath, finalRelated⟩
+          exact ⟨_, targetPath, finalRelated⟩
+
 /-- An exact delete view supplies its live operand and hereditary
 continuation to the runtime matcher. -/
 theorem ExactShadowCodeBinderReady.match_deleteStep
@@ -31577,6 +31986,50 @@ theorem ExactShadowCodeBinderReady.match_deleteStep
     simp
   exact match_deleteCodeStep_binderReady sourceState targetState programs
     frames (ready.delete_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
+/-- Ledger-aware exact matcher for a retained delete. -/
+theorem ExactShadowCodeBinderReady.match_deleteStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.delete
+          (object := object) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState (.del object sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState (.del object targetContinuation))
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_deleteCodeStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.delete_continuationGraph fuelBound usedBound) joins env
     objectMember runtime step
 
 /-- Unified hereditary dispatcher for one exact compiler edge.  Static
