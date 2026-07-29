@@ -835,8 +835,21 @@ hereditary retained/deleted matchers transport successful token and argument
 reads through exact compiler provenance. A retained exact fixture forces
 paired allocation from an empty failed token, while the deleted regression
 proves that its source-only allocation leaves the empty target owner ledger
-unchanged. Concrete-token reuse remains a separate existing-address branch:
-it overwrites an already allocated cell rather than creating a fresh pair.
+unchanged.
+
+The concrete-token reuse branch now carries the ledger through its
+existing-address semantics as well. Successful `setCell` and concrete
+`reuse` operations preserve `nextLocation`, while
+`TargetAllocationLedger.monoRenaming` transports the unchanged owner table
+across the hidden renaming extension returned by the established runtime
+simulation. `LedgerReuseSomeBothResult` packages the paired overwrite,
+related result values, and transported ledger. Specialized hereditary and
+exact retained matchers consume the token-reachability certificate; the
+deleted matcher instead consumes a ledger-certified source-only location and
+lets the target stutter. The retained exact regression starts from a genuinely
+paired live constructor and overwrites it with a self-reference on both sides;
+the deleted exact regression overwrites only an unmapped source cell while
+the empty target ledger remains unchanged.
 
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
@@ -914,7 +927,8 @@ each local operation shape from compiler typing and ownership invariants. The
 ledger now solves the address-map part without assuming an empty target, and
 its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
-matchers. It still has to be threaded through existing-address and external
+matchers, together with the concrete-token existing-address reuse branch. It
+still has to be threaded through the remaining no-allocation and external
 response branches, the unified non-lockstep dispatcher, and the
 compiler-client invariant so arbitrary selected edges receive that history
 rather than only focused fixtures.
@@ -958,9 +972,9 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through the no-allocation/existing-address matcher
-   families and strengthen the foreign-response boundary when an external
-   response allocates, then assemble the unified
+1. Preserve the ledger through the remaining no-allocation matcher families
+   and strengthen the foreign-response boundary when an external response
+   allocates, then assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
