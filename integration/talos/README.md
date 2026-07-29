@@ -308,6 +308,13 @@ and `correctBudgetedPureExternalSpine` proves arbitrary finite interleavings
 of the full direct family with the ten current W7 resident numeric
 declarations. Its caller supplies the three family laws once and no per-node
 runtime law, target witness, allocation result, or representation choice.
+`BudgetedCodeEvaluates` extends this finite-source boundary through selected
+case nodes. `CaseRuntimeRefines` states the reusable dispatcher theorem
+condition over all production compiler/adapter outputs, and
+`correctBudgetedPureExternalDefaultCases` instantiates it for arbitrary
+nesting of sole-default cases around the same mixed direct/resident-numeric
+code. The next control-flow instances will discharge constructor-tag and
+scalar case chains against their concrete comparison steps.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

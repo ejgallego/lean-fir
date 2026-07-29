@@ -125,6 +125,13 @@ Cross-cutting W6.5 state:
   current direct operations with the ten current W7 resident numeric
   declarations, from one path budget and the three initially installed family
   laws.
+  `BudgetedCodeEvaluates`, `CaseRuntimeRefines`, and
+  `codeWP_of_budgetedCodeEvaluates` extend the same certificate-free induction
+  through selected case nodes. The first constructive instance is
+  `DefaultOnlyCaseSupported`: compilation erases the wrapper, and
+  `correctBudgetedPureExternalDefaultCases` closes arbitrary nesting around
+  mixed direct/resident-numeric code. Constructor-tag and scalar case-chain
+  implementation laws remain the next control-flow coverage gap.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

@@ -198,6 +198,17 @@ whole-export proof whose source path mixes the full direct family and all ten
 declarations in W7's current resident numeric surface.
 Only the source evaluation, initial relation/frame, exact path budget, and
 three operation-family laws cross the public boundary.
+The finite structural theorem now also covers selected case nodes.
+`BudgetedCodeEvaluates` records source branch selection without target
+evidence, while `CaseRuntimeRefines` asks an operation-family theorem to lift
+correctness of the selected compiled branch through the complete generated
+dispatcher. `codeWP_of_budgetedCodeEvaluates` and
+`ConcreteSupportedExport.correctBudgetedCode` compose that law with the
+existing direct/external laws. The first instance,
+`correctBudgetedPureExternalDefaultCases`, handles arbitrary nesting of
+sole-default cases because production compilation erases each wrapper. This
+is a theorem condition over compiler outputs, not a per-program certificate.
+The next instances are constructor-tag and scalar comparison chains.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

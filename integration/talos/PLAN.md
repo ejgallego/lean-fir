@@ -3984,6 +3984,29 @@ in W7's current `ResidentNumeric.externalDeclarations` surface. The contract
 harness checks every new name/kind constructor. No FIR semantic contract,
 concrete layout, or executable ABI changed.
 
+W6.6ff opens certificate-free control flow. `BudgetedCodeEvaluates` extends
+the exact finite source relation with selected case nodes at unchanged heap
+cost. `CaseRuntimeRefines` is the corresponding reusable theorem condition:
+for every successful production compiler/adapter output, it recovers the
+selected target and lifts a `CodeWP` for that branch through the generated
+case dispatcher. `codeWP_of_budgetedCodeEvaluates` and
+`ConcreteSupportedExport.correctBudgetedCode` compose this law structurally
+with the existing direct and external family laws.
+
+The first constructive instance is deliberately small but fully nested.
+`DefaultOnlyCaseSupported` admits a sole default alternative;
+`caseRuntimeRefines_defaultOnly` proves that production compilation erases
+the wrapper to the selected branch, and
+`correctBudgetedPureExternalDefaultCases` closes arbitrary nesting of those
+cases around all current direct operations and all ten resident numeric
+externals. The contract harness checks the generic case law and the
+whole-export application. No caller supplies compiled target code, numeric
+indices, or a translation certificate. The next control-flow slices are
+constructor-tag and scalar case chains using the concrete `getTag` and scalar
+comparison rules. These proof-facing admission surfaces remain deliberately
+unstable. No FIR semantic contract, concrete layout, or executable ABI
+changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
