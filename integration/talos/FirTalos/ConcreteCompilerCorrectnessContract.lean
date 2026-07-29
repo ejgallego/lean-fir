@@ -1104,6 +1104,17 @@ example
   subst continuation
   rfl
 
+/-- Stable case posts remain stable through one nested generated arm. -/
+example
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    (stable : CaseResumptionStable module hostEnv tail Q) :
+    CaseResumptionStable module hostEnv tail
+      (CaseResumePost module hostEnv [] Q tail) :=
+  stable.resume
+
 /--
 Singleton object-constructor cases are implemented by the compiler-derived
 concrete `getTag` dispatcher, with no target witness in source admission.
@@ -1125,6 +1136,28 @@ example
       target.wasmModule hosts.env
       (SingleObjectConstructorCaseSupported context) :=
   spec.caseRuntimeRefines_singleObjectConstructor
+
+/--
+Two ordered object-constructor tests and their default are implemented by the
+same compiler-derived concrete dispatcher law.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (TwoObjectConstructorDefaultCasesSupported context) :=
+  spec.caseRuntimeRefines_twoObjectConstructorDefault
 
 /--
 The mixed whole-export theorem admits arbitrary nesting of sole-default cases
@@ -1244,6 +1277,67 @@ example
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctBudgetedPureExternalSingleObjectConstructorCases evaluation
+    stateRelated frameAligned budget integerImplementation
+    naturalImplementation scalarImplementation parameterCount
+
+/--
+The whole-export theorem also admits arbitrary nesting of two-constructor
+object chains with a default around the current direct/resident family.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (TwoObjectConstructorDefaultCasesSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedPureExternalTwoObjectConstructorDefaultCases evaluation
     stateRelated frameAligned budget integerImplementation
     naturalImplementation scalarImplementation parameterCount
 

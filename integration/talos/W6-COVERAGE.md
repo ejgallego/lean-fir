@@ -375,6 +375,13 @@ Cross-cutting W6.5 state:
   audit, round-trip, and execute a compiler-produced Unicode string input,
   while packed constructors and other initial heap kinds retain explicit
   layout gates; and
+- certificate-free finite compiler correctness now crosses ordered concrete
+  object-case control flow through two constructor tests plus a default:
+  production inversion derives all branch targets and numeric indices, the
+  concrete `getTag` contract proves first hit, second hit after one miss, and
+  default after two misses, and the whole-export theorem permits arbitrary
+  nesting around the current direct and resident-numeric family; general
+  constructor-chain length and scalar `UInt8` cases remain open; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

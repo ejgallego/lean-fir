@@ -217,8 +217,18 @@ law. `singleObjectConstructorCases_eq` derives the exact test and indices;
 `caseRuntimeRefines_singleObjectConstructor` composes the concrete `getTag`
 contract; and
 `correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
-nesting of selected singleton hits. Multi-arm hit/miss/default chains and
-scalar comparisons are the next control-flow instances.
+nesting of selected singleton hits. The first ordered multi-arm instance is
+also closed. `TwoObjectConstructorDefaultCasesSupported` admits two object
+constructor arms followed by a default using only source/compiler facts and
+the semantic tag-range law. `twoObjectConstructorDefaultCases_eq` recovers all
+three adapted branches and the nested tests;
+`caseRuntimeRefines_twoObjectConstructorDefault` proves first hit, second hit
+after one miss, and default after two misses. The second test requires a
+nested generated resumption wrapper; `CaseResumptionStable.resume` derives
+exactly that closure from the public stability premise.
+`correctBudgetedPureExternalTwoObjectConstructorDefaultCases` exposes the
+whole-export result. General-length constructor chains and scalar comparisons
+are the next control-flow instances.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

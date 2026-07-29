@@ -327,6 +327,184 @@ theorem CodeAdapted.singleObjectConstructorCases_eq
                         ⟨selectedCode, selectedCompiled, selectedAdapted⟩,
                         rfl, rfl, targetCompiled.symm⟩
 
+/--
+Invert production compilation and adaptation of two ordered object-constructor
+arms followed by a default. All three adapted branch targets and the complete
+nested test are recovered from the executable compiler and adapter.
+-/
+theorem CodeAdapted.twoObjectConstructorDefaultCases_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List FVarId}
+    {cases : LCNF.Cases .impure}
+    {firstInfo secondInfo : LCNF.CtorInfo}
+    {firstBranch secondBranch defaultBranch : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (altsEq : cases.alts.toList =
+      [.ctorAlt firstInfo firstBranch, .ctorAlt secondInfo secondBranch,
+        .default defaultBranch])
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
+    (firstFits : Fir.Wasm.constructorTagFitsI32 firstInfo = true)
+    (secondFits : Fir.Wasm.constructorTagFitsI32 secondInfo = true)
+    (adapted : CodeAdapted context sourceModule sourceFunction labels
+      (.cases cases) target) :
+    ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex,
+      CodeAdapted context sourceModule sourceFunction labels firstBranch
+          firstTarget ∧
+      CodeAdapted context sourceModule sourceFunction labels secondBranch
+          secondTarget ∧
+      CodeAdapted context sourceModule sourceFunction labels defaultBranch
+          defaultTarget ∧
+      findFVar? (functionBindings sourceFunction) cases.discr =
+        some discrIndex ∧
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
+      target =
+        [.localGet discrIndex, .call getTagIndex,
+          .const (UInt32.ofNat firstInfo.cidx), .eq,
+          .iff 0 0 firstTarget
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .iff 0 0 secondTarget defaultTarget]] := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  rw [altsEq] at core
+  simp only [Fir.Wasm.compileCaseFallbackWithM,
+    Fir.Wasm.compileCaseChainWithM, Fir.Wasm.isDefaultAlt,
+    List.find?,
+    Fir.Wasm.caseConstructorTagFits, modeEq, firstFits, secondFits,
+    ↓reduceIte] at core
+  cases defaultCore : Fir.Wasm.compileCodeCore context defaultBranch with
+  | none =>
+      rw [defaultCore] at core
+      cases core
+  | some defaultResult =>
+      cases defaultResult with
+      | error error =>
+          rw [defaultCore] at core
+          cases core
+      | ok defaultCode =>
+          cases firstCore :
+              Fir.Wasm.compileCodeCore context firstBranch with
+          | none =>
+              rw [defaultCore, firstCore] at core
+              cases core
+          | some firstResult =>
+              cases firstResult with
+              | error error =>
+                  rw [defaultCore, firstCore] at core
+                  cases core
+              | ok firstCode =>
+                  cases secondCore :
+                      Fir.Wasm.compileCodeCore context secondBranch with
+                  | none =>
+                      rw [defaultCore, firstCore, secondCore] at core
+                      cases core
+                  | some secondResult =>
+                      cases secondResult with
+                      | error error =>
+                          rw [defaultCore, firstCore, secondCore] at core
+                          cases core
+                      | ok secondCode =>
+                          rw [defaultCore, firstCore, secondCore] at core
+                          injection core with symbolicEq
+                          injection symbolicEq with symbolicEq
+                          subst symbolic
+                          have firstCompiled :
+                              Fir.Wasm.compileCode context firstBranch =
+                                .ok firstCode :=
+                            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr firstCore
+                          have secondCompiled :
+                              Fir.Wasm.compileCode context secondBranch =
+                                .ok secondCode :=
+                            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr secondCore
+                          have defaultCompiled :
+                              Fir.Wasm.compileCode context defaultBranch =
+                                .ok defaultCode :=
+                            Fir.Wasm.finishCompileResult_eq_ok_iff.mpr
+                              defaultCore
+                          cases discrFound :
+                              findFVar?
+                                (functionBindings sourceFunction)
+                                cases.discr with
+                          | none =>
+                              change findFVar?
+                                (sourceFunction.params.toList ++
+                                  sourceFunction.locals.toList)
+                                cases.discr = none at discrFound
+                              simp [Fir.Wasm.caseTagTest, instructions,
+                                instruction, discrFound, Bind.bind,
+                                Except.bind, Pure.pure, Except.pure]
+                                at targetCompiled
+                          | some discrIndex =>
+                              change findFVar?
+                                (sourceFunction.params.toList ++
+                                  sourceFunction.locals.toList)
+                                cases.discr = some discrIndex at discrFound
+                              cases getTagFound :
+                                  callIndex? sourceModule
+                                    (.runtime .getTag) with
+                              | none =>
+                                  simp [Fir.Wasm.caseTagTest, instructions,
+                                    instruction, discrFound, getTagFound,
+                                    Bind.bind, Except.bind, Pure.pure,
+                                    Except.pure] at targetCompiled
+                              | some getTagIndex =>
+                                  cases firstAdapted :
+                                      instructions sourceModule sourceFunction
+                                        labels firstCode with
+                                  | error error =>
+                                      simp [Fir.Wasm.caseTagTest,
+                                        instructions, instruction, discrFound,
+                                        getTagFound, firstAdapted, Bind.bind,
+                                        Except.bind, Pure.pure, Except.pure]
+                                        at targetCompiled
+                                  | ok firstTarget =>
+                                      cases secondAdapted :
+                                          instructions sourceModule
+                                            sourceFunction labels secondCode with
+                                      | error error =>
+                                          simp [Fir.Wasm.caseTagTest,
+                                            instructions, instruction,
+                                            discrFound, getTagFound,
+                                            firstAdapted, secondAdapted,
+                                            Bind.bind, Except.bind, Pure.pure,
+                                            Except.pure] at targetCompiled
+                                      | ok secondTarget =>
+                                          cases defaultAdapted :
+                                              instructions sourceModule
+                                                sourceFunction labels
+                                                defaultCode with
+                                          | error error =>
+                                              simp [Fir.Wasm.caseTagTest,
+                                                instructions, instruction,
+                                                discrFound, getTagFound,
+                                                firstAdapted, secondAdapted,
+                                                defaultAdapted, Bind.bind,
+                                                Except.bind, Pure.pure,
+                                                Except.pure] at targetCompiled
+                                          | ok defaultTarget =>
+                                              simp [Fir.Wasm.caseTagTest,
+                                                instructions, instruction,
+                                                discrFound, getTagFound,
+                                                firstAdapted, secondAdapted,
+                                                defaultAdapted, Bind.bind,
+                                                Except.bind, Pure.pure,
+                                                Except.pure] at targetCompiled
+                                              exact
+                                                ⟨firstTarget, secondTarget,
+                                                  defaultTarget, discrIndex,
+                                                  getTagIndex,
+                                                  ⟨firstCode, firstCompiled,
+                                                    firstAdapted⟩,
+                                                  ⟨secondCode, secondCompiled,
+                                                    secondAdapted⟩,
+                                                  ⟨defaultCode,
+                                                    defaultCompiled,
+                                                    defaultAdapted⟩,
+                                                  rfl, rfl,
+                                                  targetCompiled.symm⟩
+
 /-- Invert one successful adapter sequence step. -/
 theorem instructions_cons_eq_ok
     {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
@@ -3204,6 +3382,33 @@ def SingleObjectConstructorCaseSupported
       actualTag < UInt32.size
 
 /--
+Source-facing admission for the first ordered multi-arm object case.
+
+Two constructor tests precede one default. The source interpreter still
+chooses the branch; the admission records only source/compiler shape and the
+semantic tag-range law needed by both generated i32 comparisons.
+-/
+def TwoObjectConstructorDefaultCasesSupported
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (cases : LCNF.Cases .impure) (_selected : LCNF.Code .impure) : Prop :=
+  ∃ firstInfo secondInfo : LCNF.CtorInfo,
+    ∃ firstBranch secondBranch defaultBranch : LCNF.Code .impure,
+      cases.alts.toList =
+          [.ctorAlt firstInfo firstBranch,
+            .ctorAlt secondInfo secondBranch,
+            .default defaultBranch] ∧
+        Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
+        Fir.Wasm.constructorTagFitsI32 firstInfo = true ∧
+        Fir.Wasm.constructorTagFitsI32 secondInfo = true ∧
+        Fir.Wasm.getLocal context cases.discr =
+          .ok (.localGet cases.discr, .tobject) ∧
+        ∀ {sourceObject : Value} {actualTag : Nat},
+          lookupValue sourceEnv cases.discr = .ok sourceObject →
+          getTag sourceRuntime sourceObject = .ok actualTag →
+          actualTag < UInt32.size
+
+/--
 Static admission for a direct local alias.
 
 The declaration copies an existing local without applying it, and source and
@@ -4398,6 +4603,24 @@ def CaseResumptionStable (module : Wasm.Module) (hostEnv : Wasm.HostEnv Host)
     (tail : List Wasm.Value) (Q : Wasm.Assertion Host) : Prop :=
   Q ⇛ CaseResumePost module hostEnv [] Q tail
 
+/-- A stable post remains stable after one generated case-arm wrapper. -/
+theorem CaseResumptionStable.resume
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {tail : List Wasm.Value} {Q : Wasm.Assertion Host}
+    (stable : CaseResumptionStable module hostEnv tail Q) :
+    CaseResumptionStable module hostEnv tail
+      (CaseResumePost module hostEnv [] Q tail) := by
+  intro continuation resumed
+  cases continuation with
+  | Break level nextStore nextLocals =>
+      cases level with
+      | zero =>
+          simpa [CaseResumePost, Wasm.wp_nil] using resumed
+      | succ level =>
+          exact stable (.Break level nextStore nextLocals) resumed
+  | _ =>
+      simpa [CaseResumePost, Wasm.wp_nil] using resumed
+
 /--
 Uniform runtime condition for a selected source case branch.
 
@@ -4600,6 +4823,406 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_singleObjectConstructor
   rw [targetEq]
   apply codeWP_cases fallbackCompiled
   simpa only [altsEq] using chain
+
+/--
+The concrete `getTag` host implements an ordered two-constructor chain with a
+default fallback.
+
+The proof executes the first hit, second hit after one miss, and default after
+two misses. Nested generated resumption wrappers are discharged from the
+single semantic stability condition carried by `CaseRuntimeRefines`.
+-/
+theorem ConcreteSupportedExport.caseRuntimeRefines_twoObjectConstructorDefault
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (TwoObjectConstructorDefaultCasesSupported context) := by
+  intro sourceRuntime sourceEnv cases selected fullTarget targetStore
+    targetLocals witness supported sourceStep stateRelated adapted
+  rcases supported with
+    ⟨firstInfo, secondInfo, firstBranch, secondBranch, defaultBranch,
+      altsEq, modeEq, firstTagFits, secondTagFits, discrCompiled,
+      actualTagFits⟩
+  rcases sourceStep with
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup :
+      lookup sourceEnv cases.discr = some sourceObject := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none =>
+        simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceObject := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  have actualFits : actualTag < UInt32.size :=
+    actualTagFits lookupFound tagged
+  have firstExpectedFits : firstInfo.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using firstTagFits
+  have secondExpectedFits : secondInfo.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using secondTagFits
+  obtain ⟨firstTarget, secondTarget, defaultTarget, discrIndex, getTagIndex,
+      firstAdapted, secondAdapted, defaultAdapted, discrFound, getTagFound,
+      targetEq⟩ :=
+    CodeAdapted.twoObjectConstructorDefaultCases_eq altsEq modeEq firstTagFits
+      secondTagFits adapted
+  obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+    spec.localsAligned discrCompiled
+  rw [discrFound] at alignedFound
+  injection alignedFound with indexEq
+  subst alignedIndex
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned getTagFound
+  have getTagContracted :
+      hosts.spec.contracts[getTagIndex]? = some getTagContract := by
+    change hosts.spec.contracts[getTagIndex]? =
+      some (fun initial args result => result = getTagStep initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, getTagFn]
+      using contracted
+  have parameterCount : imp.params.length = 1 := by
+    change imp.params.length = 1 at params
+    exact params
+  have resultCount : imp.results.length = 1 := by
+    change imp.results.length = 1 at results
+    exact results
+  rcases defaultAdapted with
+    ⟨defaultSymbolic, defaultCompiled, defaultTargetCompiled⟩
+  have defaultAdapted' :
+      CodeAdapted context sourceModule sourceFunction labels defaultBranch
+        defaultTarget :=
+    ⟨defaultSymbolic, defaultCompiled, defaultTargetCompiled⟩
+  have fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context cases.alts.toList =
+        .ok defaultSymbolic := by
+    rw [altsEq]
+    change
+      Fir.Wasm.compileCaseFallbackWithM (Fir.Wasm.compileCode context)
+          [.ctorAlt firstInfo firstBranch,
+            .ctorAlt secondInfo secondBranch,
+            .default defaultBranch] =
+        .ok defaultSymbolic
+    simp [Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt,
+      defaultCompiled]
+  have defaultChainAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+        [.default defaultBranch] defaultSymbolic defaultTarget :=
+    caseChainAdapted_default
+      (caseChainAdapted_nil defaultTargetCompiled)
+  have secondChainAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+        [.ctorAlt secondInfo secondBranch, .default defaultBranch]
+        defaultSymbolic
+        [.localGet discrIndex, .call getTagIndex,
+          .const (UInt32.ofNat secondInfo.cidx), .eq,
+          .iff 0 0 secondTarget defaultTarget] :=
+    caseChainAdapted_constructor modeEq secondTagFits secondAdapted
+      defaultChainAdapted discrFound getTagFound
+  by_cases firstHit : actualTag = firstInfo.cidx
+  · have selectedEq : selected = firstBranch := by
+      have branchEq : firstBranch = selected := by
+        rw [altsEq] at chosen
+        simpa [chooseAlt, findCtorAlt, findDefaultAlt, firstHit] using chosen
+      exact branchEq.symm
+    subst selected
+    refine ⟨firstTarget, firstAdapted,
+      ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
+    intro tail Q stable continued
+    have continuedOnce :
+        CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv firstBranch firstTarget targetStore
+          targetLocals witness tail
+          (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+      continued.conseq stable
+    have branchWP :
+        Wasm.wp target.wasmModule
+          (if actualTag = firstInfo.cidx then firstTarget else
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .iff 0 0 secondTarget defaultTarget])
+          (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
+          { targetLocals with values := tail } hosts.env := by
+      simpa [firstHit] using continuedOnce.2.2
+    have chain :
+        CaseChainWP context sourceModule sourceFunction labels
+          target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
+          [.ctorAlt firstInfo firstBranch,
+            .ctorAlt secondInfo secondBranch,
+            .default defaultBranch]
+          defaultSymbolic
+          [.localGet discrIndex, .call getTagIndex,
+            .const (UInt32.ofNat firstInfo.cidx), .eq,
+            .iff 0 0 firstTarget
+              [.localGet discrIndex, .call getTagIndex,
+                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .iff 0 0 secondTarget defaultTarget]]
+          targetStore targetLocals witness tail Q := by
+      apply caseChainWP_constructor
+        (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+        (actualTag := actualTag)
+      · exact modeEq
+      · exact firstTagFits
+      · exact firstAdapted
+      · exact secondChainAdapted
+      · exact discrFound
+      · exact discrKind
+      · exact getTagFound
+      · exact stateRelated
+      · exact sourceLookup
+      · exact imported
+      · exact spec.hostsSatisfy
+      · exact inBounds
+      · exact getTagContracted
+      · exact parameterCount
+      · exact resultCount
+      · exact tagged
+      · exact actualFits
+      · exact firstExpectedFits
+      · exact branchWP
+    rw [targetEq]
+    apply codeWP_cases fallbackCompiled
+    simpa only [altsEq] using chain
+  · by_cases secondHit : actualTag = secondInfo.cidx
+    · have selectedEq : selected = secondBranch := by
+        have firstMiss' : firstInfo.cidx ≠ actualTag :=
+          fun equal => firstHit equal.symm
+        have different : firstInfo.cidx ≠ secondInfo.cidx :=
+          fun equal => firstHit (secondHit.trans equal.symm)
+        have branchEq : secondBranch = selected := by
+          rw [altsEq] at chosen
+          simpa [chooseAlt, findCtorAlt, findDefaultAlt, firstHit, firstMiss',
+            secondHit, different] using chosen
+        exact branchEq.symm
+      subst selected
+      refine ⟨secondTarget, secondAdapted,
+        ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
+      intro tail Q stable continued
+      have continuedOnce :
+          CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv secondBranch secondTarget
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+        continued.conseq stable
+      have continuedTwice :
+          CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv secondBranch secondTarget
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env []
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) tail) :=
+        continuedOnce.conseq stable.resume
+      have innerBranchWP :
+          Wasm.wp target.wasmModule
+            (if actualTag = secondInfo.cidx then secondTarget else
+              defaultTarget)
+            (CaseResumePost target.wasmModule hosts.env []
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) tail)
+            targetStore { targetLocals with values := tail } hosts.env := by
+        simpa [secondHit] using continuedTwice.2.2
+      have innerChain :
+          CaseChainWP context sourceModule sourceFunction labels
+            target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
+            [.ctorAlt secondInfo secondBranch, .default defaultBranch]
+            defaultSymbolic
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .iff 0 0 secondTarget defaultTarget]
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) := by
+        apply caseChainWP_constructor
+          (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+          (actualTag := actualTag)
+        · exact modeEq
+        · exact secondTagFits
+        · exact secondAdapted
+        · exact defaultChainAdapted
+        · exact discrFound
+        · exact discrKind
+        · exact getTagFound
+        · exact stateRelated
+        · exact sourceLookup
+        · exact imported
+        · exact spec.hostsSatisfy
+        · exact inBounds
+        · exact getTagContracted
+        · exact parameterCount
+        · exact resultCount
+        · exact tagged
+        · exact actualFits
+        · exact secondExpectedFits
+        · exact innerBranchWP
+      have outerBranchWP :
+          Wasm.wp target.wasmModule
+            (if actualTag = firstInfo.cidx then firstTarget else
+              [.localGet discrIndex, .call getTagIndex,
+                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .iff 0 0 secondTarget defaultTarget])
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
+            { targetLocals with values := tail } hosts.env := by
+        simpa [firstHit] using innerChain.2.2
+      have chain :
+          CaseChainWP context sourceModule sourceFunction labels
+            target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
+            [.ctorAlt firstInfo firstBranch,
+              .ctorAlt secondInfo secondBranch,
+              .default defaultBranch]
+            defaultSymbolic
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat firstInfo.cidx), .eq,
+              .iff 0 0 firstTarget
+                [.localGet discrIndex, .call getTagIndex,
+                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .iff 0 0 secondTarget defaultTarget]]
+            targetStore targetLocals witness tail Q := by
+        apply caseChainWP_constructor
+          (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+          (actualTag := actualTag)
+        · exact modeEq
+        · exact firstTagFits
+        · exact firstAdapted
+        · exact innerChain.1
+        · exact discrFound
+        · exact discrKind
+        · exact getTagFound
+        · exact stateRelated
+        · exact sourceLookup
+        · exact imported
+        · exact spec.hostsSatisfy
+        · exact inBounds
+        · exact getTagContracted
+        · exact parameterCount
+        · exact resultCount
+        · exact tagged
+        · exact actualFits
+        · exact firstExpectedFits
+        · exact outerBranchWP
+      rw [targetEq]
+      apply codeWP_cases fallbackCompiled
+      simpa only [altsEq] using chain
+    · have selectedEq : selected = defaultBranch := by
+        have firstMiss' : firstInfo.cidx ≠ actualTag :=
+          fun equal => firstHit equal.symm
+        have secondMiss' : secondInfo.cidx ≠ actualTag :=
+          fun equal => secondHit equal.symm
+        have branchEq : defaultBranch = selected := by
+          rw [altsEq] at chosen
+          simpa [chooseAlt, findCtorAlt, findDefaultAlt, firstHit, firstMiss',
+            secondHit, secondMiss'] using chosen
+        exact branchEq.symm
+      subst selected
+      refine ⟨defaultTarget, defaultAdapted',
+        ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
+      intro tail Q stable continued
+      have continuedOnce :
+          CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv defaultBranch defaultTarget
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+        continued.conseq stable
+      have continuedTwice :
+          CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv defaultBranch defaultTarget
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env []
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) tail) :=
+        continuedOnce.conseq stable.resume
+      have innerBranchWP :
+          Wasm.wp target.wasmModule
+            (if actualTag = secondInfo.cidx then secondTarget else
+              defaultTarget)
+            (CaseResumePost target.wasmModule hosts.env []
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) tail)
+            targetStore { targetLocals with values := tail } hosts.env := by
+        simpa [secondHit] using continuedTwice.2.2
+      have innerChain :
+          CaseChainWP context sourceModule sourceFunction labels
+            target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
+            [.ctorAlt secondInfo secondBranch, .default defaultBranch]
+            defaultSymbolic
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .iff 0 0 secondTarget defaultTarget]
+            targetStore targetLocals witness tail
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) := by
+        apply caseChainWP_constructor
+          (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+          (actualTag := actualTag)
+        · exact modeEq
+        · exact secondTagFits
+        · exact secondAdapted
+        · exact defaultChainAdapted
+        · exact discrFound
+        · exact discrKind
+        · exact getTagFound
+        · exact stateRelated
+        · exact sourceLookup
+        · exact imported
+        · exact spec.hostsSatisfy
+        · exact inBounds
+        · exact getTagContracted
+        · exact parameterCount
+        · exact resultCount
+        · exact tagged
+        · exact actualFits
+        · exact secondExpectedFits
+        · exact innerBranchWP
+      have outerBranchWP :
+          Wasm.wp target.wasmModule
+            (if actualTag = firstInfo.cidx then firstTarget else
+              [.localGet discrIndex, .call getTagIndex,
+                .const (UInt32.ofNat secondInfo.cidx), .eq,
+                .iff 0 0 secondTarget defaultTarget])
+            (CaseResumePost target.wasmModule hosts.env [] Q tail) targetStore
+            { targetLocals with values := tail } hosts.env := by
+        simpa [firstHit] using innerChain.2.2
+      have chain :
+          CaseChainWP context sourceModule sourceFunction labels
+            target.wasmModule hosts.env sourceRuntime sourceEnv cases.discr
+            [.ctorAlt firstInfo firstBranch,
+              .ctorAlt secondInfo secondBranch,
+              .default defaultBranch]
+            defaultSymbolic
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat firstInfo.cidx), .eq,
+              .iff 0 0 firstTarget
+                [.localGet discrIndex, .call getTagIndex,
+                  .const (UInt32.ofNat secondInfo.cidx), .eq,
+                  .iff 0 0 secondTarget defaultTarget]]
+            targetStore targetLocals witness tail Q := by
+        apply caseChainWP_constructor
+          (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+          (actualTag := actualTag)
+        · exact modeEq
+        · exact firstTagFits
+        · exact firstAdapted
+        · exact innerChain.1
+        · exact discrFound
+        · exact discrKind
+        · exact getTagFound
+        · exact stateRelated
+        · exact sourceLookup
+        · exact imported
+        · exact spec.hostsSatisfy
+        · exact inBounds
+        · exact getTagContracted
+        · exact parameterCount
+        · exact resultCount
+        · exact tagged
+        · exact actualFits
+        · exact firstExpectedFits
+        · exact outerBranchWP
+      rw [targetEq]
+      apply codeWP_cases fallbackCompiled
+      simpa only [altsEq] using chain
 
 /--
 The production compiler, adapter, concrete resolver, and reusable external
@@ -8445,6 +9068,72 @@ theorem
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
     spec.caseRuntimeRefines_singleObjectConstructor parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary nesting of ordered
+two-constructor/default object cases around the current
+direct/pure-external family.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalTwoObjectConstructorDefaultCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (TwoObjectConstructorDefaultCasesSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    spec.caseRuntimeRefines_twoObjectConstructorDefault parameterCount
 
 /--
 Whole-export partial correctness for the current budgeted direct-value

@@ -320,8 +320,16 @@ object-constructor hits without target evidence;
 `caseRuntimeRefines_singleObjectConstructor` derives the generated `getTag`
 test and executes it against the concrete heap; and
 `correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
-nesting around the same mixed direct/resident-numeric family. Multi-arm
-hit/miss/default and scalar comparison chains remain next.
+nesting around the same mixed direct/resident-numeric family.
+`TwoObjectConstructorDefaultCasesSupported` admits the first ordered
+multi-arm family without target evidence;
+`twoObjectConstructorDefaultCases_eq` derives its exact nested generated
+tests; `caseRuntimeRefines_twoObjectConstructorDefault` proves first hit,
+second hit after one miss, and default after two misses; and
+`correctBudgetedPureExternalTwoObjectConstructorDefaultCases` closes arbitrary
+nesting around the same mixed family. Nested arm control uses
+`CaseResumptionStable.resume`, not an unrestricted fallthrough assumption.
+General-length constructor chains and scalar comparisons remain next.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

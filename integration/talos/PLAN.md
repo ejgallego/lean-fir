@@ -4033,6 +4033,24 @@ hit/miss/default and scalar comparison chains are next. These proof-facing
 surfaces remain deliberately unstable. No FIR semantic contract, concrete
 layout, executable ABI, or W7 helper signature changed.
 
+W6.6fh closes the first ordered multi-arm dispatcher. Production inversion
+`twoObjectConstructorDefaultCases_eq` derives all three adapted branches, the
+shared discriminator/import indices, and the exact nested target for two
+object-constructor arms followed by a default.
+`TwoObjectConstructorDefaultCasesSupported` remains source/runtime-facing: it
+records that source shape, object-tag compilation, both static tag bounds, and
+the semantic actual-tag bound, but no target evidence.
+`caseRuntimeRefines_twoObjectConstructorDefault` proves first-arm hit,
+second-arm hit after one miss, and default selection after two misses against
+the concrete `getTag` host. `CaseResumptionStable.resume` supplies the precise
+closure fact needed by the nested generated `if` wrappers.
+`correctBudgetedPureExternalTwoObjectConstructorDefaultCases` lifts the result
+to arbitrary nesting around all current direct operations and ten resident
+numeric externals. The contract harness checks the nested stability law,
+runtime instance, and whole-export application. General-length constructor
+chains and scalar `UInt8` comparisons are next. No FIR semantic contract,
+concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
