@@ -20,11 +20,11 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/wasm-lanes` | active | Released resident literal allocation and the 152/153-import `prettyM` checkpoints as `64831f6`; W7 resident closure allocation is next | Stable closure descriptors remain the shared W6/W7 base; later contract changes still land separately before dependent work |
+| Integration | integration owner | `integration/wasm-lanes` | active | Integrated W7's closed resident `prettyM` runtime through `071fcbc` and the exact Int32 validation checkpoint as `a669b51`; subsequent lane releases remain independently queued | Stable W6/W7 contracts are unchanged; validation consumes the released semantic ABI without creating a new cross-lane contract |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | active | Hereditary control-flow readiness through named invocation and yielded steps is landed through `0e0cf0b`; worktree is clean | Independent of W7 generation; branch only needs the latest W7 landing before its next handoff |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Partial-closure capacity is proved at clean head `5095ac3`; the branch contains the stable closure-descriptor contract | W7 may consume the released descriptor table now; W6 remains the proof owner and rebases on current `main` before its next handoff |
-| W7 generation | generation owner | `wasm/generation` | active | Resident immediate Naturals are landed as `64831f6`; implement the 87-import resident `partialApply` closure-allocation slice | Uses released `closureDispatch`/`closureDescriptors` metadata without editing W6 proof files or changing a shared contract |
-| Validation | validation owner | `validation/interpreter-corpus` | active | The 103-case native ABI boundary release is on `main`; the worktree is now exploring JSON integer precision with `FIR-BUG-wasm-none-json-int-precision` | Independent validation slice; any protocol change must land separately before W7 consumes it |
+| W7 generation | generation owner | `wasm/generation` | active | Resident cache publication, numeric operations, String operations, and fallbacks are landed through the zero-import `prettyM` checkpoint `071fcbc` | Uses released W6/W7 contracts; the owner must report the next generation helper and any new contract impact before handoff |
+| Validation | validation owner | `validation/interpreter-corpus` | active | Exact signed Int8/Int16/Int32 coverage is landed through `a669b51`: 493 source cases, 502 unique cases, 1,488 comparisons, and zero native/LCNF/V8 findings; Int64 is next | No shared-contract change; consumes the signed semantic Wasm ABI released at `504d1ad`, while compiler-generated Wasm adoption remains a downstream W7 user of the same fixtures |
 
 ## Resident-helper bridge
 
