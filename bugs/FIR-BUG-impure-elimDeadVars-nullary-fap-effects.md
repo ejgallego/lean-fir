@@ -9,7 +9,7 @@ pass: elimDeadVars-0
 discovered-by: proof
 first-seen: 2026-07-22
 reproduction: Fir/LeanIR/Passes/ElimDeadExamples.lean#deadNullaryFapBeforeProgram
-regression: Fir/LeanIR/Passes/ElimDeadExamples.lean#deadNullaryFapObservableMismatch
+regression: Fir/LeanIR/Passes/ElimDeadExamples.lean#deadNullaryFapStaticPremisesButNotCorrect
 ---
 
 # Summary
@@ -61,11 +61,19 @@ observation equality nor `ObservationRel` can relate the world/trace fields.
 The actual-pass fixture `deadNullaryFapBefore` transforms to
 `deadNullaryFapAfter`.  `deadNullaryFapObservableMismatch` checks that both
 runs return erased while the source has world `1` and trace length `1` and the
-target has world `0` and an empty trace.  Kernel theorems separately establish
-that both programs satisfy current impure well-formedness.
+target has world `0` and an empty trace.
 
-Consequently, `WellFormedAt .impure` alone cannot discharge the `.fap #[]`
-case of the planned generalized deleted-let stuttering theorem.
+`deadNullaryFapStaticPremisesButNotCorrect` strengthens this to a kernel
+theorem: the source satisfies the full `ProgramElimDeadWellFormed` premise,
+the transparent whole-program pass run succeeds with the actual pinned
+target, and `LoweringCorrect` is false for the counted external specification.
+The proof admits the concrete source run into the relational small-step
+semantics and characterizes every target evaluation before refuting
+`ObservationRel` from the worlds `1 ≠ 0`.
+
+Consequently, neither `WellFormedAt .impure` nor the complete static
+`ProgramElimDeadWellFormed` package can discharge the `.fap #[]` case of a
+generalized deleted-let stuttering theorem.
 
 ## Semantic impact
 
@@ -98,6 +106,7 @@ none
 
 ## Resolution and regression
 
-Unresolved.  Preserve the actual-pass and observable-mismatch fixtures, then
-replace the explicit certificate only after the shared semantic contract rules
-out or accounts for effectful nullary constants.
+Unresolved.  Preserve the actual-pass fixture, executable mismatch, and
+kernel-level negative theorem. Replace the explicit semantic-admissibility
+premise only after a shared contract rules out or accounts for effectful
+nullary constants.

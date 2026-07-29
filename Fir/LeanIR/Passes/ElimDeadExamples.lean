@@ -448,6 +448,186 @@ def countedNullaryExternal : ExternalImpl where
     nextLocation := runtime.nextLocation
     world := runtime.world + 1 }
 
+def countedNullaryExternalSpec : ExternalSpec :=
+  fun request runtime response =>
+    countedNullaryExternal.call request runtime = .ok response
+
+theorem countedNullaryExternalImplements :
+    countedNullaryExternal.Implements countedNullaryExternalSpec :=
+  fun _ _ _ response => response
+
+def deadNullaryFapSourceObservation : Observation :=
+  match runMain deadNullaryFapBeforeProgram countedNullaryExternal with
+  | .done observation => observation
+  | .outOfFuel _ => default
+
+def deadNullaryFapSourceRunIsDone : Bool :=
+  match runMain deadNullaryFapBeforeProgram countedNullaryExternal with
+  | .done _ => true
+  | .outOfFuel _ => false
+
+theorem deadNullaryFapSourceRunIsDone_true :
+    deadNullaryFapSourceRunIsDone = true := by
+  native_decide
+
+theorem deadNullaryFapSourceRun :
+    runMain deadNullaryFapBeforeProgram countedNullaryExternal =
+      .done deadNullaryFapSourceObservation := by
+  unfold deadNullaryFapSourceObservation
+  cases execution :
+      runMain deadNullaryFapBeforeProgram countedNullaryExternal with
+  | done observation =>
+      simp
+  | outOfFuel _ =>
+      have impossible := deadNullaryFapSourceRunIsDone_true
+      simp [deadNullaryFapSourceRunIsDone, execution] at impossible
+
+theorem countedNullaryExternal_executeStep_done
+    (execution :
+      executeStep countedNullaryExternal state = .done observation) :
+    coreStep state = .done observation := by
+  unfold executeStep at execution
+  split at execution
+  next transition => contradiction
+  next transition =>
+    cases execution
+    exact transition
+  next request waiting transition =>
+    simp [countedNullaryExternal] at execution
+
+theorem deadNullaryFapSourceEvaluates :
+    Evaluates countedNullaryExternalSpec
+      deadNullaryFapBeforeProgram `main #[]
+      deadNullaryFapSourceObservation := by
+  have executed :=
+    run_done_sound countedNullaryExternal
+      deadNullaryFapSourceObservation 100
+      (initialState deadNullaryFapBeforeProgram `main #[])
+      (by
+        simpa [runMain, runProgram] using
+          deadNullaryFapSourceRun)
+  rcases executed with ⟨count, final, steps, done⟩
+  exact ⟨count, final,
+    execSteps_sound countedNullaryExternalImplements steps,
+    countedNullaryExternal_executeStep_done done⟩
+
+def deadNullaryFapLiveEnv : Env :=
+  bind [] live .erased
+
+def deadNullaryFapTargetOuterState : MachineState := {
+  program := deadNullaryFapAfterProgram
+  control := .code deadNullaryFapAfter
+  frames := [.cache `main]
+}
+
+def deadNullaryFapTargetReturnState : MachineState := {
+  program := deadNullaryFapAfterProgram
+  control := .code (.return live)
+  env := deadNullaryFapLiveEnv
+  frames := [.cache `main]
+}
+
+def deadNullaryFapTargetYieldedState : MachineState := {
+  program := deadNullaryFapAfterProgram
+  control := .yielded .erased
+  env := deadNullaryFapLiveEnv
+  frames := [.cache `main]
+}
+
+def deadNullaryFapTargetCachedState : MachineState := {
+  program := deadNullaryFapAfterProgram
+  control := .yielded .erased
+  env := deadNullaryFapLiveEnv
+  runtime := ({} : RuntimeState).setGlobal `main .erased
+}
+
+def deadNullaryFapTargetObservation : Observation :=
+  observe deadNullaryFapTargetCachedState (.returned .erased)
+
+theorem deadNullaryFapTargetEntryStep :
+    coreStep
+      (initialState deadNullaryFapAfterProgram `main #[]) =
+      .next deadNullaryFapTargetOuterState := by
+  simp [initialState, coreStep, deadNullaryFapAfterProgram,
+    deadNullaryExternalDecl, fixtureDecl, decl,
+    Program.findDecl?, invokeDecl, bindParams, findGlobal?,
+    deadNullaryFapTargetOuterState]
+
+theorem deadNullaryFapTargetOuterStep :
+    coreStep deadNullaryFapTargetOuterState =
+      .next deadNullaryFapTargetReturnState := by
+  unfold deadNullaryFapTargetOuterState
+    deadNullaryFapTargetReturnState deadNullaryFapAfter
+    liveDecl letDecl deadNullaryFapLiveEnv
+  rfl
+
+theorem deadNullaryFapTargetReturnStep :
+    coreStep deadNullaryFapTargetReturnState =
+      .next deadNullaryFapTargetYieldedState := by
+  simp [coreStep, deadNullaryFapTargetReturnState,
+    deadNullaryFapTargetYieldedState, deadNullaryFapLiveEnv,
+    lookupValue, Impure.bind, Impure.lookup, live]
+
+theorem deadNullaryFapTargetYieldedStep :
+    coreStep deadNullaryFapTargetYieldedState =
+      .next deadNullaryFapTargetCachedState := by
+  rfl
+
+theorem deadNullaryFapTargetCachedDone :
+    coreStep deadNullaryFapTargetCachedState =
+      .done deadNullaryFapTargetObservation := by
+  rfl
+
+theorem deadNullaryFapTargetEvaluates_iff :
+    Evaluates countedNullaryExternalSpec
+      deadNullaryFapAfterProgram `main #[] observation ↔
+      deadNullaryFapTargetObservation = observation := by
+  change EvaluatesState countedNullaryExternalSpec
+    (initialState deadNullaryFapAfterProgram `main #[])
+    observation ↔ _
+  rw [evaluatesState_internal_iff deadNullaryFapTargetEntryStep]
+  rw [evaluatesState_internal_iff deadNullaryFapTargetOuterStep]
+  rw [evaluatesState_internal_iff deadNullaryFapTargetReturnStep]
+  rw [evaluatesState_internal_iff deadNullaryFapTargetYieldedStep]
+  exact ElimDead.evaluatesState_done_iff
+    deadNullaryFapTargetCachedDone
+
+theorem deadNullaryFapSourceObservation_world :
+    deadNullaryFapSourceObservation.world = 1 := by
+  native_decide
+
+theorem deadNullaryFapTargetObservation_world :
+    deadNullaryFapTargetObservation.world = 0 := by
+  rfl
+
+theorem deadNullaryFapObservationsNotRelated :
+    ¬ObservationRel deadNullaryFapSourceObservation
+      deadNullaryFapTargetObservation := by
+  rintro ⟨_, _, world, _, _⟩
+  rw [deadNullaryFapSourceObservation_world,
+    deadNullaryFapTargetObservation_world] at world
+  contradiction
+
+/-- The actual pass result is not a correct lowering under FIR's unrestricted
+external semantics: the deleted source call advances the observable world,
+while every target execution leaves it at zero. -/
+theorem deadNullaryFapNotLoweringCorrect :
+    ¬LoweringCorrect
+      (Impure.semantics countedNullaryExternalSpec)
+      (Impure.semantics countedNullaryExternalSpec)
+      (reachablePhaseSimulation countedNullaryExternalSpec)
+      deadNullaryFapBeforeProgram
+      deadNullaryFapAfterProgram #[`main] := by
+  intro correct
+  obtain ⟨targetObservation, targetEvaluation, related⟩ :=
+    correct `main (by simp) #[] #[] .nil
+      deadNullaryFapSourceObservation
+      deadNullaryFapSourceEvaluates
+  have observationEq :=
+    deadNullaryFapTargetEvaluates_iff.mp targetEvaluation
+  subst targetObservation
+  exact deadNullaryFapObservationsNotRelated related
+
 theorem deadNullaryFapBeforeWellFormed :
     WellFormedAt .impure deadNullaryFapBeforeProgram := by
   apply WellFormedAt.impure
@@ -489,6 +669,81 @@ theorem neutralShadowRun :
   have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by native_decide
   simp [neutralBefore, neutralAfter, liveDecl, deadErasedDecl, letDecl,
     shadowCode?, safeToElim, collectLetValue, liveMember, deadAbsent]
+
+theorem deadNullaryFapShadowRun :
+    shadowCode? 3 {} deadNullaryFapBefore =
+      some (deadNullaryFapAfter, neutralUsed) := by
+  change shadowCode? 3 {} deadNullaryFapBefore =
+    some (deadNullaryFapAfter, ({} : UsedLocals).insert live)
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [deadNullaryFapBefore, deadNullaryFapAfter,
+    liveDecl, deadNullaryFapDecl, letDecl,
+    shadowCode?, safeToElim, collectLetValue,
+    collectArgs, collectArgList,
+    liveMember, deadAbsent]
+
+theorem deadNullaryFapBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed deadNullaryFapBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · exact deadNullaryFapBeforeWellFormed
+    · native_decide
+    · intro declaration member
+      simp [deadNullaryFapBeforeProgram] at member
+      rcases member with rfl | rfl
+      · trivial
+      · exact .letE (.letE .ret)
+    · intro declaration member
+      simp [deadNullaryFapBeforeProgram] at member
+      rcases member with rfl | rfl
+      · trivial
+      · exact .letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩ .ret)
+  · intro declaration member
+    simp [deadNullaryFapBeforeProgram] at member
+    rcases member with rfl | rfl
+    · simp [DeclCodeBinderNamesUnique,
+        deadNullaryExternalDecl, decl,
+        BinderNamesUnique, ImpureHygiene.paramIds]
+    · simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+        deadNullaryFapBefore, liveDecl, deadNullaryFapDecl,
+        letDecl, codeBinderIds, BinderNamesUnique,
+        ImpureHygiene.paramIds, live, dead]
+
+theorem deadNullaryFapShadowProgramRun :
+    shadowProgram? 3 deadNullaryFapBeforeProgram =
+      some deadNullaryFapAfterProgram := by
+  have externalRun :
+      shadowDecl? 3 deadNullaryExternalDecl =
+        some deadNullaryExternalDecl := by
+    simp [shadowDecl?, deadNullaryExternalDecl, decl]
+  have mainRun :
+      shadowDecl? 3 (fixtureDecl `main deadNullaryFapBefore) =
+        some (fixtureDecl `main deadNullaryFapAfter) := by
+    simp [shadowDecl?, fixtureDecl, decl,
+      deadNullaryFapShadowRun]
+  simp [shadowProgram?, shadowDecls?,
+    deadNullaryFapBeforeProgram, deadNullaryFapAfterProgram,
+    externalRun, mainRun]
+
+/-- Static compiler well-formedness and a successful pinned transparent run
+do not suffice for semantic correctness of the nullary-application rule. -/
+theorem deadNullaryFapStaticPremisesButNotCorrect :
+    ProgramElimDeadWellFormed deadNullaryFapBeforeProgram ∧
+    shadowProgram? 3 deadNullaryFapBeforeProgram =
+      some deadNullaryFapAfterProgram ∧
+    ¬LoweringCorrect
+      (Impure.semantics countedNullaryExternalSpec)
+      (Impure.semantics countedNullaryExternalSpec)
+      (reachablePhaseSimulation countedNullaryExternalSpec)
+      deadNullaryFapBeforeProgram
+      deadNullaryFapAfterProgram #[`main] :=
+  ⟨deadNullaryFapBeforeProgramElimDeadWellFormed,
+    deadNullaryFapShadowProgramRun,
+    deadNullaryFapNotLoweringCorrect⟩
 
 theorem allocatingShadowRun :
     shadowCode? 3 {} allocatingBefore =
@@ -8807,6 +9062,18 @@ theorem closedOwnedReuseShadowProgramRun :
     closedOwnedReuseAfterProgram,
     fixtureDecl, decl, closedOwnedReuseShadowRun]
 
+theorem closedOwnedReuseSemanticallyAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadSemanticallyAdmissibleRun externals 7
+      closedOwnedReuseBeforeProgram
+      closedOwnedReuseAfterProgram #[`main] := {
+  wellFormed := closedOwnedReuseBeforeProgramElimDeadWellFormed
+  transformed := closedOwnedReuseShadowProgramRun
+  runtime := .exact
+    (closedOwnedReuseExactRuntimeOwnershipInitialInvariant
+      externals)
+}
+
 /-- Whole-program correctness for deleted reset/reuse with a real owned
 child.  The source recursively releases the child and overwrites the parent;
 the target omits the unreachable object graph and returns the same value. -/
@@ -8819,11 +9086,8 @@ theorem closedOwnedReuseProgramLoweringCorrect
       (reachablePhaseSimulation externals)
       closedOwnedReuseBeforeProgram
       closedOwnedReuseAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_exactRuntimeOwnership
-    closedOwnedReuseBeforeProgramElimDeadWellFormed
-    closedOwnedReuseShadowProgramRun compatible
-    (closedOwnedReuseExactRuntimeOwnershipInitialInvariant
-      externals)
+  (closedOwnedReuseSemanticallyAdmissibleRun
+    externals).loweringCorrect compatible
 
 /-! ## Closed partial-application and box allocation correctness -/
 
@@ -9359,6 +9623,17 @@ theorem closedPapBoxShadowProgramRun :
     closedPapBoxBeforeProgram, closedPapBoxAfterProgram,
     firstRun, mainRun]
 
+theorem closedPapBoxSemanticallyAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadSemanticallyAdmissibleRun externals 6
+      closedPapBoxBeforeProgram
+      closedPapBoxAfterProgram #[`main] := {
+  wellFormed := closedPapBoxBeforeProgramElimDeadWellFormed
+  transformed := closedPapBoxShadowProgramRun
+  runtime := .source
+    (closedPapBoxSourceRuntimeOwnershipInitialInvariant externals)
+}
+
 /-- Whole-program correctness for deleting both a heap-allocating partial
 application and a heap-backed scalar box.  The source performs both
 unobservable allocations; the target omits them and returns the same tagged
@@ -9371,9 +9646,7 @@ theorem closedPapBoxProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       closedPapBoxBeforeProgram closedPapBoxAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_sourceMachineInvariant
-    closedPapBoxBeforeProgramElimDeadWellFormed
-    closedPapBoxShadowProgramRun compatible
-    (closedPapBoxSourceRuntimeOwnershipInitialInvariant externals)
+  (closedPapBoxSemanticallyAdmissibleRun
+    externals).loweringCorrect compatible
 
 end Fir.LeanIR.Passes.ElimDeadExamples

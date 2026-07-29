@@ -26188,4 +26188,63 @@ theorem shadowProgram_loweringCorrect_sourceMachineInvariant
   exact
     (initialSourceRuntime entry member sourceArguments).binderReady
 
+/-! ## Compiler-facing semantic admissibility -/
+
+/-- Dynamic admissibility for a checked `elimDeadVars` run.  Exact
+provenance is the weakest supported form and accommodates ownership-sensitive
+reset/reuse/write programs; a source-machine invariant is the more convenient
+strong form for source-only execution arguments.
+
+This contract is deliberately separate from `ProgramElimDeadWellFormed`.
+Static compiler well-formedness cannot imply it under unrestricted external
+semantics because an effectful deleted nullary `.fap` is a well-formed
+counterexample. -/
+inductive ElimDeadRuntimeAdmissibility
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Prop where
+  | exact
+      (initial : ReachableInitialInvariantOn
+        (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
+        source target entries) :
+      ElimDeadRuntimeAdmissibility externals fuel source target entries
+  | source
+      (initial : SourceRuntimeOwnershipInitialInvariantOn
+        externals fuel source entries) :
+      ElimDeadRuntimeAdmissibility externals fuel source target entries
+
+/-- Complete compiler-facing package for one semantically admissible
+transparent pass run.  Foreign-response compatibility remains a separate
+consumer contract so the compiler package never quantifies over target
+external implementations. -/
+structure ElimDeadSemanticallyAdmissibleRun
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Prop where
+  wellFormed : ProgramElimDeadWellFormed source
+  transformed : shadowProgram? fuel source = some target
+  runtime :
+    ElimDeadRuntimeAdmissibility externals fuel source target entries
+
+/-- Corrected general whole-program theorem.  The package makes the exact
+additional semantic premise visible, while accepting either exact-provenance
+or source-machine runtime/ownership evidence. -/
+theorem ElimDeadSemanticallyAdmissibleRun.loweringCorrect
+    (admissible :
+      ElimDeadSemanticallyAdmissibleRun
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries := by
+  cases admissible.runtime with
+  | exact initial =>
+      exact shadowProgram_loweringCorrect_exactRuntimeOwnership
+        admissible.wellFormed admissible.transformed
+        compatible initial
+  | source initial =>
+      exact shadowProgram_loweringCorrect_sourceMachineInvariant
+        admissible.wellFormed admissible.transformed
+        compatible initial
+
 end Fir.LeanIR.Passes.ElimDead
