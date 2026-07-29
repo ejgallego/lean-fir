@@ -47,7 +47,10 @@ Cross-cutting W6.5 state:
   `stringLiteralLet_eq`, `codeWP_stringLiteralLet`, and
   `correctStringLiteralReturn` close the equivalent UTF-8 `.object` lane
   through concrete allocation, resolver alignment, witness growth, and finite
-  exported execution.
+  exported execution. The immediate-return theorem now derives concrete
+  allocation success from aligned wasm32 `AllocationCapacity`; the reusable
+  `AddressSpaceBudget.consume` law exposes exact remaining headroom for the
+  forthcoming structural allocating spine.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

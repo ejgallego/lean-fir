@@ -223,6 +223,68 @@ private theorem uint32Field_string_success (field : String) (value : Nat)
   next fits => exact ⟨fits, (Except.ok.inj encoded).symm⟩
   next overflow => contradiction
 
+/--
+Enough wasm32 address-space headroom makes String allocation constructive.
+The bound also forces the UTF-8 byte count to fit the checked 32-bit header
+field; linear-memory growth and payload writes then succeed inside the newly
+allocated extent.
+-/
+theorem MemoryState.FrontierInvariant.allocateString_eq_ok_of_capacity
+    {state : MemoryState} (valid : state.FrontierInvariant) (value : String)
+    (capacity :
+      state.AllocationCapacity
+        (align8 (headerBytes + (stringUtf8Bytes value).length))) :
+    ∃ result address,
+      allocateString state value = .ok (result, address) := by
+  let bytes := stringUtf8Bytes value
+  have byteCountFits : bytes.length < UInt32.size := by
+    have endWithin :
+        state.heapCursor + align8 (align8 (headerBytes + bytes.length)) ≤
+          wordModulus := by
+      simpa [bytes] using capacity.endWithinAddressSpace
+    simp only [align8_align8] at endWithin
+    have extent := align8_ge (headerBytes + bytes.length)
+    have cursorPositive := capacity.cursorPositive
+    have belowWordModulus : bytes.length < wordModulus := by
+      omega
+    simpa [wordModulus] using belowWordModulus
+  have byteCount :
+      uint32Field "string UTF-8 byte count" bytes.length =
+        .ok (UInt32.ofNat bytes.length) := by
+    simp [uint32Field, byteCountFits]
+  obtain ⟨middle, address, objectAllocation⟩ :=
+    state.allocateObject_eq_ok_of_capacity .string bytes.length false
+      stringUtf8Marker (UInt32.ofNat bytes.length) 0 0 valid.cursorAligned
+      (by simpa [bytes] using capacity)
+  have middleValid := valid.allocateObject objectAllocation
+  have middleExtent := MemoryState.allocateObject_extent objectAllocation
+  have payloadInBounds :
+      address.value + headerBytes + 0 + bytes.length ≤ middle.memory.size := by
+    have cursorInBounds := middleValid.cursorInBounds
+    rw [middleExtent] at cursorInBounds
+    have extent := align8_ge (headerBytes + bytes.length)
+    omega
+  obtain ⟨memory, payloadWrite, _⟩ :=
+    writeStringBytes_spec middle.memory address.value 0 bytes payloadInBounds
+  refine ⟨{ middle with memory }, address, ?_⟩
+  unfold allocateString
+  change
+    (do
+      let byteCount ← uint32Field "string UTF-8 byte count" bytes.length
+      let (state, address) ← liftMemory <|
+        state.allocateObject .string bytes.length false stringUtf8Marker
+          byteCount
+      let memory ← liftMemory <|
+        Fir.Wasm.Concrete.writeStringBytes state.memory address.value 0 bytes
+      return ({ state with memory }, address)) =
+        .ok ({ middle with memory }, address)
+  rw [byteCount]
+  simp only [Bind.bind, Except.bind]
+  rw [objectAllocation]
+  simp only [liftMemory, Bind.bind, Except.bind]
+  rw [payloadWrite]
+  rfl
+
 /-- A successful concrete string allocation decomposes into one checked object
 allocation followed by the exact UTF-8 byte writer. -/
 theorem allocateString_decompose

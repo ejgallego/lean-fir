@@ -1534,6 +1534,7 @@ with an arbitrary compiler-selected continuation.
 As in the natural-literal rule, the recursive premise is continuation
 correctness. Compiler output, target splitting, import/local numbering, and
 the concrete host contract are all derived from `ConcreteSupportedExport`.
+Concrete allocation success is derived from explicit wasm32 headroom.
 -/
 theorem ConcreteSupportedExport.codeWP_stringLiteralLet
     {program : Fir.LeanIR.ImpureProgram}
@@ -1561,21 +1562,21 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet
     {witness : RefinementWitness}
     {tail : List Wasm.Value}
     {Q : Wasm.Assertion Host}
-    {heap : MemoryState}
-    {word : Word32}
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (allocated :
-      allocateString initial.host.runtime.heap value = .ok (heap, word))
+    (allocationCapacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (align8 (headerBytes + (stringUtf8Bytes value).length)))
     (localSetReady :
-      ∀ {resultIndex},
+      ∀ {resultIndex} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
             some resultIndex →
           ∃ updated,
             locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
               some updated)
     (continued :
-      ∀ {targetRest resultIndex updated nextWitness},
+      ∀ {heap : MemoryState} {word : Word32}
+          {targetRest resultIndex updated nextWitness},
         CodeAdapted context sourceModule sourceFunction [] continuation
             targetRest →
           findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -1601,6 +1602,9 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet
       resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
     CodeAdapted.stringLiteralLet_eq spec.localsAligned valueEq valueKind
       localCompiled spec.bodyAdapted
+  obtain ⟨heap, word, allocated⟩ :=
+    stateRelated.1.heap.frontier.allocateString_eq_ok_of_capacity value
+      allocationCapacity
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.stringLiteralCall callFound
@@ -3793,8 +3797,9 @@ literal followed by its return.
 
 The theorem derives the compiler-selected String call, destination local,
 concrete resolver contract, and return suffix from the static pipeline. Its
-only dynamic resource premises are successful String allocation and capacity
-for the checked local write.
+only dynamic resource premises are wasm32 address-space headroom for the
+concrete UTF-8 allocation and capacity for the checked local write. Allocation
+success itself is derived from the related heap frontier.
 -/
 theorem ConcreteSupportedExport.correctStringLiteralReturn
     {program : Fir.LeanIR.ImpureProgram}
@@ -3821,17 +3826,16 @@ theorem ConcreteSupportedExport.correctStringLiteralReturn
     {initial : Wasm.Store Host}
     {initialWitness : RefinementWitness}
     {parameters callerTail : List Wasm.Value}
-    {heap : MemoryState}
-    {word : Word32}
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (parameterCount :
       parameters.length = spec.targetFunction.numParams)
-    (allocated :
-      allocateString initial.host.runtime.heap value = .ok (heap, word))
+    (allocationCapacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (align8 (headerBytes + (stringUtf8Bytes value).length)))
     (localSetReady :
-      ∀ {resultIndex},
+      ∀ {resultIndex} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
             some resultIndex →
           ∃ updated,
@@ -3853,6 +3857,9 @@ theorem ConcreteSupportedExport.correctStringLiteralReturn
       resultKindAt, bodyEq⟩ :=
     CodeAdapted.stringLiteralReturn_eq spec.localsAligned valueEq valueKind
       localCompiled spec.bodyAdapted
+  obtain ⟨heap, word, allocated⟩ :=
+    stateRelated.1.heap.frontier.allocateString_eq_ok_of_capacity value
+      allocationCapacity
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.stringLiteralCall callFound

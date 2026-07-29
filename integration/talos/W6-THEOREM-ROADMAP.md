@@ -118,6 +118,12 @@ continuation, not a caller-built translation certificate.
 recursive rule for exact UTF-8 String allocation in the `.object` lane.
 `correctStringLiteralReturn` also closes the finite whole-export String
 instance through the concrete resolver contract and heap-witness extension.
+Both String rules now use the source-facing
+`MemoryState.AllocationCapacity`, not a concrete-success equation:
+`AddressSpaceBudget` plus the related frontier constructs raw allocation,
+header installation, and the full UTF-8 payload write. The exact budget
+consumption theorem is the resource transport intended for allocating
+direct-value induction.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

@@ -211,6 +211,17 @@ layout, or translation-certificate premise. This success theorem does not
 weaken the recorded uninitialized-coordinate fault discrepancy:
 `FIR-BUG-wasm-none-uninitialized-scalar-projection` remains the boundary for
 full structured-fault correspondence.
+Allocating proofs now use an explicit, compositional wasm32 resource boundary
+instead of opaque success assumptions. `MemoryState.AddressSpaceBudget`
+measures aligned remaining address space and has an exact consumption law;
+`AllocationCapacity` specializes it to one request. Raw allocation, object
+allocation, and complete UTF-8 String allocation are constructive from this
+headroom plus the alignment already present in `StateRelated`.
+`codeWP_stringLiteralLet` and `correctStringLiteralReturn` therefore assume
+only String allocation capacity and derive `allocateString = .ok ...`
+internally. The boundary is deliberately unstable while the structural
+source-path budget is developed; clients should expect to adapt as
+constructor and heap-Nat cases join it.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

@@ -3634,6 +3634,25 @@ wasm32 heap is finite. Their structural law must thread a remaining-capacity
 condition rather than assume concrete allocation totality. No FIR semantic
 contract or executable ABI changed.
 
+W6.6el establishes that finite-heap boundary and applies it to the first
+allocating compiler theorem. `MemoryState.AddressSpaceBudget` records
+source-computed, already-aligned wasm32 headroom; linear memory needs no
+separate capacity premise because the concrete allocator grows it on demand.
+`AllocationCapacity` is the one-request view. The raw and object allocators
+are now proved constructive from an aligned live frontier and that capacity,
+and the budget-consumption theorem subtracts the exact aligned request for
+later structural composition. The UTF-8 layer derives its checked 32-bit byte
+count, object allocation, and complete payload write from the same boundary.
+Consequently, both `codeWP_stringLiteralLet` and
+`correctStringLiteralReturn` no longer assume an opaque
+`allocateString = .ok ...` execution witness: they assume only explicit
+address-space capacity, obtain alignment from `StateRelated`, and construct
+the concrete allocation themselves. This surface is intentionally
+experimental; the next slice computes and threads path budgets through
+allocating direct-value evaluation, then applies the same boundary to
+constructors and heap-backed naturals. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -341,7 +341,8 @@ example
     allocated localSetReady continued
 
 /--
-The UTF-8 String instance keeps the same recursive certificate-free boundary.
+The UTF-8 String instance keeps the same recursive certificate-free boundary
+and derives concrete allocation from explicit wasm32 headroom.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -369,21 +370,21 @@ example
     {witness : RefinementWitness}
     {tail : List Wasm.Value}
     {Q : Wasm.Assertion Host}
-    {heap : MemoryState}
-    {word : Word32}
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (allocated :
-      allocateString initial.host.runtime.heap value = .ok (heap, word))
+    (allocationCapacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (align8 (headerBytes + (stringUtf8Bytes value).length)))
     (localSetReady :
-      ∀ {resultIndex},
+      ∀ {resultIndex} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
             some resultIndex →
           ∃ updated,
             locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
               some updated)
     (continued :
-      ∀ {targetRest resultIndex updated nextWitness},
+      ∀ {heap : MemoryState} {word : Word32}
+          {targetRest resultIndex updated nextWitness},
         CodeAdapted context sourceModule sourceFunction [] continuation
             targetRest →
           findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -406,7 +407,7 @@ example
       sourceRuntime sourceEnv (.let decl continuation)
       spec.targetFunction.body initial locals witness tail Q :=
   spec.codeWP_stringLiteralLet valueEq valueKind localCompiled stateRelated
-    allocated localSetReady continued
+    allocationCapacity localSetReady continued
 
 /--
 The first compositional API check. A natural literal and its return require
@@ -471,7 +472,8 @@ example
 
 /--
 The finite UTF-8 String export theorem likewise accepts no caller-supplied
-translation simulation.
+translation simulation or concrete-allocation success witness. The only heap
+resource premise is explicit wasm32 address-space headroom.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -498,17 +500,16 @@ example
     {initial : Wasm.Store Host}
     {initialWitness : RefinementWitness}
     {parameters callerTail : List Wasm.Value}
-    {heap : MemoryState}
-    {word : Word32}
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
     (parameterCount :
       parameters.length = spec.targetFunction.numParams)
-    (allocated :
-      allocateString initial.host.runtime.heap value = .ok (heap, word))
+    (allocationCapacity :
+      initial.host.runtime.heap.AllocationCapacity
+        (align8 (headerBytes + (stringUtf8Bytes value).length)))
     (localSetReady :
-      ∀ {resultIndex},
+      ∀ {resultIndex} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
             some resultIndex →
           ∃ updated,
@@ -527,7 +528,7 @@ example
           (literal sourceRuntime (.str value)).1
           (literal sourceRuntime (.str value)).2 .object callerTail) :=
   spec.correctStringLiteralReturn valueEq valueKind localCompiled stateRelated
-    parameterCount allocated localSetReady
+    parameterCount allocationCapacity localSetReady
 
 /--
 Object projection is compositional without a target-code certificate.  Static

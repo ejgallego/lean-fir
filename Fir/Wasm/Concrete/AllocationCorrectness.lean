@@ -94,6 +94,112 @@ theorem MemoryState.allocate_spec (state result : MemoryState)
         · rw [if_neg heap] at allocated
           contradiction
 
+/--
+Finite wasm32 address-space headroom at one concrete heap frontier.
+
+This budget is measured in already-aligned bytes so a source evaluation can
+sum the allocations on its selected path and consume them one by one. Linear
+memory itself grows on demand. Positivity is kept here because physical zero
+is reserved for erased values and reuse tokens; frontier alignment is supplied
+separately by the ordinary heap invariant.
+-/
+structure MemoryState.AddressSpaceBudget (state : MemoryState)
+    (remainingBytes : Nat) : Prop where
+  cursorPositive : 0 < state.heapCursor
+  endWithinAddressSpace :
+    state.heapCursor + remainingBytes ≤ wordModulus
+
+/-- One allocation's exact view of the reusable address-space budget. -/
+abbrev MemoryState.AllocationCapacity (state : MemoryState)
+    (requestedBytes : Nat) : Prop :=
+  state.AddressSpaceBudget (align8 requestedBytes)
+
+/-- A larger source-computed budget supplies any one aligned allocation that
+fits inside it. -/
+theorem MemoryState.AddressSpaceBudget.allocationCapacity
+    {state : MemoryState} {remainingBytes requestedBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : align8 requestedBytes ≤ remainingBytes) :
+    state.AllocationCapacity requestedBytes := by
+  exact {
+    cursorPositive := budget.cursorPositive
+    endWithinAddressSpace := by
+      exact Nat.le_trans (Nat.add_le_add_left fits state.heapCursor)
+        budget.endWithinAddressSpace }
+
+/--
+Successful allocation consumes exactly its aligned request from a
+source-computed address-space budget. This is the transport law needed by the
+future structural proof over allocating direct-value spines.
+-/
+theorem MemoryState.AddressSpaceBudget.consume
+    {before after : MemoryState} {remainingBytes requestedBytes : Nat}
+    {address : Word32}
+    (budget : before.AddressSpaceBudget remainingBytes)
+    (cursorAligned : before.heapCursor % target.heapAlignment = 0)
+    (fits : align8 requestedBytes ≤ remainingBytes)
+    (post : before.AllocatePost after requestedBytes address) :
+    after.AddressSpaceBudget (remainingBytes - align8 requestedBytes) := by
+  have alignedCursor : align8 before.heapCursor = before.heapCursor := by
+    unfold align8
+    simp [target] at cursorAligned
+    omega
+  constructor
+  · rw [post.cursor, alignedCursor]
+    exact Nat.lt_of_lt_of_le budget.cursorPositive (Nat.le_add_right _ _)
+  · rw [post.cursor, alignedCursor]
+    have within := budget.endWithinAddressSpace
+    omega
+
+/--
+An aligned live frontier with enough wasm32 address-space headroom makes the
+checked raw allocator constructive. No pre-existing linear-memory size premise
+is needed because `growToFit` extends memory through the requested end.
+-/
+theorem MemoryState.allocate_eq_ok_of_capacity
+    (state : MemoryState) (requestedBytes : Nat)
+    (minimum : headerBytes ≤ requestedBytes)
+    (cursorAligned : state.heapCursor % target.heapAlignment = 0)
+    (capacity : state.AllocationCapacity requestedBytes) :
+    ∃ result address,
+      state.allocate requestedBytes = .ok (result, address) := by
+  have alignedCursor : align8 state.heapCursor = state.heapCursor := by
+    unfold align8
+    simp [target] at cursorAligned
+    omega
+  have requestedEnd :
+      align8 state.heapCursor + align8 requestedBytes ≤ wordModulus := by
+    simpa [alignedCursor] using capacity.endWithinAddressSpace
+  have addressLt : align8 state.heapCursor < wordModulus := by
+    have positiveBytes : 0 < align8 requestedBytes := by
+      have := align8_ge requestedBytes
+      have : 0 < headerBytes := by decide
+      omega
+    omega
+  let address : Word32 := ⟨align8 state.heapCursor, addressLt⟩
+  have addressOption :
+      Word32.ofNat? (align8 state.heapCursor) = some address := by
+    simp [Word32.ofNat?, address, addressLt]
+  have addressHeap : address.classify = .heap := by
+    have cursorNe : state.heapCursor ≠ 0 :=
+      Nat.ne_of_gt capacity.cursorPositive
+    have cursorMod8 : state.heapCursor % 8 = 0 := by
+      simpa [target] using cursorAligned
+    have cursorNotOdd : state.heapCursor % 2 ≠ 1 := by
+      omega
+    simp [Word32.classify, address, alignedCursor,
+      cursorNe, cursorNotOdd, cursorMod8, cursorAligned]
+  let result : MemoryState := {
+    memory := state.memory.growToFit
+      (align8 state.heapCursor + align8 requestedBytes)
+    heapCursor := align8 state.heapCursor + align8 requestedBytes }
+  refine ⟨result, address, ?_⟩
+  unfold MemoryState.allocate
+  rw [if_neg (Nat.not_lt.mpr minimum)]
+  dsimp only
+  rw [if_neg (Nat.not_lt.mpr requestedEnd), addressOption]
+  simp [addressHeap, result, pure, Except.pure]
+
 @[simp] theorem align8_align8 (bytes : Nat) : align8 (align8 bytes) = align8 bytes := by
   unfold align8
   omega
@@ -166,6 +272,55 @@ theorem MemoryState.allocateObject_header (state result : MemoryState)
               headerInBounds writeResult
           rw [← resultEq, ← addressEq]
           exact ⟨middle, rfl, writeResult, rfl, headerRead⟩
+
+/--
+Object allocation is constructive from the same raw address-space capacity.
+The common header introduces no additional resource premise: it is written
+inside the extent made in-bounds by the successful growing allocation.
+-/
+theorem MemoryState.allocateObject_eq_ok_of_capacity
+    (state : MemoryState) (kind : ObjectKind) (payloadBytes : Nat)
+    (persistent : Bool) (aux0 aux1 aux2 aux3 : UInt32)
+    (cursorAligned : state.heapCursor % target.heapAlignment = 0)
+    (capacity :
+      state.AllocationCapacity (align8 (headerBytes + payloadBytes))) :
+    ∃ result address,
+      state.allocateObject kind payloadBytes persistent aux0 aux1 aux2 aux3 =
+        .ok (result, address) := by
+  let allocationBytes := align8 (headerBytes + payloadBytes)
+  obtain ⟨middle, address, allocated⟩ :=
+    state.allocate_eq_ok_of_capacity allocationBytes
+      (by
+        have := align8_ge (headerBytes + payloadBytes)
+        dsimp only [allocationBytes]
+        omega)
+      cursorAligned capacity
+  have post := MemoryState.allocate_spec state middle allocationBytes address
+    allocated
+  have allocationAligned : align8 allocationBytes = allocationBytes := by
+    simp [allocationBytes]
+  have headerInBounds : address.value + headerBytes ≤ middle.memory.size := by
+    have endInBounds := post.endInBounds
+    rw [allocationAligned] at endInBounds
+    have minimum := align8_ge (headerBytes + payloadBytes)
+    dsimp only [allocationBytes] at endInBounds
+    omega
+  let header :=
+    Header.forAllocation kind allocationBytes persistent aux0 aux1 aux2 aux3
+  obtain ⟨memory, written, _⟩ :=
+    Header.write_spec middle.memory address header headerInBounds
+  refine ⟨{ middle with memory }, address, ?_⟩
+  unfold MemoryState.allocateObject
+  dsimp only
+  rw [show align8 (headerBytes + payloadBytes) = allocationBytes by rfl]
+  rw [allocated]
+  change
+    (do
+      let memory ← header.write middle.memory address
+      return ({ middle with memory }, address)) =
+        .ok ({ middle with memory }, address)
+  rw [written]
+  rfl
 
 /-- A successful object allocation passes the full checked live-header read,
 including address class, liveness, aligned allocation size, and bounds. -/
