@@ -3784,6 +3784,94 @@ theorem retainedLargeNatExactStepLedgerPreserved
     retainedLargeNatState retainedLargeNatState programs frames joins env
       runtime step
 
+/-- The ordinary transparent traversal also retains the live nullary full
+application exactly; the checked-policy theorem above is a stricter
+conformance statement about the same branch. -/
+theorem retainedNullaryFapShadowRun :
+    shadowCode? 2 {} retainedNullaryFap =
+      some (retainedNullaryFap, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [retainedNullaryFap, retainedNullaryFapDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, liveMember]
+
+theorem retainedNullaryFapStepBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedNullaryFapDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedNullaryFapDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · simp [codeBinderIds, BinderNamesUnique]
+
+def retainedNullaryFapState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedNullaryFap }
+
+/-- Exact retained-call regression. The nullary full application pushes the
+paired bind continuation and enters named invocation on both machines while
+the target remains at allocation frontier zero with its empty ledger. -/
+theorem retainedNullaryFapExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedNullaryFapState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedNullaryFapState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedNullaryFapState.program retainedNullaryFapState.program := by
+    simpa [retainedNullaryFapState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedNullaryFapState.frames retainedNullaryFapState.frames
+        [] [] := by
+    simpa [retainedNullaryFapState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedNullaryFapState.joins retainedNullaryFapState.joins := by
+    simpa [retainedNullaryFapState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedNullaryFapState.env retainedNullaryFapState.env := by
+    simpa [retainedNullaryFapState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedNullaryFapState.runtime retainedNullaryFapState.runtime
+        (envRootsOn neutralUsed retainedNullaryFapState.env ++ [])
+        (envRootsOn neutralUsed retainedNullaryFapState.env ++ []) := by
+    have emptyRoots (used : UsedLocals) :
+        envRootsOn used ([] : Env) = [] := by
+      unfold envRootsOn
+      induction used.toList with
+      | nil => rfl
+      | cons head tail ih =>
+          simp [lookup]
+    simpa [retainedNullaryFapState, emptyRoots] using
+      LedgerShadowRuntimeRel.empty
+  simpa [retainedNullaryFapState, retainedNullaryFap,
+    retainedNullaryFapDecl, letDecl] using
+    retainedNullaryFapStepBinderReady.match_retainedFapLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      (usedBound := UsedSubset.refl neutralUsed)
+      retainedNullaryFapState retainedNullaryFapState programs frames joins
+      env runtime step
+
 /-- A retained one-field constructor forces the paired heap-allocation branch
 of the ledger-aware constructor matcher. -/
 def retainedCtorDecl : LCNF.LetDecl .impure :=
