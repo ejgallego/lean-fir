@@ -7947,6 +7947,153 @@ theorem decValue_nextLocation_eq_of_ok
               (decValueOnce_nextLocation_eq_of_ok headEq)
   exact foldFrontier (List.replicate amount value) runtime result effect
 
+/-- Releasing one field during reset is either the erased no-op or one
+ordinary recursive value decrement, so it cannot advance the allocation
+frontier. -/
+theorem releaseResetField_nextLocation_eq_of_ok
+    (effect : releaseResetField runtime value = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | erased =>
+      have resultEq := Except.ok.inj effect
+      subst result
+      rfl
+  | object reference =>
+      exact decValueOnce_nextLocation_eq_of_ok
+        (effect := by simpa [releaseResetField] using effect)
+  | usize value =>
+      exact decValueOnce_nextLocation_eq_of_ok
+        (effect := by simpa [releaseResetField] using effect)
+  | scalar value =>
+      exact decValueOnce_nextLocation_eq_of_ok
+        (effect := by simpa [releaseResetField] using effect)
+  | reuseToken location? =>
+      exact decValueOnce_nextLocation_eq_of_ok
+        (effect := by simpa [releaseResetField] using effect)
+
+/-- Folding reset-field releases preserves the allocation frontier after
+every successfully released prefix. -/
+theorem releaseResetFields_nextLocation_eq_of_ok
+    (effect :
+      Array.foldlM (fun next field => releaseResetField next field)
+        runtime fields = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  rw [← Array.foldlM_toList] at effect
+  have foldFrontier : ∀ (values : List Value)
+      (before after : RuntimeState),
+      values.foldlM (init := before)
+          (fun next field => releaseResetField next field) = .ok after →
+        after.nextLocation = before.nextLocation := by
+    intro values
+    induction values with
+    | nil =>
+        intro before after folded
+        have same := Except.ok.inj folded
+        subst after
+        rfl
+    | cons head tail recurse =>
+        intro before after folded
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at folded
+        cases headEq : releaseResetField before head with
+        | error fault =>
+            rw [headEq] at folded
+            contradiction
+        | ok middle =>
+            rw [headEq] at folded
+            exact (recurse middle after folded).trans
+              (releaseResetField_nextLocation_eq_of_ok headEq)
+  exact foldFrontier fields.toList runtime result effect
+
+/-- Reset only decrements or replaces existing cells. Even its unique-object
+branch, which clears a prefix and recursively releases its former fields,
+therefore preserves the allocation frontier on every successful result. -/
+theorem reset_nextLocation_eq_of_ok
+    (effect : reset runtime count value = .ok (result, token)) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          have pairEq := Except.ok.inj effect
+          have runtimeEq := congrArg Prod.fst pairEq
+          simp only at runtimeEq
+          subst result
+          rfl
+      | heap location =>
+          unfold reset at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime location = cellResult at effect
+          cases cellResult with
+          | error fault => simp at effect
+          | ok cell =>
+              simp only at effect
+              by_cases shared : cell.persistent || cell.rc != 1
+              · rw [if_pos shared] at effect
+                generalize decEq :
+                  decLocation runtime location = decResult at effect
+                cases decResult with
+                | error fault => simp at effect
+                | ok nextRuntime =>
+                    have pairEq := Except.ok.inj effect
+                    have runtimeEq := congrArg Prod.fst pairEq
+                    simp only at runtimeEq
+                    subst result
+                    exact decLocation_nextLocation_eq_of_ok decEq
+              · rw [if_neg shared] at effect
+                generalize objectEq : cell.object = heapObject at effect
+                cases heapObject with
+                | ctor object =>
+                    simp only at effect
+                    by_cases tooMany :
+                        count > object.objectFields.size
+                    · rw [if_pos tooMany] at effect
+                      simp at effect
+                    · rw [if_neg tooMany] at effect
+                      generalize setEq :
+                        setCell runtime location
+                            { cell with object := .ctor {
+                                object with
+                                objectFields :=
+                                  object.objectFields.mapIdx
+                                    (fun index field =>
+                                      if index < count then
+                                        .object (.tagged 0)
+                                      else field) } } = setResult at effect
+                      cases setResult with
+                      | error fault => simp at effect
+                      | ok parent =>
+                          simp only at effect
+                          generalize foldEq :
+                            Array.foldlM
+                                (fun next field =>
+                                  releaseResetField next field)
+                                parent
+                                (object.objectFields.extract 0 count) =
+                              foldResult at effect
+                          cases foldResult with
+                          | error fault => simp at effect
+                          | ok finalRuntime =>
+                              have pairEq := Except.ok.inj effect
+                              have runtimeEq := congrArg Prod.fst pairEq
+                              simp only at runtimeEq
+                              subst result
+                              exact
+                                (releaseResetFields_nextLocation_eq_of_ok
+                                  foldEq).trans
+                                  (setCell_nextLocation_eq_of_ok setEq)
+                | closure fixed => simp at effect
+                | boxed type value => simp at effect
+                | string value => simp at effect
+                | natural value => simp at effect
+                | integer value => simp at effect
+                | byteArray value => simp at effect
+                | «opaque» value => simp at effect
+  | usize value => simp [reset] at effect
+  | scalar value => simp [reset] at effect
+  | erased => simp [reset] at effect
+  | reuseToken location? => simp [reset] at effect
+
 /-- Reusing a concrete token updates an existing cell and therefore
 preserves the allocation frontier on every successful result. -/
 theorem reuseSome_nextLocation_eq_of_ok
@@ -8009,6 +8156,61 @@ def LedgerShadowRuntimeRel.empty :
       ({} : RuntimeState) ({} : RuntimeState) [] [] where
   runtime := emptyRuntime_shadowRelated
   ledger := TargetAllocationLedger.empty emptyAddressRenaming
+
+/-- Proof-relevant result of a retained reset on two related runtimes. -/
+structure LedgerResetBothResult
+    (rho : AddressRenaming) (left right leftResult : RuntimeState)
+    (leftExtra rightExtra : List Value) (count : Nat)
+    (leftObject rightObject leftToken : Value) : Type where
+  rightResult : RuntimeState
+  rightToken : Value
+  targetEffect :
+    reset right count rightObject = .ok (rightResult, rightToken)
+  tokens : ValueRel rho leftToken rightToken
+  runtime :
+    LedgerShadowRuntimeRel rho leftResult rightResult
+      (leftToken :: leftExtra) (rightToken :: rightExtra)
+
+/-- A retained reset follows the existing paired runtime simulation and
+transports the target owner ledger across its unchanged allocation frontier.
+The reset token is published as a root on both sides exactly as in the
+underlying relation theorem. -/
+theorem LedgerShadowRuntimeRel.resetBoth_of_related_nonempty
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      reset left count leftObject = .ok (leftResult, leftToken)) :
+    Nonempty
+      (LedgerResetBothResult rho left right leftResult leftExtra rightExtra
+        count leftObject rightObject leftToken) := by
+  rcases related.runtime.resetBoth_of_related objectRoot objects
+      sourceEffect with
+    ⟨rightResult, rightToken, targetEffect, tokens, nextRuntime⟩
+  exact ⟨{
+    rightResult
+    rightToken
+    targetEffect
+    tokens
+    runtime := {
+      runtime := nextRuntime
+      ledger := by
+        rw [reset_nextLocation_eq_of_ok targetEffect]
+        exact related.ledger
+    }
+  }⟩
+
+/-- Select the proof-relevant retained-reset result. -/
+noncomputable def LedgerShadowRuntimeRel.resetBoth_of_related
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (objectRoot : leftObject ∈ leftExtra)
+    (objects : ValueRel rho leftObject rightObject)
+    (sourceEffect :
+      reset left count leftObject = .ok (leftResult, leftToken)) :
+    LedgerResetBothResult rho left right leftResult leftExtra rightExtra
+      count leftObject rightObject leftToken :=
+  Classical.choice
+    (related.resetBoth_of_related_nonempty objectRoot objects sourceEffect)
 
 /-- A deleted source-only allocation preserves the target ledger exactly. -/
 def LedgerShadowRuntimeRel.allocLeftGarbage
@@ -23013,6 +23215,204 @@ theorem match_deletedResetLetStep_binderReady
         ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
       exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying hereditary retained-reset matcher. Reset may recursively
+release owned fields but never allocates, so the paired runtime result carries
+the exact target owner table across the unchanged frontier. -/
+theorem match_retainedResetLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .reset count object
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .reset count object
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceObjectRead :
+    lookupValue sourceState.env object = sourceObjectResult
+  cases sourceObjectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceObjectRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceObject =>
+      have sourceObjectLookup :=
+        lookupValue_eq_ok_iff.mp sourceObjectRead
+      have objects := env object objectMember
+      rw [sourceObjectLookup] at objects
+      generalize targetObjectLookup :
+        lookup targetState.env object = targetObjectOption at objects
+      cases objects with
+      | some values =>
+          rename_i targetObject
+          have targetObjectRead :
+              lookupValue targetState.env object = .ok targetObject :=
+            lookupValue_eq_ok_iff.mpr targetObjectLookup
+          generalize sourceResetEq :
+            reset sourceState.runtime count sourceObject = sourceResetResult
+          cases sourceResetResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceObjectRead, sourceResetEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourcePair =>
+              obtain ⟨sourceRuntime, sourceToken⟩ := sourcePair
+              have sourceObjectRoot :
+                  sourceObject ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn objectMember sourceObjectLookup)
+              let resetResult := runtime.resetBoth_of_related
+                sourceObjectRoot values sourceResetEq
+              let sourceExpected := {
+                sourceState with
+                runtime := sourceRuntime
+                env := bind sourceState.env fvarId sourceToken
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                runtime := resetResult.rightResult
+                env := bind targetState.env fvarId resetResult.rightToken
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceObjectRead, sourceResetEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetObjectRead, resetResult.targetEffect,
+                  Bind.bind, Except.bind, Pure.pure, Except.pure]
+              have afterStructural :
+                  BinderReadyReachableMachineRelated fuel rho
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_binderReadyReachableRelated
+                  sourceState targetState sourceRuntime resetResult.rightResult
+                  programs frames continuation joins env resetResult.tokens
+                  resetResult.runtime.runtime
+              have afterRelated :
+                  LedgerBinderReadyReachableMachineRelated fuel rho
+                    sourceExpected targetExpected := by
+                refine ⟨?_, afterStructural⟩
+                simpa [targetExpected] using resetResult.runtime.ledger
+              exact ⟨targetExpected,
+                match_internalCoreSteps_binderReady_ledger
+                  sourceTransition targetTransition afterRelated
+                  (by simpa [sourceCurrent] using step)⟩
+
+/-- Ledger-carrying hereditary deleted-reset matcher. Runtime-neutral tokens
+use the common deleted-let rule; ownership-changing resets execute only on the
+source while target stuttering preserves the exact owner ledger. -/
+theorem match_deletedResetLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .reset count object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact match_deletedRuntimeNeutralLetStep_binderReady_ledger
+        sourceState targetState programs frames continuation joins env absent
+        runtime evaluated step
+  | reset fvarId binderName type count object ready =>
+      rcases coreStep_deletedReset_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime.runtime ready with
+        ⟨nextRuntime, token, transition, afterStructural⟩
+      have afterRelated :
+          LedgerBinderReadyReachableMachineRelated fuel rho
+            { sourceState with
+              runtime := nextRuntime
+              env := bind sourceState.env fvarId token
+              control := .code sourceContinuation }
+            { targetState with control := .code targetContinuation } := by
+        refine ⟨?_, afterStructural⟩
+        simpa using runtime.ledger
+      rcases match_sourceOnlyCoreStep_binderReady_ledger
+          transition afterRelated step with
+        ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+      exact ⟨targetAfter, targetPath, relatedAfter⟩
+
 /-- Exact retained reset provenance supplies the hereditary continuation and
 promotes the compiler-collected object local to the ambient live set. -/
 theorem ExactShadowCodeBinderReady.match_retainedResetLetStep
@@ -23121,6 +23521,121 @@ theorem ExactShadowCodeBinderReady.match_deletedResetLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedResetLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
+
+/-- Ledger-carrying exact retained reset matcher. Exact compiler provenance
+promotes the object local to the ambient roots, while the runtime theorem
+retains the target allocation ledger through every reset branch. -/
+theorem ExactShadowCodeBinderReady.match_retainedResetLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel count : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.reset count object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .reset count object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reset count object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedResetLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime step
+
+/-- Ledger-carrying exact deleted reset matcher. The compiler-certified
+deleted continuation stutters on the target, preserving its owner table
+while the source performs the readiness-certified reset transition. -/
+theorem ExactShadowCodeBinderReady.match_deletedResetLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel count : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.reset count object :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .reset count object
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .reset count object })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedResetLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime deletedReady step
