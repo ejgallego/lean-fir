@@ -745,6 +745,77 @@ theorem deadNullaryFapStaticPremisesButNotCorrect :
     deadNullaryFapShadowProgramRun,
     deadNullaryFapNotLoweringCorrect⟩
 
+/-- The conservative policy rejects exactly the audited deletion responsible
+for the observable nullary-application counterexample. -/
+theorem deadNullaryFapNotNullarySafeCode :
+    ¬NullarySafeExactShadowCodeRelated 3
+      deadNullaryFapBefore deadNullaryFapAfter := by
+  rintro ⟨final, graph⟩
+  change NullarySafeShadowCodeRun 3 {} final
+    (.let liveDecl (.let deadNullaryFapDecl (.return live)))
+    (.let liveDecl (.return live)) at graph
+  cases graph with
+  | letRetained continuation _keep =>
+      cases continuation with
+      | letDeleted _return _absent _safe notNullary =>
+          apply notNullary
+          exact ⟨`deadNullaryExternal, #[], rfl, rfl⟩
+  | letDeleted continuation _absent _safe _notNullary =>
+      have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+        native_decide
+      have innerRun :
+          shadowCode? 2 {}
+              (.let deadNullaryFapDecl (.return live)) =
+            some (.return live, neutralUsed) := by
+        simp [shadowCode?, deadNullaryFapDecl, letDecl,
+          neutralUsed, safeToElim, collectLetValue,
+          collectArgs, collectArgList,
+          deadAbsent]
+      have continuationResult := continuation.result
+      rw [innerRun] at continuationResult
+      cases continuationResult
+
+/-- The same rejection lifts through the external declaration and the
+program-level exact pass relation. -/
+theorem deadNullaryFapNotNullarySafeProgram :
+    ¬NoDeletedNullaryFapProgramRun 3
+      deadNullaryFapBeforeProgram deadNullaryFapAfterProgram := by
+  intro policy
+  have declarations :
+      ListRel
+        (DeclRelated (NullarySafeExactShadowCodeRelated 3))
+        [deadNullaryExternalDecl,
+          fixtureDecl `main deadNullaryFapBefore]
+        [deadNullaryExternalDecl,
+          fixtureDecl `main deadNullaryFapAfter] := by
+    simpa [NoDeletedNullaryFapProgramRun, ProgramRelated,
+      deadNullaryFapBeforeProgram,
+      deadNullaryFapAfterProgram] using policy
+  cases declarations with
+  | cons _external rest =>
+      cases rest with
+      | cons main _nil =>
+          have bodies :
+              DeclValueRelated
+                (NullarySafeExactShadowCodeRelated 3)
+                (.code deadNullaryFapBefore)
+                (.code deadNullaryFapAfter) := by
+            simpa [fixtureDecl, decl] using main.value
+          cases bodies with
+          | code related =>
+              exact deadNullaryFapNotNullarySafeCode related
+
+/-- Consequently the observable counterexample cannot be smuggled into the
+new compiler-facing contract through an opaque runtime certificate. -/
+theorem deadNullaryFapNotCompilerAdmissible
+    (externals : ExternalSpec) :
+    ¬ElimDeadCompilerAdmissibleRun externals 3
+      deadNullaryFapBeforeProgram
+      deadNullaryFapAfterProgram #[`main] := by
+  intro admissible
+  exact deadNullaryFapNotNullarySafeProgram
+    admissible.noDeletedNullaryFap
+
 theorem allocatingShadowRun :
     shadowCode? 3 {} allocatingBefore =
       some (allocatingAfter, neutralUsed) := by
@@ -1389,6 +1460,59 @@ theorem neutralShadowProgramRun :
     neutralBeforeProgram, neutralAfterProgram, fixtureDecl, decl,
     neutralShadowRun]
 
+/-- The neutral fixture's exact pass graph satisfies the conservative policy:
+the erased let is deleted, but no nullary full application occurs. -/
+theorem neutralNoDeletedNullaryFapCode :
+    NullarySafeExactShadowCodeRelated 3 neutralBefore neutralAfter := by
+  refine ⟨neutralUsed, ?_⟩
+  change NullarySafeShadowCodeRun 3 {} neutralUsed
+    (.let liveDecl (.let deadErasedDecl (.return live)))
+    (.let liveDecl (.return live))
+  have returned : NullarySafeShadowCodeRun 1 {} neutralUsed
+      (.return live) (.return live) := by
+    simpa [neutralUsed] using
+      (NullarySafeShadowCodeRun.return
+        (fuel := 1) (initial := {}) (result := live))
+  have inner : NullarySafeShadowCodeRun 2 {} neutralUsed
+      (.let deadErasedDecl (.return live)) (.return live) := by
+    apply NullarySafeShadowCodeRun.letDeleted returned
+    · native_decide
+    · rfl
+    · rintro ⟨name, arguments, impossible, _empty⟩
+      cases impossible
+  have outer :=
+    NullarySafeShadowCodeRun.letRetained
+      (declaration := liveDecl) inner (Or.inl (by native_decide))
+  simpa [liveDecl, letDecl, collectLetValue] using outer
+
+/-- Program-level conservative nullary policy for the neutral fixture. -/
+theorem neutralNoDeletedNullaryFapProgramRun :
+    NoDeletedNullaryFapProgramRun 3
+      neutralBeforeProgram neutralAfterProgram := by
+  exact .cons {
+    name_eq := rfl
+    levelParams_eq := rfl
+    type_eq := rfl
+    params_eq := rfl
+    safe_eq := rfl
+    value := .code neutralNoDeletedNullaryFapCode
+    recursive_eq := rfl
+    inlineAttr_eq := rfl
+  } .nil
+
+/-- The first concrete compiler-admissible package keeps the nullary policy
+and source runtime/ownership certificate as separate audited fields. -/
+theorem neutralCompilerAdmissibleRun
+    (externals : ExternalSpec) :
+    ElimDeadCompilerAdmissibleRun externals 3
+      neutralBeforeProgram neutralAfterProgram #[`main] := {
+  wellFormed := neutralBeforeProgramElimDeadWellFormed
+  transformed := neutralShadowProgramRun
+  noDeletedNullaryFap := neutralNoDeletedNullaryFapProgramRun
+  runtime := .source
+    (neutralSourceRuntimeOwnershipInitialInvariant externals)
+}
+
 /-- End-to-end use of the checked strong endpoint on a concrete program.
 Only foreign-response compatibility remains parametric; the source
 runtime/ownership invariant is fully discharged above. -/
@@ -1400,9 +1524,7 @@ theorem neutralProgramLoweringCorrect
       (Impure.semantics externals) (Impure.semantics externals)
       (reachablePhaseSimulation externals)
       neutralBeforeProgram neutralAfterProgram #[`main] :=
-  shadowProgram_loweringCorrect_sourceMachineInvariant
-    neutralBeforeProgramElimDeadWellFormed neutralShadowProgramRun
-    compatible (neutralSourceRuntimeOwnershipInitialInvariant externals)
+  (neutralCompilerAdmissibleRun externals).loweringCorrect compatible
 
 def liveEnv : Env :=
   bind [] live .erased

@@ -26247,4 +26247,54 @@ theorem ElimDeadSemanticallyAdmissibleRun.loweringCorrect
         admissible.wellFormed admissible.transformed
         compatible initial
 
+/-! ## Conservative compiler-facing contract -/
+
+/-- Upstream-facing contract for FIR's current impure semantics.  The exact
+pass graph must certify that no nullary full application was deleted, and the
+dynamic certificate must independently discharge runtime/ownership
+readiness.  Keeping these fields separate prevents the nullary-constant
+assumption from being hidden inside an unrelated ownership invariant.
+
+This is intentionally conservative.  A later shared semantics may replace
+`noDeletedNullaryFap` with a proof that selected nullary constants are
+observationally stuttering. -/
+structure ElimDeadCompilerAdmissibleRun
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Prop where
+  wellFormed : ProgramElimDeadWellFormed source
+  transformed : shadowProgram? fuel source = some target
+  noDeletedNullaryFap :
+    NoDeletedNullaryFapProgramRun fuel source target
+  runtime :
+    ElimDeadRuntimeAdmissibility externals fuel source target entries
+
+/-- Forget the explicit conservative compiler policy after it has been
+audited.  The operational endpoint consumes the independent dynamic
+certificate. -/
+theorem ElimDeadCompilerAdmissibleRun.toSemanticallyAdmissibleRun
+    (admissible :
+      ElimDeadCompilerAdmissibleRun
+        externals fuel source target entries) :
+    ElimDeadSemanticallyAdmissibleRun
+      externals fuel source target entries := {
+  wellFormed := admissible.wellFormed
+  transformed := admissible.transformed
+  runtime := admissible.runtime
+}
+
+/-- Conservative whole-program correctness endpoint for compiler clients.
+It makes the disputed nullary rule auditable without weakening any
+runtime/ownership or foreign-compatibility premise. -/
+theorem ElimDeadCompilerAdmissibleRun.loweringCorrect
+    (admissible :
+      ElimDeadCompilerAdmissibleRun
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries :=
+  admissible.toSemanticallyAdmissibleRun.loweringCorrect compatible
+
 end Fir.LeanIR.Passes.ElimDead

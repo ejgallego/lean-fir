@@ -75,6 +75,13 @@ Consequently, neither `WellFormedAt .impure` nor the complete static
 `ProgramElimDeadWellFormed` package can discharge the `.fap #[]` case of a
 generalized deleted-let stuttering theorem.
 
+`NullarySafeShadowCodeRun` now records the conservative compiler policy
+separately from runtime/ownership admissibility.  Its soundness theorem
+reconstructs the transparent `shadowCode?` result.  The positive neutral
+fixture constructs `neutralCompilerAdmissibleRun`, while
+`deadNullaryFapNotCompilerAdmissible` proves that this counterexample cannot
+inhabit the stricter compiler-facing package.
+
 ## Semantic impact
 
 Whole-pass correctness for `elimDeadVars` is unprovable against FIR's current
@@ -95,10 +102,12 @@ or classify effectful nullary externals as outside the compiler contract.
 
 ## Workaround
 
-Keep `.fap #[]` out of the local one-step deleted-let theorem.  Any later
-nullary-call rule must consume an explicit semantic stuttering certificate
-until a shared compiler invariant is defined and landed through the
-integration owner.
+Keep `.fap #[]` out of the local one-step deleted-let theorem.  Compiler
+clients may use `ElimDeadCompilerAdmissibleRun`, whose exact policy graph
+forbids precisely a deleted nullary `.fap` while retaining the independent
+runtime/ownership certificate. Any later nullary-call rule must consume an
+explicit semantic stuttering certificate until a shared compiler invariant is
+defined and landed through the integration owner.
 
 ## Upstream tracking
 

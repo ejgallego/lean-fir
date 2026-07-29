@@ -891,6 +891,282 @@ def ExactShadowCodeGraph.view
               exact .delete ⟨continuationResult⟩
       | «fun» _ _ impossible => nomatch impossible
 
+/-! ## Explicit nullary-constant deletion policy -/
+
+/- A proof-relevant transparent traversal satisfies the conservative FIR
+nullary-constant policy when no deleted let is a zero-argument full
+application. Retained nullary applications remain permitted: this excludes
+exactly the branch whose purity is not represented by FIR's current impure
+program or external-specification contracts.
+
+The policy graph mirrors the exact compiler decisions and is hereditary over
+the selected child runs. It is deliberately independent of runtime/ownership
+readiness; compiler clients must supply both facts. -/
+mutual
+
+  inductive NullarySafeShadowCodeRun :
+      Nat → UsedLocals → UsedLocals →
+        LCNF.Code .impure → LCNF.Code .impure → Prop where
+    | letRetained
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (keep :
+          declaration.fvarId ∈ continuationUsed ∨
+            safeToElim declaration.value = false) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (collectLetValue continuationUsed declaration.value)
+          (.let declaration sourceContinuation)
+          (.let declaration targetContinuation)
+    | letDeleted
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (absent :
+          continuationUsed.contains declaration.fvarId = false)
+        (safe : safeToElim declaration.value = true)
+        (notNullary : ¬ ∃ name arguments,
+          declaration.value = .fap name arguments ∧
+            arguments.isEmpty = true) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial continuationUsed
+          (.let declaration sourceContinuation) targetContinuation
+    | joinRetained
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (live : continuationUsed.contains fvarId = true)
+        (body :
+          NullarySafeShadowCodeRun nextFuel continuationUsed bodyUsed
+            sourceBody targetBody) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial bodyUsed
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation)
+          (.jp (.mk fvarId binderName params type targetBody)
+            targetContinuation)
+    | joinDeleted
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (absent : continuationUsed.contains fvarId = false) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial continuationUsed
+          (.jp (.mk fvarId binderName params type sourceBody)
+            sourceContinuation)
+          targetContinuation
+    | cases
+        (alternatives :
+          NullarySafeShadowAltListRun nextFuel initial beforeDiscr
+            sourceAlternatives.toList targetAlternatives) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (beforeDiscr.insert discr)
+          (.cases (.mk typeName resultType discr sourceAlternatives))
+          (.cases (.mk typeName resultType discr targetAlternatives.toArray))
+    | jump :
+        NullarySafeShadowCodeRun fuel initial
+          (collectArgs (initial.insert join) arguments)
+          (.jmp join arguments) (.jmp join arguments)
+    | return :
+        NullarySafeShadowCodeRun fuel initial (initial.insert result)
+          (.return result) (.return result)
+    | unreachable :
+        NullarySafeShadowCodeRun fuel initial initial
+          (.unreach type) (.unreach type)
+    | objectSetRetained
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (live : continuationUsed.contains object = true) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (collectArg continuationUsed field)
+          (.oset object index field sourceContinuation)
+          (.oset object index field targetContinuation)
+    | objectSetDeleted
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (absent : continuationUsed.contains object = false) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial continuationUsed
+          (.oset object index field sourceContinuation) targetContinuation
+    | usizeSetRetained
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (live : continuationUsed.contains object = true) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert field)
+          (.uset object index field sourceContinuation)
+          (.uset object index field targetContinuation)
+    | usizeSetDeleted
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (absent : continuationUsed.contains object = false) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial continuationUsed
+          (.uset object index field sourceContinuation) targetContinuation
+    | scalarSetRetained
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (live : continuationUsed.contains object = true) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert field)
+          (.sset object width offset field type sourceContinuation)
+          (.sset object width offset field type targetContinuation)
+    | scalarSetDeleted
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation)
+        (absent : continuationUsed.contains object = false) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial continuationUsed
+          (.sset object width offset field type sourceContinuation)
+          targetContinuation
+    | tagSet
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert object)
+          (.setTag object tag sourceContinuation)
+          (.setTag object tag targetContinuation)
+    | increment
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert object)
+          (.inc object amount check persistent sourceContinuation)
+          (.inc object amount check persistent targetContinuation)
+    | decrement
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert object)
+          (.dec object amount check persistent objects sourceContinuation)
+          (.dec object amount check persistent objects targetContinuation)
+    | delete
+        (continuation :
+          NullarySafeShadowCodeRun nextFuel initial continuationUsed
+            sourceContinuation targetContinuation) :
+        NullarySafeShadowCodeRun (nextFuel + 1) initial
+          (continuationUsed.insert object)
+          (.del object sourceContinuation)
+          (.del object targetContinuation)
+
+  /-- Conservative-policy traversal threaded through a `cases` alternative
+  list. -/
+  inductive NullarySafeShadowAltListRun :
+      Nat → UsedLocals → UsedLocals →
+        List (LCNF.Alt .impure) → List (LCNF.Alt .impure) → Prop where
+    | nil :
+        NullarySafeShadowAltListRun fuel initial initial [] []
+    | ctor
+        (body :
+          NullarySafeShadowCodeRun fuel initial middle
+            sourceBody targetBody)
+        (rest :
+          NullarySafeShadowAltListRun fuel middle final
+            sourceRest targetRest) :
+        NullarySafeShadowAltListRun fuel initial final
+          (.ctorAlt info sourceBody :: sourceRest)
+          (.ctorAlt info targetBody :: targetRest)
+    | default
+        (body :
+          NullarySafeShadowCodeRun fuel initial middle
+            sourceBody targetBody)
+        (rest :
+          NullarySafeShadowAltListRun fuel middle final
+            sourceRest targetRest) :
+        NullarySafeShadowAltListRun fuel initial final
+          (.default sourceBody :: sourceRest)
+          (.default targetBody :: targetRest)
+
+end
+
+/- The conservative policy graph is sound for the transparent compiler
+traversal. -/
+mutual
+
+  theorem NullarySafeShadowCodeRun.result
+      (run :
+        NullarySafeShadowCodeRun fuel initial final source target) :
+      shadowCode? fuel initial source = some (target, final) := by
+    cases run with
+    | letRetained continuation keep =>
+        simp [shadowCode?, continuation.result, keep]
+    | letDeleted continuation absent safe _notNullary =>
+        simp_all [shadowCode?, continuation.result]
+    | joinRetained continuation live body =>
+        simp_all [shadowCode?, continuation.result, body.result]
+    | joinDeleted continuation absent =>
+        simp_all [shadowCode?, continuation.result]
+    | cases alternatives =>
+        simp [shadowCode?, alternatives.result]
+    | jump =>
+        cases fuel <;> simp [shadowCode?]
+    | «return» =>
+        cases fuel <;> simp [shadowCode?]
+    | unreachable =>
+        cases fuel <;> simp [shadowCode?]
+    | objectSetRetained continuation live =>
+        simp_all [shadowCode?, continuation.result]
+    | objectSetDeleted continuation absent =>
+        simp_all [shadowCode?, continuation.result]
+    | usizeSetRetained continuation live =>
+        simp_all [shadowCode?, continuation.result]
+    | usizeSetDeleted continuation absent =>
+        simp_all [shadowCode?, continuation.result]
+    | scalarSetRetained continuation live =>
+        simp_all [shadowCode?, continuation.result]
+    | scalarSetDeleted continuation absent =>
+        simp_all [shadowCode?, continuation.result]
+    | tagSet continuation =>
+        simp [shadowCode?, continuation.result]
+    | increment continuation =>
+        simp [shadowCode?, continuation.result]
+    | decrement continuation =>
+        simp [shadowCode?, continuation.result]
+    | delete continuation =>
+        simp [shadowCode?, continuation.result]
+
+  /-- Alternative-list policy graphs reconstruct the same threaded
+  transparent traversal. -/
+  theorem NullarySafeShadowAltListRun.result
+      (run :
+        NullarySafeShadowAltListRun fuel initial final source target) :
+      shadowAltList? (shadowCode? fuel) initial source =
+        some (target, final) := by
+    cases run with
+    | nil => simp [shadowAltList?]
+    | ctor body rest =>
+        simp [shadowAltList?, body.result, rest.result,
+          LCNF.Alt.getCode, updateAltCode]
+    | default body rest =>
+        simp [shadowAltList?, body.result, rest.result,
+          LCNF.Alt.getCode, updateAltCode]
+
+end
+
+/-- Forget the conservative policy while retaining the exact transparent
+compiler equation. -/
+def NullarySafeShadowCodeRun.toExact
+    (run :
+      NullarySafeShadowCodeRun fuel initial final source target) :
+    ExactShadowCodeGraph fuel final source target :=
+  ⟨initial, run.result⟩
+
+/-- Code relation refined with the explicit conservative policy for nullary
+full applications. Declaration bodies always begin with the compiler's empty
+liveness seed. -/
+def NullarySafeExactShadowCodeRelated (fuel : Nat)
+    (source target : LCNF.Code .impure) : Prop :=
+  ∃ final, NullarySafeShadowCodeRun fuel {} final source target
+
+/-- Whole-program audited pass graph in which no nullary full application
+was selected for deletion. -/
+def NoDeletedNullaryFapProgramRun (fuel : Nat)
+    (source target : ImpureProgram) : Prop :=
+  ProgramRelated (NullarySafeExactShadowCodeRelated fuel) source target
+
 /-- Every listed binder that is absent from one liveness set remains absent
 from another.  This is the contravariant transport used when backwards
 liveness moves from a child result to the result of its containing node. -/
