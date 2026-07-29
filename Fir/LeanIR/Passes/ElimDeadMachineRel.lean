@@ -11755,6 +11755,28 @@ theorem match_sourceOnlyCoreStep_binderReady
       rw [transition] at actual
       contradiction
 
+/-- Ledger-carrying hereditary source-only matcher. Target stuttering keeps
+the exact target frontier and therefore the incoming owner ledger
+definitionally unchanged. -/
+theorem match_sourceOnlyCoreStep_binderReady_ledger
+    (transition : coreStep source = .next expectedSourceAfter)
+    (related : LedgerBinderReadyReachableMachineRelated fuel rho
+      expectedSourceAfter target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      targetAfter = target ∧
+      NonLockstep.Reaches externals target targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact ⟨target, rfl, NonLockstep.reaches_refl target, related⟩
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
+
 /-- Determinism also packages an exhibited pair of internal transitions as a
 one-step target match. -/
 theorem match_internalCoreSteps
@@ -11784,6 +11806,28 @@ theorem match_internalCoreSteps_binderReady
     (step : Step externals source sourceAfter) :
     NonLockstep.Reaches externals target targetAfter ∧
       BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases step with
+  | internal actual =>
+      rw [sourceTransition] at actual
+      cases actual
+      exact ⟨NonLockstep.reaches_of_step (.internal targetTransition), related⟩
+  | external actual externalProof =>
+      rw [sourceTransition] at actual
+      contradiction
+
+/-- Ledger-carrying counterpart of
+`match_internalCoreSteps_binderReady`. The post-state relation already owns
+the exact target-frontier ledger, so determinism only selects the source and
+target transitions. -/
+theorem match_internalCoreSteps_binderReady_ledger
+    (sourceTransition : coreStep source = .next expectedSourceAfter)
+    (targetTransition : coreStep target = .next targetAfter)
+    (related : LedgerBinderReadyReachableMachineRelated fuel rho
+      expectedSourceAfter targetAfter)
+    (step : Step externals source sourceAfter) :
+    NonLockstep.Reaches externals target targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   cases step with
   | internal actual =>
@@ -12072,6 +12116,82 @@ theorem match_retainedErasedLetStep_binderReady
       sourceTransition targetTransition afterRelated
       (by simpa [sourceCurrent] using step)⟩
 
+/-- Ledger-carrying retained erased-let matcher. The paired transition changes
+only environments and control, so the target frontier and owner ledger are
+unchanged. -/
+theorem match_retainedErasedLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .erased
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .erased
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .erased
+    } targetContinuation) }
+  let sourceExpected := {
+    sourceState with
+    env := bind sourceState.env fvarId .erased
+    control := .code sourceContinuation }
+  let targetExpected := {
+    targetState with
+    env := bind targetState.env fvarId .erased
+    control := .code targetContinuation }
+  have sourceTransition :
+      coreStep sourceCurrent = .next sourceExpected := by
+    simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+      Pure.pure, Except.pure]
+  have targetTransition :
+      coreStep targetCurrent = .next targetExpected := by
+    simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+      Pure.pure, Except.pure]
+  have afterStructural :
+      BinderReadyReachableMachineRelated fuel rho
+        sourceExpected targetExpected := by
+    exact retainedLetValue_binderReadyReachableRelated
+      sourceState targetState sourceState.runtime targetState.runtime
+      programs frames continuation joins env .erased
+      runtime.runtime.prependErased
+  have afterRelated :
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceExpected targetExpected := by
+    refine ⟨?_, afterStructural⟩
+    simpa [targetExpected] using runtime.ledger
+  exact ⟨targetExpected,
+    match_internalCoreSteps_binderReady_ledger
+      sourceTransition targetTransition afterRelated
+      (by simpa [sourceCurrent] using step)⟩
+
 /-- A deleted erased `let` advances only the source machine.  Binder absence
 makes the new source binding invisible to the exact related continuation, so
 the target may stutter without losing hereditary compiler provenance. -/
@@ -12117,6 +12237,95 @@ theorem match_deletedErasedLetStep_binderReady
       (by simpa [declaration] using step) with
     ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
   exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Any runtime-neutral deleted let carries the target ledger through its
+zero-step target match. This is the common ledger rule for erased values,
+copies, projections, unboxing, and ownership queries after their local
+evaluation certificate is established. -/
+theorem match_deletedRuntimeNeutralLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains declaration.fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (evaluated : evalLetValue sourceState declaration =
+      .ok (sourceState.runtime, .value value))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases coreStep_deletedLet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env absent
+      evaluated runtime.runtime with
+    ⟨transition, afterStructural⟩
+  have afterRelated :
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        { sourceState with
+          env := bind sourceState.env declaration.fvarId value
+          control := .code sourceContinuation }
+        { targetState with control := .code targetContinuation } := by
+    refine ⟨?_, afterStructural⟩
+    simpa using runtime.ledger
+  rcases match_sourceOnlyCoreStep_binderReady_ledger
+      transition afterRelated step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Ledger-carrying deleted erased-let specialization. -/
+theorem match_deletedErasedLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let declaration : LCNF.LetDecl .impure := {
+    fvarId, binderName, type, value := .erased
+  }
+  have evaluated : evalLetValue sourceState declaration =
+      .ok (sourceState.runtime, .value .erased) := by
+    simp [declaration, evalLetValue, Pure.pure, Except.pure]
+  exact match_deletedRuntimeNeutralLetStep_binderReady_ledger
+    sourceState targetState programs frames continuation joins env
+    (by simpa [declaration] using absent) runtime evaluated
+    (by simpa [declaration] using step)
 
 /-- An exact retained erased-let branch supplies its post-step hereditary
 continuation graph directly.  This is the first end-to-end residual step from
@@ -12222,6 +12431,160 @@ theorem ExactShadowCodeBinderReady.match_deletedErasedLetStep
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime step
+
+/-- Exact retained erased provenance consumed through the ledger-preserving
+paired matcher. -/
+theorem ExactShadowCodeBinderReady.match_retainedErasedLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.erased : LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .erased
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.erased : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .erased
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_retainedErasedLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env runtime step
+
+/-- Exact deleted erased provenance consumed through the generic
+runtime-neutral ledger rule. -/
+theorem ExactShadowCodeBinderReady.match_deletedErasedLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.erased : LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .erased
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedErasedLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime step
+
+/-- Generic exact wrapper for every deleted let whose dynamic certificate
+exhibits evaluation with the unchanged source runtime. Individual value
+families only need to expose that local evaluation equation. -/
+theorem ExactShadowCodeBinderReady.match_deletedRuntimeNeutralLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {declaration : LCNF.LetDecl .impure}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent :
+      continuationUsed.contains declaration.fvarId = false}
+    {safe : safeToElim declaration.value = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := declaration) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (evaluated : evalLetValue sourceState declaration =
+      .ok (sourceState.runtime, .value value))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let declaration sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedRuntimeNeutralLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime evaluated step
 
 /-- Complete graph-level matcher for erased lets.  A retained node executes
 on both machines; a certified deleted node is one source step matched by
