@@ -9485,6 +9485,21 @@ theorem SourceRuntimeOwnershipMachineReadyAt.of_not_code
   intro sourceFrameRoots sourceCode frames control
   exact (notCode sourceCode control).elim
 
+/-- One-machine source readiness upgrades any already-related strong pair.
+The structural frame relation supplies exactly the source-root witness
+hidden by `BinderReadySourceFramesRooted`. -/
+theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyAt_of_sourceMachine
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (sourceReady : SourceRuntimeOwnershipMachineReadyAt fuel source) :
+    BinderReadyReachableMachineReadyAt fuel source target := by
+  apply related.binderReadyReachableMachineReadyAt_of_sourceRuntime
+  intro rho sourceControlRoots targetControlRoots
+    sourceFrameRoots targetFrameRoots programs control frames runtime
+    sourceCode sourceControl
+  exact sourceReady
+    ⟨rho, target.frames, targetFrameRoots, frames⟩ sourceControl
+
 /-- Hereditary source-only runtime/ownership contract.  Unlike the pair
 invariant, it quantifies over one execution and contains no target path,
 target state, observation relation, or address renaming. -/

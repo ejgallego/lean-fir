@@ -5468,4 +5468,814 @@ theorem erasedKernelRegression (externals : ExternalSpec)
         { state with control := .code (.unreach type) } observation := by
   exact eliminate_erased_before_unreach state dead dead.name objType type
 
+/-- Concrete states for the closed mutation fixture.  Entry arguments remain
+only in the declaration-entry frame; the declaration itself has no
+parameters, so all mutation operands and runtimes below are closed. -/
+def closedWritesDeadEnv : Env :=
+  bind liveEnv dead (.object (.heap 0))
+
+def closedWritesUSizeEnv : Env :=
+  bind closedWritesDeadEnv usizeField (.usize 7)
+
+def closedWritesAfterUSizeRuntime : RuntimeState :=
+  match setUSizeSlot deletedWriteSourceRuntime (.object (.heap 0))
+      1 (.usize 7) with
+  | .ok runtime => runtime
+  | .error _ => {}
+
+def closedWritesAfterScalarRuntime : RuntimeState :=
+  match setScalarField closedWritesAfterUSizeRuntime (.object (.heap 0))
+      8 0 (.scalar (.uint8 9)) with
+  | .ok runtime => runtime
+  | .error _ => {}
+
+def closedWritesSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code closedWritesBefore
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceObjectState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code <|
+      .let closedWritesObjectDecl <|
+      .let closedWritesUSizeDecl <|
+      .let closedWritesScalarDecl deletedWritesBefore
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceUSizeState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code <|
+      .let closedWritesUSizeDecl <|
+      .let closedWritesScalarDecl deletedWritesBefore
+    env := closedWritesDeadEnv
+    runtime := deletedWriteSourceRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceScalarState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code <| .let closedWritesScalarDecl deletedWritesBefore
+    env := closedWritesUSizeEnv
+    runtime := deletedWriteSourceRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceObjectSetState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code deletedWritesBefore
+    env := deletedWriteSourceEnv
+    runtime := deletedWriteSourceRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceUSizeSetState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code <|
+      .uset dead 1 usizeField <|
+      .sset dead 8 0 scalarField u8Type <| .return live
+    env := deletedWriteSourceEnv
+    runtime := deletedWriteSourceRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceScalarSetState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code <|
+      .sset dead 8 0 scalarField u8Type <| .return live
+    env := deletedWriteSourceEnv
+    runtime := closedWritesAfterUSizeRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceReturnState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .code (.return live)
+    env := deletedWriteSourceEnv
+    runtime := closedWritesAfterScalarRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceYieldedState (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .yielded .erased
+    env := deletedWriteSourceEnv
+    runtime := closedWritesAfterScalarRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedWritesSourceCachedState : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .yielded .erased
+    env := deletedWriteSourceEnv
+    runtime := closedWritesAfterScalarRuntime.setGlobal `main .erased }
+
+def closedWritesSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedWritesBeforeProgram
+    control := .invokeValue .erased arguments
+    env := deletedWriteSourceEnv
+    runtime := closedWritesAfterScalarRuntime }
+
+theorem closedWritesSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState closedWritesBeforeProgram `main arguments) =
+      .next (closedWritesSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedWritesBeforeProgram,
+      Program.findDecl?, invokeDecl, closedWritesSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedWritesSourceOuterStep (arguments : Array Value) :
+    coreStep (closedWritesSourceOuterState arguments) =
+      .next (closedWritesSourceObjectState arguments) := by
+  rfl
+
+theorem closedWritesSourceObjectStep (arguments : Array Value) :
+    coreStep (closedWritesSourceObjectState arguments) =
+      .next (closedWritesSourceUSizeState arguments) := by
+  simp [closedWritesSourceObjectState, closedWritesSourceUSizeState,
+    coreStep, evalLetValue, closedWritesObjectDecl, letDecl,
+    evalArgs, evalArg, closedWritesDeadEnv, deletedWriteSourceRuntime,
+    deletedWriteObject, closedWritesInfo, allocCtor, alloc,
+    Functor.map, Except.map, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+
+theorem closedWritesSourceUSizeStep (arguments : Array Value) :
+    coreStep (closedWritesSourceUSizeState arguments) =
+      .next (closedWritesSourceScalarState arguments) := by
+  rfl
+
+theorem closedWritesSourceScalarStep (arguments : Array Value) :
+    coreStep (closedWritesSourceScalarState arguments) =
+      .next (closedWritesSourceObjectSetState arguments) := by
+  rfl
+
+theorem closedWritesSourceObjectSetStep (arguments : Array Value) :
+    coreStep (closedWritesSourceObjectSetState arguments) =
+      .next (closedWritesSourceUSizeSetState arguments) := by
+  rfl
+
+theorem closedWritesSourceUSizeSetStep (arguments : Array Value) :
+    coreStep (closedWritesSourceUSizeSetState arguments) =
+      .next (closedWritesSourceScalarSetState arguments) := by
+  rfl
+
+theorem closedWritesSourceScalarSetStep (arguments : Array Value) :
+    coreStep (closedWritesSourceScalarSetState arguments) =
+      .next (closedWritesSourceReturnState arguments) := by
+  rfl
+
+theorem closedWritesSourceReturnStep (arguments : Array Value) :
+    coreStep (closedWritesSourceReturnState arguments) =
+      .next (closedWritesSourceYieldedState arguments) := by
+  rfl
+
+theorem closedWritesSourceYieldedStepEmpty :
+    coreStep (closedWritesSourceYieldedState #[]) =
+      .next closedWritesSourceCachedState := by
+  rfl
+
+theorem closedWritesSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedWritesSourceYieldedState arguments) =
+      .next (closedWritesSourceInvokingState arguments) := by
+  simp [coreStep, closedWritesSourceYieldedState, neutralEntryFrames,
+    notEmpty, closedWritesSourceInvokingState]
+
+/-- Complete source execution graph for the closed mutation fixture. -/
+inductive ClosedWritesSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      ClosedWritesSourceReachable arguments
+        (initialState closedWritesBeforeProgram `main arguments)
+  | outer :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceOuterState arguments)
+  | object :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceObjectState arguments)
+  | usize :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceUSizeState arguments)
+  | scalar :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceScalarState arguments)
+  | objectSet :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceObjectSetState arguments)
+  | usizeSet :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceUSizeSetState arguments)
+  | scalarSet :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceScalarSetState arguments)
+  | ret :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceReturnState arguments)
+  | yielded :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedWritesSourceReachable arguments closedWritesSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedWritesSourceReachable arguments
+        (closedWritesSourceInvokingState arguments)
+
+theorem closedWritesSourceReachable_step
+    (reachable : ClosedWritesSourceReachable arguments before)
+    (step : Step externals before after) :
+    ClosedWritesSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedWritesSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedWritesSourceOuterStep arguments) .object step
+  | object =>
+      exact predicate_of_step_next
+        (closedWritesSourceObjectStep arguments) .usize step
+  | usize =>
+      exact predicate_of_step_next
+        (closedWritesSourceUSizeStep arguments) .scalar step
+  | scalar =>
+      exact predicate_of_step_next
+        (closedWritesSourceScalarStep arguments) .objectSet step
+  | objectSet =>
+      exact predicate_of_step_next
+        (closedWritesSourceObjectSetStep arguments) .usizeSet step
+  | usizeSet =>
+      exact predicate_of_step_next
+        (closedWritesSourceUSizeSetStep arguments) .scalarSet step
+  | scalarSet =>
+      exact predicate_of_step_next
+        (closedWritesSourceScalarSetStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedWritesSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next closedWritesSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedWritesSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedWritesSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [closedWritesSourceCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedWritesSourceInvokingState, coreStep,
+            invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedWritesSourceInvokingState, coreStep,
+            invokeClosure, fail] at transition
+
+def closedWritesTargetOuterState (arguments : Array Value) : MachineState :=
+  { program := closedWritesAfterProgram
+    control := .code closedWritesAfter
+    frames := neutralEntryFrames arguments }
+
+def closedWritesTargetReturnState (arguments : Array Value) : MachineState :=
+  { program := closedWritesAfterProgram
+    control := .code (.return live)
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedWritesTargetYieldedState (arguments : Array Value) : MachineState :=
+  { program := closedWritesAfterProgram
+    control := .yielded .erased
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedWritesTargetCachedState : MachineState :=
+  { program := closedWritesAfterProgram
+    control := .yielded .erased
+    env := liveEnv
+    runtime := ({} : RuntimeState).setGlobal `main .erased }
+
+def closedWritesTargetInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedWritesAfterProgram
+    control := .invokeValue .erased arguments
+    env := liveEnv }
+
+theorem closedWritesTargetEntryStep (arguments : Array Value) :
+    coreStep (initialState closedWritesAfterProgram `main arguments) =
+      .next (closedWritesTargetOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedWritesAfterProgram,
+      Program.findDecl?, invokeDecl, closedWritesTargetOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedWritesTargetOuterStep (arguments : Array Value) :
+    coreStep (closedWritesTargetOuterState arguments) =
+      .next (closedWritesTargetReturnState arguments) := by
+  rfl
+
+theorem closedWritesTargetReturnStep (arguments : Array Value) :
+    coreStep (closedWritesTargetReturnState arguments) =
+      .next (closedWritesTargetYieldedState arguments) := by
+  rfl
+
+theorem closedWritesTargetYieldedStepEmpty :
+    coreStep (closedWritesTargetYieldedState #[]) =
+      .next closedWritesTargetCachedState := by
+  rfl
+
+theorem closedWritesTargetYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedWritesTargetYieldedState arguments) =
+      .next (closedWritesTargetInvokingState arguments) := by
+  simp [coreStep, closedWritesTargetYieldedState, neutralEntryFrames,
+    notEmpty, closedWritesTargetInvokingState]
+
+inductive ClosedWritesTargetReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      ClosedWritesTargetReachable arguments
+        (initialState closedWritesAfterProgram `main arguments)
+  | outer :
+      ClosedWritesTargetReachable arguments
+        (closedWritesTargetOuterState arguments)
+  | ret :
+      ClosedWritesTargetReachable arguments
+        (closedWritesTargetReturnState arguments)
+  | yielded :
+      ClosedWritesTargetReachable arguments
+        (closedWritesTargetYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedWritesTargetReachable arguments closedWritesTargetCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedWritesTargetReachable arguments
+        (closedWritesTargetInvokingState arguments)
+
+theorem closedWritesTargetReachable_step
+    (reachable : ClosedWritesTargetReachable arguments before)
+    (step : Step externals before after) :
+    ClosedWritesTargetReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedWritesTargetEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedWritesTargetOuterStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedWritesTargetReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next closedWritesTargetYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedWritesTargetYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedWritesTargetCachedState, coreStep] at transition
+      | external transition response =>
+          simp [closedWritesTargetCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedWritesTargetInvokingState, coreStep,
+            invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedWritesTargetInvokingState, coreStep,
+            invokeClosure, fail] at transition
+
+/-- The erased target has no allocation path and no active write head. -/
+def ClosedWritesTargetRuntimeShape (state : MachineState) : Prop :=
+  state.runtime.nextLocation = 0 ∧
+    ∀ code, state.control = .code code →
+      (∀ object index field continuation,
+        code ≠ .oset object index field continuation) ∧
+      (∀ object index field continuation,
+        code ≠ .uset object index field continuation) ∧
+      (∀ object width offset field type continuation,
+        code ≠ .sset object width offset field type continuation)
+
+theorem closedWritesTargetReachable_runtimeShape
+    (reachable : ClosedWritesTargetReachable arguments state) :
+    ClosedWritesTargetRuntimeShape state := by
+  cases reachable <;>
+    simp [ClosedWritesTargetRuntimeShape, initialState,
+      closedWritesTargetOuterState, closedWritesTargetReturnState,
+      closedWritesTargetYieldedState, closedWritesTargetCachedState,
+      closedWritesTargetInvokingState, closedWritesAfter, neutralAfter,
+      RuntimeState.setGlobal, RuntimeState.markPersistent]
+
+/-- Pair-indexed ownership certificates for the three source-only writes.
+The target's zero allocation frontier, together with the runtime relation,
+excludes the source object from every actual control/frame root
+decomposition. -/
+theorem closedWritesObjectSetReady_of_shadowRuntime
+    (target : MachineState) (runtime :
+      ShadowRuntimeRel rho
+        (closedWritesSourceObjectSetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedObjectSetReadyAt
+      (closedWritesSourceObjectSetState arguments)
+      (runtimeRoots
+        (closedWritesSourceObjectSetState arguments).runtime sourceRoots)
+      dead 0 .erased := by
+  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
+    deletedWriteObject, .erased, ?_, rfl, ?_, rfl, rfl, ?_, ?_⟩
+  · simp [closedWritesSourceObjectSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · simp [deletedWriteObject]
+  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+
+theorem closedWritesUSizeSetReady_of_shadowRuntime
+    (target : MachineState) (runtime :
+      ShadowRuntimeRel rho
+        (closedWritesSourceUSizeSetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedUSizeSetReadyAt
+      (closedWritesSourceUSizeSetState arguments)
+      (runtimeRoots
+        (closedWritesSourceUSizeSetState arguments).runtime sourceRoots)
+      dead 1 usizeField := by
+  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
+    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_, ?_⟩
+  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · simp [deletedWriteObject]
+  · simp [deletedWriteObject]
+  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+
+def deletedWriteObjectAfterUSize : ConstructorObject :=
+  { deletedWriteObject with usizeFields := #[7] }
+
+theorem closedWritesScalarSetReady_of_shadowRuntime
+    (target : MachineState) (runtime :
+      ShadowRuntimeRel rho
+        (closedWritesSourceScalarSetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedScalarSetReadyAt
+      (closedWritesSourceScalarSetState arguments)
+      (runtimeRoots
+        (closedWritesSourceScalarSetState arguments).runtime sourceRoots)
+      dead scalarField := by
+  refine ⟨0, ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell),
+    deletedWriteObjectAfterUSize, .uint8 9, ?_, ?_, ?_, rfl, rfl, ?_⟩
+  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · change findCell? closedWritesAfterUSizeRuntime.heap 0 =
+      some ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
+    rfl
+  · exact runtime.leftUnreachable_of_rightNextLocation_zero targetEmpty 0
+
+/-- The exact structural pair determines the deleted object-write edge; the
+target runtime shape supplies its dynamic unreachability certificate. -/
+theorem closedWritesObjectSetPairReady
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 8
+      (closedWritesSourceObjectSetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceObjectSetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceObjectSetState arguments).control =
+        .code deletedWritesBefore := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedObjectSet :=
+        exact.view.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
+          targetHead.1
+      have writeReady :=
+        closedWritesObjectSetReady_of_shadowRuntime target runtime
+          targetShape.1
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .objectSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedWritesUSizeSetPairReady
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 8
+      (closedWritesSourceUSizeSetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceUSizeSetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceUSizeSetState arguments).control =
+        .code
+          (.uset dead 1 usizeField <|
+            .sset dead 8 0 scalarField u8Type <| .return live) := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedUSizeSet :=
+        exact.view.runtimeDecision_eq_deletedUSizeSet_of_target_not_uset
+          targetHead.2.1
+      have writeReady :=
+        closedWritesUSizeSetReady_of_shadowRuntime target runtime
+          targetShape.1
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .usizeSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedWritesScalarSetPairReady
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 8
+      (closedWritesSourceScalarSetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceScalarSetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceScalarSetState arguments).control =
+        .code
+          (.sset dead 8 0 scalarField u8Type <| .return live) := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedScalarSet :=
+        exact.view.runtimeDecision_eq_deletedScalarSet_of_target_not_sset
+          targetHead.2.2
+      have writeReady :=
+        closedWritesScalarSetReady_of_shadowRuntime target runtime
+          targetShape.1
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .scalarSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedWritesOuterSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 8
+      (closedWritesSourceOuterState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedWritesBefore :=
+    Control.code.inj control.symm
+  subst sourceCode
+  unfold closedWritesBefore
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem closedWritesObjectSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 8
+      (closedWritesSourceObjectState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq :
+      sourceCode =
+        (.let closedWritesObjectDecl <|
+          .let closedWritesUSizeDecl <|
+          .let closedWritesScalarDecl deletedWritesBefore) :=
+    Control.code.inj control.symm
+  subst sourceCode
+  unfold closedWritesObjectDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.erased] ?_ rfl
+  simp [closedWritesSourceObjectState, evalArgs, evalArg]
+  rfl
+
+theorem closedWritesUSizeSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 8
+      (closedWritesSourceUSizeState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq :
+      sourceCode =
+        (.let closedWritesUSizeDecl <|
+          .let closedWritesScalarDecl deletedWritesBefore) :=
+    Control.code.inj control.symm
+  subst sourceCode
+  unfold closedWritesUSizeDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedWritesScalarSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 8
+      (closedWritesSourceScalarState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq :
+      sourceCode = .let closedWritesScalarDecl deletedWritesBefore :=
+    Control.code.inj control.symm
+  subst sourceCode
+  unfold closedWritesScalarDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedWritesReturnSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 8
+      (closedWritesSourceReturnState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = .return live :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+/-- Every reachable source state is ready against any structurally related
+reachable target state.  The three ownership-sensitive write cases use the
+pair-indexed certificates above; all remaining states use ordinary
+source-machine readiness. -/
+theorem closedWritesSourceReachable_pairReady
+    (sourceReachable : ClosedWritesSourceReachable arguments source)
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related :
+      SomeBinderReadyReachableMachineRelated 8 source target) :
+    BinderReadyReachableMachineReadyAt 8 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact
+        related.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesOuterSourceMachineReadyAt arguments)
+  | object =>
+      exact
+        related.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesObjectSourceMachineReadyAt arguments)
+  | usize =>
+      exact
+        related.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesUSizeSourceMachineReadyAt arguments)
+  | scalar =>
+      exact
+        related.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesScalarSourceMachineReadyAt arguments)
+  | objectSet =>
+      exact closedWritesObjectSetPairReady targetShape related
+  | usizeSet =>
+      exact closedWritesUSizeSetPairReady targetShape related
+  | scalarSet =>
+      exact closedWritesScalarSetPairReady targetShape related
+  | ret =>
+      exact
+        related.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesReturnSourceMachineReadyAt arguments)
+  | yielded =>
+      apply related.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceYieldedState] at control
+  | cached empty =>
+      apply related.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceInvokingState] at control
+
+theorem closedWritesSourceReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedWritesBeforeProgram `main arguments) state) :
+    ClosedWritesSourceReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        ClosedWritesSourceReachable arguments before →
+          ClosedWritesSourceReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih (closedWritesSourceReachable_step ready head)
+  exact preserves steps .entry
+
+theorem closedWritesTargetReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedWritesAfterProgram `main arguments) state) :
+    ClosedWritesTargetReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        ClosedWritesTargetReachable arguments before →
+          ClosedWritesTargetReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih (closedWritesTargetReachable_step ready head)
+  exact preserves steps .entry
+
+/-- Pair-indexed hereditary ownership for the complete closed fixture.
+Related entry arguments may differ, but the empty initial address renaming
+and the target's zero allocation frontier rule out aliases to the
+source-only object at every write edge. -/
+theorem closedWritesExactRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals 8)
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] := by
+  intro entry member sourceArguments targetArguments argumentsRelated
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  intro sourceAfter targetAfter sourcePath targetPath related
+  have sourceReachable :=
+    closedWritesSourceReachable_of_reaches sourcePath
+  have targetReachable :=
+    closedWritesTargetReachable_of_reaches targetPath
+  exact closedWritesSourceReachable_pairReady sourceReachable
+    (closedWritesTargetReachable_runtimeShape targetReachable) related
+
+/-- Whole-program semantic correctness for allocation plus all three
+source-only mutation forms. -/
+theorem closedWritesProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 8) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_exactRuntimeOwnership
+    closedWritesBeforeProgramElimDeadWellFormed
+    closedWritesShadowProgramRun compatible
+    (closedWritesExactRuntimeOwnershipInitialInvariant externals)
+
 end Fir.LeanIR.Passes.ElimDeadExamples
