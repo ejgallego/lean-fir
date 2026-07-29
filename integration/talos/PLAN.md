@@ -4188,6 +4188,27 @@ and the ten resident numeric externals. The contract harness checks the
 operation-family law and whole-export endpoint. No FIR semantic contract,
 concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6fo removes the artificial one-effect-family boundary. The generic
+`EffectSupportedOr` admission contains only one of two source-family
+derivations, and `EffectRuntimeRefines.or` proves that any two uniform runtime
+laws preserving the same invariant compose. `OwnershipEffectSupported` uses
+that binary union to admit compiler-erased persistent increment/decrement,
+ordinary increment, recursive decrement, and explicit deletion in one source
+evaluation.
+
+Increment and deletion now also have ownership-frame specializations. Their
+concrete heap-only transitions preserve the host/witness closure-descriptor
+agreement needed by a later recursive decrement. The combined
+`effectRuntimeRefines_ownership` theorem is assembled from the four reusable
+operation laws with the general union theorem.
+`correctBudgetedPureExternalOwnership` consequently permits arbitrary
+interleavings of all four ownership families with default-only cases, all
+current direct operations, and the ten resident numeric externals. The only
+additional entry invariant is descriptor-table agreement; there are no
+operation-specific target witnesses or runtime-law premises at the whole-
+export boundary. No FIR semantic contract, concrete layout, executable ABI,
+or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

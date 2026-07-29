@@ -384,6 +384,14 @@ frontier exactly. `effectRuntimeRefines_ordinaryDelete` retains the ordinary
 budgeted pure-external frame, and
 `correctBudgetedPureExternalOrdinaryDeletes` is the corresponding
 whole-export endpoint.
+`EffectSupportedOr` and `EffectRuntimeRefines.or` provide the general
+operation-family composition theorem. `OwnershipEffectSupported` combines
+persistent increment/decrement, ordinary increment, recursive decrement, and
+explicit delete; increment and delete retain descriptor agreement through
+their heap-only transitions.
+`effectRuntimeRefines_ownership` composes the four reusable laws, and
+`correctBudgetedPureExternalOwnership` admits arbitrary interleavings of the
+four families in one generated export.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

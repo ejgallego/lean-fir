@@ -425,6 +425,11 @@ Cross-cutting W6.5 state:
   recover the generated unary call; both ordinary release and erased-zero
   no-op preserve the frontier exactly; and no descriptor-table premise is
   needed; and
+- effect families now compose rather than remaining isolated endpoints:
+  a general source-facing union theorem combines uniform operation laws that
+  preserve one invariant, and the ownership endpoint permits persistent
+  increment/decrement, ordinary increment, recursive decrement, and explicit
+  delete in any order around the current direct/resident family; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

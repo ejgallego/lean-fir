@@ -4237,6 +4237,44 @@ inductive OrdinaryDeleteEffectSupported
         (.del objectId continuation) continuation nextRuntime
 
 /--
+Disjoint union of two source-facing effect families.
+
+The wrapper contains only the selected source admission. It is the generic
+composition device for proving one structural compiler theorem from reusable
+operation-family laws.
+-/
+inductive EffectSupportedOr
+    (left right : EffectSupportedPredicate) : EffectSupportedPredicate where
+  | left
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : LCNF.Code .impure}
+      (supported :
+        left sourceRuntime sourceEnv code continuation nextRuntime) :
+      EffectSupportedOr left right sourceRuntime sourceEnv code continuation
+        nextRuntime
+  | right
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : LCNF.Code .impure}
+      (supported :
+        right sourceRuntime sourceEnv code continuation nextRuntime) :
+      EffectSupportedOr left right sourceRuntime sourceEnv code continuation
+        nextRuntime
+
+/--
+All currently proved successful ownership effects in one source-facing
+admission family. The nesting is an implementation detail of the reusable
+binary union and exposes no target syntax or proof certificate.
+-/
+abbrev OwnershipEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr PersistentOwnershipEffectSupported
+    (EffectSupportedOr (OrdinaryIncrementEffectSupported context)
+      (EffectSupportedOr (OrdinaryDecrementEffectSupported context)
+        (OrdinaryDeleteEffectSupported context)))
+
+/--
 Budgeted successful source evaluation for mixed direct/external code with
 selected case branches and admitted no-result effects.
 
@@ -5789,6 +5827,42 @@ theorem effectRuntimeRefines_noEffects
   exact False.elim supported
 
 /--
+Uniform effect refinement is closed under disjoint union of source admission
+families.
+
+This is the general composition theorem: operation proofs are established
+once for a shared invariant, and arbitrary structural source evaluations may
+then interleave either family without adding per-node target evidence.
+-/
+theorem EffectRuntimeRefines.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {left right : EffectSupportedPredicate}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (leftRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv left Invariant)
+    (rightRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv right Invariant) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv (EffectSupportedOr left right) Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  cases supported with
+  | left supported =>
+      exact leftRefines supported sourceStep stateRelated invariant adapted
+  | right supported =>
+      exact rightRefines supported sourceStep stateRelated invariant adapted
+
+/--
 Resolver/adaptor alignment specialized to the concrete reference-count
 increment host selected by a compiler-derived runtime-call slot.
 -/
@@ -6161,6 +6235,207 @@ theorem
           exact scalarImplementation
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, nextInvariant⟩
+
+/--
+Ordinary increment also preserves the ownership-aware frame.
+
+This specialization reuses the same executable increment boundary while
+threading immutable host/witness closure-descriptor agreement for composition
+with recursive decrement nodes.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement_ownership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      fits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.inc_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.incrementCall callFound
+      obtain ⟨heap, step, cursor, _capacity⟩ :=
+        effectStepSimulates_inc_with_capacity objectLookup updated stateRelated
+          objectCompiled objectFound kindAt objectRefines callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results fits
+      rcases invariant.1 with
+        ⟨⟨frameAligned, budget⟩, integerImplementation,
+          naturalImplementation, scalarImplementation⟩
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextBaseInvariant :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        have externalsEq :
+            (replaceHeap targetStore heap).host.externals =
+              targetStore.host.externals := by
+          simp [replaceHeap, clearFailure]
+        refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact integerImplementation
+        · rw [externalsEq]
+          exact naturalImplementation
+        · rw [externalsEq]
+          exact scalarImplementation
+      have nextInvariant :
+          ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        exact ⟨nextBaseInvariant, by
+          simpa [replaceHeap, clearFailure] using invariant.2⟩
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
+/--
+Explicit deletion preserves the ownership-aware frame.
+
+The concrete operation changes only heap memory (or is the erased-zero no-op),
+so host/witness closure-descriptor agreement remains available to subsequent
+recursive decrement nodes.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDelete_ownership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | del sourceRuntime nextRuntime sourceEnv objectId continuation objectKind
+      sourceObject objectCompiled objectLookup updated =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.del_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.deleteCall callFound
+      obtain ⟨heap, step, _capacity, cursor⟩ :=
+        effectStepSimulates_delete_with_capacity objectLookup updated
+          stateRelated objectCompiled objectFound kindAt callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results
+      rcases invariant.1 with
+        ⟨⟨frameAligned, budget⟩, integerImplementation,
+          naturalImplementation, scalarImplementation⟩
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextBaseInvariant :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        have externalsEq :
+            (replaceHeap targetStore heap).host.externals =
+              targetStore.host.externals := by
+          simp [replaceHeap, clearFailure]
+        refine ⟨⟨frameAligned, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact integerImplementation
+        · rw [externalsEq]
+          exact naturalImplementation
+        · rw [externalsEq]
+          exact scalarImplementation
+      have nextInvariant :
+          ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals
+            remainingBytes nextRuntime sourceEnv (replaceHeap targetStore heap)
+            targetLocals witness := by
+        exact ⟨nextBaseInvariant, by
+          simpa [replaceHeap, clearFailure] using invariant.2⟩
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
+/--
+One uniform runtime law for every currently proved successful ownership effect.
+
+The theorem is assembled solely with `EffectRuntimeRefines.or`: persistent
+operations, ordinary increment, recursive decrement, and explicit deletion
+retain the same ownership-aware invariant and may therefore occur in any
+order in the structural source evaluation.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ownership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {labels : List FVarId} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OwnershipEffectSupported context)
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  have decrementDelete :
+      EffectRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env
+        (EffectSupportedOr (OrdinaryDecrementEffectSupported context)
+          (OrdinaryDeleteEffectSupported context))
+        (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+    by
+      apply EffectRuntimeRefines.or
+      · exact supportedExport.effectRuntimeRefines_ordinaryDecrement
+          (externals := externals)
+      · exact supportedExport.effectRuntimeRefines_ordinaryDelete_ownership
+          (externals := externals)
+  have incrementRest :
+      EffectRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env
+        (EffectSupportedOr (OrdinaryIncrementEffectSupported context)
+          (EffectSupportedOr (OrdinaryDecrementEffectSupported context)
+            (OrdinaryDeleteEffectSupported context)))
+        (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+    by
+      apply EffectRuntimeRefines.or
+      · exact supportedExport.effectRuntimeRefines_ordinaryIncrement_ownership
+          (externals := externals)
+      · exact decrementDelete
+  apply EffectRuntimeRefines.or
+  · exact effectRuntimeRefines_persistentOwnership
+  · exact incrementRest
 
 /--
 A postcondition is stable for a generated case arm when any selected-arm
@@ -11589,6 +11864,82 @@ theorem
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ordinaryDelete (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of every
+currently proved successful ownership effect, default-only cases, and the
+complete current direct/pure-external family.
+
+Persistent increment/decrement, ordinary increment, recursive decrement, and
+explicit deletion share one ownership-aware invariant. The source evaluation
+may select any family at each effect node; no per-node target witness or
+operation-specific runtime theorem appears in this endpoint.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported (OwnershipEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ownership (externals := externals))
     parameterCount
 
 /--

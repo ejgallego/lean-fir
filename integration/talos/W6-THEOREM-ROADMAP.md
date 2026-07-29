@@ -576,7 +576,11 @@ acceptance tests pass.
    release; direct and external step interfaces expose independent table
    preservation, so the source admission remains target-free. Delete retains
    the ordinary frame and covers both live objects and the exact erased reset
-   token with exact frontier preservation. Reuse the
+   token with exact frontier preservation. `EffectSupportedOr` and
+   `EffectRuntimeRefines.or` now combine these reusable laws;
+   `OwnershipEffectSupported` and the corresponding whole-export endpoint
+   allow persistent increment/decrement, ordinary increment, recursive
+   decrement, and delete to occur in any order. Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
 5. Lift from the current source evaluation view to canonical
