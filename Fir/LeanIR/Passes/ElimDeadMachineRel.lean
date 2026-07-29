@@ -12670,6 +12670,44 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
       rw [sourceControl] at codeEq
       cases codeEq
 
+/-- A ledger-carrying hereditary pair is likewise ready automatically outside
+active code. The active-code callback must retain the exact ledger-aligned
+renaming selected by the structural witness. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.ledgerBinderReadyReachableMachineReadyAt_of_code
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (codeReady : ∀ sourceCode,
+      source.control = .code sourceCode →
+        LedgerBinderReadyReachableMachineReadyAt fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  have nonCodeReady
+      (notCode : ∀ sourceCode, source.control ≠ .code sourceCode) :
+      LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+    rcases related with
+      ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+        sourceFrameRoots, targetFrameRoots,
+        programs, control, frames, runtime⟩
+    exact ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, ledger, programs,
+      control.readyAt_of_not_code notCode, frames, runtime⟩
+  cases sourceControl : source.control with
+  | code sourceCode => exact codeReady sourceCode sourceControl
+  | yielded sourceValue =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeName sourceName sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+  | invokeValue sourceFunction sourceArguments =>
+      apply nonCodeReady
+      intro sourceCode codeEq
+      rw [sourceControl] at codeEq
+      cases codeEq
+
 /-- Source-side dynamic contract at one active code state.  For every
 proof-relevant exact compiler residual embedded in hereditary structural
 provenance, it supplies runtime/ownership readiness for that same exact view.
@@ -12860,6 +12898,54 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
     sourceFrameRoots, targetFrameRoots, programs, readyControl,
     frames, runtime⟩
 
+/-- The source-oriented dynamic certificate also upgrades a ledger-carrying
+structural pair without forgetting or reselecting its hidden renaming. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.ledgerBinderReadyReachableMachineReadyAt_of_sourceRuntime
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceReady :
+      BinderReadySourceRuntimeOwnershipReadyAt fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  apply related.ledgerBinderReadyReachableMachineReadyAt_of_code
+  intro sourceCode sourceControl
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  unfold BinderReadySourceRuntimeOwnershipReadyAt at sourceReady
+  have runtimeReady :
+      SourceRuntimeOwnershipReadyAt fuel source
+        sourceFrameRoots sourceCode :=
+    sourceReady (sourceFrameRoots := sourceFrameRoots)
+      programs control frames runtime sourceCode sourceControl
+  have readyControl :
+      BinderReadyReachableControlReadyAt fuel rho source target
+        sourceFrameRoots source.control target.control
+        sourceControlRoots targetControlRoots := by
+    cases targetControl : target.control with
+    | code targetCode =>
+        rw [sourceControl, targetControl] at control
+        cases control with
+        | code graph joins env =>
+            rcases graph with
+              ⟨remaining, final, bounded, exact, subset, static⟩
+            have dynamic := runtimeReady bounded exact subset static
+            rw [sourceControl]
+            exact .code
+              ⟨remaining, final, bounded, exact, subset, static, dynamic⟩
+              joins env
+    | yielded targetValue =>
+        rw [sourceControl, targetControl] at control
+        cases control
+    | invokeName targetName targetArguments =>
+        rw [sourceControl, targetControl] at control
+        cases control
+    | invokeValue targetFunction targetArguments =>
+        rw [sourceControl, targetControl] at control
+        cases control
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, ledger, programs, readyControl,
+    frames, runtime⟩
+
 /-- Hereditary source runtime/ownership contract along related strong paths.
 It is the compiler-client obligation that must be proved from source typing,
 ownership, constant purity, and the chosen foreign semantics. -/
@@ -12946,6 +13032,47 @@ theorem BinderReadyExactRuntimeOwnershipInvariant.stable
     (sourcePath.trans sourceTail) (targetPath.trans targetTail)
     futureRelated
 
+/-- Hereditary exact-provenance ownership contract that retains the target
+allocation history. Every future pair is tested only against the exact
+ledger-carrying structural witness selected by its matched execution. -/
+def LedgerBinderReadyExactRuntimeOwnershipInvariant
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop :=
+  ∀ sourceAfter targetAfter,
+    NonLockstep.Reaches externals source sourceAfter →
+    NonLockstep.Reaches externals target targetAfter →
+    SomeLedgerBinderReadyReachableMachineRelated
+      fuel sourceAfter targetAfter →
+      LedgerBinderReadyReachableMachineReadyAt
+        fuel sourceAfter targetAfter
+
+/-- Ledger-exact readiness at the current pair is the reflexive
+specialization of its hereditary contract. -/
+theorem LedgerBinderReadyExactRuntimeOwnershipInvariant.ready
+    (invariant :
+      LedgerBinderReadyExactRuntimeOwnershipInvariant
+        externals fuel source target)
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  invariant source target
+    (NonLockstep.reaches_refl source)
+    (NonLockstep.reaches_refl target) related
+
+/-- Ledger-exact ownership remains hereditary after matched finite prefixes. -/
+theorem LedgerBinderReadyExactRuntimeOwnershipInvariant.stable
+    (invariant :
+      LedgerBinderReadyExactRuntimeOwnershipInvariant
+        externals fuel source target)
+    (sourcePath : NonLockstep.Reaches externals source sourceAfter)
+    (targetPath : NonLockstep.Reaches externals target targetAfter) :
+    LedgerBinderReadyExactRuntimeOwnershipInvariant
+      externals fuel sourceAfter targetAfter := by
+  intro sourceFuture targetFuture sourceTail targetTail futureRelated
+  exact invariant sourceFuture targetFuture
+    (sourcePath.trans sourceTail) (targetPath.trans targetTail)
+    futureRelated
+
 /-- The source-oriented universal contract remains a convenient sufficient
 condition for exact-provenance readiness.  Root-insensitive fixture proofs
 continue to use it unchanged, while ownership-sensitive fixtures can target
@@ -13001,6 +13128,20 @@ theorem SomeBinderReadyReachableMachineRelated.binderReadyReachableMachineReadyA
     (sourceReady : SourceRuntimeOwnershipMachineReadyAt fuel source) :
     BinderReadyReachableMachineReadyAt fuel source target := by
   apply related.binderReadyReachableMachineReadyAt_of_sourceRuntime
+  intro rho sourceControlRoots targetControlRoots
+    sourceFrameRoots targetFrameRoots programs control frames runtime
+    sourceCode sourceControl
+  exact sourceReady
+    ⟨rho, target.frames, targetFrameRoots, frames⟩ sourceControl
+
+/-- One-machine source readiness upgrades a ledger-carrying structural pair
+while preserving the target allocation history selected by that pair. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceReady : SourceRuntimeOwnershipMachineReadyAt fuel source) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceRuntime
   intro rho sourceControlRoots targetControlRoots
     sourceFrameRoots targetFrameRoots programs control frames runtime
     sourceCode sourceControl
@@ -13082,6 +13223,26 @@ theorem BinderReadyReachableMachineRelatedWith.ready
     BinderReadyReachableMachineReadyAt fuel source target :=
   related.sourceRuntime.ready related.structural
 
+/-- Ledger-retaining strong simulation package.  The structural witness owns
+the exact target allocation history, while the hereditary entry contract
+supplies aligned readiness at every matched future pair. -/
+structure LedgerBinderReadyReachableMachineRelatedWith
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop where
+  structural :
+    SomeLedgerBinderReadyReachableMachineRelated fuel source target
+  ownership :
+    LedgerBinderReadyExactRuntimeOwnershipInvariant
+      externals fuel source target
+
+/-- The ledger-retaining strong package is ready at its current pair. -/
+theorem LedgerBinderReadyReachableMachineRelatedWith.ready
+    (related :
+      LedgerBinderReadyReachableMachineRelatedWith
+        externals fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target :=
+  related.ownership.ready related.structural
+
 /-- Invocation and yielded controls are ready directly from the structural
 relation.  Consequently a caller only has to discharge the active-code case
 to recover full machine readiness. -/
@@ -13157,6 +13318,33 @@ theorem initialState_binderReadyReachableMachineReadyAt
       (initialState targetProgram entry targetArguments) := by
   refine ⟨emptyAddressRenaming, sourceArguments.toList,
     targetArguments.toList, [], [], ?_, ?_, ?_, ?_⟩
+  · simpa [initialState] using programs
+  · simpa [initialState] using
+      BinderReadyReachableControlReadyAt.invokeName
+        (sourceState := initialState sourceProgram entry sourceArguments)
+        (targetState := initialState targetProgram entry targetArguments)
+        (sourceFrameRoots := []) entry arguments
+  · simpa [initialState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated
+          fuel emptyAddressRenaming [] [] [] [])
+  · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
+/-- Canonical invocation entries also carry the empty target allocation
+history, aligned with the empty address renaming used by their related
+arguments and runtimes. -/
+theorem initialState_ledgerBinderReadyReachableMachineReadyAt
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) sourceProgram targetProgram)
+    (arguments : ArrayRel (ValueRel emptyAddressRenaming)
+      sourceArguments targetArguments) :
+    LedgerBinderReadyReachableMachineReadyAt fuel
+      (initialState sourceProgram entry sourceArguments)
+      (initialState targetProgram entry targetArguments) := by
+  refine ⟨emptyAddressRenaming, sourceArguments.toList,
+    targetArguments.toList, [], [], ?_, ?_, ?_, ?_, ?_⟩
+  · simpa [initialState] using
+      TargetAllocationLedger.empty emptyAddressRenaming
   · simpa [initialState] using programs
   · simpa [initialState] using
       BinderReadyReachableControlReadyAt.invokeName
@@ -34725,6 +34913,28 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.matchStep_of_ready
       exact related.matchExternalStep_of_ready compatible ready transition
         externalProof
 
+/-- One semantic source step advances the ledger-retaining strong package.
+The unified dispatcher selects a finite target path, and hereditary ownership
+is transported to the selected pair by path composition. -/
+theorem LedgerBinderReadyReachableMachineRelatedWith.advance
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (related :
+      LedgerBinderReadyReachableMachineRelatedWith
+        externals fuel source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      LedgerBinderReadyReachableMachineRelatedWith
+        externals fuel sourceAfter targetAfter := by
+  rcases related.structural.matchStep_of_ready
+      compatible related.ready step with
+    ⟨targetAfter, targetPath, afterStructural⟩
+  have sourcePath : NonLockstep.Reaches externals source sourceAfter :=
+    NonLockstep.reaches_of_step step
+  exact ⟨targetAfter, targetPath, afterStructural,
+    related.ownership.stable sourcePath targetPath⟩
+
 /-- Every semantic source step has a finite matching target path while the
 strong structural relation and hereditary source runtime invariant are both
 preserved.  Internal steps use the hereditary compiler dispatcher; external
@@ -37562,6 +37772,21 @@ theorem BinderReadyReachableMachineRelatedWith.simulation
     BinderReadyReachableMachineRelatedWith.advance
       compatible related step
 
+/-- The ledger-retaining strong package is an observation-relational
+stuttering simulation.  Terminal behavior forgets only proof-relevant
+allocation history; advancing uses the unified ledger dispatcher directly. -/
+theorem LedgerBinderReadyReachableMachineRelatedWith.simulation
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel) :
+    RelationalStutteringSimulation externals ObservationRel
+      (LedgerBinderReadyReachableMachineRelatedWith externals fuel) where
+  terminal related done :=
+    related.structural.related.related.terminal
+      related.ready.readyAt.readyAt done
+  advance related step :=
+    LedgerBinderReadyReachableMachineRelatedWith.advance
+      compatible related step
+
 /-- Compiler-facing value and observation relation for the reachable-runtime
 proof.  Canonical entry states have empty heaps, so their admissible values
 are precisely those related by the empty address renaming. -/
@@ -37594,6 +37819,41 @@ def SourceRuntimeOwnershipInitialInvariantOn
   ∀ entry, entry ∈ entries → ∀ sourceArguments,
     SourceRuntimeOwnershipMachineInvariant externals fuel
       (initialState source entry sourceArguments)
+
+/-- Whole-program forward correctness through the ledger-retaining strong
+simulation.  Canonical entries start from the empty owner table; the
+entry-indexed invariant then supplies aligned readiness at every matched
+future pair. -/
+theorem binderReadyProgram_loweringCorrect_ledgerExactRuntimeOwnership
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (initialRuntime : ReachableInitialInvariantOn
+      (LedgerBinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  intro entry member sourceArguments targetArguments arguments
+    sourceObservation sourceEvaluation
+  have initialReady :
+      LedgerBinderReadyReachableMachineReadyAt fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) :=
+    initialState_ledgerBinderReadyReachableMachineReadyAt programs arguments
+  have initialRelated :
+      LedgerBinderReadyReachableMachineRelatedWith externals fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) := {
+    structural := initialReady.related
+    ownership :=
+      initialRuntime entry member sourceArguments
+        targetArguments arguments
+  }
+  exact
+    (LedgerBinderReadyReachableMachineRelatedWith.simulation
+      compatible).evaluatesState initialRelated sourceEvaluation
 
 /-- Whole-program forward correctness through the canonical strong
 simulation, with runtime/ownership readiness indexed by the exact compiler
@@ -37965,6 +38225,104 @@ theorem ElimDeadExactOwnershipContract.initialInvariant
       (fun ready step => contract.targetPreserved ready step)
       targetPath
   exact contract.ready targetInvariant related
+
+/-- Entry-indexed exact ownership interface retaining target allocation
+history.  Clients prove an ordinary rectangular invariant and use its local
+typing/heap-shape and source-owner facts only when an exact ledger-carrying
+compiler pair requests aligned readiness. -/
+structure ElimDeadLedgerExactOwnershipContract
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Type where
+  invariant :
+    Name → Array Value → Array Value →
+      MachineState → MachineState → Prop
+  initial : ∀ entry, entry ∈ entries →
+    ∀ sourceArguments targetArguments,
+      ArrayRel (ValueRel emptyAddressRenaming)
+        sourceArguments targetArguments →
+      invariant entry sourceArguments targetArguments
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments)
+  sourcePreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceBefore sourceAfter targetState},
+      invariant entry sourceArguments targetArguments
+        sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant entry sourceArguments targetArguments
+          sourceAfter targetState
+  targetPreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceState targetBefore targetAfter},
+      invariant entry sourceArguments targetArguments
+        sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant entry sourceArguments targetArguments
+          sourceState targetAfter
+  ready :
+    ∀ {entry sourceArguments targetArguments sourceState targetState},
+      invariant entry sourceArguments targetArguments
+        sourceState targetState →
+      SomeLedgerBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        LedgerBinderReadyReachableMachineReadyAt
+          fuel sourceState targetState
+
+/-- The ledger-exact inductive contract discharges the hereditary entry
+invariant consumed by the unified ledger simulation. -/
+theorem ElimDeadLedgerExactOwnershipContract.initialInvariant
+    (contract :
+      ElimDeadLedgerExactOwnershipContract
+        externals fuel source target entries) :
+    ReachableInitialInvariantOn
+      (LedgerBinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries := by
+  intro entry member sourceArguments targetArguments argumentsRelated
+  intro sourceAfter targetAfter sourcePath targetPath related
+  have sourceInvariant :
+      contract.invariant entry sourceArguments targetArguments
+        sourceAfter (initialState target entry targetArguments) :=
+    stepInvariant_of_reaches
+      (predicate := fun state =>
+        contract.invariant entry sourceArguments targetArguments
+          state (initialState target entry targetArguments))
+      (contract.initial entry member
+        sourceArguments targetArguments argumentsRelated)
+      (fun ready step => contract.sourcePreserved ready step)
+      sourcePath
+  have targetInvariant :
+      contract.invariant entry sourceArguments targetArguments
+        sourceAfter targetAfter :=
+    stepInvariant_of_reaches
+      (predicate := fun state =>
+        contract.invariant entry sourceArguments targetArguments
+          sourceAfter state)
+      sourceInvariant
+      (fun ready step => contract.targetPreserved ready step)
+      targetPath
+  exact contract.ready targetInvariant related
+
+/-- Direct fail-closed checked-pass endpoint for the ledger-exact ownership
+interface.  The transparent compiler equation supplies hereditary exact
+provenance; the entry contract and allocation-capable foreign semantics feed
+the unified ledger dispatcher. -/
+theorem nullarySafeShadowProgram_loweringCorrect_ledgerExactOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadLedgerExactOwnershipContract
+        externals fuel source target entries)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries := by
+  have transformed := (nullarySafeShadowProgram_certifies checked).1
+  exact binderReadyProgram_loweringCorrect_ledgerExactRuntimeOwnership
+    (shadowProgram_binderReadyShadowRelated wellFormed transformed)
+    compatible ownership.initialInvariant
 
 /-! ## Compiler-facing semantic admissibility -/
 

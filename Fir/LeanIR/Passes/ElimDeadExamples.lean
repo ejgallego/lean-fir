@@ -8387,6 +8387,176 @@ theorem closedWritesScalarSetPairReady
       rw [targetControl] at control
       cases control
 
+/-- A zero target frontier makes the source allocation at location `0`
+absent from every exact target owner ledger. -/
+theorem closedWritesSourceOnlyAtZero
+    (target : MachineState)
+    (ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    SourceOnlyUnderTargetLedger ledger 0 := by
+  intro rightLocation bounded
+  rw [targetEmpty] at bounded
+  exact (Nat.not_lt_zero rightLocation bounded).elim
+
+/-- Ledger-aligned readiness for the deleted object-field write. The local
+heap-shape certificate is combined with the exact owner table carried by the
+related machine pair. -/
+theorem closedWritesObjectSetPairReady_ledger
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 8
+      (closedWritesSourceObjectSetState arguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceObjectSetState arguments) target := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceObjectSetState arguments).control =
+        .code deletedWritesBefore := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedObjectSet :=
+        exact.view.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
+          targetHead.1
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger 0 :=
+        closedWritesSourceOnlyAtZero target ledger targetShape.1
+      have writeReady :=
+        closedWritesObjectSetLocalReady
+          |>.deletedReadyAt_of_targetAllocationLedger
+            runtime ledger sourceOnly
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .objectSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+/-- Ledger-aligned readiness for the deleted unboxed-word write. -/
+theorem closedWritesUSizeSetPairReady_ledger
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 8
+      (closedWritesSourceUSizeSetState arguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceUSizeSetState arguments) target := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceUSizeSetState arguments).control =
+        .code
+          (.uset dead 1 usizeField <|
+            .sset dead 8 0 scalarField u8Type <| .return live) := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedUSizeSet :=
+        exact.view.runtimeDecision_eq_deletedUSizeSet_of_target_not_uset
+          targetHead.2.1
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger 0 :=
+        closedWritesSourceOnlyAtZero target ledger targetShape.1
+      have writeReady :=
+        closedWritesUSizeSetLocalReady
+          |>.deletedReadyAt_of_targetAllocationLedger
+            runtime ledger sourceOnly
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .usizeSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+/-- Ledger-aligned readiness for the deleted packed-scalar write. -/
+theorem closedWritesScalarSetPairReady_ledger
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 8
+      (closedWritesSourceScalarSetState arguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 8
+      (closedWritesSourceScalarSetState arguments) target := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedWritesSourceScalarSetState arguments).control =
+        .code
+          (.sset dead 8 0 scalarField u8Type <| .return live) := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have targetHead := targetShape.2 targetCode targetControl
+      have decision :
+          exact.view.runtimeDecision = .deletedScalarSet :=
+        exact.view.runtimeDecision_eq_deletedScalarSet_of_target_not_sset
+          targetHead.2.2
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger 0 :=
+        closedWritesSourceOnlyAtZero target ledger targetShape.1
+      have writeReady :=
+        closedWritesScalarSetLocalReady
+          |>.deletedReadyAt_of_targetAllocationLedger
+            runtime ledger sourceOnly
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            .scalarSetDeleted decision writeReady⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
 theorem closedWritesOuterSourceMachineReadyAt
     (arguments : Array Value) :
     SourceRuntimeOwnershipMachineReadyAt 8
@@ -8514,6 +8684,63 @@ theorem closedWritesSourceReachable_pairReady
       intro sourceCode control
       simp [closedWritesSourceInvokingState] at control
 
+/-- Every reachable source state is ready under the exact target ledger
+selected by its structural pair. The three write heads consume the ledger
+directly; source-only dynamic certificates discharge every other head. -/
+theorem closedWritesSourceReachable_pairReady_ledger
+    (sourceReachable : ClosedWritesSourceReachable arguments source)
+    (targetShape : ClosedWritesTargetRuntimeShape target)
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated 8 source target) :
+    LedgerBinderReadyReachableMachineReadyAt 8 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesOuterSourceMachineReadyAt arguments)
+  | object =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesObjectSourceMachineReadyAt arguments)
+  | usize =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesUSizeSourceMachineReadyAt arguments)
+  | scalar =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesScalarSourceMachineReadyAt arguments)
+  | objectSet =>
+      exact closedWritesObjectSetPairReady_ledger targetShape related
+  | usizeSet =>
+      exact closedWritesUSizeSetPairReady_ledger targetShape related
+  | scalarSet =>
+      exact closedWritesScalarSetPairReady_ledger targetShape related
+  | ret =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedWritesReturnSourceMachineReadyAt arguments)
+  | yielded =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceYieldedState] at control
+  | cached empty =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedWritesSourceInvokingState] at control
+
 theorem closedWritesSourceReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState closedWritesBeforeProgram `main arguments) state) :
@@ -8585,6 +8812,40 @@ def closedWritesExactOwnershipContract
       (closedWritesTargetReachable_runtimeShape targetReachable)
       related
 
+/-- Ledger-exact entry contract for the complete write fixture. This is the
+concrete client of the allocation-history-aware checked-pass endpoint. -/
+def closedWritesLedgerExactOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadLedgerExactOwnershipContract externals 8
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    ClosedWritesSourceReachable sourceArguments source ∧
+      ClosedWritesTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments _argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact ⟨.entry, .entry⟩
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨closedWritesSourceReachable_step sourceReachable step,
+      targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      closedWritesTargetReachable_step targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ related
+    exact closedWritesSourceReachable_pairReady_ledger sourceReachable
+      (closedWritesTargetReachable_runtimeShape targetReachable)
+      related
+
 /-- The exact contract supplies the hereditary invariant consumed by the
 lower-level semantic endpoint. -/
 theorem closedWritesExactRuntimeOwnershipInitialInvariant
@@ -8616,6 +8877,23 @@ theorem closedWritesProgramLoweringCorrect
       (reachablePhaseSimulation externals)
       closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
   (closedWritesCompilerAdmissibleRun externals).loweringCorrect compatible
+
+/-- Direct checked-pass correctness for the write fixture through the unified
+ledger dispatcher. Unlike the legacy endpoint above, allocation-capable
+foreign responses retain their exact target owner history. -/
+theorem closedWritesProgramLoweringCorrect_ledgerExact
+    (externals : ExternalSpec)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals 8) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_ledgerExactOwnership
+    closedWritesBeforeProgramElimDeadWellFormed
+    closedWritesCheckedProgramRun
+    (closedWritesLedgerExactOwnershipContract externals)
+    compatible
 
 /-- Concrete source states for the closed failed-token reuse fixture.  The
 tagged live value makes `reset` return `reuseToken none`; evaluating the
