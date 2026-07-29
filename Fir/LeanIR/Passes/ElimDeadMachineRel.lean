@@ -7354,6 +7354,127 @@ def DeletedScalarSetReadyAt (state : MachineState) (roots : List Value)
     cell.object = .ctor constructor ∧
     ¬Reachable state.runtime.heap roots location
 
+/-- Allocation provenance for the target side of an exact compiler run.
+Every address below the target frontier names the source allocation that was
+paired with it. Source-only allocations deliberately do not extend this
+ledger. -/
+structure TargetAllocationLedger (rho : AddressRenaming)
+    (rightFrontier : Location) where
+  owner : Location → Location
+  reverseMapped : ∀ rightLocation, rightLocation < rightFrontier →
+    rho.reverse rightLocation = some (owner rightLocation)
+
+/-- A source location is compiler-only with respect to a target allocation
+ledger when it is distinct from the source owner of every allocated target
+address. This is a static allocation-provenance criterion, not a reachability
+claim or a restatement of `rho.forward location = none`. -/
+def SourceOnlyUnderTargetLedger
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (location : Location) : Prop :=
+  ∀ rightLocation, rightLocation < rightFrontier →
+    ledger.owner rightLocation ≠ location
+
+/-- The empty target has a vacuous allocation ledger. -/
+def TargetAllocationLedger.empty (rho : AddressRenaming) :
+    TargetAllocationLedger rho 0 where
+  owner := fun _ => 0
+  reverseMapped := by
+    intro rightLocation bounded
+    exact (Nat.not_lt_zero rightLocation bounded).elim
+
+/-- Paired fresh allocations extend the target ledger by exactly the new
+target frontier slot. -/
+def TargetAllocationLedger.extend
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (left : Location)
+    (leftFresh : rho.forward left = none)
+    (rightFresh : rho.reverse rightFrontier = none) :
+    TargetAllocationLedger
+      (AddressRenaming.extend rho left rightFrontier leftFresh rightFresh)
+      (rightFrontier + 1) where
+  owner := fun rightLocation =>
+    if rightLocation = rightFrontier then left
+    else ledger.owner rightLocation
+  reverseMapped := by
+    intro rightLocation bounded
+    by_cases newest : rightLocation = rightFrontier
+    · subst rightLocation
+      simp [AddressRenaming.extend]
+    · have old : rightLocation < rightFrontier :=
+        Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+      simp [AddressRenaming.extend, newest,
+        ledger.reverseMapped rightLocation old]
+
+/-- A source-only location remains outside the ledger after a paired
+allocation whose new source owner is different from it. -/
+theorem TargetAllocationLedger.sourceOnly_extend
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location)
+    (different : left ≠ location)
+    (leftFresh : rho.forward left = none)
+    (rightFresh : rho.reverse rightFrontier = none) :
+    SourceOnlyUnderTargetLedger
+      (ledger.extend left leftFresh rightFresh) location := by
+  intro rightLocation bounded
+  by_cases newest : rightLocation = rightFrontier
+  · subst rightLocation
+    simpa [TargetAllocationLedger.extend] using different
+  · have old : rightLocation < rightFrontier :=
+      Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+    simpa [TargetAllocationLedger.extend, newest] using
+      sourceOnly rightLocation old
+
+/-- An address already known to be absent from the renaming is outside every
+target allocation ledger. This is the induction entry point immediately
+before a deleted source-only allocation. -/
+theorem TargetAllocationLedger.sourceOnly_of_forwardUnmapped
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (unmapped : rho.forward location = none) :
+    SourceOnlyUnderTargetLedger ledger location := by
+  intro rightLocation bounded same
+  have reverseMapped := ledger.reverseMapped rightLocation bounded
+  have forwardMapped := rho.rightInverse reverseMapped
+  rw [same, unmapped] at forwardMapped
+  contradiction
+
+/-- Under a related runtime, the target ledger's source-only criterion implies
+that the source address is absent from the active renaming. The target
+frontier rules out mappings beyond the ledger; its ownership table rules out
+all mappings below it. -/
+theorem TargetAllocationLedger.forward_eq_none_of_sourceOnly
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (related : ShadowRuntimeRel rho source target
+      sourceExtra targetExtra)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    rho.forward location = none := by
+  cases mapped : rho.forward location with
+  | none => rfl
+  | some rightLocation =>
+      have reverseMapped := rho.leftInverse mapped
+      have bounded : rightLocation < target.nextLocation := by
+        apply Nat.lt_of_not_ge
+        intro beyond
+        have fresh := related.rightMappingFresh rightLocation beyond
+        rw [fresh] at reverseMapped
+        contradiction
+      have ledgerMapped := ledger.reverseMapped rightLocation bounded
+      have ownerEq : ledger.owner rightLocation = location := by
+        rw [reverseMapped] at ledgerMapped
+        exact (Option.some.inj ledgerMapped).symm
+      exact (sourceOnly rightLocation bounded ownerEq).elim
+
+/-- With a target allocation ledger, being outside its source-owner image is
+equivalent to absence from the active address renaming. -/
+theorem TargetAllocationLedger.sourceOnly_iff_forward_eq_none
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (related : ShadowRuntimeRel rho source target
+      sourceExtra targetExtra) :
+    SourceOnlyUnderTargetLedger ledger location ↔
+      rho.forward location = none := by
+  constructor
+  · exact ledger.forward_eq_none_of_sourceOnly related
+  · exact ledger.sourceOnly_of_forwardUnmapped
+
 /-- Root-independent operational shape for a deleted object-field write.
 The compiler ownership argument is deliberately absent: it is supplied later
 for the actual active roots of a related machine pair. -/
@@ -7468,6 +7589,48 @@ theorem DeletedScalarSetLocalReadyAt.deletedReadyAt_of_forwardUnmapped
       (runtimeRoots state.runtime sourceExtra) object field :=
   shape.deletedReadyAt
     (related.leftUnreachable_of_forward_unmapped unmapped)
+
+/-- A target allocation ledger discharges the compiler-ownership premise for
+a locally valid object-field write without requiring an empty target. -/
+theorem
+    DeletedObjectSetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger
+    (shape : DeletedObjectSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    DeletedObjectSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt_of_forwardUnmapped related
+    (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
+
+/-- Target-ledger bridge for a locally valid unboxed-word write. -/
+theorem
+    DeletedUSizeSetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger
+    (shape : DeletedUSizeSetLocalReadyAt
+      state object index field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    DeletedUSizeSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field :=
+  shape.deletedReadyAt_of_forwardUnmapped related
+    (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
+
+/-- Target-ledger bridge for a locally valid packed-scalar write. -/
+theorem
+    DeletedScalarSetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger
+    (shape : DeletedScalarSetLocalReadyAt state object field location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    DeletedScalarSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object field :=
+  shape.deletedReadyAt_of_forwardUnmapped related
+    (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
 
 /-- An empty related target frontier proves that every locally valid
 source object-write location is compiler-owned garbage. -/
@@ -7808,6 +7971,21 @@ theorem DeletedReuseSomeLocalReadyAt.deletedReadyAt_of_forwardUnmapped
   shape.deletedReadyAt
     (related.leftUnreachable_of_forward_unmapped unmapped)
 
+/-- A concrete reuse token outside the target allocation ledger names
+source-only storage even when the target has other live allocations. -/
+theorem
+    DeletedReuseSomeLocalReadyAt.deletedReadyAt_of_targetAllocationLedger
+    (shape : DeletedReuseSomeLocalReadyAt
+      state token info arguments location)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    DeletedReuseReadyAt state
+      (runtimeRoots state.runtime sourceExtra) token info arguments :=
+  shape.deletedReadyAt_of_forwardUnmapped related
+    (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
+
 /-- Empty-target specialization for a concrete-token reuse certificate. -/
 theorem
     DeletedReuseSomeLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
@@ -7972,6 +8150,78 @@ theorem DeletedResetLocalReadyAt.deletedReadyAt
     DeletedResetReadyAt state roots count object :=
   .mk shape.objectValue shape.token shape.nextRuntime
     shape.objectRead shape.effect frame
+
+/-- A target allocation ledger turns preservation of its source owners into a
+complete reachable-runtime frame. Every reachable source cell maps below the
+target frontier, where the ledger identifies its exact source owner; changes
+to source-only cells remain unconstrained. -/
+theorem
+    ShadowRuntimeRel.leftRuntimeReachableFrame_of_targetAllocationLedger
+    (related : ShadowRuntimeRel rho before right
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho right.nextLocation)
+    (nextLocationEq : after.nextLocation = before.nextLocation)
+    (globalsEq : after.globals = before.globals)
+    (worldEq : after.world = before.world)
+    (traceEq : after.trace = before.trace)
+    (ownerFrame : ∀ rightLocation,
+      rightLocation < right.nextLocation →
+      findCell? after.heap (ledger.owner rightLocation) =
+        findCell? before.heap (ledger.owner rightLocation))
+    (afterFresh : ∀ location, after.nextLocation ≤ location →
+      findCell? after.heap location = none) :
+    RuntimeReachableFrame before after
+      (runtimeRoots before sourceExtra) := {
+  nextLocation_eq := nextLocationEq
+  globals_eq := globalsEq
+  world_eq := worldEq
+  trace_eq := traceEq
+  heap := by
+    intro location reachable
+    rcases related.heap.1 location reachable with
+      ⟨rightLocation, leftCell, rightCell, mapping, leftFound,
+        rightFound, cells⟩
+    have reverseMapped := rho.leftInverse mapping
+    have bounded : rightLocation < right.nextLocation := by
+      apply Nat.lt_of_not_ge
+      intro beyond
+      have fresh := related.rightMappingFresh rightLocation beyond
+      rw [fresh] at reverseMapped
+      contradiction
+    have ledgerMapped := ledger.reverseMapped rightLocation bounded
+    have ownerEq : ledger.owner rightLocation = location := by
+      rw [reverseMapped] at ledgerMapped
+      exact (Option.some.inj ledgerMapped).symm
+    simpa [ownerEq] using ownerFrame rightLocation bounded
+  heapFresh := afterFresh
+}
+
+/-- Target-ledger ownership bridge for a locally successful reset. The client
+need only show that reset preserves the source owners paired with existing
+target allocations. -/
+theorem
+    DeletedResetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger
+    (shape : DeletedResetLocalReadyAt state count object)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (nextLocationEq :
+      shape.nextRuntime.nextLocation = state.runtime.nextLocation)
+    (globalsEq : shape.nextRuntime.globals = state.runtime.globals)
+    (worldEq : shape.nextRuntime.world = state.runtime.world)
+    (traceEq : shape.nextRuntime.trace = state.runtime.trace)
+    (ownerFrame : ∀ rightLocation,
+      rightLocation < target.nextLocation →
+      findCell? shape.nextRuntime.heap (ledger.owner rightLocation) =
+        findCell? state.runtime.heap (ledger.owner rightLocation))
+    (afterFresh : ∀ location,
+      shape.nextRuntime.nextLocation ≤ location →
+        findCell? shape.nextRuntime.heap location = none) :
+    DeletedResetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) count object :=
+  shape.deletedReadyAt
+    (related.leftRuntimeReachableFrame_of_targetAllocationLedger
+      ledger nextLocationEq globalsEq worldEq traceEq ownerFrame afterFresh)
 
 /-- If a related target has never allocated, no source heap cell can occur in
 the active roots.  Any reset outcome that preserves non-heap observables and

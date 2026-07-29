@@ -3581,6 +3581,106 @@ theorem deletedWriteDestinationUnreachable :
   apply deletedWriteRuntimeRelated.leftUnreachable_of_forward_unmapped
   simp [emptyAddressRenaming]
 
+/-- Runtime after one retained paired allocation. -/
+def nonemptyLedgerPairedRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) (.natural 7)).1
+
+/-- Source runtime after a second, deleted constructor allocation. -/
+def nonemptyLedgerSourceRuntime : RuntimeState :=
+  (alloc nonemptyLedgerPairedRuntime (.ctor deletedWriteObject)).1
+
+/-- The target retains the first allocation and omits only the second. -/
+def nonemptyLedgerTargetRuntime : RuntimeState :=
+  nonemptyLedgerPairedRuntime
+
+def nonemptyLedgerSourceEnv : Env :=
+  bind liveEnv dead (.object (.heap 1))
+
+def nonemptyLedgerSourceState : MachineState :=
+  { program := deletedWritesBeforeProgram
+    control := .code deletedWritesBefore
+    env := nonemptyLedgerSourceEnv
+    runtime := nonemptyLedgerSourceRuntime }
+
+def nonemptyLedgerObjectSetLocalReady :
+    DeletedObjectSetLocalReadyAt
+      nonemptyLedgerSourceState dead 0 .erased 1 := by
+  refine {
+    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
+    constructor := deletedWriteObject
+    fieldValue := .erased
+    objectRead := ?_
+    fieldRead := rfl
+    found := ?_
+    live := rfl
+    objectEq := rfl
+    indexBound := ?_
+  }
+  · simp [nonemptyLedgerSourceState, nonemptyLedgerSourceEnv,
+      lookupValue, Impure.bind, lookup, dead]
+  · rfl
+  · simp [deletedWriteObject]
+
+/-- A non-empty target exercises the allocation-ledger bridge end to end.
+Location `0` is a retained paired allocation; source location `1` is allocated
+after the ledger snapshot and is therefore unmapped and safe for the deleted
+write. -/
+theorem nonemptyTargetAllocationLedger_objectSetReady :
+    ∃ rho : AddressRenaming,
+      ∃ ledger : TargetAllocationLedger rho
+          nonemptyLedgerTargetRuntime.nextLocation,
+      ShadowRuntimeRel rho
+          nonemptyLedgerSourceRuntime nonemptyLedgerTargetRuntime
+          [.object (.heap 0)] [.object (.heap 0)] ∧
+        SourceOnlyUnderTargetLedger ledger 1 ∧
+        DeletedObjectSetReadyAt nonemptyLedgerSourceState
+          (runtimeRoots nonemptyLedgerSourceRuntime
+            [.object (.heap 0)])
+          dead 0 .erased := by
+  rcases emptyRuntime_shadowRelated.allocBoth
+      (HeapObjectRel.natural 7)
+      (by simp [RootSubset, HeapObject.ownedValues])
+      (by simp [RootSubset, HeapObject.ownedValues])
+      false with
+    ⟨rho, _, values, paired⟩
+  have mapping : rho.forward 0 = some 0 := by
+    have mappedValue :
+        ValueRel rho (.object (.heap 0)) (.object (.heap 0)) := by
+      simpa [alloc] using values
+    cases mappedValue with
+    | heap mapping => exact mapping
+  let ledger :
+      TargetAllocationLedger rho
+        nonemptyLedgerTargetRuntime.nextLocation := {
+    owner := fun _ => 0
+    reverseMapped := by
+      intro rightLocation bounded
+      have rightEq : rightLocation = 0 := by
+        apply Nat.eq_zero_of_le_zero
+        apply Nat.le_of_lt_succ
+        simpa [nonemptyLedgerTargetRuntime,
+          nonemptyLedgerPairedRuntime, alloc] using bounded
+      subst rightLocation
+      exact rho.leftInverse mapping
+  }
+  have fresh : rho.forward 1 = none := by
+    apply paired.leftMappingFresh
+    simp [alloc]
+  have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
+    ledger.sourceOnly_of_forwardUnmapped fresh
+  have related :
+      ShadowRuntimeRel rho
+        nonemptyLedgerSourceRuntime nonemptyLedgerTargetRuntime
+        [.object (.heap 0)] [.object (.heap 0)] := by
+    simpa [nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+      nonemptyLedgerPairedRuntime, alloc] using
+      paired.allocLeftGarbage (.ctor deletedWriteObject) false
+  refine ⟨rho, ledger, related, sourceOnly, ?_⟩
+  exact
+    nonemptyLedgerObjectSetLocalReady
+      |>.deletedReadyAt_of_targetAllocationLedger
+        related ledger sourceOnly
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
