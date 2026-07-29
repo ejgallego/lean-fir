@@ -26,6 +26,7 @@ MANIFEST_FIELDS = {
     "dependencies",
     "args",
     "argSchemas",
+    "argumentAliases",
     "resultSchema",
     "tags",
     "fuel",
@@ -1763,6 +1764,7 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
         dependencies = value["dependencies"]
         args = value["args"]
         arg_schemas = value["argSchemas"]
+        argument_aliases = value["argumentAliases"]
         result_schema = value["resultSchema"]
         tags = value["tags"]
         fuel = value["fuel"]
@@ -1785,6 +1787,53 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
             raise ValidationError(f"native corpus manifest/{case_id}: malformed arguments")
         if len(args) != len(arg_schemas):
             raise ValidationError(f"native corpus manifest/{case_id}: argument arity mismatch")
+        if not isinstance(argument_aliases, list):
+            raise ValidationError(
+                f"native corpus manifest/{case_id}: malformed argumentAliases"
+            )
+        alias_targets: set[int] = set()
+        last_alias_target = -1
+        for alias in argument_aliases:
+            if (
+                not isinstance(alias, dict)
+                or set(alias) != {"source", "target"}
+                or not isinstance(alias["source"], int)
+                or isinstance(alias["source"], bool)
+                or not isinstance(alias["target"], int)
+                or isinstance(alias["target"], bool)
+            ):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: malformed argumentAliases"
+                )
+            source = alias["source"]
+            target = alias["target"]
+            if source < 0 or source >= target or target >= len(args):
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: argument alias "
+                    f"{source}->{target} is out of canonical bounds"
+                )
+            if target <= last_alias_target:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: argument alias targets "
+                    "must be strictly increasing"
+                )
+            if source in alias_targets:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: argument alias source "
+                    f"{source} is not an independently materialized root"
+                )
+            if arg_schemas[source] != arg_schemas[target]:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: argument alias "
+                    f"{source}->{target} connects different schemas"
+                )
+            if args[source] != args[target]:
+                raise ValidationError(
+                    f"native corpus manifest/{case_id}: argument alias "
+                    f"{source}->{target} connects different fixtures"
+                )
+            alias_targets.add(target)
+            last_alias_target = target
         if result_schema is None:
             raise ValidationError(f"native corpus manifest/{case_id}: missing resultSchema")
         if not isinstance(tags, list) or not all(isinstance(tag, str) and tag for tag in tags):

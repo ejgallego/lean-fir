@@ -134,6 +134,7 @@ def descriptor(
         "dependencies": [],
         "args": [{"nat": {"value": "42"}}],
         "argSchemas": ["nat"],
+        "argumentAliases": [],
         "resultSchema": "nat",
         "tags": tags or ["quick"],
         "fuel": 1000,
@@ -1205,6 +1206,52 @@ class HarnessTests(unittest.TestCase):
         item["argSchemas"] = []
         with self.assertRaisesRegex(harness.ValidationError, "argument arity mismatch"):
             harness.manifest_from_output(json.dumps(item), ["native", "--manifest"])
+
+    def test_manifest_argument_alias_contract_rejected(self) -> None:
+        base = descriptor("case")
+        base["args"] = [
+            {"bytes": {"value": [1]}},
+            {"bytes": {"value": [1]}},
+            {"bytes": {"value": [1]}},
+        ]
+        base["argSchemas"] = ["bytes", "bytes", "bytes"]
+        malformed = [
+            ("malformed", [{"source": 0}]),
+            ("canonical bounds", [{"source": 1, "target": 1}]),
+            (
+                "strictly increasing",
+                [{"source": 0, "target": 2}, {"source": 0, "target": 1}],
+            ),
+            (
+                "independently materialized root",
+                [{"source": 0, "target": 1}, {"source": 1, "target": 2}],
+            ),
+        ]
+        for message, aliases in malformed:
+            with self.subTest(message=message):
+                item = dict(base)
+                item["argumentAliases"] = aliases
+                with self.assertRaisesRegex(harness.ValidationError, message):
+                    harness.manifest_from_output(
+                        json.dumps(item), ["native", "--manifest"]
+                    )
+
+        schema_mismatch = dict(base)
+        schema_mismatch["argSchemas"] = ["bytes", "string", "bytes"]
+        schema_mismatch["argumentAliases"] = [{"source": 0, "target": 1}]
+        with self.assertRaisesRegex(harness.ValidationError, "different schemas"):
+            harness.manifest_from_output(
+                json.dumps(schema_mismatch), ["native", "--manifest"]
+            )
+
+        fixture_mismatch = dict(base)
+        fixture_mismatch["args"] = list(base["args"])
+        fixture_mismatch["args"][1] = {"bytes": {"value": [2]}}
+        fixture_mismatch["argumentAliases"] = [{"source": 0, "target": 1}]
+        with self.assertRaisesRegex(harness.ValidationError, "different fixtures"):
+            harness.manifest_from_output(
+                json.dumps(fixture_mismatch), ["native", "--manifest"]
+            )
 
     def test_manifest_drives_tag_and_explicit_selection(self) -> None:
         manifest = [

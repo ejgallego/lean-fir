@@ -8,6 +8,9 @@ import {
 import { semanticDatum } from "./wasm_validation_case.mjs";
 import * as validationExternals from "./wasm_validation_externals.mjs";
 import {
+  validateMaterializedArgumentAliases,
+} from "./wasm_validation_case.mjs";
+import {
   integerValue,
   naturalValue,
   scalarUInt8,
@@ -1380,6 +1383,43 @@ for (const [handler, leftValue, rightValue, expected] of [
   assert.equal(host.nextLocation, frontier);
   assert.deepStrictEqual(snapshot(stringCell(host, left)), beforeLeft);
   assert.deepStrictEqual(snapshot(stringCell(host, right)), beforeRight);
+}
+
+{
+  const host = new SemanticHost();
+  const shared = host.alloc({ kind: "byteArray", value: [0, 127, 128, 255] });
+  host.incLocation(shared.location, 1);
+  validateMaterializedArgumentAliases(
+    "argument-alias",
+    [{ source: 0, target: 1 }],
+    [shared, shared],
+    host,
+  );
+
+  const distinctHost = new SemanticHost();
+  const first = distinctHost.alloc({ kind: "byteArray", value: [1] });
+  const second = distinctHost.alloc({ kind: "byteArray", value: [1] });
+  assert.throws(
+    () => validateMaterializedArgumentAliases(
+      "distinct-arguments",
+      [{ source: 0, target: 1 }],
+      [first, second],
+      distinctHost,
+    ),
+    /did not preserve argument alias/,
+  );
+
+  const wrongCountHost = new SemanticHost();
+  const underRetained = wrongCountHost.alloc({ kind: "byteArray", value: [1] });
+  assert.throws(
+    () => validateMaterializedArgumentAliases(
+      "wrong-reference-count",
+      [{ source: 0, target: 1 }],
+      [underRetained, underRetained],
+      wrongCountHost,
+    ),
+    /wrong initial reference count/,
+  );
 }
 
 console.log("PASS shared Wasm String and arithmetic external contracts");

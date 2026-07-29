@@ -133,6 +133,58 @@ where
         schema.accepts value && acceptFields schemas values
     | _, _ => false
 
+/--
+Declare that one runner-supplied argument is the same source object as an
+earlier argument.
+
+Aliases use a canonical star representation: `source` is an independently
+materialized root and `target` is a later argument that reuses it.  A case with
+several aliases of one object repeats the same source with increasing targets.
+-/
+structure ArgumentAlias where
+  source : Nat
+  target : Nat
+  deriving Inhabited, BEq, Repr, ToJson, FromJson
+
+/--
+Validate the backend-neutral argument-alias graph.
+
+Targets must be strictly increasing, sources must be earlier independently
+materialized roots, and an alias may only connect equal schema/datum pairs.
+This makes the manifest representation canonical before a backend assigns heap
+locations or reference counts.
+-/
+def checkArgumentAliases (schemas : Array ValidationSchema)
+    (data : Array ValidationDatum) (aliases : Array ArgumentAlias) :
+    Except String Unit := do
+  unless schemas.size == data.size do
+    throw s!"argument schema/fixture arity mismatch: {schemas.size} schemas, {data.size} values"
+  let _ ← aliases.foldlM (init := (none, #[]))
+    fun (lastTarget?, targets) alias => do
+      unless alias.source < alias.target do
+        throw s!"argument alias source {alias.source} must precede target {alias.target}"
+      unless alias.target < data.size do
+        throw s!"argument alias target {alias.target} is out of bounds for {data.size} arguments"
+      if let some lastTarget := lastTarget? then
+        unless lastTarget < alias.target do
+          throw "argument alias targets must be strictly increasing"
+      if targets.contains alias.source then
+        throw s!"argument alias source {alias.source} must be an independently materialized root"
+      let some sourceSchema := schemas[alias.source]? |
+        throw s!"argument alias source {alias.source} is out of bounds"
+      let some targetSchema := schemas[alias.target]? |
+        throw s!"argument alias target {alias.target} is out of bounds"
+      unless sourceSchema == targetSchema do
+        throw s!"argument alias {alias.source}->{alias.target} connects different schemas"
+      let some sourceDatum := data[alias.source]? |
+        throw s!"argument alias source {alias.source} is out of bounds"
+      let some targetDatum := data[alias.target]? |
+        throw s!"argument alias target {alias.target} is out of bounds"
+      unless sourceDatum == targetDatum do
+        throw s!"argument alias {alias.source}->{alias.target} connects different fixtures"
+      return (some alias.target, targets.push alias.target)
+  return ()
+
 /-- A controlled external effect observed while executing a case. -/
 structure EffectEvent where
   operation : String

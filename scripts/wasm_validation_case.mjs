@@ -306,6 +306,42 @@ export function projectedEffects(
   return effects;
 }
 
+/**
+ * Check that compiler-produced arguments realize the corpus alias contract in
+ * the initial semantic heap. This is independent of Wasm execution so an
+ * adapter cannot validate equal-but-distinct objects.
+ */
+export function validateMaterializedArgumentAliases(
+  caseId,
+  argumentAliases,
+  semanticArguments,
+  host,
+) {
+  const aliasMultiplicities = new Map();
+  for (const alias of argumentAliases) {
+    assert.ok(alias && typeof alias === "object" &&
+      Number.isSafeInteger(alias.source) && Number.isSafeInteger(alias.target),
+    `${caseId} malformed argument alias`);
+    const source = semanticArguments[alias.source];
+    const target = semanticArguments[alias.target];
+    assert.equal(source?.kind, "heap",
+      `${caseId} argument alias source ${alias.source} is not a heap object`);
+    assert.equal(target?.kind, "heap",
+      `${caseId} argument alias target ${alias.target} is not a heap object`);
+    assert.equal(target.location, source.location,
+      `${caseId} compiler manifest did not preserve argument alias ${alias.source}->${alias.target}`);
+    aliasMultiplicities.set(alias.source,
+      (aliasMultiplicities.get(alias.source) ?? 1) + 1);
+  }
+  for (const [sourceIndex, multiplicity] of aliasMultiplicities) {
+    const location = semanticArguments[sourceIndex].location;
+    const cell = host.heap.find((candidate) => candidate.location === location);
+    assert.ok(cell, `${caseId} argument alias root ${sourceIndex} is not live in the initial heap`);
+    assert.equal(cell.rc, multiplicity,
+      `${caseId} argument alias root ${sourceIndex} has the wrong initial reference count`);
+  }
+}
+
 /** Execute one compiler-produced semantic Wasm validation case in any JS host. */
 export async function executeSemanticWasmCase({
   caseId,
@@ -318,6 +354,8 @@ export async function executeSemanticWasmCase({
   assert.equal(descriptor.id, caseId, `${caseId} descriptor ID mismatch`);
   assert.equal(descriptor.args.length, descriptor.argSchemas.length,
     `${caseId} argument schema/fixture arity mismatch`);
+  assert.ok(Array.isArray(descriptor.argumentAliases),
+    `${caseId} argument aliases must be an array`);
   assert.ok(Array.isArray(descriptor.effectProjections),
     `${caseId} effect projections must be an array`);
 
@@ -366,7 +404,7 @@ export async function executeSemanticWasmCase({
     compilerManifest.initialRuntime,
     validationExternals.validationExternalRegistry,
   );
-  const physicalArguments = compilerManifest.params.map((_kind, index) => {
+  const semanticArguments = compilerManifest.params.map((_kind, index) => {
     const semanticArgument = semanticRuntime.manifestValue(
       compilerManifest.arguments[index]);
     assert.deepStrictEqual(
@@ -380,9 +418,17 @@ export async function executeSemanticWasmCase({
       descriptor.args[index],
       `${caseId} compiler manifest disagrees with the corpus invocation`,
     );
-    return semanticRuntime.encodeManifestArgument(
-      host, compilerManifest, index, semanticArgument);
+    return semanticArgument;
   });
+  validateMaterializedArgumentAliases(
+    caseId,
+    descriptor.argumentAliases,
+    semanticArguments,
+    host,
+  );
+  const physicalArguments = compilerManifest.params.map((_kind, index) =>
+    semanticRuntime.encodeManifestArgument(
+      host, compilerManifest, index, semanticArguments[index]));
 
   assert.ok(WebAssembly.validate(bytes),
     `JavaScript engine rejected the generated WebAssembly module for ${caseId}`);

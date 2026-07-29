@@ -3119,13 +3119,63 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
         values |>.mapError (fun fault => toString (repr fault))
   | _, _ => mismatch schema datum
 
-def encodeArgs (schemas : Array ValidationSchema) (data : Array ValidationDatum) :
+private def encodeArgsFrom
+    (argumentAliases : Array ArgumentAlias) :
+    List (ValidationSchema × ValidationDatum) → Nat → RuntimeState → Array Value →
+      Except String (RuntimeState × Array Value)
+  | [], _, runtime, values => return (runtime, values)
+  | (schema, datum) :: remaining, index, runtime, values => do
+      let encoded : Except String (RuntimeState × Value) :=
+        match argumentAliases.find? fun alias => alias.target == index with
+        | none => encodeDatum runtime schema datum
+        | some alias => do
+            let some value := values[alias.source]? |
+              throw s!"argument alias source {alias.source} was not materialized"
+            let .object (.heap _) := value |
+              throw s!"argument alias {alias.source}->{alias.target} does not name a heap object"
+            let runtime ← incValue runtime value 1 true
+              |>.mapError (fun fault => toString (repr fault))
+            return (runtime, value)
+      let (runtime, value) ← encoded
+      encodeArgsFrom argumentAliases remaining (index + 1) runtime (values.push value)
+
+def encodeArgs (schemas : Array ValidationSchema) (data : Array ValidationDatum)
+    (argumentAliases : Array ArgumentAlias := #[]) :
     Except String (RuntimeState × Array Value) := do
-  if schemas.size != data.size then
-    throw s!"argument schema/fixture arity mismatch: {schemas.size} schemas, {data.size} values"
-  schemas.zip data |>.foldlM (init := ({}, #[])) fun (runtime, values) (schema, datum) => do
-    let (runtime, value) ← encodeDatum runtime schema datum
-    return (runtime, values.push value)
+  checkArgumentAliases schemas data argumentAliases
+  encodeArgsFrom argumentAliases (schemas.zip data).toList 0 {} #[]
+
+private def encodedArgumentAliasGuard : Bool :=
+  match encodeArgs #[.bytes, .bytes]
+      #[.bytes #[0, 127, 255], .bytes #[0, 127, 255]]
+      #[{ source := 0, target := 1 }] with
+  | .error _ => false
+  | .ok (runtime, values) =>
+      match (values[0]? : Option Value), (values[1]? : Option Value) with
+      | some (Value.object (.heap first)), some (Value.object (.heap second)) =>
+          first == second &&
+            match findCell? runtime.heap first with
+            | some cell => cell.live && cell.rc == 2 &&
+                cell.object == .byteArray #[0, 127, 255]
+            | none => false
+      | _, _ => false
+
+private def rejectsNonHeapArgumentAliasGuard : Bool :=
+  match encodeArgs #[.nat, .nat] #[.nat 1, .nat 1]
+      #[{ source := 0, target := 1 }] with
+  | .error _ => true
+  | .ok _ => false
+
+private def rejectsNonCanonicalArgumentAliasGuard : Bool :=
+  match encodeArgs #[.bytes, .bytes, .bytes]
+      #[.bytes #[1], .bytes #[1], .bytes #[1]]
+      #[{ source := 0, target := 2 }, { source := 0, target := 1 }] with
+  | .error _ => true
+  | .ok _ => false
+
+#guard encodedArgumentAliasGuard
+#guard rejectsNonHeapArgumentAliasGuard
+#guard rejectsNonCanonicalArgumentAliasGuard
 
 private def encodedBoolArgumentsUseScalarAbiGuard : Bool :=
   match encodeArgs #[.bool, .bool] #[.bool false, .bool true] with
@@ -3339,7 +3389,7 @@ def execute (case : Corpus.Case) (artifact : Artifact) : BackendResult :=
     { key := "missing-externals",
       value := String.intercalate ","
         ((artifact.missingExternals case.requiredExternals).toList.map toString) }]
-  match encodeArgs case.argSchemas case.args with
+  match encodeArgs case.argSchemas case.args case.argumentAliases with
   | .error message =>
       { caseId := case.id, backend := "lcnf", outcome := .failure message,
         diagnostics := staticDiagnostics }

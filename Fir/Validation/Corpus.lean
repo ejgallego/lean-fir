@@ -2401,6 +2401,8 @@ structure Case where
   dependencies : Array Lean.Name := #[]
   args : Array ValidationDatum := #[]
   argSchemas : Array ValidationSchema := #[]
+  /-- Runner-supplied argument identities, before the source entry consumes them. -/
+  argumentAliases : Array ArgumentAlias := #[]
   resultSchema : ValidationSchema
   native : Unit → ValidationDatum
   /-- Reset native observation state immediately before running the source case. -/
@@ -2438,6 +2440,7 @@ structure CaseDescriptor where
   dependencies : Array String
   args : Array ValidationDatum
   argSchemas : Array ValidationSchema
+  argumentAliases : Array ArgumentAlias
   resultSchema : ValidationSchema
   tags : Array String
   fuel : Nat
@@ -2460,6 +2463,7 @@ def Case.descriptor (validationCase : Case) : CaseDescriptor := {
   dependencies := validationCase.dependencies.map toString
   args := validationCase.args
   argSchemas := validationCase.argSchemas
+  argumentAliases := validationCase.argumentAliases
   resultSchema := validationCase.resultSchema
   tags := validationCase.tags
   fuel := validationCase.fuel
@@ -10257,6 +10261,10 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.effectProjections.all fun projection =>
     validationCase.requiredExternals.contains projection.external &&
     validationCase.requiredExecutedExternals.contains projection.external
+
+#guard cases.all fun validationCase =>
+  (checkArgumentAliases validationCase.argSchemas validationCase.args
+    validationCase.argumentAliases).isOk
 
 #guard cases.all fun validationCase =>
   match validationCase.requiredExecutedLcnfFormTrace with
