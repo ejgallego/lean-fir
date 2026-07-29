@@ -9744,6 +9744,63 @@ theorem coreStep_retainedScalarSet_binderReadyReachableRelated_ledger
     exact runtime.ledger
   exact ⟨sourceStep, targetStep, ledger, related⟩
 
+/-- A retained constructor-tag update preserves the target allocation
+ledger because it mutates an existing constructor without advancing the
+frontier. -/
+theorem coreStep_setTag_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (objectRead : lookupValue sourceState.env object = .ok objectValue)
+    (effect : setTag sourceState.runtime objectValue tag =
+      .ok sourceNextRuntime)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots)) :
+    ∃ targetObjectValue targetNextRuntime,
+      lookupValue targetState.env object = .ok targetObjectValue ∧
+      setTag targetState.runtime targetObjectValue tag =
+          .ok targetNextRuntime ∧
+      let sourceAfter := {
+        sourceState with
+        runtime := sourceNextRuntime
+        control := .code sourceContinuation }
+      let targetAfter := {
+        targetState with
+        runtime := targetNextRuntime
+        control := .code targetContinuation }
+      coreStep (withCodeControl sourceState
+          (.setTag object tag sourceContinuation)) =
+          .next sourceAfter ∧
+        coreStep (withCodeControl targetState
+          (.setTag object tag targetContinuation)) =
+          .next targetAfter ∧
+        LedgerBinderReadyReachableMachineRelated fuel rho
+          sourceAfter targetAfter := by
+  rcases coreStep_setTag_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectMember objectRead effect runtime.runtime with
+    ⟨targetObjectValue, targetNextRuntime, targetObjectRead, targetEffect,
+      nextRelated⟩
+  refine ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+    targetEffect, ?_⟩
+  dsimp only at nextRelated ⊢
+  rcases nextRelated with ⟨sourceStep, targetStep, related⟩
+  have ledger :
+      TargetAllocationLedger rho targetNextRuntime.nextLocation := by
+    rw [setTag_nextLocation_eq_of_ok targetEffect]
+    exact runtime.ledger
+  exact ⟨sourceStep, targetStep, ledger, related⟩
+
 /-- Root-independent operational shape for a deleted object-field write.
 The compiler ownership argument is deliberately absent: it is supplied later
 for the actual active roots of a related machine pair. -/
@@ -30675,6 +30732,80 @@ theorem match_setTagCodeStep_binderReady
             ⟨targetPath, finalRelated⟩
           exact ⟨_, targetPath, finalRelated⟩
 
+/-- Ledger-aware hereditary semantic matcher for a retained constructor-tag
+update. -/
+theorem match_setTagCodeStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.setTag object tag sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.setTag object tag targetContinuation)) targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := withCodeControl sourceState
+    (.setTag object tag sourceContinuation)
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show withCodeControl sourceState
+          (.setTag object tag sourceContinuation) = sourceCurrent by
+            rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize objectRead :
+    lookupValue sourceState.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, withCodeControl, coreStep, objectRead, fail]
+      exact (noStep done).elim
+  | ok objectValue =>
+      generalize effect :
+        setTag sourceState.runtime objectValue tag = effectResult
+      cases effectResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, withCodeControl, coreStep, objectRead,
+              effect, fail]
+          exact (noStep done).elim
+      | ok sourceNextRuntime =>
+          rcases coreStep_setTag_binderReadyReachableRelated_ledger
+              sourceState targetState programs frames continuation joins env
+              objectMember objectRead effect runtime with
+            ⟨targetObjectValue, targetNextRuntime, targetObjectRead,
+              targetEffect, sourceTransition, targetTransition,
+              afterRelated⟩
+          rcases match_internalCoreSteps_binderReady_ledger
+              sourceTransition targetTransition afterRelated step with
+            ⟨targetPath, finalRelated⟩
+          exact ⟨_, targetPath, finalRelated⟩
+
 /-- An exact tag-update view supplies the live operand and hereditary
 continuation required by the runtime matcher. -/
 theorem ExactShadowCodeBinderReady.match_setTagStep
@@ -30716,6 +30847,50 @@ theorem ExactShadowCodeBinderReady.match_setTagStep
     simp
   exact match_setTagCodeStep_binderReady sourceState targetState programs
     frames (ready.tagSet_continuationGraph fuelBound usedBound) joins env
+    objectMember runtime step
+
+/-- Ledger-aware exact matcher for a retained constructor-tag update. -/
+theorem ExactShadowCodeBinderReady.match_setTagStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel tag : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.tagSet
+          (object := object) (tag := tag) continuation))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset (continuationUsed.insert object) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      (withCodeControl sourceState
+        (.setTag object tag sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState
+          (.setTag object tag targetContinuation)) targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have objectMember : ambient.contains object = true := by
+    apply usedBound object
+    simp
+  exact match_setTagCodeStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.tagSet_continuationGraph fuelBound usedBound) joins env
     objectMember runtime step
 
 /-- Complete graph-level matcher for reference-count increments. Persistent
