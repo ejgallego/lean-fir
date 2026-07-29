@@ -921,6 +921,16 @@ through the common runtime-neutral rule. Together with object projection, all
 three layout-field projection families now expose retained/deleted
 ledger-aware exact wrappers.
 
+Unboxing and ownership queries now complete the remaining read-only
+object-consumer layer. The retained unbox matcher transports successful
+unboxing across related live objects and publishes a heap-backed payload as a
+continuation root when necessary; tagged payloads remain immediate. The
+retained `isShared` matcher transports equal ownership metadata and binds the
+related scalar result. Neither operation changes either runtime, so both
+preserve the exact target frontier. Their deleted exact branches use the
+generic runtime-neutral source-step/target-stutter rule. All four exact
+retained/deleted wrappers are integrated at `3a12fe31`.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -999,10 +1009,10 @@ its proof-relevant carrier covers the allocation primitives and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
 runtime-neutral erased/deleted layer, plus retained/deleted local-value
-applications and all three layout-field projection families. It still has to
-be threaded through retained unboxing/ownership queries, the remaining
-invocation steps, existing-address mutations, and
-allocation-capable external responses, then assembled into the unified
+applications, all three layout-field projection families, unboxing, and
+ownership queries. It still has to be threaded through the remaining
+invocation steps, existing-address mutations, and allocation-capable external
+responses, then assembled into the unified
 non-lockstep dispatcher and compiler-client invariant so arbitrary selected
 edges receive that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
@@ -1045,10 +1055,9 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Preserve the ledger through retained unboxing/ownership queries,
-   invocation steps, and the existing-address matcher families. Strengthen
-   the foreign-response boundary when an external response allocates, then
-   assemble the unified
+1. Preserve the ledger through the remaining invocation steps and the
+   existing-address matcher families. Strengthen the foreign-response boundary
+   when an external response allocates, then assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
