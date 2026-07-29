@@ -46,6 +46,8 @@ inductive Instruction where
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)
   | block (label : FVarId) (body : List Instruction)
+  /-- Structured repetition; branching to `label` starts the next iteration. -/
+  | loop (label : FVarId) (body : List Instruction)
   | ifElse (thenBody elseBody : List Instruction)
   | br (label : FVarId)
   | ret
@@ -1239,6 +1241,7 @@ def addUnique [BEq α] (values : Array α) (value : α) : Array α :=
 partial def collectRuntimeOpsInstruction (operations : Array RuntimeOp) : Instruction → Array RuntimeOp
   | .call (.runtime operation) => addUnique operations operation
   | .block _ body => body.foldl collectRuntimeOpsInstruction operations
+  | .loop _ body => body.foldl collectRuntimeOpsInstruction operations
   | .ifElse thenBody elseBody =>
       elseBody.foldl collectRuntimeOpsInstruction
         (thenBody.foldl collectRuntimeOpsInstruction operations)

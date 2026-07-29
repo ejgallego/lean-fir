@@ -162,6 +162,9 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .block label body => do
       let body ← encodeInstructions { context with labels := some label :: context.labels } body
       return #[0x02, 0x40] ++ body ++ #[0x0b]
+  | .loop label body => do
+      let body ← encodeInstructions { context with labels := some label :: context.labels } body
+      return #[0x03, 0x40] ++ body ++ #[0x0b]
   | .ifElse thenBody elseBody => do
       let nested := { context with labels := none :: context.labels }
       let thenBody ← encodeInstructions nested thenBody

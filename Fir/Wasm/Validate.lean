@@ -236,6 +236,7 @@ mutual
 
 partial def collectLabelsInstruction : Instruction → List FVarId
   | .block label body => label :: collectLabels body
+  | .loop label body => label :: collectLabels body
   | .ifElse thenBody elseBody => collectLabels thenBody ++ collectLabels elseBody
   | _ => []
 
@@ -417,6 +418,19 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         | none, some actual => throw (.stackMismatch context.function.name [] actual)
         | _, none => pure false
       let fallthrough := if normal || caught then stack? else none
+      return { fallthrough, branches }
+  | .loop label body => do
+      let nested := { context with labels := { fvarId := label, stack? } :: context.labels }
+      let flow ← checkInstructions nested stack? body
+      let branches := flow.branches.filter (·.name != label.name)
+      let normal ←
+        match stack?, flow.fallthrough with
+        | some expected, some actual =>
+            if stackEquivalent actual expected then pure true
+            else throw (.stackMismatch context.function.name expected actual)
+        | none, some actual => throw (.stackMismatch context.function.name [] actual)
+        | _, none => pure false
+      let fallthrough := if normal then stack? else none
       return { fallthrough, branches }
   | .ifElse thenBody elseBody => do
       let branchInput ← stack?.mapM fun stack => do

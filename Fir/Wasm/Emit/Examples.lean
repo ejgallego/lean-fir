@@ -394,6 +394,28 @@ def residentMemoryGrowFunction : Function := {
   locals := #[]
   body := [.localGet residentValue32, .memoryGrow, .ret] }
 
+def residentLoop : Lean.FVarId := ⟨`residentLoop⟩
+
+/-- Encoding witness for the structured loop surface consumed by resident
+runtime walkers. The zero arm returns; every nonzero arm decrements and
+branches to the loop header without growing the Wasm call stack. -/
+def residentLoopFunction : Function := {
+  name := `residentLoop
+  params := #[(residentValue32, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .loop residentLoop [
+      .localGet residentValue32,
+      .i32Const .uint32 0,
+      .i32Eq,
+      .ifElse [.localGet residentValue32, .ret] [],
+      .localGet residentValue32,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet residentValue32,
+      .br residentLoop]] }
+
 /-- W7 shared-surface guard. Existing modules omit memory; a resident-runtime
 module may define/export it and use checked physical memory instructions. -/
 def residentMemorySurfaceModule : Module := {
@@ -408,7 +430,8 @@ def residentMemorySurfaceModule : Module := {
     residentStore32Function,
     residentStore64Function,
     residentMemorySizeFunction,
-    residentMemoryGrowFunction]
+    residentMemoryGrowFunction,
+    residentLoopFunction]
   exports := #[
     `residentBits,
     `residentLoad,

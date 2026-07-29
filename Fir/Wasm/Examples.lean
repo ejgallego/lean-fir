@@ -843,6 +843,17 @@ def inner : Lean.FVarId := ⟨`inner⟩
   | _ => false
 
 #guard match validateModule (fixtureModule <| fixtureFunction [
+    .loop outer [.br outer]]) with
+  | .ok _ => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .loop outer [.i32Const .uint32 1, .br outer]]) with
+  | .error (.branchStackMismatch `fixture fvarId [] [.uint32]) =>
+      fvarId.name == outer.name
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
     .block outer [.block outer [.br outer]]]) with
   | .error (.duplicateLabel `fixture fvarId) => fvarId.name == outer.name
   | _ => false
