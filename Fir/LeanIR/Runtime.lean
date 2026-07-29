@@ -660,6 +660,22 @@ def scalarFromType (type : Expr) (payload : UInt64) : Except RuntimeFault Value 
   else
     .error (.malformed "unbox has an unknown scalar result type")
 
+/--
+Whether final-LCNF `box` may use Lean's tagged immediate representation.
+
+Float32 and Float boxes are always heap objects: compiler-generated boxed
+wrappers release them with unchecked `dec[ref]`. Integer and `USize` boxes
+retain the payload-size split.
+-/
+def boxUsesTaggedRepresentation (type : Expr) (payload : UInt64) : Bool :=
+  !(type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float) &&
+    decide (payload.toNat ≤ maxTaggedPayload)
+
+#guard boxUsesTaggedRepresentation LCNF.ImpureType.uint32 0xdeadbeef
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.uint64 0xffffffffffffffff
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.float32 0
+#guard !boxUsesTaggedRepresentation LCNF.ImpureType.float 0
+
 def box (runtime : RuntimeState) (type : Expr) (value : Value) :
     Except RuntimeFault (RuntimeState × Value) := do
   let payload ←
@@ -667,10 +683,18 @@ def box (runtime : RuntimeState) (type : Expr) (value : Value) :
     | .scalar scalar => .ok scalar.toUInt64
     | .usize value => .ok value
     | _ => .error .expectedScalar
-  if payload.toNat ≤ maxTaggedPayload then
+  if boxUsesTaggedRepresentation type payload then
     return (runtime, .object (.tagged payload))
   let (runtime, reference) := alloc runtime (.boxed type value)
   return (runtime, .object reference)
+
+private def floatingBoxGuard : Bool :=
+  match box {} LCNF.ImpureType.float32 (.scalar (.float32Bits 0)),
+      box {} LCNF.ImpureType.float (.scalar (.float64Bits 0)) with
+  | .ok (_, .object (.heap _)), .ok (_, .object (.heap _)) => true
+  | _, _ => false
+
+#guard floatingBoxGuard
 
 def unbox (runtime : RuntimeState) (type : Expr) (value : Value) : Except RuntimeFault Value :=
   match value with
