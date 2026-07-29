@@ -20,11 +20,11 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/wasm-lanes` | active | Integrated W7's closed resident `prettyM` runtime through `071fcbc` and the exact Int32 validation checkpoint as `a669b51`; subsequent lane releases remain independently queued | Stable W6/W7 contracts are unchanged; validation consumes the released semantic ABI without creating a new cross-lane contract |
+| Integration | integration owner | `integration/wasm-lanes` | active | Integrated W7's closed resident `prettyM` runtime through `071fcbc` and exact signed validation through the Int64 checkpoint `20729f5`; subsequent lane releases remain independently queued | Stable W6/W7 contracts are unchanged; validation consumes the released semantic ABI without creating a new cross-lane contract |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | active | Hereditary control-flow readiness through named invocation and yielded steps is landed through `0e0cf0b`; worktree is clean | Independent of W7 generation; branch only needs the latest W7 landing before its next handoff |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Partial-closure capacity is proved at clean head `5095ac3`; the branch contains the stable closure-descriptor contract | W7 may consume the released descriptor table now; W6 remains the proof owner and rebases on current `main` before its next handoff |
 | W7 generation | generation owner | `wasm/generation` | active | Resident cache publication, numeric operations, String operations, and fallbacks are landed through the zero-import `prettyM` checkpoint `071fcbc` | Uses released W6/W7 contracts; the owner must report the next generation helper and any new contract impact before handoff |
-| Validation | validation owner | `validation/interpreter-corpus` | active | Exact signed Int8/Int16/Int32 coverage is landed through `a669b51`: 493 source cases, 502 unique cases, 1,488 comparisons, and zero native/LCNF/V8 findings; Int64 is next | No shared-contract change; consumes the signed semantic Wasm ABI released at `504d1ad`, while compiler-generated Wasm adoption remains a downstream W7 user of the same fixtures |
+| Validation | validation owner | `validation/interpreter-corpus` | active | Exact signed Int8/Int16/Int32/Int64 coverage is landed through `20729f5`: 536 source cases, 545 unique cases, 1,617 comparisons, and zero native/LCNF/V8 findings; ISize is next | No shared-contract change; consumes the signed semantic Wasm ABI released at `504d1ad`, while compiler-generated Wasm adoption remains a downstream W7 user of the same fixtures |
 
 ## Resident-helper bridge
 
