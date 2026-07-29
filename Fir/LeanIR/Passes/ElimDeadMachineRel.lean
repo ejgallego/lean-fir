@@ -19280,6 +19280,233 @@ theorem match_retainedFVarLetStep_binderReady
                         targetTransition afterRelated
                         (by simpa [sourceCurrent] using step)⟩
 
+/-- Ledger-carrying hereditary retained local-application matcher. The
+nullary copy branch binds related values and the non-nullary branch pushes
+paired bind frames and enters related `invokeValue` controls; neither branch
+changes the target runtime or its allocation ledger. -/
+theorem match_retainedFVarLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (functionMember : used.contains function = true)
+    (covered : ArgsCovered used arguments)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fvar function arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .fvar function arguments
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type, value := .fvar function arguments
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fvar function arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fvar function arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceFunctionRead :
+    lookupValue sourceState.env function = sourceFunctionResult
+  cases sourceFunctionResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceFunctionRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceFunction =>
+      have sourceFunctionLookup :=
+        lookupValue_eq_ok_iff.mp sourceFunctionRead
+      have functions := env function functionMember
+      rw [sourceFunctionLookup] at functions
+      generalize targetFunctionLookup :
+        lookup targetState.env function = targetFunctionOption at functions
+      cases functions with
+      | some functionRelated =>
+          rename_i targetFunction
+          have targetFunctionRead :
+              lookupValue targetState.env function = .ok targetFunction :=
+            lookupValue_eq_ok_iff.mpr targetFunctionLookup
+          generalize sourceArgumentsEq :
+            evalArgs sourceState.env arguments = sourceEvaluation
+          cases sourceEvaluation with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceFunctionRead, sourceArgumentsEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceArguments =>
+              have evaluated := evalArgs_relOn env covered
+              rw [sourceArgumentsEq] at evaluated
+              generalize targetArgumentsEq :
+                evalArgs targetState.env arguments = targetEvaluation
+                  at evaluated
+              cases evaluated with
+              | ok argumentsRelated =>
+                  rename_i targetArguments
+                  have sourceFunctionRoot :
+                      sourceFunction ∈
+                        envRootsOn used sourceState.env ++
+                          sourceFrameRoots := by
+                    exact List.mem_append_left _
+                      (lookup_mem_envRootsOn functionMember
+                        sourceFunctionLookup)
+                  have targetFunctionRoot :
+                      targetFunction ∈
+                        envRootsOn used targetState.env ++
+                          targetFrameRoots := by
+                    exact List.mem_append_left _
+                      (lookup_mem_envRootsOn functionMember
+                        targetFunctionLookup)
+                  have publishedFunction :=
+                    runtime.runtime.prependRelatedRoot sourceFunctionRoot
+                      targetFunctionRoot functionRelated
+                  have publishedArguments :=
+                    runtime.runtime.publishEvalArgs covered sourceArgumentsEq
+                      targetArgumentsEq argumentsRelated
+                  have publishedCall :=
+                    publishedArguments.prependRelatedRoot
+                      (List.mem_append_right _ sourceFunctionRoot)
+                      (List.mem_append_right _ targetFunctionRoot)
+                      functionRelated
+                  have sizeEq := arrayRel_size_eq argumentsRelated
+                  have emptyEq :
+                      sourceArguments.isEmpty = targetArguments.isEmpty := by
+                    simp [Array.isEmpty, sizeEq]
+                  by_cases empty : sourceArguments.isEmpty
+                  · have targetEmpty : targetArguments.isEmpty := by
+                      rw [← emptyEq]
+                      exact empty
+                    let sourceExpected := {
+                      sourceState with
+                      env := bind sourceState.env fvarId sourceFunction
+                      control := .code sourceContinuation }
+                    let targetExpected := {
+                      targetState with
+                      env := bind targetState.env fvarId targetFunction
+                      control := .code targetContinuation }
+                    have sourceTransition :
+                        coreStep sourceCurrent = .next sourceExpected := by
+                      simp [sourceCurrent, sourceExpected, coreStep,
+                        evalLetValue, sourceFunctionRead, sourceArgumentsEq,
+                        empty, Bind.bind, Except.bind, Pure.pure, Except.pure]
+                    have targetTransition :
+                        coreStep targetCurrent = .next targetExpected := by
+                      simp [targetCurrent, targetExpected, coreStep,
+                        evalLetValue, targetFunctionRead, targetArgumentsEq,
+                        targetEmpty, Bind.bind, Except.bind,
+                        Pure.pure, Except.pure]
+                    have afterStructural :
+                        BinderReadyReachableMachineRelated fuel rho
+                          sourceExpected targetExpected := by
+                      exact retainedLetValue_binderReadyReachableRelated
+                        sourceState targetState
+                        sourceState.runtime targetState.runtime
+                        programs frames continuation joins env functionRelated
+                        publishedFunction
+                    have afterRelated :
+                        LedgerBinderReadyReachableMachineRelated fuel rho
+                          sourceExpected targetExpected := by
+                      refine ⟨?_, afterStructural⟩
+                      simpa [targetExpected] using runtime.ledger
+                    exact ⟨targetExpected,
+                      match_internalCoreSteps_binderReady_ledger
+                        sourceTransition targetTransition afterRelated
+                        (by simpa [sourceCurrent] using step)⟩
+                  · have targetNonempty : ¬targetArguments.isEmpty := by
+                      intro targetEmpty
+                      have sourceEmpty : sourceArguments.isEmpty := by
+                        rw [emptyEq]
+                        exact targetEmpty
+                      exact empty sourceEmpty
+                    let sourceExpected := {
+                      sourceState with
+                      frames := .bind fvarId sourceContinuation
+                        sourceState.env sourceState.joins ::
+                          sourceState.frames
+                      control := .invokeValue sourceFunction
+                        sourceArguments }
+                    let targetExpected := {
+                      targetState with
+                      frames := .bind fvarId targetContinuation
+                        targetState.env targetState.joins ::
+                          targetState.frames
+                      control := .invokeValue targetFunction
+                        targetArguments }
+                    have sourceTransition :
+                        coreStep sourceCurrent = .next sourceExpected := by
+                      simp [sourceCurrent, sourceExpected, coreStep,
+                        evalLetValue, sourceFunctionRead, sourceArgumentsEq,
+                        empty, pushBindFrame, Bind.bind, Except.bind,
+                        Pure.pure, Except.pure]
+                    have targetTransition :
+                        coreStep targetCurrent = .next targetExpected := by
+                      simp [targetCurrent, targetExpected, coreStep,
+                        evalLetValue, targetFunctionRead, targetArgumentsEq,
+                        targetNonempty, pushBindFrame, Bind.bind, Except.bind,
+                        Pure.pure, Except.pure]
+                    have afterStructural :
+                        BinderReadyReachableMachineRelated fuel rho
+                          sourceExpected targetExpected := by
+                      unfold BinderReadyReachableMachineRelated
+                      exact ⟨sourceFunction :: sourceArguments.toList,
+                        targetFunction :: targetArguments.toList,
+                        envRootsOn used sourceState.env ++ sourceFrameRoots,
+                        envRootsOn used targetState.env ++ targetFrameRoots,
+                        programs,
+                        .invokeValue functionRelated argumentsRelated,
+                        .cons (.bind continuation joins env) frames,
+                        by simpa only [List.cons_append] using publishedCall⟩
+                    have afterRelated :
+                        LedgerBinderReadyReachableMachineRelated fuel rho
+                          sourceExpected targetExpected := by
+                      refine ⟨?_, afterStructural⟩
+                      simpa [targetExpected] using runtime.ledger
+                    exact ⟨targetExpected,
+                      match_internalCoreSteps_binderReady_ledger
+                        sourceTransition targetTransition afterRelated
+                        (by simpa [sourceCurrent] using step)⟩
+
 /-- Hereditary deleted local-application matcher.  A dynamically certified
 deleted `.fvar` is necessarily the runtime-neutral nullary value-copy branch,
 so the source consumes it while the target stutters. -/
@@ -19317,6 +19544,47 @@ theorem match_deletedFVarLetStep_binderReady
   cases ready with
   | runtimeNeutral declaration value evaluated =>
       exact match_deletedRuntimeNeutralLetStep_binderReady
+        sourceState targetState programs frames continuation joins env absent
+        runtime evaluated step
+
+/-- Ledger-carrying deleted local-application matcher. Dynamic readiness
+forces the nullary value-copy branch, so the target stutters and retains its
+incoming allocation history. -/
+theorem match_deletedFVarLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .fvar function arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      exact match_deletedRuntimeNeutralLetStep_binderReady_ledger
         sourceState targetState programs frames continuation joins env absent
         runtime evaluated step
 
@@ -19387,6 +19655,74 @@ theorem ExactShadowCodeBinderReady.match_retainedFVarLetStep
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env covered.1 covered.2 runtime step
 
+/-- Exact retained local-application provenance consumed through the
+ledger-carrying copy/invocation matcher. -/
+theorem ExactShadowCodeBinderReady.match_retainedFVarLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId function : FVarId} {binderName : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .fvar function arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fvar function arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have covered :
+      ambient.contains function = true ∧ ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.fvar function arguments :
+            LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure)).mono usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedFVarLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered.1 covered.2 runtime step
+
 /-- Exact deleted local-application provenance supplies binder absence and
 the hereditary continuation; dynamic readiness identifies the runtime-neutral
 nullary value-copy branch. -/
@@ -19439,6 +19775,62 @@ theorem ExactShadowCodeBinderReady.match_deletedFVarLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedFVarLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
+
+/-- Exact deleted local-application provenance consumed through the
+ledger-carrying nullary-copy stuttering matcher. -/
+theorem ExactShadowCodeBinderReady.match_deletedFVarLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId function : FVarId} {binderName : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.fvar function arguments :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type, value := .fvar function arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type, value := .fvar function arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedFVarLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime deletedReady step
