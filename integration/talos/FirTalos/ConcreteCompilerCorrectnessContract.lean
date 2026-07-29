@@ -176,9 +176,10 @@ example
     parameterCount resultCount
 
 /--
-A whole direct-value spine of admitted `USize` projections obtains its runtime
-law from the concrete supported export.  In particular, the client supplies
-neither target instructions/import indices nor constructor descriptors.
+A whole mixed read-only direct-value spine obtains its runtime law from the
+concrete supported export. Local aliases, `USize` projections, and object
+projections may be interleaved; the client supplies neither target
+instructions/import indices nor constructor descriptors.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -200,7 +201,7 @@ example
     {resultValue : Value}
     {parameters callerTail : List Wasm.Value}
     (evaluation :
-      DirectValueEvaluates context (USizeProjectionSupported context)
+      DirectValueEvaluates context (ReadOnlyDirectSupported context)
         sourceRuntime sourceEnv sourceCode resultRuntime resultValue)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
@@ -222,7 +223,7 @@ example
         PhysicalValueRel resultWitness resultKind physical resultValue :=
   codeWP_of_directValueEvaluates evaluation spec.bodyAdapted
     spec.localsAligned stateRelated frameAligned
-    spec.directLetRuntimeRefines_usizeProjection parameterCount
+    spec.directLetRuntimeRefines_readOnlyDirect parameterCount
     spec.singleResult
 
 /--

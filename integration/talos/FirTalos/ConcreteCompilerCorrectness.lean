@@ -2271,6 +2271,41 @@ inductive USizeProjectionSupported (context : Fir.Wasm.Context) :
           .ok (.localGet decl.fvarId, .usize)) :
       USizeProjectionSupported context decl
 
+/--
+Static admission for a direct object projection.
+
+The selected field's ABI kind is the one additional typing fact that cannot
+be recovered from `ConcreteRuntimeRel`: the heap relation proves descriptor
+existence and contents, while this source-level condition connects the
+compiler-selected result kind to that descriptor. It quantifies over related
+source values but contains no target program, numeric slot, import, concrete
+read, or chosen descriptor witness.
+-/
+inductive ObjectProjectionSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (index : Nat) (objectId : FVarId)
+      (objectKind resultKind : AbiKind)
+      (valueEq : decl.value = .oproj index objectId)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, resultKind))
+      (fieldKindAligned :
+        ∀ {sourceEnv : Env} {sourceObject : Value}
+            {witness : RefinementWitness} {objectWord : Word32}
+            {info : LCNF.CtorInfo} {fieldKinds : Array AbiKind},
+          lookup sourceEnv objectId = some sourceObject →
+            ValueRel witness .tobject (.word32 objectWord) sourceObject →
+            witness.descriptors.lookup? objectWord =
+                some (.constructor info fieldKinds) →
+              fieldKinds[index]? = some resultKind) :
+      ObjectProjectionSupported context decl
+
 /-- Every successful absolute-slot `USize` read produces an unboxed word. -/
 theorem getUSizeSlot_ok_eq_usize
     {runtime : RuntimeState} {object result : Value} {slot : Nat}
@@ -2353,6 +2388,57 @@ theorem sourceLetResult_usizeProjection_eq
           obtain ⟨value, resultEq⟩ := getUSizeSlot_ok_eq_usize projected
           subst projectedValue
           exact ⟨sourceObject, value, runtimeEq.symm, rfl, rfl, projected⟩
+
+/--
+Invert a successful source object projection to its environment lookup and
+semantic field read.
+-/
+theorem sourceLetResult_objectProjection_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {index : Nat} {objectId : FVarId}
+    (valueEq : decl.value = .oproj index objectId)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject,
+      nextRuntime = sourceRuntime ∧
+        lookup sourceEnv objectId = some sourceObject ∧
+        getObjectField sourceRuntime sourceObject index = .ok sourceValue := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases projected : getObjectField sourceRuntime sourceObject index with
+      | error fault =>
+          rw [projected] at sourceStep
+          contradiction
+      | ok projectedValue =>
+          rw [projected] at sourceStep
+          have pairEq :
+              (sourceRuntime, LetAction.value projectedValue) =
+                (nextRuntime, LetAction.value sourceValue) :=
+            Except.ok.inj sourceStep
+          have runtimeEq : sourceRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : projectedValue = sourceValue :=
+            LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst projectedValue
+          exact ⟨sourceObject, runtimeEq.symm, rfl, projected⟩
 
 /--
 The concrete frame has exactly the parameter and local capacity allocated for
@@ -2455,6 +2541,40 @@ def DirectLetRuntimeRefines
           targetLocals nextLocals resultIndex witness nextWitness ∧
         Invariant nextRuntime (bind sourceEnv decl.fvarId sourceValue)
           nextStore nextLocals nextWitness
+
+/-- Uniform runtime laws with the same resource invariant compose by source
+admission disjunction. This is the structural bridge for mixed direct-value
+spines; it combines verified operation families without constructing a
+source/target certificate. -/
+theorem DirectLetRuntimeRefines.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Left Right : LCNF.LetDecl .impure → Prop}
+    {Invariant :
+      RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (left :
+      DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Left Invariant)
+    (right :
+      DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Right Invariant) :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv (fun decl => Left decl ∨ Right decl) Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    invariant sourceStep stateRelated valueCompiled valueAdapted resultFound
+  cases supported with
+  | inl leftSupported =>
+      exact left leftSupported invariant sourceStep stateRelated valueCompiled
+        valueAdapted resultFound
+  | inr rightSupported =>
+      exact right rightSupported invariant sourceStep stateRelated valueCompiled
+        valueAdapted resultFound
 
 /--
 One zero-argument local alias is simulated by the generated `local.get` /
@@ -2709,6 +2829,139 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_usizeProjection
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
+
+/--
+Uniform runtime-law instance for direct object projections.
+
+As for `USize`, every target-level choice is derived from the executable
+pipeline and related state. The sole extra source obligation is
+`ObjectProjectionSupported.fieldKindAligned`, which identifies the selected
+descriptor field with the compiler's destination ABI kind.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_objectProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ObjectProjectionSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    frameAligned sourceStep stateRelated valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨index, objectId, objectKind, resultKind, valueEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, fieldKindAligned⟩
+  obtain ⟨sourceObject, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_objectProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.objectProj index resultKind))] :=
+    compileLetValue_objectProjection valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .objectProj index resultKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨info, fieldKinds, descriptor⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getObjectField
+              stateRelated.1 objectRelated projected
+          have fieldKind :=
+            fieldKindAligned sourceLookup objectRelated descriptor
+          obtain ⟨resultWord, concreteRead, valueRelated⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.readObjectField_refines
+              stateRelated.1 objectRelated descriptor fieldKind projected
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            frameAligned.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i32 (UInt32.ofNat resultWord.value)) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.objectProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_objectProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject objectRelated
+              descriptor fieldKind concreteRead imported spec.hostsSatisfy
+              inBounds contracted params results targetSet,
+            nextFrameAligned⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/-- Current constructive read-only direct-value admission. The disjunction is
+deliberately source-facing and can grow operation by operation without
+changing the structural theorem. -/
+def ReadOnlyDirectSupported (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure) : Prop :=
+  LocalAliasSupported context decl ∨
+    USizeProjectionSupported context decl ∨
+      ObjectProjectionSupported context decl
+
+/--
+Mixed local-alias, `USize`-projection, and object-projection spines share one
+uniform runtime law and the same exact-frame invariant.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ReadOnlyDirectSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  change
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (fun decl =>
+          LocalAliasSupported context decl ∨
+            (USizeProjectionSupported context decl ∨
+              ObjectProjectionSupported context decl))
+        (ConcreteLocalFrameAligned sourceFunction)
+  apply DirectLetRuntimeRefines.or
+  · exact directLetRuntimeRefines_localAlias spec.localsAligned
+  · apply DirectLetRuntimeRefines.or
+    · exact spec.directLetRuntimeRefines_usizeProjection
+    · exact spec.directLetRuntimeRefines_objectProjection
 
 /--
 Structural, certificate-free partial correctness for the direct-value code

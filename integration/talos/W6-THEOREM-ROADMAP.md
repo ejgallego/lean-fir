@@ -395,9 +395,13 @@ acceptance tests pass.
    law now covers arbitrary admitted `USize`-projection spines: compiler and
    adapter inversion, related physical object resolution, automatic descriptor
    recovery, resolved host execution, and total i64 local writes discharge the
-   uniform step interface. Extend it next to object projection, then across
-   the remaining allocation/projection refinements for the currently admitted
-   direct-value fragment.
+   uniform step interface. Object projection now discharges the same interface
+   from its one selected-field ABI-kind typing obligation; the compiler,
+   adapter, heap relation, concrete read, and local write supply everything
+   else. `ReadOnlyDirectSupported` composes aliases and both projection
+   families into mixed spines. Extend the law next to packed-scalar projection,
+   then across the remaining allocation refinements for the currently
+   admitted direct-value fragment.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

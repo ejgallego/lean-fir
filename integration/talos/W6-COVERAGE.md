@@ -75,10 +75,13 @@ Cross-cutting W6.5 state:
   projection admission, production compiler/adapter inversion, the related
   physical object word, automatically recovered constructor descriptor,
   resolved concrete host contract, and the preserved frame-shape invariant.
-  The harness applies arbitrary admitted `USize`-projection spines with no
-  target or descriptor witness. Discharging the law for object/scalar
-  projection and allocation, then adding control-flow, calls, externals,
-  caches, and faults, remains;
+  Object projections now add only a target-independent selected-field
+  ABI-kind typing theorem; descriptor existence, concrete reads, physical
+  words, and numeric target layout are derived. A generic runtime-law union
+  composes aliases, `USize`, and object projection into arbitrary mixed
+  read-only spines, and the harness supplies no target or descriptor witness.
+  Discharging the law for scalar projection and allocation, then adding
+  control-flow, calls, externals, caches, and faults, remains;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

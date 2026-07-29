@@ -3588,6 +3588,22 @@ without a translation certificate or heap-shape premise. Object projection is
 next; unlike `USize`, it retains selected-field ABI-kind agreement as a static
 typing obligation. No FIR semantic contract or executable ABI changed.
 
+W6.6ei constructs the object-projection instance and the first mixed
+structural admission. `ObjectProjectionSupported` records the source/compiler
+shape and a target-independent typing theorem: whenever the projected source
+object is related to a constructor descriptor, the selected descriptor field
+has the compiler's result ABI kind. Runtime descriptor existence, the concrete
+field read, physical result word, numeric locals/import, and checked write are
+all derived. `DirectLetRuntimeRefines.or` combines operation families that
+preserve the same resource invariant, and `ReadOnlyDirectSupported` now admits
+arbitrarily interleaved local aliases, `USize` projections, and object
+projections. The contract harness applies one structural theorem to that
+mixed spine with no target-code, numeric-layout, concrete-read, or descriptor
+witness. Packed-scalar projection is next; its existing operation theorem
+still exposes a concrete-read premise that must be reduced to a stable source
+typing/layout boundary before joining the uniform law. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

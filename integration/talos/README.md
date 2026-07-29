@@ -195,8 +195,12 @@ The same law is now constructive for read-only `USize` projections:
 `USizeProjectionSupported` contains source/compiler typing facts only, while
 the real adapter, related local frame, concrete heap relation, and resolved
 host recover the numeric read/call/write prefix and its successful concrete
-step. The structural contract harness accepts arbitrary admitted projection
-spines without a descriptor or translation-certificate premise.
+step. Object projections now use the same boundary, with selected-field
+ABI-kind agreement represented as their one source typing obligation.
+`DirectLetRuntimeRefines.or` and `ReadOnlyDirectSupported` compose local
+aliases plus both projection families into arbitrary mixed spines. The
+structural contract harness accepts them without a descriptor, concrete read,
+numeric layout, or translation-certificate premise.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
