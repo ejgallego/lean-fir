@@ -8088,6 +8088,254 @@ def LedgerShadowRuntimeRel.literalLeftGarbage
   runtime := related.runtime.literalLeftGarbage literalValue
   ledger := related.ledger
 
+/-- Proof-relevant result of boxing one related retained input. Tagged
+results preserve the incoming renaming and ledger; heap-backed results expose
+the paired allocation's exact extension. -/
+structure LedgerBoxBothResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value) (type : Expr)
+    (leftInput rightInput : Value)
+    (leftRuntime : RuntimeState) (leftResult : Value) : Type where
+  larger : AddressRenaming
+  rightRuntime : RuntimeState
+  rightResult : Value
+  extension : RenamingExtends rho larger
+  leftEffect :
+    box left type leftInput = .ok (leftRuntime, leftResult)
+  rightEffect :
+    box right type rightInput = .ok (rightRuntime, rightResult)
+  values : ValueRel larger leftResult rightResult
+  runtime :
+    LedgerShadowRuntimeRel larger leftRuntime rightRuntime
+      (leftResult :: leftExtra) (rightResult :: rightExtra)
+
+/-- Boxing related published scalar or `USize` inputs carries the target
+allocation ledger through the exact representation split. The `Nonempty`
+boundary permits relation inversion in `Prop` before the proof-relevant
+result is selected. -/
+theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (leftMember : leftInput ∈ leftExtra)
+    (values : ValueRel rho leftInput rightInput)
+    (sourceBox :
+      box left type leftInput = .ok (leftRuntime, leftResult)) :
+    Nonempty (LedgerBoxBothResult rho left right leftExtra rightExtra type
+      leftInput rightInput leftRuntime leftResult) := by
+  cases values with
+  | tagged payload => simp [box, Bind.bind, Except.bind] at sourceBox
+  | erased => simp [box, Bind.bind, Except.bind] at sourceBox
+  | reuseNone => simp [box, Bind.bind, Except.bind] at sourceBox
+  | reuseSome mapped => simp [box, Bind.bind, Except.bind] at sourceBox
+  | heap mapped => simp [box, Bind.bind, Except.bind] at sourceBox
+  | scalar scalar =>
+      have rightMember : Value.scalar scalar ∈ rightExtra := by
+        rcases listRel_exists_right_of_mem related.runtime.extra leftMember with
+          ⟨target, targetMember, targetRelated⟩
+        cases targetRelated
+        exact targetMember
+      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨{
+          larger := rho
+          rightRuntime := right
+          rightResult := .object (.tagged scalar.toUInt64)
+          extension := RenamingExtends.refl rho
+          leftEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          rightEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          values := .tagged _
+          runtime := {
+            runtime := related.runtime.prependNonHeap (.tagged _)
+              (by intro location; simp) (by intro location; simp)
+            ledger := related.ledger
+          }
+        }⟩
+      · let leftObject : HeapObject := .boxed type (.scalar scalar)
+        let rightObject : HeapObject := .boxed type (.scalar scalar)
+        have objects : HeapObjectRel rho leftObject rightObject :=
+          .boxed (.scalar scalar)
+        have leftOwned : RootSubset leftObject.ownedValues.toList
+            (runtimeRoots left leftExtra) := by
+          intro value member
+          have same : value = .scalar scalar := by
+            simpa [leftObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots left leftExtra _ leftMember
+        have rightOwned : RootSubset rightObject.ownedValues.toList
+            (runtimeRoots right rightExtra) := by
+          intro value member
+          have same : value = .scalar scalar := by
+            simpa [rightObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots right rightExtra _ rightMember
+        let allocated :=
+          related.allocBoth objects leftOwned rightOwned false
+        have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨{
+          larger := allocated.larger
+          rightRuntime := (alloc right rightObject).1
+          rightResult := .object (alloc right rightObject).2
+          extension := allocated.extension
+          leftEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          rightEffect := by
+            simp [box, small, rightObject, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          values := allocated.values
+          runtime := allocated.runtime
+        }⟩
+  | usize word =>
+      have rightMember : Value.usize word ∈ rightExtra := by
+        rcases listRel_exists_right_of_mem related.runtime.extra leftMember with
+          ⟨target, targetMember, targetRelated⟩
+        cases targetRelated
+        exact targetMember
+      by_cases small : word.toNat ≤ maxTaggedPayload
+      · have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨{
+          larger := rho
+          rightRuntime := right
+          rightResult := .object (.tagged word)
+          extension := RenamingExtends.refl rho
+          leftEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          rightEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          values := .tagged _
+          runtime := {
+            runtime := related.runtime.prependNonHeap (.tagged _)
+              (by intro location; simp) (by intro location; simp)
+            ledger := related.ledger
+          }
+        }⟩
+      · let leftObject : HeapObject := .boxed type (.usize word)
+        let rightObject : HeapObject := .boxed type (.usize word)
+        have objects : HeapObjectRel rho leftObject rightObject :=
+          .boxed (.usize word)
+        have leftOwned : RootSubset leftObject.ownedValues.toList
+            (runtimeRoots left leftExtra) := by
+          intro value member
+          have same : value = .usize word := by
+            simpa [leftObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots left leftExtra _ leftMember
+        have rightOwned : RootSubset rightObject.ownedValues.toList
+            (runtimeRoots right rightExtra) := by
+          intro value member
+          have same : value = .usize word := by
+            simpa [rightObject, HeapObject.ownedValues] using member
+          subst value
+          exact extra_subset_runtimeRoots right rightExtra _ rightMember
+        let allocated :=
+          related.allocBoth objects leftOwned rightOwned false
+        have normalized := sourceBox
+        simp [box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨resultEq, runtimeEq⟩
+        subst leftResult
+        subst leftRuntime
+        exact ⟨{
+          larger := allocated.larger
+          rightRuntime := (alloc right rightObject).1
+          rightResult := .object (alloc right rightObject).2
+          extension := allocated.extension
+          leftEffect := by
+            simp [box, small, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          rightEffect := by
+            simp [box, small, rightObject, Bind.bind, Except.bind,
+              Pure.pure, Except.pure]
+          values := allocated.values
+          runtime := allocated.runtime
+        }⟩
+
+/-- Select the proof-relevant retained-box result after the propositional
+shape proof above. -/
+noncomputable def LedgerShadowRuntimeRel.boxBoth_of_related
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (leftMember : leftInput ∈ leftExtra)
+    (values : ValueRel rho leftInput rightInput)
+    (sourceBox :
+      box left type leftInput = .ok (leftRuntime, leftResult)) :
+    LedgerBoxBothResult rho left right leftExtra rightExtra type
+      leftInput rightInput leftRuntime leftResult :=
+  Classical.choice
+    (related.boxBoth_of_related_nonempty leftMember values sourceBox)
+
+/-- Proof-relevant result of a deleted box evaluation. -/
+structure LedgerBoxLeftGarbageResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (type : Expr) (input : Value) : Type where
+  nextRuntime : RuntimeState
+  value : Value
+  effect :
+    box left type input = .ok (nextRuntime, value)
+  runtime :
+    LedgerShadowRuntimeRel rho nextRuntime right leftExtra rightExtra
+
+/-- A deleted scalar box preserves the target frontier and owner ledger,
+whether the source result is tagged or heap-backed. -/
+noncomputable def LedgerShadowRuntimeRel.boxScalarLeftGarbage
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (type : Expr) (scalar : ScalarValue) :
+    LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
+      type (.scalar scalar) := by
+  let witness := related.runtime.boxScalarLeftGarbage type scalar
+  let nextRuntime := Classical.choose witness
+  have valueWitness := Classical.choose_spec witness
+  let value := Classical.choose valueWitness
+  have specification := Classical.choose_spec valueWitness
+  exact {
+    nextRuntime
+    value
+    effect := specification.1
+    runtime := { runtime := specification.2, ledger := related.ledger }
+  }
+
+/-- A deleted `USize` box has the same ledger-preserving split. -/
+noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (type : Expr) (word : UInt64) :
+    LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
+      type (.usize word) := by
+  let witness := related.runtime.boxUSizeLeftGarbage type word
+  let nextRuntime := Classical.choose witness
+  have valueWitness := Classical.choose_spec witness
+  let value := Classical.choose valueWitness
+  have specification := Classical.choose_spec valueWitness
+  exact {
+    nextRuntime
+    value
+    effect := specification.1
+    runtime := { runtime := specification.2, ledger := related.ledger }
+  }
+
 /-- Hereditary exact machine correspondence equipped with the target
 allocation history for its exact address renaming. This is the machine-level
 surface on which write/reset/reuse clients can select ledger-based readiness
@@ -15798,6 +16046,214 @@ theorem match_deletedBoxLetStep_binderReady
         ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
       exact ⟨targetAfter, targetPath, relatedAfter⟩
 
+/-- Ledger-carrying hereditary retained-box matcher. Tagged results preserve
+the current history; heap-backed boxes return the exact paired allocation
+extension. -/
+theorem match_retainedBoxLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (inputMember : used.contains input = true)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } sourceContinuation) }
+  let targetCurrent := {
+    targetState with
+    control := .code (.let {
+      fvarId, binderName, type := resultType,
+      value := .box boxedType input
+    } targetContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceInputRead :
+    lookupValue sourceState.env input = sourceInputResult
+  cases sourceInputResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceInputRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceInput =>
+      have sourceInputLookup :=
+        lookupValue_eq_ok_iff.mp sourceInputRead
+      have inputs := env input inputMember
+      rw [sourceInputLookup] at inputs
+      generalize targetInputLookup :
+        lookup targetState.env input = targetInputOption at inputs
+      cases inputs with
+      | some inputValues =>
+          rename_i targetInput
+          have targetInputRead :
+              lookupValue targetState.env input = .ok targetInput :=
+            lookupValue_eq_ok_iff.mpr targetInputLookup
+          generalize sourceBoxEq :
+            box sourceState.runtime boxedType sourceInput = sourceBoxResult
+          cases sourceBoxResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourceResult =>
+              obtain ⟨sourceRuntime, sourceValue⟩ := sourceResult
+              have sourceInputRoot :
+                  sourceInput ∈
+                    envRootsOn used sourceState.env ++ sourceFrameRoots := by
+                exact List.mem_append_left _
+                  (lookup_mem_envRootsOn inputMember sourceInputLookup)
+              let boxed := runtime.boxBoth_of_related
+                sourceInputRoot inputValues sourceBoxEq
+              let sourceExpected := {
+                sourceState with
+                runtime := sourceRuntime
+                env := bind sourceState.env fvarId sourceValue
+                control := .code sourceContinuation }
+              let targetExpected := {
+                targetState with
+                runtime := boxed.rightRuntime
+                env := bind targetState.env fvarId boxed.rightResult
+                control := .code targetContinuation }
+              have sourceTransition :
+                  coreStep sourceCurrent = .next sourceExpected := by
+                simp [sourceCurrent, sourceExpected, coreStep, evalLetValue,
+                  sourceInputRead, sourceBoxEq, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have targetTransition :
+                  coreStep targetCurrent = .next targetExpected := by
+                simp [targetCurrent, targetExpected, coreStep, evalLetValue,
+                  targetInputRead, boxed.rightEffect, Bind.bind, Except.bind,
+                  Pure.pure, Except.pure]
+              have afterRelated :
+                  BinderReadyReachableMachineRelated fuel boxed.larger
+                    sourceExpected targetExpected := by
+                exact retainedLetValue_binderReadyReachableRelated
+                  sourceState targetState sourceRuntime boxed.rightRuntime
+                  programs (frames.monoRenaming boxed.extension)
+                  continuation joins
+                  (envRelOn_monoRenaming boxed.extension env)
+                  boxed.values boxed.runtime.runtime
+              have afterLedger :
+                  TargetAllocationLedger boxed.larger
+                    targetExpected.runtime.nextLocation := by
+                simpa [targetExpected] using boxed.runtime.ledger
+              rcases match_internalCoreSteps_binderReady
+                  sourceTransition targetTransition afterRelated
+                  (by simpa [sourceCurrent] using step) with
+                ⟨targetPath, relatedAfter⟩
+              exact ⟨boxed.larger, targetExpected, boxed.extension,
+                targetPath, afterLedger, relatedAfter⟩
+
+/-- Ledger-carrying hereditary deleted-box matcher. Both a tagged result and
+a source-only heap box leave the target frontier and owner ledger unchanged.
+-/
+theorem match_deletedBoxLetStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type := resultType,
+        value := .box boxedType input })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases ready with
+  | runtimeNeutral declaration value evaluated =>
+      rcases coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated runtime.runtime with
+        ⟨transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+      subst targetAfter
+      exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+  | box fvarId binderName resultType boxedType input ready =>
+      rcases coreStep_deletedBox_of_ready_binderReady
+          sourceState targetState programs frames continuation joins env
+          absent runtime.runtime ready with
+        ⟨nextRuntime, value, transition, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady
+          transition afterRelated step with
+        ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+      subst targetAfter
+      exact ⟨_, targetPath, by simpa using runtime.ledger, relatedAfter⟩
+
 /-- Exact retained box provenance supplies the hereditary continuation and
 promotes the compiler-collected input local to the ambient live set. -/
 theorem ExactShadowCodeBinderReady.match_retainedBoxLetStep
@@ -15915,6 +16371,130 @@ theorem ExactShadowCodeBinderReady.match_deletedBoxLetStep
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
   exact match_deletedBoxLetStep_binderReady
+    sourceState targetState programs frames
+    (ready.letDeleted_continuationGraph fuelBound usedBound)
+    joins env ready.letDeleted_ambientAbsent runtime deletedReady step
+
+/-- Exact retained-box provenance consumed through the ledger-carrying
+matcher. The compiler-facing result preserves tagged history or exposes the
+paired heap-box allocation. -/
+theorem ExactShadowCodeBinderReady.match_retainedBoxLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId input : FVarId} {binderName : Name}
+    {resultType boxedType : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.box boxedType input :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.box boxedType input : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  have inputMember : ambient.contains input = true :=
+    usedBound input (by simp [collectLetValue])
+  exact match_retainedBoxLetStep_binderReady_ledger
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env inputMember runtime step
+
+/-- Exact deleted-box provenance consumed through the ledger-carrying
+source-only matcher. The selected continuation stutters with the incoming
+target allocation history. -/
+theorem ExactShadowCodeBinderReady.match_deletedBoxLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId input : FVarId} {binderName : Name}
+    {resultType boxedType : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim (LCNF.LetValue.box boxedType input :
+        LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type := resultType,
+        value := .box boxedType input })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  exact match_deletedBoxLetStep_binderReady_ledger
     sourceState targetState programs frames
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime deletedReady step

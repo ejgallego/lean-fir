@@ -4086,6 +4086,161 @@ theorem deletedPapSourceOnlyKeepsAllocationLedger :
     LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage,
     TargetAllocationLedger.empty]
 
+/-- The retained heap-box fixture keeps its live input in the ambient
+liveness set and its box result in the continuation. -/
+def retainedBoxUsed : UsedLocals :=
+  neutralUsed.insert boxInputVar
+
+def retainedBoxDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.box u64Type boxInputVar)
+
+def retainedBoxCode : LCNF.Code .impure :=
+  .let retainedBoxDecl (.return live)
+
+theorem retainedBoxShadowRun :
+    shadowCode? 2 {} retainedBoxCode =
+      some (retainedBoxCode, retainedBoxUsed) := by
+  simp [retainedBoxCode, retainedBoxDecl, retainedBoxUsed, neutralUsed,
+    letDecl, shadowCode?, safeToElim, collectLetValue, live, boxInputVar]
+
+def retainedBoxExactGraph :
+    ExactShadowCodeGraph 2 retainedBoxUsed
+      retainedBoxCode retainedBoxCode :=
+  ExactShadowCodeGraph.ofResult retainedBoxShadowRun
+
+theorem retainedBoxExactBinderReady :
+    ExactShadowCodeBinderReady retainedBoxUsed
+      retainedBoxExactGraph.view := by
+  apply retainedBoxExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty boxInputVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, .uint64⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [retainedBoxCode, retainedBoxDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live, boxInputVar]
+
+theorem retainedBoxStepBinderReady :
+    ExactShadowCodeBinderReady retainedBoxUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedBoxDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedBoxDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply ExactShadowCodeView.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact CodeBinderList.ret
+  · simp [BinderNamesUnique]
+  · simp [BinderAbsenceTransfers]
+
+def retainedBoxEnv : Env :=
+  bind [] boxInputVar (.scalar (.uint64 18446744073709551615))
+
+def retainedBoxState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedBoxCode
+    env := retainedBoxEnv }
+
+/-- Compiler-facing retained-box regression: a large `UInt64` payload forces
+paired heap allocation and returns the extended target owner ledger. -/
+theorem retainedBoxExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedBoxState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedBoxState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedBoxState.program retainedBoxState.program := by
+    simpa [retainedBoxState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedBoxState.frames retainedBoxState.frames [] [] := by
+    simpa [retainedBoxState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedBoxUsed
+        retainedBoxState.joins retainedBoxState.joins := by
+    simpa [retainedBoxState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedBoxUsed
+  have env :
+      EnvRelOn emptyAddressRenaming retainedBoxUsed
+        retainedBoxState.env retainedBoxState.env := by
+    simpa [retainedBoxState, retainedBoxEnv] using
+      (EnvRelOn.empty emptyAddressRenaming retainedBoxUsed).bindBoth
+        (binder := boxInputVar)
+        (ValueRel.scalar (.uint64 18446744073709551615))
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedBoxState.runtime retainedBoxState.runtime
+        (envRootsOn retainedBoxUsed retainedBoxState.env ++ [])
+        (envRootsOn retainedBoxUsed retainedBoxState.env ++ []) := {
+    runtime := by
+      simpa [retainedBoxState] using
+        emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+    ledger := by
+      simpa [retainedBoxState] using
+        TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  have usedBound :
+      UsedSubset
+        (collectLetValue neutralUsed
+          (LCNF.LetValue.box u64Type boxInputVar :
+            LCNF.LetValue .impure))
+        retainedBoxUsed := by
+    simpa [collectLetValue, retainedBoxUsed] using
+      UsedSubset.refl retainedBoxUsed
+  simpa [retainedBoxState, retainedBoxCode,
+    retainedBoxDecl, letDecl] using
+    retainedBoxStepBinderReady.match_retainedBoxLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      usedBound retainedBoxState retainedBoxState programs frames joins env
+      runtime step
+
+/-- The deleted large scalar box may allocate one source-only cell while the
+target's empty allocation ledger remains unchanged. -/
+noncomputable def deletedBoxLedgerResult :
+    LedgerBoxLeftGarbageResult emptyAddressRenaming
+      deletedBoxSourceState.runtime deletedBoxTargetState.runtime
+      (envRootsOn neutralUsed deletedBoxSourceState.env)
+      (envRootsOn neutralUsed deletedBoxTargetState.env)
+      u64Type (.scalar (.uint64 18446744073709551615)) :=
+  let related : LedgerShadowRuntimeRel emptyAddressRenaming
+      deletedBoxSourceState.runtime deletedBoxTargetState.runtime
+      (envRootsOn neutralUsed deletedBoxSourceState.env)
+      (envRootsOn neutralUsed deletedBoxTargetState.env) := {
+    runtime := deletedBoxRuntimeRelated
+    ledger := by
+      simpa [deletedBoxTargetState] using
+        TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  related.boxScalarLeftGarbage u64Type
+    (.uint64 18446744073709551615)
+
+theorem deletedBoxSourceOnlyKeepsAllocationLedger :
+    deletedBoxLedgerResult.runtime.ledger.owner = fun _ => 0 := by
+  simp [deletedBoxLedgerResult,
+    LedgerShadowRuntimeRel.boxScalarLeftGarbage,
+    TargetAllocationLedger.empty]
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
