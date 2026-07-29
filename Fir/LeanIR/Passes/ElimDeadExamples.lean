@@ -4409,6 +4409,364 @@ theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
     LedgerShadowRuntimeRel.allocCtorLeftGarbage,
     TargetAllocationLedger.empty]
 
+/-- The existing concrete-token deletion starts with an empty target owner
+ledger; its source cell is therefore source-only by construction. -/
+noncomputable def deletedReuseSomeLedgerRuntime :
+    LedgerShadowRuntimeRel emptyAddressRenaming
+      deletedReuseSomeSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseSomeSourceState.env ++ [])
+      (envRootsOn neutralUsed deletedReuseTargetState.env ++ []) where
+  runtime := by simpa using deletedReuseSomeRuntimeRelated
+  ledger := by
+    simpa [deletedReuseTargetState] using
+      TargetAllocationLedger.empty emptyAddressRenaming
+
+def deletedReuseSomeLocalReady :
+    DeletedReuseSomeLocalReadyAt deletedReuseSomeSourceState
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 where
+  cell := { object := .ctor deletedWriteObject }
+  oldObject := deletedWriteObject
+  values := #[.erased]
+  tokenRead := by
+    simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+  argumentsRead := by
+    simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+    rfl
+  found := rfl
+  live := rfl
+  objectEq := rfl
+  arity := rfl
+
+theorem deletedReuseSomeLedgerSourceOnly :
+    SourceOnlyUnderTargetLedger
+      deletedReuseSomeLedgerRuntime.ledger 0 := by
+  intro rightLocation bounded
+  exact (Nat.not_lt_zero rightLocation bounded).elim
+
+theorem deletedReuseSomeStepBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      (ExactShadowCodeView.letDeleted
+        (declaration := deadReuseDecl)
+        retainedLargeNatContinuationRun
+        (by native_decide)
+        (by native_decide)) := by
+  apply ExactShadowCodeBinderReady.letDeleted
+  · native_decide
+  · apply retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+      (index :=
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+    · simp [codeBinderIds, BinderNamesUnique]
+
+/-- Exact deleted existing-address regression: the ledger proves that the
+concrete reuse cell is source-only, the source overwrites it, and the target
+stutters without changing its empty owner ledger. -/
+theorem deletedReuseSomeExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedReuseSomeSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedReuseTargetState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        deletedReuseSomeSourceState.program
+        deletedReuseTargetState.program := by
+    simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseSomeProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        deletedReuseSomeSourceState.frames deletedReuseTargetState.frames
+        [] [] := by
+    exact .nil
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        deletedReuseSomeSourceState.joins
+        deletedReuseTargetState.joins := by
+    exact BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedReuseSomeSourceState.env deletedReuseTargetState.env := by
+    simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseSomeEnvReachableRelated
+  simpa [deletedReuseSomeSourceState, deletedReuseTargetState,
+    deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl] using
+    deletedReuseSomeStepBinderReady.match_deletedReuseSomeLetStep_ledger
+      (fuelBound := Nat.le_refl 2)
+      (usedBound := UsedSubset.refl neutralUsed)
+      deletedReuseSomeSourceState deletedReuseTargetState programs frames
+      joins env deletedReuseSomeLedgerRuntime deletedReuseSomeLocalReady
+      deletedReuseSomeLedgerSourceOnly step
+
+/-- A retained concrete reuse begins from one paired nullary constructor.
+The live argument names that object directly, so the token's capability is
+backed by an ordinary reachable root before the in-place overwrite. -/
+def retainedReuseSomeInitialObject : ConstructorObject :=
+  { tag := 0
+    objectFields := #[]
+    usizeFields := #[]
+    scalarFields := [] }
+
+def retainedReuseSomeUpdatedObject : ConstructorObject :=
+  { tag := oneFieldInfo.cidx
+    objectFields := #[.object (.heap 0)]
+    usizeFields := #[]
+    scalarFields := [] }
+
+def retainedReuseSomeRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState)
+    (.ctor retainedReuseSomeInitialObject)).1
+
+def retainedReuseSomeResultRuntime : RuntimeState :=
+  { retainedReuseSomeRuntime with
+    heap := [(0, { object := .ctor retainedReuseSomeUpdatedObject })] }
+
+def retainedReuseSomeDecl : LCNF.LetDecl .impure :=
+  letDecl dead objType
+    (.reuse reuseTokenVar oneFieldInfo true #[.fvar reuseArgVar])
+
+def retainedReuseSomeCode : LCNF.Code .impure :=
+  .let retainedReuseSomeDecl (.return dead)
+
+def retainedReuseSomeContinuationUsed : UsedLocals :=
+  ({} : UsedLocals).insert dead
+
+def retainedReuseSomeUsed : UsedLocals :=
+  ((retainedReuseSomeContinuationUsed.insert reuseTokenVar).insert
+    reuseArgVar)
+
+theorem retainedReuseSomeShadowRun :
+    shadowCode? 2 {} retainedReuseSomeCode =
+      some (retainedReuseSomeCode, retainedReuseSomeUsed) := by
+  simp [retainedReuseSomeCode, retainedReuseSomeDecl, letDecl,
+    retainedReuseSomeContinuationUsed, retainedReuseSomeUsed, shadowCode?,
+    safeToElim, collectLetValue, collectArgs, collectArgList, collectArg,
+    dead, reuseTokenVar, reuseArgVar]
+
+def retainedReuseSomeExactGraph :
+    ExactShadowCodeGraph 2 retainedReuseSomeUsed
+      retainedReuseSomeCode retainedReuseSomeCode :=
+  ExactShadowCodeGraph.ofResult retainedReuseSomeShadowRun
+
+def retainedReuseSomeContinuationRun :
+    ExactShadowCodeRun 1 {} retainedReuseSomeContinuationUsed
+      (.return dead) (.return dead) where
+  result := by
+    simp [shadowCode?, retainedReuseSomeContinuationUsed]
+
+theorem retainedReuseSomeStepBinderReady :
+    ExactShadowCodeBinderReady retainedReuseSomeUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedReuseSomeDecl)
+        retainedReuseSomeContinuationRun
+        (Or.inl (by
+          simp [retainedReuseSomeDecl, letDecl,
+            retainedReuseSomeContinuationUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply ExactShadowCodeView.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty dead)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact CodeBinderList.ret
+  · simp [BinderNamesUnique]
+  · simp [BinderAbsenceTransfers]
+
+def retainedReuseSomeEnv : Env :=
+  bind (bind [] reuseArgVar (.object (.heap 0)))
+    reuseTokenVar (.reuseToken (some 0))
+
+def retainedReuseSomeState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedReuseSomeCode
+    env := retainedReuseSomeEnv
+    runtime := retainedReuseSomeRuntime }
+
+theorem retainedReuseSomeEnvRootsSubset :
+    RootSubset
+      (envRootsOn retainedReuseSomeUsed retainedReuseSomeEnv)
+      [.reuseToken (some 0), .object (.heap 0)] := by
+  intro value member
+  have outer :
+      value ∈
+        .reuseToken (some 0) ::
+          envRootsOn retainedReuseSomeUsed
+            (bind [] reuseArgVar (.object (.heap 0))) :=
+    envRootsOn_bind_subset value member
+  rcases List.mem_cons.mp outer with rfl | inner
+  · simp
+  have inner' :
+      value ∈
+        .object (.heap 0) ::
+          envRootsOn retainedReuseSomeUsed [] :=
+    envRootsOn_bind_subset value inner
+  rcases List.mem_cons.mp inner' with rfl | empty
+  · simp
+  have emptyRoots :
+      envRootsOn retainedReuseSomeUsed ([] : Env) = [] := by
+    unfold envRootsOn
+    induction retainedReuseSomeUsed.toList with
+    | nil => rfl
+    | cons head tail ih => simp [lookup]
+  rw [emptyRoots] at empty
+  simp at empty
+
+theorem retainedReuseSomeReady :
+    RetainedLetReadyAt retainedReuseSomeState
+      (runtimeRoots retainedReuseSomeState.runtime
+        (envRootsOn retainedReuseSomeUsed retainedReuseSomeState.env ++ []))
+      (.reuse reuseTokenVar oneFieldInfo true #[.fvar reuseArgVar]) := by
+  intro location tokenRead
+  have locationEq : location = 0 := by
+    symm
+    simpa [retainedReuseSomeState, retainedReuseSomeEnv, lookupValue,
+      Impure.bind, lookup, reuseTokenVar, reuseArgVar] using tokenRead
+  subst location
+  apply Reachable.root
+  apply extra_subset_runtimeRoots
+  apply List.mem_append_left
+  exact lookup_mem_envRootsOn (fvarId := reuseArgVar)
+    (by native_decide)
+    (by
+      simp [retainedReuseSomeState, retainedReuseSomeEnv,
+        Impure.bind, lookup, reuseArgVar, reuseTokenVar])
+
+/-- Exact retained existing-address regression: both sides overwrite their
+paired live cell, expose any larger hidden renaming chosen by the mature
+runtime theorem, and transport the target owner ledger at frontier `1`. -/
+theorem retainedReuseSomeExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedReuseSomeState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedReuseSomeState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have initialObjects :
+      HeapObjectRel emptyAddressRenaming
+        (.ctor retainedReuseSomeInitialObject)
+        (.ctor retainedReuseSomeInitialObject) := by
+    apply HeapObjectRel.ctor
+    · rfl
+    · change ListRel (ValueRel emptyAddressRenaming) [] []
+      exact .nil
+    · rfl
+    · rfl
+  let paired := LedgerShadowRuntimeRel.empty.allocBoth
+      initialObjects
+      (by
+        simp [RootSubset, HeapObject.ownedValues,
+          retainedReuseSomeInitialObject])
+      (by
+        simp [RootSubset, HeapObject.ownedValues,
+          retainedReuseSomeInitialObject])
+      false
+  have objectValues :
+      ValueRel paired.larger
+        (.object (.heap 0)) (.object (.heap 0)) := by
+    simpa [alloc] using paired.values
+  have mapping : paired.larger.forward 0 = some 0 := by
+    cases objectValues with
+    | heap mapping => exact mapping
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedReuseSomeState.program retainedReuseSomeState.program := by
+    simpa [retainedReuseSomeState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 paired.larger
+        retainedReuseSomeState.frames retainedReuseSomeState.frames [] [] := by
+    simpa [retainedReuseSomeState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 paired.larger
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedReuseSomeUsed
+        retainedReuseSomeState.joins retainedReuseSomeState.joins := by
+    simpa [retainedReuseSomeState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedReuseSomeUsed
+  have env :
+      EnvRelOn paired.larger retainedReuseSomeUsed
+        retainedReuseSomeState.env retainedReuseSomeState.env := by
+    simpa [retainedReuseSomeState, retainedReuseSomeEnv] using
+      ((EnvRelOn.empty paired.larger retainedReuseSomeUsed).bindBoth
+        (binder := reuseArgVar) objectValues).bindBoth
+          (binder := reuseTokenVar) (.reuseSome mapping)
+  have published :
+      ShadowRuntimeRel paired.larger
+        retainedReuseSomeState.runtime retainedReuseSomeState.runtime
+        [.reuseToken (some 0), .object (.heap 0)]
+        [.reuseToken (some 0), .object (.heap 0)] := by
+    simpa [retainedReuseSomeState, retainedReuseSomeRuntime, alloc] using
+      paired.runtime.runtime.prependNonHeap (.reuseSome mapping)
+        (by intro location impossible; cases impossible)
+        (by intro location impossible; cases impossible)
+  have runtime :
+      LedgerShadowRuntimeRel paired.larger
+        retainedReuseSomeState.runtime retainedReuseSomeState.runtime
+        (envRootsOn retainedReuseSomeUsed retainedReuseSomeState.env ++ [])
+        (envRootsOn retainedReuseSomeUsed retainedReuseSomeState.env ++ []) := {
+    runtime := by
+      simpa only [List.append_nil] using
+        published.restrictExtra (envRootsOn_related env)
+          (by
+            simpa [retainedReuseSomeState] using
+              retainedReuseSomeEnvRootsSubset)
+          (by
+            simpa [retainedReuseSomeState] using
+              retainedReuseSomeEnvRootsSubset)
+    ledger := by
+      simpa [retainedReuseSomeState, retainedReuseSomeRuntime, alloc] using
+        paired.runtime.ledger
+  }
+  have tokenRead :
+      lookupValue retainedReuseSomeState.env reuseTokenVar =
+        .ok (.reuseToken (some 0)) := by
+    simp [retainedReuseSomeState, retainedReuseSomeEnv, lookupValue,
+      Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+  have argumentsRead :
+      evalArgs retainedReuseSomeState.env #[.fvar reuseArgVar] =
+        .ok #[.object (.heap 0)] := by
+    simp [retainedReuseSomeState, retainedReuseSomeEnv, evalArgs, evalArg,
+      Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+    rfl
+  have sourceEffect :
+      reuse retainedReuseSomeState.runtime (.reuseToken (some 0))
+        oneFieldInfo true #[.object (.heap 0)] =
+          .ok (retainedReuseSomeResultRuntime, .object (.heap 0)) := by
+    simp [retainedReuseSomeState, retainedReuseSomeRuntime,
+      retainedReuseSomeResultRuntime, retainedReuseSomeInitialObject,
+      retainedReuseSomeUpdatedObject, reuse, getLiveCell, setCell,
+      findCell?, replaceCell, alloc, oneFieldInfo, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  have usedBound :
+      UsedSubset
+        (collectLetValue retainedReuseSomeContinuationUsed
+          (LCNF.LetValue.reuse reuseTokenVar oneFieldInfo true
+            #[.fvar reuseArgVar] : LCNF.LetValue .impure))
+        retainedReuseSomeUsed := by
+    simpa [collectLetValue, collectArgs, collectArgList, collectArg,
+      retainedReuseSomeContinuationUsed, retainedReuseSomeUsed] using
+      UsedSubset.refl retainedReuseSomeUsed
+  rcases
+      retainedReuseSomeStepBinderReady.match_retainedReuseSomeLetStep_ledger
+      (fuelBound := Nat.le_refl 2) usedBound
+      retainedReuseSomeState retainedReuseSomeState programs frames joins env
+      retainedReuseSomeReady tokenRead argumentsRead (by rfl) sourceEffect
+      runtime step with
+    ⟨larger, targetAfter, extension, path, related⟩
+  exact ⟨larger, targetAfter, paired.extension.trans extension,
+    by
+      simpa [retainedReuseSomeState, retainedReuseSomeCode,
+        retainedReuseSomeDecl, letDecl] using path,
+    related⟩
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
