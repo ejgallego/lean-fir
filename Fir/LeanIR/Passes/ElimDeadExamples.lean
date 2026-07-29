@@ -4411,6 +4411,524 @@ theorem unsafeTwoRetainedStepsExactPreserved
       (NonLockstep.reaches_of_step (.internal unsafeOuterStep)).trans
       targetTail
 
+/-- The retained erased binding supplies both possible exact-view runtime
+certificates, independently of the compiler's liveness decision. -/
+theorem usedBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 2 state sourceFrameRoots usedBefore := by
+  unfold usedBefore
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem usedReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 2 state sourceFrameRoots
+      (.return dead) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+def usedSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := usedProgram
+    control := .code usedBefore
+    frames := neutralEntryFrames arguments }
+
+def usedSourceReturnState (arguments : Array Value) : MachineState :=
+  { program := usedProgram
+    control := .code (.return dead)
+    env := bind [] dead .erased
+    frames := neutralEntryFrames arguments }
+
+def usedSourceYieldedState (arguments : Array Value) : MachineState :=
+  { program := usedProgram
+    control := .yielded .erased
+    env := bind [] dead .erased
+    frames := neutralEntryFrames arguments }
+
+def usedSourceCachedState : MachineState :=
+  { program := usedProgram
+    control := .yielded .erased
+    env := bind [] dead .erased
+    runtime := ({} : RuntimeState).setGlobal `main .erased }
+
+def usedSourceInvokingState (arguments : Array Value) : MachineState :=
+  { program := usedProgram
+    control := .invokeValue .erased arguments
+    env := bind [] dead .erased }
+
+theorem usedSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState usedProgram `main arguments) =
+      .next (usedSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, usedProgram, Program.findDecl?,
+      invokeDecl, usedSourceOuterState, neutralEntryFrames, fixtureDecl, decl,
+      bindParams, findGlobal?]
+
+theorem usedSourceOuterStep (arguments : Array Value) :
+    coreStep (usedSourceOuterState arguments) =
+      .next (usedSourceReturnState arguments) := by
+  rfl
+
+theorem usedSourceReturnStep (arguments : Array Value) :
+    coreStep (usedSourceReturnState arguments) =
+      .next (usedSourceYieldedState arguments) := by
+  simp [coreStep, usedSourceReturnState, usedSourceYieldedState,
+    lookupValue, Impure.bind, Impure.lookup, dead]
+
+theorem usedSourceYieldedStepEmpty :
+    coreStep (usedSourceYieldedState #[]) =
+      .next usedSourceCachedState := by
+  rfl
+
+theorem usedSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (usedSourceYieldedState arguments) =
+      .next (usedSourceInvokingState arguments) := by
+  simp [coreStep, usedSourceYieldedState, neutralEntryFrames, notEmpty,
+    usedSourceInvokingState]
+
+/-- Complete finite-state characterization of source executions for the
+live-binder retention fixture. -/
+inductive UsedSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      UsedSourceReachable arguments
+        (initialState usedProgram `main arguments)
+  | outer :
+      UsedSourceReachable arguments (usedSourceOuterState arguments)
+  | ret :
+      UsedSourceReachable arguments (usedSourceReturnState arguments)
+  | yielded :
+      UsedSourceReachable arguments (usedSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      UsedSourceReachable arguments usedSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      UsedSourceReachable arguments (usedSourceInvokingState arguments)
+
+theorem usedSourceReachable_step
+    (reachable : UsedSourceReachable arguments before)
+    (step : Step externals before after) :
+    UsedSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (usedSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (usedSourceOuterStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (usedSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next usedSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (usedSourceYieldedStepNonempty empty) (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [usedSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [usedSourceCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [usedSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+      | external transition response =>
+          simp [usedSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+
+theorem usedSourceReachable_ready
+    (state : MachineState)
+    (reachable : UsedSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 2 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = usedBefore :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact usedBeforeSourceRuntimeReadyAt
+        (usedSourceOuterState arguments) sourceFrameRoots
+        bounded exact subset static
+  | ret =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = .return dead :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact usedReturnSourceRuntimeReadyAt
+        (usedSourceReturnState arguments) sourceFrameRoots
+        bounded exact subset static
+  | yielded =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [usedSourceYieldedState] at control
+  | cached empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [usedSourceCachedState] at control
+  | invoking notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [usedSourceInvokingState] at control
+
+theorem usedSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 2
+      (initialState usedProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (UsedSourceReachable arguments)
+    .entry usedSourceReachable_step usedSourceReachable_ready
+
+theorem usedSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 2
+      usedProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact usedSourceRuntimeOwnershipMachineInvariant externals arguments
+
+theorem usedProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed usedProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, usedProgram, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [usedProgram] at member
+      subst declaration
+      exact .letE .ret
+    · intro declaration member
+      simp [usedProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩ .ret
+  · intro declaration member
+    simp [usedProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl, usedBefore,
+      deadErasedDecl, letDecl, codeBinderIds, BinderNamesUnique,
+      ImpureHygiene.paramIds, dead]
+
+theorem usedShadowProgramRun :
+    shadowProgram? 2 usedProgram = some usedProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?, usedProgram,
+    fixtureDecl, decl, usedShadowRun]
+
+/-- Whole-program correctness when the pass retains an erased let because
+its binder is live in the return. -/
+theorem usedProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 2) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      usedProgram usedProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    usedProgramElimDeadWellFormed usedShadowProgramRun compatible
+    (usedSourceRuntimeOwnershipInitialInvariant externals)
+
+/-- The live outer binding of the unsafe-copy fixture is runtime-neutral
+under either exact compiler decision. -/
+theorem unsafeBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3 state sourceFrameRoots unsafeBefore := by
+  unfold unsafeBefore
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+def unsafeSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := unsafeProgram
+    control := .code unsafeBefore
+    frames := neutralEntryFrames arguments }
+
+def unsafeSourceInnerStateAt (arguments : Array Value) : MachineState :=
+  { program := unsafeProgram
+    control := .code (.let deadCopyDecl (.return live))
+    env := liveEnv
+    frames := neutralEntryFrames arguments }
+
+def unsafeSourceReturnState (arguments : Array Value) : MachineState :=
+  { program := unsafeProgram
+    control := .code (.return live)
+    env := bind liveEnv dead .erased
+    frames := neutralEntryFrames arguments }
+
+def unsafeSourceYieldedState (arguments : Array Value) : MachineState :=
+  { program := unsafeProgram
+    control := .yielded .erased
+    env := bind liveEnv dead .erased
+    frames := neutralEntryFrames arguments }
+
+def unsafeSourceCachedState : MachineState :=
+  { program := unsafeProgram
+    control := .yielded .erased
+    env := bind liveEnv dead .erased
+    runtime := ({} : RuntimeState).setGlobal `main .erased }
+
+def unsafeSourceInvokingState (arguments : Array Value) : MachineState :=
+  { program := unsafeProgram
+    control := .invokeValue .erased arguments
+    env := bind liveEnv dead .erased }
+
+/-- In the only reachable inner state, the dead local copy evaluates to the
+already-published erased value without changing runtime.  This supplies the
+deleted-side certificate even though the exact pass must retain the copy. -/
+theorem unsafeInnerSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 3
+      (unsafeSourceInnerStateAt arguments) sourceFrameRoots
+      (.let deadCopyDecl (.return live)) := by
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · refine ⟨.erased, ?_⟩
+    simp [unsafeSourceInnerStateAt, deadCopyDecl, letDecl, liveEnv,
+      evalLetValue, lookupValue, evalArgs, Impure.bind, lookup]
+    rfl
+  · intro roots
+    trivial
+
+theorem unsafeSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState unsafeProgram `main arguments) =
+      .next (unsafeSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, unsafeProgram, Program.findDecl?,
+      invokeDecl, unsafeSourceOuterState, neutralEntryFrames, fixtureDecl,
+      decl, bindParams, findGlobal?]
+
+theorem unsafeSourceOuterStep (arguments : Array Value) :
+    coreStep (unsafeSourceOuterState arguments) =
+      .next (unsafeSourceInnerStateAt arguments) := by
+  rfl
+
+theorem unsafeSourceInnerStep (arguments : Array Value) :
+    coreStep (unsafeSourceInnerStateAt arguments) =
+      .next (unsafeSourceReturnState arguments) := by
+  have evaluatedAt :
+      evalLetValue (unsafeSourceInnerStateAt arguments) deadCopyDecl =
+        .ok ((unsafeSourceInnerStateAt arguments).runtime,
+          .value .erased) := by
+    simp [unsafeSourceInnerStateAt, deadCopyDecl, letDecl, liveEnv,
+      evalLetValue, lookupValue, evalArgs, Impure.bind, lookup]
+    rfl
+  change coreStep {
+      unsafeSourceInnerStateAt arguments with
+      control := .code (.let deadCopyDecl (.return live)) } =
+    .next (unsafeSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluatedAt]
+  rfl
+
+theorem unsafeSourceReturnStep (arguments : Array Value) :
+    coreStep (unsafeSourceReturnState arguments) =
+      .next (unsafeSourceYieldedState arguments) := by
+  simp [coreStep, unsafeSourceReturnState, unsafeSourceYieldedState,
+    liveEnv, lookupValue, Impure.bind, Impure.lookup, live, dead]
+
+theorem unsafeSourceYieldedStepEmpty :
+    coreStep (unsafeSourceYieldedState #[]) =
+      .next unsafeSourceCachedState := by
+  rfl
+
+theorem unsafeSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (unsafeSourceYieldedState arguments) =
+      .next (unsafeSourceInvokingState arguments) := by
+  simp [coreStep, unsafeSourceYieldedState, neutralEntryFrames, notEmpty,
+    unsafeSourceInvokingState]
+
+/-- Complete finite-state characterization of source executions for the
+dead-but-unsafe retained local copy. -/
+inductive UnsafeSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      UnsafeSourceReachable arguments
+        (initialState unsafeProgram `main arguments)
+  | outer :
+      UnsafeSourceReachable arguments
+        (unsafeSourceOuterState arguments)
+  | inner :
+      UnsafeSourceReachable arguments
+        (unsafeSourceInnerStateAt arguments)
+  | ret :
+      UnsafeSourceReachable arguments
+        (unsafeSourceReturnState arguments)
+  | yielded :
+      UnsafeSourceReachable arguments
+        (unsafeSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      UnsafeSourceReachable arguments unsafeSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      UnsafeSourceReachable arguments
+        (unsafeSourceInvokingState arguments)
+
+theorem unsafeSourceReachable_step
+    (reachable : UnsafeSourceReachable arguments before)
+    (step : Step externals before after) :
+    UnsafeSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (unsafeSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (unsafeSourceOuterStep arguments) .inner step
+  | inner =>
+      exact predicate_of_step_next
+        (unsafeSourceInnerStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (unsafeSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next unsafeSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (unsafeSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [unsafeSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [unsafeSourceCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [unsafeSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+      | external transition response =>
+          simp [unsafeSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+
+theorem unsafeSourceReachable_ready
+    (state : MachineState)
+    (reachable : UnsafeSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 3 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = unsafeBefore :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact unsafeBeforeSourceRuntimeReadyAt
+        (unsafeSourceOuterState arguments) sourceFrameRoots
+        bounded exact subset static
+  | inner =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq :
+          sourceCode = .let deadCopyDecl (.return live) :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact unsafeInnerSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | ret =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = .return live :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact neutralReturnSourceRuntimeReadyAt
+        (unsafeSourceReturnState arguments) sourceFrameRoots
+        bounded exact subset static
+  | yielded =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [unsafeSourceYieldedState] at control
+  | cached empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [unsafeSourceCachedState] at control
+  | invoking notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [unsafeSourceInvokingState] at control
+
+theorem unsafeSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 3
+      (initialState unsafeProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (UnsafeSourceReachable arguments)
+    .entry unsafeSourceReachable_step unsafeSourceReachable_ready
+
+theorem unsafeSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 3
+      unsafeProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact unsafeSourceRuntimeOwnershipMachineInvariant externals arguments
+
+theorem unsafeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed unsafeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, unsafeProgram, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [unsafeProgram] at member
+      subst declaration
+      exact .letE (.letE .ret)
+    · intro declaration member
+      simp [unsafeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩ .ret)
+  · intro declaration member
+    simp [unsafeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl, unsafeBefore,
+      liveDecl, deadCopyDecl, letDecl, codeBinderIds, BinderNamesUnique,
+      ImpureHygiene.paramIds, live, dead]
+
+theorem unsafeShadowProgramRun :
+    shadowProgram? 3 unsafeProgram = some unsafeProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?, unsafeProgram,
+    fixtureDecl, decl, unsafeShadowRun]
+
+/-- Whole-program correctness when the pass retains a dead local copy because
+local-function application is not safe to erase. -/
+theorem unsafeProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 3) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      unsafeProgram unsafeProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    unsafeProgramElimDeadWellFormed unsafeShadowProgramRun compatible
+    (unsafeSourceRuntimeOwnershipInitialInvariant externals)
+
 theorem allocatingSourceInnerStep (arguments : Array Value) :
     ∃ nextRuntime deadValue,
       coreStep (allocatingSourceInnerStateAt arguments) =
