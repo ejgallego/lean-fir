@@ -8193,6 +8193,21 @@ theorem ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
   | letDeleted continuation absent safe =>
       rfl
 
+/-- A let value that is not safe to erase forces the retained exact branch.
+This selector is independent of target shape and is the proof-relevant
+counterpart of the compiler's second `keep` disjunct. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_retainedLet_of_unsafe
+    (view : ExactShadowCodeView initial fuel final
+      (.let declaration sourceContinuation) target)
+    (notSafe : safeToElim declaration.value = false) :
+    view.runtimeDecision = .retainedLet := by
+  cases view with
+  | letRetained continuation keep =>
+      rfl
+  | letDeleted continuation absent safe =>
+      rw [notSafe] at safe
+      contradiction
+
 /-- An exact object write traversal whose target is not an object write must
 have selected the deleted branch. -/
 theorem ExactShadowCodeView.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
@@ -8271,6 +8286,18 @@ theorem ExactShadowCodeRuntimeReadyAt.letDeleted
       (.let declaration continuation) target}
     (decision : view.runtimeDecision = .deletedLet)
     (ready : DeletedLetReadyAt state roots declaration) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
+
+/-- A selected retained exact let edge consumes only its retained dynamic
+certificate.  This is the branch-specific counterpart of `letDeleted` and
+avoids demanding a deleted evaluation certificate for values retained
+precisely because they are unsafe to erase. -/
+theorem ExactShadowCodeRuntimeReadyAt.letRetained
+    {view : ExactShadowCodeView initial fuel final
+      (.let declaration continuation) target}
+    (decision : view.runtimeDecision = .retainedLet)
+    (ready : RetainedLetReadyAt state roots declaration.value) :
     ExactShadowCodeRuntimeReadyAt state roots view := by
   simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
 

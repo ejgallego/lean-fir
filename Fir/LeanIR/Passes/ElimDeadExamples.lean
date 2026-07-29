@@ -217,6 +217,12 @@ def neutralBeforeProgram : ImpureProgram :=
 def neutralAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main neutralAfter] }
 
+def usedProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main usedBefore] }
+
+def unsafeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main unsafeBefore] }
+
 def allocatingBeforeProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main allocatingBefore] }
 
@@ -4044,6 +4050,366 @@ theorem neutralTwoActiveStepsExactPreserved
   · exact
       (NonLockstep.reaches_of_step
         (.internal (neutralTargetOuterStep arguments))).trans targetTail
+
+/-- Final liveness set of the fixture whose result directly uses its only
+let binder. -/
+def usedResultUsed : UsedLocals :=
+  ({} : UsedLocals).insert dead
+
+/-- Exact implementation-level liveness result for the unsafe local copy.
+`HashSet.insert` preserves the existing element internally, but the proof
+records the compiler's two syntactic insertions without assuming a
+proof-irrelevant extensional representation for hash sets. -/
+def unsafeResultUsed : UsedLocals :=
+  (({} : UsedLocals).insert live).insert live
+
+/-- The transparent traversal retains a binder that is live in the return. -/
+theorem usedShadowRun :
+    shadowCode? 2 {} usedBefore =
+      some (usedBefore, usedResultUsed) := by
+  change shadowCode? 2 {} usedBefore =
+    some (usedBefore, ({} : UsedLocals).insert dead)
+  have deadMember : dead ∈ ({} : UsedLocals).insert dead := by
+    native_decide
+  simp [usedBefore, deadErasedDecl, letDecl, shadowCode?, safeToElim,
+    collectLetValue, deadMember]
+
+/-- The transparent traversal also retains an otherwise-dead local copy,
+because local-function application is not safe to erase. -/
+theorem unsafeShadowRun :
+    shadowCode? 3 {} unsafeBefore =
+      some (unsafeBefore, unsafeResultUsed) := by
+  change shadowCode? 3 {} unsafeBefore =
+    some (unsafeBefore, (({} : UsedLocals).insert live).insert live)
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [unsafeBefore, liveDecl, deadCopyDecl, letDecl, shadowCode?,
+    safeToElim, collectLetValue, collectArgs, collectArgList, liveMember]
+
+/-- Exact residual run at the unsafe fixture's inner retained local copy. -/
+theorem unsafeInnerShadowRun :
+    shadowCode? 2 {} (.let deadCopyDecl (.return live)) =
+      some (.let deadCopyDecl (.return live), unsafeResultUsed) := by
+  simp [deadCopyDecl, letDecl, unsafeResultUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList]
+
+/-- Active identical machines for the live-binder retention fixture. -/
+def usedActiveState : MachineState :=
+  { program := usedProgram
+    control := .code usedBefore }
+
+def usedReturnState : MachineState :=
+  { program := usedProgram
+    control := .code (.return dead)
+    env := bind [] dead .erased }
+
+/-- First and second active states of the unsafe-retention fixture. -/
+def unsafeOuterState : MachineState :=
+  { program := unsafeProgram
+    control := .code unsafeBefore }
+
+def unsafeInnerState : MachineState :=
+  { program := unsafeProgram
+    control := .code (.let deadCopyDecl (.return live))
+    env := liveEnv }
+
+def unsafeReturnState : MachineState :=
+  { program := unsafeProgram
+    control := .code (.return live)
+    env := bind liveEnv dead .erased }
+
+def usedExactGraph :
+    ExactShadowCodeGraph 2 usedResultUsed usedBefore usedBefore :=
+  ExactShadowCodeGraph.ofResult usedShadowRun
+
+def unsafeExactGraph :
+    ExactShadowCodeGraph 3 unsafeResultUsed unsafeBefore unsafeBefore :=
+  ExactShadowCodeGraph.ofResult unsafeShadowRun
+
+def unsafeInnerExactGraph :
+    ExactShadowCodeGraph 2 unsafeResultUsed
+      (.let deadCopyDecl (.return live))
+      (.let deadCopyDecl (.return live)) :=
+  ExactShadowCodeGraph.ofResult unsafeInnerShadowRun
+
+/-- Hereditary static readiness for the live-binder retention graph. -/
+theorem usedExactBinderReady :
+    ExactShadowCodeBinderReady usedResultUsed usedExactGraph.view := by
+  apply usedExactGraph.binderReady_of_canonical
+    (index := Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [usedBefore, deadErasedDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, dead]
+
+/-- Hereditary static readiness for both retained lets in the unsafe graph. -/
+theorem unsafeExactBinderReady :
+    ExactShadowCodeBinderReady unsafeResultUsed unsafeExactGraph.view := by
+  apply unsafeExactGraph.binderReady_of_canonical
+    (index := Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.letE
+      · native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · exact ⟨.object, trivial⟩
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+  · simp [unsafeBefore, liveDecl, deadCopyDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- Hereditary static readiness for the retained unsafe residual. -/
+theorem unsafeInnerExactBinderReady :
+    ExactShadowCodeBinderReady unsafeResultUsed
+      unsafeInnerExactGraph.view := by
+  apply unsafeInnerExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deadCopyDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+theorem usedProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      usedProgram usedProgram := by
+  simpa [usedProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨usedResultUsed, 2, usedResultUsed, Nat.le_refl 2,
+        usedExactGraph, UsedSubset.refl usedResultUsed,
+        usedExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 2 usedBefore usedBefore)
+
+theorem unsafeProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 3)
+      unsafeProgram unsafeProgram := by
+  simpa [unsafeProgram] using
+    fixtureProgram_binderReadyRelated (name := `main)
+      (⟨unsafeResultUsed, 3, unsafeResultUsed, Nat.le_refl 3,
+        unsafeExactGraph, UsedSubset.refl unsafeResultUsed,
+        unsafeExactBinderReady⟩ :
+        BinderReadyShadowCodeRelated 3 unsafeBefore unsafeBefore)
+
+/-- The inner binder is retained despite being dead because its local copy
+operation is unsafe to erase. -/
+theorem unsafeInnerExactDecision :
+    unsafeInnerExactGraph.view.runtimeDecision = .retainedLet := by
+  apply
+    ExactShadowCodeView.runtimeDecision_eq_retainedLet_of_unsafe
+  simp [deadCopyDecl, letDecl, safeToElim]
+
+theorem usedExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 usedResultUsed usedActiveState
+      (runtimeRoots usedActiveState.runtime
+        (envRootsOn usedResultUsed usedActiveState.env ++ []))
+      usedBefore usedBefore := by
+  refine ⟨2, usedResultUsed, Nat.le_refl 2,
+    usedExactGraph, UsedSubset.refl usedResultUsed,
+    usedExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt usedActiveState
+        (runtimeRoots usedActiveState.runtime
+          (envRootsOn usedResultUsed usedActiveState.env ++ []))
+        deadErasedDecl := by
+    exact .runtimeNeutral deadErasedDecl .erased rfl
+  have kept :
+      RetainedLetReadyAt usedActiveState
+        (runtimeRoots usedActiveState.runtime
+          (envRootsOn usedResultUsed usedActiveState.env ++ []))
+        deadErasedDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+theorem unsafeOuterExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 3 unsafeResultUsed unsafeOuterState
+      (runtimeRoots unsafeOuterState.runtime
+        (envRootsOn unsafeResultUsed unsafeOuterState.env ++ []))
+      unsafeBefore unsafeBefore := by
+  refine ⟨3, unsafeResultUsed, Nat.le_refl 3,
+    unsafeExactGraph, UsedSubset.refl unsafeResultUsed,
+    unsafeExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt unsafeOuterState
+        (runtimeRoots unsafeOuterState.runtime
+          (envRootsOn unsafeResultUsed unsafeOuterState.env ++ []))
+        liveDecl := by
+    exact .runtimeNeutral liveDecl .erased rfl
+  have kept :
+      RetainedLetReadyAt unsafeOuterState
+        (runtimeRoots unsafeOuterState.runtime
+          (envRootsOn unsafeResultUsed unsafeOuterState.env ++ []))
+        liveDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+theorem unsafeInnerExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 3 unsafeResultUsed unsafeInnerState
+      (runtimeRoots unsafeInnerState.runtime
+        (envRootsOn unsafeResultUsed unsafeInnerState.env ++ []))
+      (.let deadCopyDecl (.return live))
+      (.let deadCopyDecl (.return live)) := by
+  refine ⟨2, unsafeResultUsed, by omega,
+    unsafeInnerExactGraph, UsedSubset.refl unsafeResultUsed,
+    unsafeInnerExactBinderReady, ?_⟩
+  exact ExactShadowCodeRuntimeReadyAt.letRetained
+    unsafeInnerExactDecision (by trivial)
+
+theorem usedExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      usedActiveState usedActiveState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn usedResultUsed usedActiveState.env,
+    envRootsOn usedResultUsed usedActiveState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [usedActiveState] using usedProgramBinderReadyRelated
+  · exact .code usedExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 usedResultUsed)
+      (by simpa [usedActiveState] using
+        (EnvRelOn.empty emptyAddressRenaming usedResultUsed))
+  · simpa [usedActiveState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related
+          (EnvRelOn.empty emptyAddressRenaming usedResultUsed))
+
+theorem unsafeOuterExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      unsafeOuterState unsafeOuterState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn unsafeResultUsed unsafeOuterState.env,
+    envRootsOn unsafeResultUsed unsafeOuterState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [unsafeOuterState] using unsafeProgramBinderReadyRelated
+  · exact .code unsafeOuterExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 3 unsafeResultUsed)
+      (by simpa [unsafeOuterState] using
+        (EnvRelOn.empty emptyAddressRenaming unsafeResultUsed))
+  · simpa [unsafeOuterState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related
+          (EnvRelOn.empty emptyAddressRenaming unsafeResultUsed))
+
+theorem unsafeLiveEnvReachableRelated :
+    EnvRelOn emptyAddressRenaming unsafeResultUsed liveEnv liveEnv := by
+  intro fvarId member
+  have same : live = fvarId := by
+    simpa [unsafeResultUsed] using member
+  subst fvarId
+  exact .some .erased
+
+theorem unsafeInnerExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      unsafeInnerState unsafeInnerState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn unsafeResultUsed unsafeInnerState.env,
+    envRootsOn unsafeResultUsed unsafeInnerState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [unsafeInnerState] using unsafeProgramBinderReadyRelated
+  · exact .code unsafeInnerExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 3 unsafeResultUsed)
+      (by simpa [unsafeInnerState] using unsafeLiveEnvReachableRelated)
+  · simpa [unsafeInnerState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related unsafeLiveEnvReachableRelated)
+
+theorem usedActiveStep :
+    coreStep usedActiveState = .next usedReturnState := by
+  rfl
+
+theorem unsafeOuterStep :
+    coreStep unsafeOuterState = .next unsafeInnerState := by
+  rfl
+
+theorem unsafeInnerStep :
+    coreStep unsafeInnerState = .next unsafeReturnState := by
+  have evaluatedAt :
+      evalLetValue unsafeInnerState deadCopyDecl =
+        .ok (unsafeInnerState.runtime, .value .erased) := by
+    simp [unsafeInnerState, deadCopyDecl, letDecl, liveEnv,
+      evalLetValue, lookupValue, evalArgs, Impure.bind, lookup]
+    rfl
+  change coreStep {
+      unsafeInnerState with
+      control := .code (.let deadCopyDecl (.return live)) } =
+    .next unsafeReturnState
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluatedAt]
+  rfl
+
+/-- Exact dispatcher preservation for a let retained because its binder is
+live. -/
+theorem usedExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals usedActiveState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals usedActiveState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  usedExactMachineReadyAt.related.matchCodeStep_of_ready
+    usedExactMachineReadyAt rfl step
+
+/-- Exact dispatcher preservation at the unsafe fixture's outer live let. -/
+theorem unsafeOuterExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals unsafeOuterState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals unsafeOuterState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  unsafeOuterExactMachineReadyAt.related.matchCodeStep_of_ready
+    unsafeOuterExactMachineReadyAt rfl step
+
+/-- Exact dispatcher preservation for the dead binder retained solely because
+its local copy is unsafe to erase. -/
+theorem unsafeInnerExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals unsafeInnerState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals unsafeInnerState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  unsafeInnerExactMachineReadyAt.related.matchCodeStep_of_ready
+    unsafeInnerExactMachineReadyAt rfl step
+
+/-- Composed unsafe-retention regression: both source and target execute the
+live outer binding and the otherwise-dead but unsafe inner copy, preserving
+exact provenance through the endpoint. -/
+theorem unsafeTwoRetainedStepsExactPreserved
+    (externals : ExternalSpec) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals unsafeOuterState unsafeReturnState ∧
+      NonLockstep.Reaches externals unsafeOuterState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3
+        unsafeReturnState targetAfter := by
+  rcases unsafeInnerExactStepPreserved externals
+      (.internal unsafeInnerStep) with
+    ⟨targetAfter, targetTail, endpoint⟩
+  refine ⟨targetAfter, ?_, ?_, endpoint⟩
+  · exact
+      (NonLockstep.reaches_of_step (.internal unsafeOuterStep)).trans
+      (NonLockstep.reaches_of_step (.internal unsafeInnerStep))
+  · exact
+      (NonLockstep.reaches_of_step (.internal unsafeOuterStep)).trans
+      targetTail
 
 theorem allocatingSourceInnerStep (arguments : Array Value) :
     ∃ nextRuntime deadValue,
