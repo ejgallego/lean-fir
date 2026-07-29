@@ -4051,6 +4051,30 @@ runtime instance, and whole-export application. General-length constructor
 chains and scalar `UInt8` comparisons are next. No FIR semantic contract,
 concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6fi removes the constructor-chain arity bound. Generic inverse theorems now
+recover the public fallback compiler result and constructor-chain result from
+successful recursive-core execution. `CodeAdapted.cases_eq` exposes the actual
+fallback and adapted chain for every production-compiled case, while
+`CaseChainAdapted.objectConstructor_eq` peels one generated object-tag test
+without accepting a target description.
+
+`ObjectConstructorCaseAltsSupported` admits any normalized constructor-only
+list or constructor list with exactly one trailing default; every expected tag
+must fit the i32 discriminator lane. `ObjectConstructorCasesSupported` adds
+only object-tag compilation, discriminator-local compilation, and the semantic
+actual-tag bound. Its recursive theorem
+`objectConstructorCaseChainRefines` follows `chooseAlt`: a hit consumes the
+selected branch proof, and a miss recurses through the production suffix under
+`CaseResumptionStable.resume`.
+`caseRuntimeRefines_objectConstructorCases` and
+`correctBudgetedPureExternalObjectConstructorCases` consequently close
+arbitrary-length object-constructor dispatch and arbitrary nesting around the
+current direct/resident-numeric family. The singleton and two-arm theorems
+remain compatibility surfaces. The contract harness checks generic compiler
+inversion, runtime refinement, and whole-export use. Scalar `UInt8` comparison
+chains are next. No FIR semantic contract, concrete layout, executable ABI, or
+W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

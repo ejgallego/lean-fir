@@ -137,9 +137,14 @@ Cross-cutting W6.5 state:
   `caseRuntimeRefines_singleObjectConstructor` derive and execute the
   production `getTag` test for a singleton object-constructor hit, while
   `correctBudgetedPureExternalSingleObjectConstructorCases` closes arbitrary
-  nesting around the same direct/resident family. Multi-arm
-  hit/miss/default chains and scalar comparisons remain the next
-  control-flow coverage gap.
+  nesting around the same direct/resident family.
+  `ObjectConstructorCaseAltsSupported`,
+  `objectConstructorCaseChainRefines`, and
+  `caseRuntimeRefines_objectConstructorCases` generalize this to every
+  normalized object-constructor chain, with or without one trailing default;
+  `correctBudgetedPureExternalObjectConstructorCases` closes arbitrary chain
+  length and nesting. Scalar comparisons remain the next control-flow
+  coverage gap.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
@@ -375,13 +380,14 @@ Cross-cutting W6.5 state:
   audit, round-trip, and execute a compiler-produced Unicode string input,
   while packed constructors and other initial heap kinds retain explicit
   layout gates; and
-- certificate-free finite compiler correctness now crosses ordered concrete
-  object-case control flow through two constructor tests plus a default:
-  production inversion derives all branch targets and numeric indices, the
-  concrete `getTag` contract proves first hit, second hit after one miss, and
-  default after two misses, and the whole-export theorem permits arbitrary
-  nesting around the current direct and resident-numeric family; general
-  constructor-chain length and scalar `UInt8` cases remain open; and
+- certificate-free finite compiler correctness now crosses arbitrary-length
+  normalized concrete object-case control flow: production inversion derives
+  the actual fallback, every branch/suffix target, and numeric indices; the
+  recursive concrete `getTag` theorem follows the source-selected hit/miss
+  path through constructor-only chains or one trailing default; and the
+  whole-export theorem permits arbitrary chain length and nesting around the
+  current direct and resident-numeric family. Scalar `UInt8` cases remain
+  open; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

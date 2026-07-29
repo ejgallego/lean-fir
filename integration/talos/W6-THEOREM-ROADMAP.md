@@ -227,8 +227,18 @@ after one miss, and default after two misses. The second test requires a
 nested generated resumption wrapper; `CaseResumptionStable.resume` derives
 exactly that closure from the public stability premise.
 `correctBudgetedPureExternalTwoObjectConstructorDefaultCases` exposes the
-whole-export result. General-length constructor chains and scalar comparisons
-are the next control-flow instances.
+whole-export result. Generic compiler inversions now remove this arity bound:
+`CodeAdapted.cases_eq` recovers the actual production fallback and chain;
+`CaseChainAdapted.objectConstructor_eq` peels each executable test; and
+`ObjectConstructorCaseAltsSupported` admits arbitrary normalized
+constructor-only lists or one trailing default.
+`objectConstructorCaseChainRefines` recursively follows `chooseAlt` under the
+nested resumption law, `caseRuntimeRefines_objectConstructorCases` supplies the
+uniform runtime condition, and
+`correctBudgetedPureExternalObjectConstructorCases` exposes arbitrary chain
+length and nesting at the whole-export boundary. The fixed-arity theorems
+remain compatibility surfaces. Scalar comparisons are the next control-flow
+instance.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

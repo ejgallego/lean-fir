@@ -239,6 +239,389 @@ theorem CodeAdapted.defaultOnlyCases_selected
     Fir.Wasm.compileCaseChainWithM, Fir.Wasm.isDefaultAlt] using core
 
 /--
+Recover the public fallback compiler result from a successful recursive-core
+result. This is the reverse direction of the lowering bridge needed for
+certificate-free case inversion.
+-/
+theorem compileCaseFallback_eq_ok_of_core
+    {context : Fir.Wasm.Context}
+    {alts : List (LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    (core :
+      Fir.Wasm.compileCaseFallbackWithM
+          (Fir.Wasm.compileCodeCore context) alts =
+        some (.ok fallback)) :
+    Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
+  unfold Fir.Wasm.compileCaseFallback
+  unfold Fir.Wasm.compileCaseFallbackWithM at core ⊢
+  generalize foundEq :
+      alts.find? Fir.Wasm.isDefaultAlt = found at core ⊢
+  cases found with
+  | none =>
+      change some (Except.ok [.unreachable]) =
+        some (Except.ok fallback) at core
+      simp only [Option.some.injEq, Except.ok.injEq] at core
+      subst fallback
+      rfl
+  | some alt =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | ctorAlt info code =>
+          change some (Except.ok [.unreachable]) =
+            some (Except.ok fallback) at core
+          simp only [Option.some.injEq, Except.ok.injEq] at core
+          subst fallback
+          rfl
+      | default code =>
+          exact Fir.Wasm.finishCompileResult_eq_ok_iff.mpr core
+
+/--
+Recover the public constructor-chain compiler result from its successful
+recursive-core execution. The proof follows the executable alternatives list
+and introduces no independent target description.
+-/
+theorem compileCaseChain_eq_ok_of_core
+    {context : Fir.Wasm.Context}
+    {discr : FVarId}
+    {alts : List (LCNF.Alt .impure)}
+    {fallback result : List Fir.Wasm.Instruction}
+    (core :
+      Fir.Wasm.compileCaseChainWithM
+          (Fir.Wasm.compileCodeCore context)
+          (Fir.Wasm.caseDiscriminatorMode context discr)
+          discr alts fallback =
+        some (.ok result)) :
+    Fir.Wasm.compileCaseChain context discr alts fallback = .ok result := by
+  induction alts generalizing result with
+  | nil =>
+      rw [Fir.Wasm.compileCaseChainWithM.eq_def] at core
+      change some (Except.ok fallback) = some (Except.ok result) at core
+      simp only [Option.some.injEq, Except.ok.injEq] at core
+      subst result
+      change
+        Fir.Wasm.compileCaseChainWithM
+            (Fir.Wasm.compileCode context)
+            (Fir.Wasm.caseDiscriminatorMode context discr)
+            discr [] fallback =
+          .ok fallback
+      rw [Fir.Wasm.compileCaseChainWithM.eq_def]
+      rfl
+  | cons alt alts ih =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | default code =>
+          rw [Fir.Wasm.compileCaseChainWithM.eq_def] at core
+          change
+            Fir.Wasm.compileCaseChainWithM
+                (Fir.Wasm.compileCode context)
+                (Fir.Wasm.caseDiscriminatorMode context discr)
+                discr (.default code :: alts) fallback =
+              .ok result
+          rw [Fir.Wasm.compileCaseChainWithM.eq_def]
+          exact ih core
+      | ctorAlt info code =>
+          rw [Fir.Wasm.compileCaseChainWithM.eq_def] at core
+          cases fitsEq :
+              Fir.Wasm.caseConstructorTagFits
+                (Fir.Wasm.caseDiscriminatorMode context discr) info with
+          | false =>
+              simp only [fitsEq, Bool.false_eq_true, ↓reduceIte] at core
+              change
+                some (Except.error (Fir.Wasm.CompileError.malformed
+                  s!"constructor tag {info.cidx} does not fit the case discriminator ABI")) =
+                    some (Except.ok result) at core
+              cases core
+          | true =>
+              simp only [fitsEq, ↓reduceIte] at core
+              cases thenCore :
+                  Fir.Wasm.compileCodeCore context code with
+              | none =>
+                  rw [thenCore] at core
+                  cases core
+              | some thenResult =>
+                  cases thenResult with
+                  | error error =>
+                      rw [thenCore] at core
+                      cases core
+                  | ok thenBody =>
+                      cases elseCore :
+                          Fir.Wasm.compileCaseChainWithM
+                            (Fir.Wasm.compileCodeCore context)
+                            (Fir.Wasm.caseDiscriminatorMode context discr)
+                            discr alts fallback with
+                      | none =>
+                          rw [thenCore, elseCore] at core
+                          cases core
+                      | some elseResult =>
+                          cases elseResult with
+                          | error error =>
+                              rw [thenCore, elseCore] at core
+                              cases core
+                          | ok elseBody =>
+                              rw [thenCore, elseCore] at core
+                              injection core with resultEq
+                              injection resultEq with resultEq
+                              subst result
+                              have thenCompiled :
+                                  Fir.Wasm.compileCode context code =
+                                    .ok thenBody :=
+                                Fir.Wasm.finishCompileResult_eq_ok_iff.mpr
+                                  thenCore
+                              have elseCompiled :
+                                  Fir.Wasm.compileCaseChain context discr alts
+                                      fallback =
+                                    .ok elseBody :=
+                                ih elseCore
+                              have elseCompiled' :
+                                  Fir.Wasm.compileCaseChainWithM
+                                      (Fir.Wasm.compileCode context)
+                                      (Fir.Wasm.caseDiscriminatorMode context
+                                        discr)
+                                      discr alts fallback =
+                                    .ok elseBody :=
+                                elseCompiled
+                              change
+                                Fir.Wasm.compileCaseChainWithM
+                                    (Fir.Wasm.compileCode context)
+                                    (Fir.Wasm.caseDiscriminatorMode context
+                                      discr)
+                                    discr (.ctorAlt info code :: alts)
+                                    fallback =
+                                  .ok
+                                    (Fir.Wasm.caseTagTest
+                                        (Fir.Wasm.caseDiscriminatorMode context
+                                          discr)
+                                        discr info ++
+                                      [.i32Eq,
+                                        .ifElse thenBody elseBody])
+                              rw [Fir.Wasm.compileCaseChainWithM.eq_def]
+                              simp only [fitsEq, ↓reduceIte]
+                              rw [thenCompiled, elseCompiled']
+                              rfl
+
+/--
+Generic inverse for production case compilation and Talos adaptation.
+Successful `CodeAdapted (.cases cases)` yields the actual compiled fallback and
+constructor-chain relation; clients do not supply either witness.
+-/
+theorem CodeAdapted.cases_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {cases : LCNF.Cases .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels (.cases cases)
+        target) :
+    CasesAdapted context sourceModule sourceFunction labels cases target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp only at core
+  cases fallbackCore :
+      Fir.Wasm.compileCaseFallbackWithM
+        (Fir.Wasm.compileCodeCore context) cases.alts.toList with
+  | none =>
+      rw [fallbackCore] at core
+      cases core
+  | some fallbackResult =>
+      cases fallbackResult with
+      | error error =>
+          rw [fallbackCore] at core
+          cases core
+      | ok fallback =>
+          rw [fallbackCore] at core
+          change
+            Fir.Wasm.compileCaseChainWithM
+                (Fir.Wasm.compileCodeCore context)
+                (Fir.Wasm.caseDiscriminatorMode context cases.discr)
+                cases.discr cases.alts.toList fallback =
+              some (.ok symbolic) at core
+          exact
+            ⟨fallback,
+              compileCaseFallback_eq_ok_of_core fallbackCore,
+              symbolic,
+              compileCaseChain_eq_ok_of_core core,
+              targetCompiled⟩
+
+/-- Invert the empty adapted case chain to its adapted fallback. -/
+theorem CaseChainAdapted.nil_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {discr : FVarId}
+    {fallback : List Fir.Wasm.Instruction}
+    {target : Wasm.Program}
+    (adapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr []
+        fallback target) :
+    instructions sourceModule sourceFunction labels fallback = .ok target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  change
+    Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+        (Fir.Wasm.caseDiscriminatorMode context discr)
+        discr [] fallback =
+      .ok symbolic at compiled
+  rw [Fir.Wasm.compileCaseChainWithM.eq_def] at compiled
+  injection compiled with symbolicEq
+  subst symbolic
+  exact targetCompiled
+
+/-- Defaults do not contribute a test to an adapted constructor chain. -/
+theorem CaseChainAdapted.default_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {discr : FVarId}
+    {code : LCNF.Code .impure}
+    {alts : List (LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {target : Wasm.Program}
+    (adapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr
+        (.default code :: alts) fallback target) :
+    CaseChainAdapted context sourceModule sourceFunction labels discr alts
+      fallback target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  refine ⟨symbolic, ?_, targetCompiled⟩
+  change
+    Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+        (Fir.Wasm.caseDiscriminatorMode context discr)
+        discr (.default code :: alts) fallback =
+      .ok symbolic at compiled
+  rw [Fir.Wasm.compileCaseChainWithM.eq_def] at compiled
+  exact compiled
+
+/--
+Invert one adapted object-constructor test.
+
+The executable chain compiler supplies the branch bodies and suffix; the
+numeric adapter supplies the shared discriminator/import indices and exact
+Talos `if`. No target component is an input to the theorem.
+-/
+theorem CaseChainAdapted.objectConstructor_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {discr : FVarId}
+    {info : LCNF.CtorInfo}
+    {code : LCNF.Code .impure}
+    {alts : List (LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {target : Wasm.Program}
+    (modeEq :
+      Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (adapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr
+        (.ctorAlt info code :: alts) fallback target) :
+    ∃ thenTarget elseTarget discrIndex getTagIndex,
+      CodeAdapted context sourceModule sourceFunction labels code thenTarget ∧
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+          fallback elseTarget ∧
+      findFVar? (functionBindings sourceFunction) discr = some discrIndex ∧
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
+      target =
+        [.localGet discrIndex, .call getTagIndex,
+          .const (UInt32.ofNat info.cidx), .eq,
+          .iff 0 0 thenTarget elseTarget] := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  change
+    Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+        (Fir.Wasm.caseDiscriminatorMode context discr)
+        discr (.ctorAlt info code :: alts) fallback =
+      .ok symbolic at compiled
+  rw [Fir.Wasm.compileCaseChainWithM.eq_def] at compiled
+  simp only [Fir.Wasm.caseConstructorTagFits, modeEq, fits, ↓reduceIte]
+    at compiled
+  cases thenCompiled : Fir.Wasm.compileCode context code with
+  | error error =>
+      rw [thenCompiled] at compiled
+      cases compiled
+  | ok thenBody =>
+      cases elseCompiled :
+          Fir.Wasm.compileCaseChain context discr alts fallback with
+      | error error =>
+          change
+            Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+                (Fir.Wasm.caseDiscriminatorMode context discr)
+                discr alts fallback =
+              .error error at elseCompiled
+          have elseCompiled' :
+              Fir.Wasm.compileCaseChainWithM
+                  (Fir.Wasm.compileCode context) .objectTag
+                  discr alts fallback =
+                .error error := by
+            simpa only [modeEq] using elseCompiled
+          rw [thenCompiled, elseCompiled'] at compiled
+          cases compiled
+      | ok elseBody =>
+          change
+            Fir.Wasm.compileCaseChainWithM (Fir.Wasm.compileCode context)
+                (Fir.Wasm.caseDiscriminatorMode context discr)
+                discr alts fallback =
+              .ok elseBody at elseCompiled
+          have elseCompiled' :
+              Fir.Wasm.compileCaseChainWithM
+                  (Fir.Wasm.compileCode context) .objectTag
+                  discr alts fallback =
+                .ok elseBody := by
+            simpa only [modeEq] using elseCompiled
+          rw [thenCompiled, elseCompiled'] at compiled
+          injection compiled with symbolicEq
+          subst symbolic
+          cases discrFound :
+              findFVar? (functionBindings sourceFunction) discr with
+          | none =>
+              change findFVar?
+                (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+                discr = none at discrFound
+              simp [Fir.Wasm.caseTagTest, instructions, instruction, discrFound,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+                at targetCompiled
+          | some discrIndex =>
+              change findFVar?
+                (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+                discr = some discrIndex at discrFound
+              cases getTagFound :
+                  callIndex? sourceModule (.runtime .getTag) with
+              | none =>
+                  simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                    discrFound, getTagFound, Bind.bind, Except.bind,
+                    Pure.pure, Except.pure] at targetCompiled
+              | some getTagIndex =>
+                  cases thenAdapted :
+                      instructions sourceModule sourceFunction labels
+                        thenBody with
+                  | error error =>
+                      simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                        discrFound, getTagFound, thenAdapted, Bind.bind,
+                        Except.bind, Pure.pure, Except.pure] at targetCompiled
+                  | ok thenTarget =>
+                      cases elseAdapted :
+                          instructions sourceModule sourceFunction labels
+                            elseBody with
+                      | error error =>
+                          simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                            discrFound, getTagFound, thenAdapted, elseAdapted,
+                            Bind.bind, Except.bind, Pure.pure, Except.pure]
+                            at targetCompiled
+                      | ok elseTarget =>
+                          simp [Fir.Wasm.caseTagTest, instructions, instruction,
+                            discrFound, getTagFound, thenAdapted, elseAdapted,
+                            Bind.bind, Except.bind, Pure.pure, Except.pure]
+                            at targetCompiled
+                          exact
+                            ⟨thenTarget, elseTarget, discrIndex, getTagIndex,
+                              ⟨thenBody, thenCompiled, thenAdapted⟩,
+                              ⟨elseBody, elseCompiled, elseAdapted⟩,
+                              rfl, rfl, targetCompiled.symm⟩
+
+/--
 Invert production compilation and adaptation of a singleton constructor case.
 The selected arm, discriminator local, concrete `getTag` import, and exact
 generated test are recovered from the compiler result; none is supplied by a
@@ -3409,6 +3792,44 @@ def TwoObjectConstructorDefaultCasesSupported
           actualTag < UInt32.size
 
 /--
+Compiler-facing shape for an arbitrary ordered object-constructor chain.
+
+The chain is either constructor-only or ends in exactly one default. This is
+the normalized order shared by `chooseAlt` and the executable case compiler;
+every constructor tag is statically representable in the generated i32 test.
+-/
+inductive ObjectConstructorCaseAltsSupported :
+    List (LCNF.Alt .impure) → Prop where
+  | nil :
+      ObjectConstructorCaseAltsSupported []
+  | default (code : LCNF.Code .impure) :
+      ObjectConstructorCaseAltsSupported [.default code]
+  | ctor
+      (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+      (rest : ObjectConstructorCaseAltsSupported alts) :
+      ObjectConstructorCaseAltsSupported (.ctorAlt info code :: alts)
+
+/--
+Source/runtime admission for arbitrary normalized object-constructor cases.
+
+The selected branch remains determined by `SourceCaseResult`. Admission
+contains only the normalized source table, compiler discriminator facts, and
+the semantic tag bound needed by every concrete i32 comparison.
+-/
+def ObjectConstructorCasesSupported
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (cases : LCNF.Cases .impure) (_selected : LCNF.Code .impure) : Prop :=
+  ObjectConstructorCaseAltsSupported cases.alts.toList ∧
+    Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag ∧
+    Fir.Wasm.getLocal context cases.discr =
+      .ok (.localGet cases.discr, .tobject) ∧
+    ∀ {sourceObject : Value} {actualTag : Nat},
+      lookupValue sourceEnv cases.discr = .ok sourceObject →
+      getTag sourceRuntime sourceObject = .ok actualTag →
+      actualTag < UInt32.size
+
+/--
 Static admission for a direct local alias.
 
 The declaration copies an existing local without applying it, and source and
@@ -4622,6 +5043,233 @@ theorem CaseResumptionStable.resume
       simpa [CaseResumePost, Wasm.wp_nil] using resumed
 
 /--
+The concrete `getTag` host implements every normalized object-constructor
+suffix produced by the executable case compiler.
+
+The theorem follows the source alternative list. A matching constructor
+returns its compiled arm; a miss recursively proves the compiled suffix under
+one more case-resumption boundary. The result is therefore path-sensitive:
+only the branch selected by `chooseAlt` needs a semantic `CodeWP`, while all
+unselected arms are recovered structurally from production compilation and
+adaptation.
+-/
+theorem ConcreteSupportedExport.objectConstructorCaseChainRefines
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {discr : FVarId}
+    {alts : List (LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction}
+    {chainTarget : Wasm.Program}
+    {selected : LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {sourceObject : Value}
+    {actualTag : Nat}
+    (supported : ObjectConstructorCaseAltsSupported alts)
+    (modeEq :
+      Fir.Wasm.caseDiscriminatorMode context discr = .objectTag)
+    (discrCompiled :
+      Fir.Wasm.getLocal context discr =
+        .ok (.localGet discr, .tobject))
+    (selection : chooseAlt actualTag alts = some selected)
+    (sourceLookup : lookup sourceEnv discr = some sourceObject)
+    (tagged : getTag sourceRuntime sourceObject = .ok actualTag)
+    (actualFits : actualTag < UInt32.size)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context alts = .ok fallback)
+    (chainAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback chainTarget) :
+    ∃ selectedTarget,
+      CodeAdapted context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+        ∀ (tail : List Wasm.Value) (Q : Wasm.Assertion Host),
+          CaseResumptionStable target.wasmModule hosts.env tail Q →
+          CodeWP context sourceModule sourceFunction labels target.wasmModule
+              hosts.env sourceRuntime sourceEnv selected selectedTarget
+              targetStore targetLocals witness tail Q →
+            CaseChainWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
+              fallback chainTarget targetStore targetLocals witness tail Q := by
+  induction supported generalizing chainTarget selected with
+  | nil =>
+      simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
+  | default code =>
+      have selectedEq : selected = code := by
+        simpa [chooseAlt, findCtorAlt, findDefaultAlt] using selection.symm
+      subst selected
+      have branchCompiled :
+          Fir.Wasm.compileCode context code = .ok fallback := by
+        simpa [Fir.Wasm.compileCaseFallback,
+          Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt]
+          using fallbackCompiled
+      have branchAdapted :
+          CodeAdapted context sourceModule sourceFunction labels code
+            chainTarget :=
+        ⟨fallback, branchCompiled,
+          CaseChainAdapted.nil_eq
+            (CaseChainAdapted.default_eq chainAdapted)⟩
+      refine ⟨chainTarget, branchAdapted, ?_⟩
+      intro tail Q _stable continued
+      exact ⟨chainAdapted, stateRelated, continued.2.2⟩
+  | @ctor info alts code fits rest ih =>
+      have fallbackCompiledRest :
+          Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
+        simpa [Fir.Wasm.compileCaseFallback,
+          Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt]
+          using fallbackCompiled
+      obtain ⟨thenTarget, elseTarget, discrIndex, getTagIndex, thenAdapted,
+          elseAdapted, discrFound, getTagFound, targetEq⟩ :=
+        CaseChainAdapted.objectConstructor_eq modeEq fits chainAdapted
+      obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+        spec.localsAligned discrCompiled
+      rw [discrFound] at alignedFound
+      injection alignedFound with indexEq
+      subst alignedIndex
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.runtimeCallsAligned getTagFound
+      have getTagContracted :
+          hosts.spec.contracts[getTagIndex]? = some getTagContract := by
+        change hosts.spec.contracts[getTagIndex]? =
+          some (fun initial args result => result = getTagStep initial args)
+        simpa only [resolvedContract?, hostFn?, Option.map_some, getTagFn]
+          using contracted
+      have parameterCount : imp.params.length = 1 := by
+        change imp.params.length = 1 at params
+        exact params
+      have resultCount : imp.results.length = 1 := by
+        change imp.results.length = 1 at results
+        exact results
+      have expectedFits : info.cidx < UInt32.size := by
+        simpa [Fir.Wasm.constructorTagFitsI32] using fits
+      by_cases hit : actualTag = info.cidx
+      · have selectedEq : selected = code := by
+          have branchEq : code = selected := by
+            simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit] using selection
+          exact branchEq.symm
+        subst selected
+        refine ⟨thenTarget, thenAdapted, ?_⟩
+        intro tail Q stable continued
+        have continuedOnce :
+            CodeWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv code
+              thenTarget targetStore targetLocals witness tail
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+          continued.conseq stable
+        have branchWP :
+            Wasm.wp target.wasmModule
+              (if actualTag = info.cidx then thenTarget else elseTarget)
+              (CaseResumePost target.wasmModule hosts.env [] Q tail)
+              targetStore { targetLocals with values := tail } hosts.env := by
+          simpa [hit] using continuedOnce.2.2
+        have chain :
+            CaseChainWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv discr
+              (.ctorAlt info code :: alts) fallback
+              [.localGet discrIndex, .call getTagIndex,
+                .const (UInt32.ofNat info.cidx), .eq,
+                .iff 0 0 thenTarget elseTarget]
+              targetStore targetLocals witness tail Q := by
+          apply caseChainWP_constructor
+            (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+            (actualTag := actualTag)
+          · exact modeEq
+          · exact fits
+          · exact thenAdapted
+          · exact elseAdapted
+          · exact discrFound
+          · exact discrKind
+          · exact getTagFound
+          · exact stateRelated
+          · exact sourceLookup
+          · exact imported
+          · exact spec.hostsSatisfy
+          · exact inBounds
+          · exact getTagContracted
+          · exact parameterCount
+          · exact resultCount
+          · exact tagged
+          · exact actualFits
+          · exact expectedFits
+          · exact branchWP
+        simpa only [targetEq] using chain
+      · have reverseMiss : info.cidx ≠ actualTag :=
+          fun equal => hit equal.symm
+        have selectionRest : chooseAlt actualTag alts = some selected := by
+          simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
+            using selection
+        obtain ⟨selectedTarget, selectedAdapted, liftRest⟩ :=
+          ih selectionRest fallbackCompiledRest elseAdapted
+        refine ⟨selectedTarget, selectedAdapted, ?_⟩
+        intro tail Q stable continued
+        have continuedOnce :
+            CodeWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv selected
+              selectedTarget targetStore targetLocals witness tail
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+          continued.conseq stable
+        have restChain :
+            CaseChainWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv discr alts
+              fallback elseTarget targetStore targetLocals witness tail
+              (CaseResumePost target.wasmModule hosts.env [] Q tail) :=
+          liftRest tail (CaseResumePost target.wasmModule hosts.env [] Q tail)
+            stable.resume continuedOnce
+        have branchWP :
+            Wasm.wp target.wasmModule
+              (if actualTag = info.cidx then thenTarget else elseTarget)
+              (CaseResumePost target.wasmModule hosts.env [] Q tail)
+              targetStore { targetLocals with values := tail } hosts.env := by
+          simpa [hit] using restChain.2.2
+        have chain :
+            CaseChainWP context sourceModule sourceFunction labels
+              target.wasmModule hosts.env sourceRuntime sourceEnv discr
+              (.ctorAlt info code :: alts) fallback
+              [.localGet discrIndex, .call getTagIndex,
+                .const (UInt32.ofNat info.cidx), .eq,
+                .iff 0 0 thenTarget elseTarget]
+              targetStore targetLocals witness tail Q := by
+          apply caseChainWP_constructor
+            (spec := hosts.spec) (imp := imp) (sourceObject := sourceObject)
+            (actualTag := actualTag)
+          · exact modeEq
+          · exact fits
+          · exact thenAdapted
+          · exact restChain.1
+          · exact discrFound
+          · exact discrKind
+          · exact getTagFound
+          · exact stateRelated
+          · exact sourceLookup
+          · exact imported
+          · exact spec.hostsSatisfy
+          · exact inBounds
+          · exact getTagContracted
+          · exact parameterCount
+          · exact resultCount
+          · exact tagged
+          · exact actualFits
+          · exact expectedFits
+          · exact branchWP
+        simpa only [targetEq] using chain
+
+/--
 Uniform runtime condition for a selected source case branch.
 
 The full and selected target programs are universally quantified outputs of
@@ -4689,6 +5337,61 @@ theorem caseRuntimeRefines_defaultOnly
   refine ⟨target, selectedAdapted, sourceStep, ?_⟩
   intro tail Q _stable continued
   exact ⟨adapted, stateRelated, continued.2.2⟩
+
+/--
+Arbitrary normalized object-constructor cases satisfy the uniform runtime
+condition.
+
+The interpreter supplies the selected source branch and semantic tag. Generic
+compiler inversion recovers the fallback and constructor chain, and
+`objectConstructorCaseChainRefines` follows exactly that selected path through
+the concrete `getTag` calls.
+-/
+theorem ConcreteSupportedExport.caseRuntimeRefines_objectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (ObjectConstructorCasesSupported context) := by
+  intro sourceRuntime sourceEnv cases selected fullTarget targetStore
+    targetLocals witness supported sourceStep stateRelated adapted
+  rcases supported with
+    ⟨altsSupported, modeEq, discrCompiled, actualTagFits⟩
+  rcases sourceStep with
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+  have sourceLookup :
+      lookup sourceEnv cases.discr = some sourceObject := by
+    cases lookupEq : lookup sourceEnv cases.discr with
+    | none =>
+        simp [lookupValue, lookupEq] at lookupFound
+    | some value =>
+        have valueEq : value = sourceObject := by
+          simpa [lookupValue, lookupEq] using lookupFound
+        subst value
+        rfl
+  have actualFits : actualTag < UInt32.size :=
+    actualTagFits lookupFound tagged
+  rcases CodeAdapted.cases_eq adapted with
+    ⟨fallback, fallbackCompiled, chainAdapted⟩
+  obtain ⟨selectedTarget, selectedAdapted, liftChain⟩ :=
+    spec.objectConstructorCaseChainRefines altsSupported modeEq discrCompiled
+      chosen sourceLookup tagged actualFits stateRelated fallbackCompiled
+      chainAdapted
+  refine ⟨selectedTarget, selectedAdapted,
+    ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩, ?_⟩
+  intro tail Q stable continued
+  apply codeWP_cases fallbackCompiled
+  exact liftChain tail Q stable continued
 
 /--
 The concrete `getTag` host implements singleton object-constructor dispatch.
@@ -8998,6 +9701,77 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalDefaultCases
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
     caseRuntimeRefines_defaultOnly parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary nesting of normalized
+object-constructor case chains around the complete current
+direct/pure-external family.
+
+There is no arity-specific case certificate. Each alternatives list is
+admitted by `ObjectConstructorCaseAltsSupported`; the source evaluator selects
+the branch, and production compiler inversion plus the recursive concrete
+`getTag` theorem reconstructs and executes the exact generated chain.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalObjectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (ObjectConstructorCasesSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    spec.caseRuntimeRefines_objectConstructorCases parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of singleton

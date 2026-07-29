@@ -329,7 +329,14 @@ second hit after one miss, and default after two misses; and
 `correctBudgetedPureExternalTwoObjectConstructorDefaultCases` closes arbitrary
 nesting around the same mixed family. Nested arm control uses
 `CaseResumptionStable.resume`, not an unrestricted fallthrough assumption.
-General-length constructor chains and scalar comparisons remain next.
+`ObjectConstructorCaseAltsSupported` now removes that arity bound for
+normalized constructor-only chains and constructor chains with one trailing
+default. Generic compiler inversion recovers the production fallback, suffix,
+branch targets, and indices; `objectConstructorCaseChainRefines` recursively
+follows the source-selected hit/miss path; and
+`correctBudgetedPureExternalObjectConstructorCases` closes arbitrary chain
+length and nesting without a per-program target witness. The singleton and
+two-arm APIs remain compatibility corollaries. Scalar comparisons remain next.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
