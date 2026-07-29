@@ -4241,6 +4241,174 @@ theorem deletedBoxSourceOnlyKeepsAllocationLedger :
     LedgerShadowRuntimeRel.boxScalarLeftGarbage,
     TargetAllocationLedger.empty]
 
+/-- A retained failed reuse keeps the token live in the ambient set and uses
+its result in the continuation. -/
+def retainedReuseNoneUsed : UsedLocals :=
+  neutralUsed.insert reuseTokenVar
+
+def retainedReuseNoneDecl : LCNF.LetDecl .impure :=
+  letDecl live objType
+    (.reuse reuseTokenVar oneFieldInfo true #[.erased])
+
+def retainedReuseNoneCode : LCNF.Code .impure :=
+  .let retainedReuseNoneDecl (.return live)
+
+theorem retainedReuseNoneShadowRun :
+    shadowCode? 2 {} retainedReuseNoneCode =
+      some (retainedReuseNoneCode, retainedReuseNoneUsed) := by
+  simp [retainedReuseNoneCode, retainedReuseNoneDecl,
+    retainedReuseNoneUsed, neutralUsed, letDecl, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg, live,
+    reuseTokenVar]
+
+def retainedReuseNoneExactGraph :
+    ExactShadowCodeGraph 2 retainedReuseNoneUsed
+      retainedReuseNoneCode retainedReuseNoneCode :=
+  ExactShadowCodeGraph.ofResult retainedReuseNoneShadowRun
+
+theorem retainedReuseNoneExactBinderReady :
+    ExactShadowCodeBinderReady retainedReuseNoneUsed
+      retainedReuseNoneExactGraph.view := by
+  apply retainedReuseNoneExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty reuseTokenVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [retainedReuseNoneCode, retainedReuseNoneDecl, letDecl,
+      codeBinderIds, BinderNamesUnique, live, reuseTokenVar]
+
+theorem retainedReuseNoneStepBinderReady :
+    ExactShadowCodeBinderReady retainedReuseNoneUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedReuseNoneDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedReuseNoneDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply ExactShadowCodeView.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact CodeBinderList.ret
+  · simp [BinderNamesUnique]
+  · simp [BinderAbsenceTransfers]
+
+def retainedReuseNoneEnv : Env :=
+  bind [] reuseTokenVar (.reuseToken none)
+
+def retainedReuseNoneState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedReuseNoneCode
+    env := retainedReuseNoneEnv }
+
+/-- Compiler-facing retained failed-reuse regression: constructor allocation
+on both sides returns the proof-relevant paired owner ledger. -/
+theorem retainedReuseNoneExactStepLedgerPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedReuseNoneState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedReuseNoneState targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedReuseNoneState.program retainedReuseNoneState.program := by
+    simpa [retainedReuseNoneState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedReuseNoneState.frames retainedReuseNoneState.frames [] [] := by
+    simpa [retainedReuseNoneState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedReuseNoneUsed
+        retainedReuseNoneState.joins retainedReuseNoneState.joins := by
+    simpa [retainedReuseNoneState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedReuseNoneUsed
+  have env :
+      EnvRelOn emptyAddressRenaming retainedReuseNoneUsed
+        retainedReuseNoneState.env retainedReuseNoneState.env := by
+    simpa [retainedReuseNoneState, retainedReuseNoneEnv] using
+      (EnvRelOn.empty emptyAddressRenaming retainedReuseNoneUsed).bindBoth
+        (binder := reuseTokenVar) ValueRel.reuseNone
+  have runtime :
+      LedgerShadowRuntimeRel emptyAddressRenaming
+        retainedReuseNoneState.runtime retainedReuseNoneState.runtime
+        (envRootsOn retainedReuseNoneUsed retainedReuseNoneState.env ++ [])
+        (envRootsOn retainedReuseNoneUsed retainedReuseNoneState.env ++ []) := {
+    runtime := by
+      simpa [retainedReuseNoneState] using
+        emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+    ledger := by
+      simpa [retainedReuseNoneState] using
+        TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  have tokenRead :
+      lookupValue retainedReuseNoneState.env reuseTokenVar =
+        .ok (.reuseToken none) := by
+    simp [retainedReuseNoneState, retainedReuseNoneEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar]
+  have argumentsRead :
+      evalArgs retainedReuseNoneState.env #[.erased] =
+        .ok #[.erased] := by
+    simp [evalArgs, evalArg]
+    rfl
+  have usedBound :
+      UsedSubset
+        (collectLetValue neutralUsed
+          (LCNF.LetValue.reuse reuseTokenVar oneFieldInfo true #[.erased] :
+            LCNF.LetValue .impure))
+        retainedReuseNoneUsed := by
+    simpa [collectLetValue, collectArgs, collectArgList, collectArg,
+      retainedReuseNoneUsed] using
+      UsedSubset.refl retainedReuseNoneUsed
+  simpa [retainedReuseNoneState, retainedReuseNoneCode,
+    retainedReuseNoneDecl, letDecl] using
+    retainedReuseNoneStepBinderReady.match_retainedReuseNoneLetStep_ledger
+      (fuelBound := Nat.le_refl 2) usedBound
+      retainedReuseNoneState retainedReuseNoneState programs frames joins env
+      tokenRead argumentsRead (by rfl) runtime step
+
+/-- The deleted failed-reuse fixture's source-only constructor allocation
+retains the empty target owner ledger. -/
+noncomputable def deletedReuseNoneLedgerResult :
+    LedgerReuseNoneLeftGarbageResult emptyAddressRenaming
+      deletedReuseNoneSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseNoneSourceState.env)
+      (envRootsOn neutralUsed deletedReuseTargetState.env)
+      oneFieldInfo true #[.erased] :=
+  let related : LedgerShadowRuntimeRel emptyAddressRenaming
+      deletedReuseNoneSourceState.runtime deletedReuseTargetState.runtime
+      (envRootsOn neutralUsed deletedReuseNoneSourceState.env)
+      (envRootsOn neutralUsed deletedReuseTargetState.env) := {
+    runtime := deletedReuseNoneRuntimeRelated
+    ledger := by
+      simpa [deletedReuseTargetState] using
+        TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  related.reuseNoneLeftGarbage oneFieldInfo #[.erased] (by rfl) true
+
+theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
+    deletedReuseNoneLedgerResult.runtime.ledger.owner = fun _ => 0 := by
+  simp [deletedReuseNoneLedgerResult,
+    LedgerShadowRuntimeRel.reuseNoneLeftGarbage,
+    LedgerShadowRuntimeRel.allocCtorLeftGarbage,
+    TargetAllocationLedger.empty]
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
