@@ -243,6 +243,11 @@ literals plus successful object, `USize`, and packed-integer scalar
 projections under one source path budget. The projection laws expose exact
 heap preservation across their generated readers, so the complete residual
 budget reaches the continuation.
+`ConcreteSupportedExport.correctBudgetedDirect` packages that structural
+result at the named-export boundary: successful finite source evaluation and
+one initial budget imply the matching executable source observation and
+fuel-free concrete Wasm termination under `RefinedReturnPost`, with no
+translation certificate or target-level witnesses.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

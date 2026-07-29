@@ -431,6 +431,55 @@ example
     spec.singleResult
 
 /--
+The public whole-export theorem exposes the same budgeted direct fragment
+without a `CodeWP`, target program, translation certificate, concrete
+operation witness, or per-node allocation premise.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    (evaluation :
+      DirectValueEvaluates context (BudgetedDirectSupported context)
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget
+        (DirectValuePathCost directLetAllocationCost sourceCode))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedDirect evaluation stateRelated frameAligned budget
+    parameterCount
+
+/--
 The recursive direct-`let` API is likewise certificate-free: its only
 recursive premise is correctness of the compiler-selected continuation.
 -/

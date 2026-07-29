@@ -67,6 +67,9 @@ Cross-cutting W6.5 state:
   object, `USize`, and packed-integer scalar projections in arbitrary finite
   interleavings. Each projection instance records exact heap preservation and
   therefore retains the complete residual budget.
+  `ConcreteSupportedExport.correctBudgetedDirect` closes this fragment at the
+  named-export boundary, pairing executable source evaluation with fuel-free
+  concrete Wasm termination under `RefinedReturnPost`.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

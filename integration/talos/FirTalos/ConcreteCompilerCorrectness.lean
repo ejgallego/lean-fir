@@ -5085,6 +5085,90 @@ theorem codeWP_of_directValueEvaluates_withCost
         resultRuntimeRelated, failureClear, valueRelated⟩
 
 /--
+Whole-export partial correctness for the current budgeted direct-value
+fragment.
+
+The premise is only a successful finite source evaluation through admitted
+direct operations, the initial concrete-state relation, exact generated-frame
+shape, and one source-computed wasm32 allocation budget. The production
+compiler and adapter determine the complete target body. The conclusion pairs
+the executable source observation with fuel-free termination of the named
+concrete export and hides the final physical representation behind
+`RefinedReturnPost`.
+-/
+theorem ConcreteSupportedExport.correctBudgetedDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    (evaluation :
+      DirectValueEvaluates context (BudgetedDirectSupported context)
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget
+        (DirectValuePathCost directLetAllocationCost sourceCode))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+      resultRuntimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_directValueEvaluates_withCost
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned stateRelated
+      ⟨frameAligned, budget⟩ spec.directLetRuntimeRefines_budgetedDirect
+      parameterCount spec.singleResult
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates sourceExternals, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultRuntimeRelated, failureClear, valueRelated, rfl⟩
+
+/--
 Certificate-free partial compiler correctness for the base return case.
 
 The only dynamic premise is a source evaluation. The target proof is derived

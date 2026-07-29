@@ -3768,6 +3768,22 @@ or per-node budget premises. The next slice packages this structural `CodeWP`
 as the whole-export partial-correctness endpoint. No FIR semantic contract or
 executable ABI changed.
 
+W6.6et packages the indexed structural proof as a public whole-export
+partial-correctness theorem. `ConcreteSupportedExport.correctBudgetedDirect`
+takes a successful `DirectValueEvaluates` run through the current mixed
+fragment, initial `StateRelated`, exact generated-frame shape, one
+source-computed `DirectValuePathCost` budget, and parameter arity. It returns
+the executable source observation together with fuel-free termination of the
+named concrete Wasm export under `RefinedReturnPost`. The proof internally
+applies the production compiler/adaptor equation, the seven-family indexed
+runtime law, and the concrete function-body termination bridge. Its public
+interface contains no translation certificate, target instruction/index,
+concrete operation witness, or per-node allocation premise. This is the first
+general whole-export theorem for allocating direct spines; remaining W6 work
+extends the admitted syntax/effects and develops the trace/simulation layer
+beyond terminating direct evaluation. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

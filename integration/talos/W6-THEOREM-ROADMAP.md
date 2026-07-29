@@ -135,6 +135,10 @@ composition now includes cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar projections
 through `BudgetedDirectSupported`. The projection instances preserve the
 concrete heap exactly and return the full residual address-space budget.
+`ConcreteSupportedExport.correctBudgetedDirect` now turns the resulting
+structural `CodeWP` into the public named-export statement: finite source
+evaluation plus one source-path budget implies the matching source observation
+and fuel-free concrete Wasm termination under `RefinedReturnPost`.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
