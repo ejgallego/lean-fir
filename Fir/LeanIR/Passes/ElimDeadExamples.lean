@@ -96,6 +96,28 @@ def deadReuseDecl : LCNF.LetDecl .impure :=
   letDecl dead objType
     (.reuse reuseTokenVar oneFieldInfo true #[.fvar reuseArgVar])
 
+def closedReuseLiveDecl : LCNF.LetDecl .impure :=
+  letDecl live objType (.lit (.nat 0))
+
+def closedReuseTokenDecl : LCNF.LetDecl .impure :=
+  letDecl reuseTokenVar objType (.reset 1 live)
+
+def closedReuseArgDecl : LCNF.LetDecl .impure :=
+  letDecl reuseArgVar objType .erased
+
+/-- Closed failed-token reuse fixture.  Resetting the erased live value
+produces `reuseToken none`; the deleted reuse then allocates only on the
+source, while the target retains just the live return. -/
+def closedReuseBefore : LCNF.Code .impure :=
+  .let closedReuseLiveDecl <|
+  .let closedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedReuseAfter : LCNF.Code .impure :=
+  .let closedReuseLiveDecl <| .return live
+
 def deletedReuseBefore : LCNF.Code .impure :=
   .let deadReuseDecl (.return live)
 
@@ -221,6 +243,7 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadAllocating allocatingBefore allocatingAfter
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
   checkActualElimDead `elimDeadClosedWrites closedWritesBefore closedWritesAfter
+  checkActualElimDead `elimDeadClosedReuse closedReuseBefore closedReuseAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualElimDead `elimDeadLargeNat
@@ -266,6 +289,12 @@ def closedWritesBeforeProgram : ImpureProgram :=
 
 def closedWritesAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main closedWritesAfter] }
+
+def closedReuseBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedReuseBefore] }
+
+def closedReuseAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedReuseAfter] }
 
 def deletedReuseBeforeProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedReuseBefore] }
@@ -440,6 +469,24 @@ theorem deletedReuseShadowRun :
   simp [deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl,
     neutralUsed, shadowCode?, safeToElim, liveMember, deadAbsent]
 
+theorem closedReuseShadowRun :
+    shadowCode? 5 {} closedReuseBefore =
+      some (closedReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedReuseBefore, closedReuseAfter, closedReuseTokenDecl,
+    closedReuseArgDecl, closedReuseLiveDecl, deadReuseDecl, letDecl,
+    neutralUsed, shadowCode?, safeToElim, collectLetValue, liveMember, tokenAbsent,
+    argumentAbsent, deadAbsent]
+
 theorem deletedResetShadowRun :
     shadowCode? 2 {} deletedResetBefore =
       some (deletedResetAfter, neutralUsed) := by
@@ -524,6 +571,14 @@ theorem closedWritesProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     closedWritesBeforeProgram, closedWritesAfterProgram,
     fixtureDecl, decl, closedWritesShadowRun]
+
+theorem closedReuseProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 5)
+      closedReuseBeforeProgram closedReuseAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedReuseBeforeProgram, closedReuseAfterProgram,
+    fixtureDecl, decl, closedReuseShadowRun]
 
 theorem deletedReuseProgramShadowRelated :
     ProgramRelated (ShadowCodeRelated 2)
@@ -6277,5 +6332,465 @@ theorem closedWritesProgramLoweringCorrect
     closedWritesBeforeProgramElimDeadWellFormed
     closedWritesShadowProgramRun compatible
     (closedWritesExactRuntimeOwnershipInitialInvariant externals)
+
+/-- Concrete source states for the closed failed-token reuse fixture.  The
+tagged live value makes `reset` return `reuseToken none`; evaluating the
+subsequent deleted reuse allocates one fresh source-only constructor. -/
+def closedReuseLiveEnv : Env :=
+  bind [] live (.object (.tagged 0))
+
+def closedReuseTokenEnv : Env :=
+  bind closedReuseLiveEnv reuseTokenVar (.reuseToken none)
+
+def closedReuseArgEnv : Env :=
+  bind closedReuseTokenEnv reuseArgVar .erased
+
+def closedReuseAfterLiveCode : LCNF.Code .impure :=
+  .let closedReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedReuseAfterResetCode : LCNF.Code .impure :=
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedReuseAfterArgCode : LCNF.Code .impure :=
+  .let deadReuseDecl <| .return live
+
+def closedReuseAllocatedObject : ConstructorObject :=
+  { tag := oneFieldInfo.cidx
+    objectFields := #[.erased]
+    usizeFields := #[]
+    scalarFields := [] }
+
+def closedReuseAllocation : RuntimeState × ObjectRef :=
+  alloc ({} : RuntimeState) (.ctor closedReuseAllocatedObject)
+
+def closedReuseSourceOuterState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .code closedReuseBefore
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceResetState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .code closedReuseAfterLiveCode
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceArgState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .code closedReuseAfterResetCode
+    env := closedReuseTokenEnv
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceReuseState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .code closedReuseAfterArgCode
+    env := closedReuseArgEnv
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceReturnState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .code (.return live)
+    env := bind closedReuseArgEnv dead
+      (.object closedReuseAllocation.2)
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceYieldedState (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedReuseArgEnv dead
+      (.object closedReuseAllocation.2)
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedReuseSourceCachedState : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedReuseArgEnv dead
+      (.object closedReuseAllocation.2)
+    runtime := closedReuseAllocation.1.setGlobal `main
+      (.object (.tagged 0)) }
+
+def closedReuseSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedReuseBeforeProgram
+    control := .invokeValue (.object (.tagged 0)) arguments
+    env := bind closedReuseArgEnv dead
+      (.object closedReuseAllocation.2)
+    runtime := closedReuseAllocation.1 }
+
+theorem closedReuseSourceEntryStep (arguments : Array Value) :
+    coreStep (initialState closedReuseBeforeProgram `main arguments) =
+      .next (closedReuseSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedReuseBeforeProgram,
+      Program.findDecl?, invokeDecl, closedReuseSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedReuseSourceOuterStep (arguments : Array Value) :
+    coreStep (closedReuseSourceOuterState arguments) =
+      .next (closedReuseSourceResetState arguments) := by
+  rfl
+
+theorem closedReuseSourceResetStep (arguments : Array Value) :
+    coreStep (closedReuseSourceResetState arguments) =
+      .next (closedReuseSourceArgState arguments) := by
+  rfl
+
+theorem closedReuseSourceArgStep (arguments : Array Value) :
+    coreStep (closedReuseSourceArgState arguments) =
+      .next (closedReuseSourceReuseState arguments) := by
+  rfl
+
+theorem closedReuseSourceReuseStep (arguments : Array Value) :
+    coreStep (closedReuseSourceReuseState arguments) =
+      .next (closedReuseSourceReturnState arguments) := by
+  have evaluated :
+      evalLetValue (closedReuseSourceReuseState arguments)
+          deadReuseDecl =
+        .ok (closedReuseAllocation.1,
+          .value (.object closedReuseAllocation.2)) := by
+    simp [evalLetValue, closedReuseSourceReuseState,
+      closedReuseAfterArgCode, deadReuseDecl, letDecl,
+      closedReuseArgEnv, closedReuseTokenEnv, closedReuseLiveEnv,
+      lookupValue, evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, reuse, allocCtor, oneFieldInfo,
+      closedReuseAllocation,
+      closedReuseAllocatedObject, Functor.map, Except.map,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+  change coreStep {
+      closedReuseSourceReuseState arguments with
+      control := .code (.let deadReuseDecl (.return live)) } =
+    .next (closedReuseSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedReuseSourceReturnStep (arguments : Array Value) :
+    coreStep (closedReuseSourceReturnState arguments) =
+      .next (closedReuseSourceYieldedState arguments) := by
+  rfl
+
+theorem closedReuseSourceYieldedStepEmpty :
+    coreStep (closedReuseSourceYieldedState #[]) =
+      .next closedReuseSourceCachedState := by
+  rfl
+
+theorem closedReuseSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedReuseSourceYieldedState arguments) =
+      .next (closedReuseSourceInvokingState arguments) := by
+  simp [coreStep, closedReuseSourceYieldedState, neutralEntryFrames,
+    notEmpty, closedReuseSourceInvokingState]
+
+/-- Complete finite-state characterization of source executions for the
+closed failed-token reuse fixture. -/
+inductive ClosedReuseSourceReachable (arguments : Array Value) :
+    MachineState → Prop where
+  | entry :
+      ClosedReuseSourceReachable arguments
+        (initialState closedReuseBeforeProgram `main arguments)
+  | outer :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceOuterState arguments)
+  | reset :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceResetState arguments)
+  | argument :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceArgState arguments)
+  | reuse :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceReuseState arguments)
+  | ret :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceReturnState arguments)
+  | yielded :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedReuseSourceReachable arguments
+        closedReuseSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedReuseSourceReachable arguments
+        (closedReuseSourceInvokingState arguments)
+
+theorem closedReuseSourceReachable_step
+    (reachable : ClosedReuseSourceReachable arguments before)
+    (step : Step externals before after) :
+    ClosedReuseSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedReuseSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedReuseSourceOuterStep arguments) .reset step
+  | reset =>
+      exact predicate_of_step_next
+        (closedReuseSourceResetStep arguments) .argument step
+  | argument =>
+      exact predicate_of_step_next
+        (closedReuseSourceArgStep arguments) .reuse step
+  | reuse =>
+      exact predicate_of_step_next
+        (closedReuseSourceReuseStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedReuseSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          closedReuseSourceYieldedStepEmpty (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedReuseSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedReuseSourceCachedState, coreStep] at transition
+      | external transition response =>
+          simp [closedReuseSourceCachedState, coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedReuseSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+      | external transition response =>
+          simp [closedReuseSourceInvokingState, coreStep, invokeClosure,
+            fail] at transition
+
+/-- The retained small-Nat literal is safe under every exact traversal
+residual; the literal helper covers both immediate and allocating cases. -/
+theorem closedReuseBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 5 state sourceFrameRoots
+      closedReuseBefore := by
+  unfold closedReuseBefore closedReuseLiveDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+/-- Resetting the tagged live value is runtime-neutral and deterministically
+produces a failed reuse token. -/
+theorem closedReuseResetSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 5
+      (closedReuseSourceResetState arguments) sourceFrameRoots
+      closedReuseAfterLiveCode := by
+  unfold closedReuseAfterLiveCode closedReuseTokenDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · refine ⟨.reuseToken none, ?_⟩
+    simp [evalLetValue, closedReuseSourceResetState,
+      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+      live, reset, Bind.bind, Except.bind, Pure.pure, Except.pure]
+  · intro roots
+    trivial
+
+/-- The erased constructor argument is itself a runtime-neutral deleted let. -/
+theorem closedReuseArgSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 5
+      (closedReuseSourceArgState arguments) sourceFrameRoots
+      closedReuseAfterResetCode := by
+  unfold closedReuseAfterResetCode closedReuseArgDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem closedReuseDeletedReuseReadyAt
+    (arguments : Array Value) (roots : List Value) :
+    DeletedReuseReadyAt (closedReuseSourceReuseState arguments)
+      roots reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  apply DeletedReuseReadyAt.none #[.erased]
+  · simp [closedReuseSourceReuseState, closedReuseArgEnv,
+      closedReuseTokenEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+  · simp [closedReuseSourceReuseState, closedReuseArgEnv,
+      closedReuseTokenEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar]
+    rfl
+  · rfl
+
+/-- Retaining this reuse needs no concrete-token ownership proof because its
+token lookup is definitionally `none`. -/
+theorem closedReuseRetainedReuseReadyAt
+    (arguments : Array Value) (roots : List Value) :
+    RetainedLetReadyAt (closedReuseSourceReuseState arguments)
+      roots deadReuseDecl.value := by
+  intro location tokenRead
+  simp [closedReuseSourceReuseState, closedReuseArgEnv,
+    closedReuseTokenEnv, closedReuseLiveEnv, lookupValue,
+    Impure.bind, lookup, reuseTokenVar, reuseArgVar] at tokenRead
+
+/-- Failed-token reuse supports the stronger source-only contract: allocation
+freshness preserves arbitrary active and saved-frame roots. -/
+theorem closedReuseReuseSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 5
+      (closedReuseSourceReuseState arguments) sourceFrameRoots
+      closedReuseAfterArgCode := by
+  unfold closedReuseAfterArgCode deadReuseDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_ready
+  · intro roots
+    exact .reuse dead dead.name objType reuseTokenVar oneFieldInfo true
+      #[.fvar reuseArgVar]
+      (closedReuseDeletedReuseReadyAt
+        (arguments := arguments) roots)
+  · intro roots
+    exact closedReuseRetainedReuseReadyAt
+      (arguments := arguments) roots
+
+theorem closedReuseReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 5 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+theorem closedReuseSourceReachable_ready
+    (state : MachineState)
+    (reachable : ClosedReuseSourceReachable arguments state) :
+    SourceRuntimeOwnershipMachineReadyAt 5 state := by
+  cases reachable with
+  | entry =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedReuseBefore :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedReuseBeforeSourceRuntimeReadyAt
+        (closedReuseSourceOuterState arguments) sourceFrameRoots
+        bounded exact subset static
+  | reset =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedReuseAfterLiveCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedReuseResetSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | argument =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedReuseAfterResetCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedReuseArgSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | reuse =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = closedReuseAfterArgCode :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedReuseReuseSourceRuntimeReadyAt
+        arguments sourceFrameRoots bounded exact subset static
+  | ret =>
+      intro sourceFrameRoots sourceCode frames control
+      have codeEq : sourceCode = .return live :=
+        Control.code.inj control.symm
+      subst sourceCode
+      intro used remaining final targetCode bounded exact subset static
+      exact closedReuseReturnSourceRuntimeReadyAt
+        (closedReuseSourceReturnState arguments) sourceFrameRoots
+        bounded exact subset static
+  | yielded =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedReuseSourceYieldedState] at control
+  | cached empty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedReuseSourceCachedState] at control
+  | invoking notEmpty =>
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedReuseSourceInvokingState] at control
+
+/-- Every source state of the closed failed-token fixture satisfies the
+strong source-only runtime/ownership contract. -/
+theorem closedReuseSourceRuntimeOwnershipMachineInvariant
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineInvariant externals 5
+      (initialState closedReuseBeforeProgram `main arguments) :=
+  SourceRuntimeOwnershipMachineInvariant.of_inductive
+    (ClosedReuseSourceReachable arguments)
+    .entry closedReuseSourceReachable_step
+    closedReuseSourceReachable_ready
+
+theorem closedReuseSourceRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    SourceRuntimeOwnershipInitialInvariantOn externals 5
+      closedReuseBeforeProgram #[`main] := by
+  intro entry member arguments
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  exact
+    closedReuseSourceRuntimeOwnershipMachineInvariant externals arguments
+
+theorem closedReuseBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed closedReuseBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique, closedReuseBeforeProgram,
+          fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [closedReuseBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE (.letE (.letE .ret)))
+    · intro declaration member
+      simp [closedReuseBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩
+            (.letE ⟨.object, trivial⟩ .ret)))
+  · intro declaration member
+    simp [closedReuseBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+      closedReuseBefore, closedReuseLiveDecl, closedReuseTokenDecl,
+      closedReuseArgDecl, deadReuseDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds,
+      live, reuseTokenVar, reuseArgVar, dead]
+
+theorem closedReuseShadowProgramRun :
+    shadowProgram? 5 closedReuseBeforeProgram =
+      some closedReuseAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedReuseBeforeProgram, closedReuseAfterProgram,
+    fixtureDecl, decl, closedReuseShadowRun]
+
+/-- Whole-program correctness for the closed failed-token reset/reuse chain.
+The source allocates an unreachable constructor during the deleted reuse;
+the target omits the reset/token/argument/reuse suffix and returns the same
+tagged value. -/
+theorem closedReuseProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 5) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedReuseBeforeProgram closedReuseAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_sourceMachineInvariant
+    closedReuseBeforeProgramElimDeadWellFormed
+    closedReuseShadowProgramRun compatible
+    (closedReuseSourceRuntimeOwnershipInitialInvariant externals)
 
 end Fir.LeanIR.Passes.ElimDeadExamples
