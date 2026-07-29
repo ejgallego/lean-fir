@@ -749,6 +749,16 @@ one-cell reset/reuse, and owned-child reset/reuse fixtures now consume these
 shared laws instead of rebuilding the mixed local/ownership existential at
 each edge.
 
+The closed three-write chain also exercises the full client composition.
+`closedWritesExactOwnershipContract` packages its separate source and target
+finite graphs, one-step preservation, and exact-pair readiness as an
+`ElimDeadExactOwnershipContract`. The fail-closed checker is proved to compute
+the complete program target, and
+`closedWritesCompilerAdmissibleRun` combines that equation, compiler
+well-formedness, and the exact contract. Its public `LoweringCorrect` theorem
+therefore uses the strict compiler-facing endpoint rather than the older
+reachability-quantified helper.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -843,11 +853,11 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Package the local write/reset/reuse certificates into reusable
-   `ElimDeadExactOwnershipContract` combinators, beginning by replacing the
-   older reachability-quantified closed-writes endpoint.
-2. Derive the unmapped/source-only location premise from an auditable static
+1. Derive the unmapped/source-only location premise from an auditable static
    compiler ownership invariant, rather than an empty-target fixture shape.
+2. Route the closed reset/reuse and owned-child reset/reuse programs through
+   checked `ElimDeadCompilerAdmissibleRun` packages, reusing their existing
+   exact ownership contracts.
 3. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
