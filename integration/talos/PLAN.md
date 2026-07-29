@@ -3556,9 +3556,21 @@ slot, and `local.set` simulation from the production compiler/adapter plus
 `StateRelated`. The contract harness composes two aliases and a return through
 the structural theorem, demonstrating that the runtime-law interface scales
 past one-node declarations without certificates. The next slice generalizes
-this resource instance across read-only projections, where descriptor
-readiness remains the operation-specific semantic invariant. No FIR semantic
-contract or executable ABI changed.
+this resource instance across read-only projections. No FIR semantic contract
+or executable ABI changed.
+
+W6.6eg removes redundant constructor-descriptor readiness from that projection
+boundary. A successful semantic constructor decode at a related object word,
+together with `ConcreteRuntimeRel`, now recovers the constructor descriptor
+already carried by the whole-heap relation. The object- and `USize`-projection
+corollaries reuse that fact directly. Consequently,
+`codeWP_usizeProjectionLet` exposes no heap-shape premise, while
+`codeWP_objectProjectionLet` exposes only the selected field's ABI-kind
+agreement—the genuine compiler-typing obligation needed to relate the
+physical word. The public contract harness checks both reduced APIs. The next
+slice constructs the uniform `DirectLetRuntimeRefines` instance for read-only
+`USize` projection from this boundary and exact local-frame capacity. No FIR
+semantic contract or executable ABI changed.
 
 ## Parallel agent packages
 

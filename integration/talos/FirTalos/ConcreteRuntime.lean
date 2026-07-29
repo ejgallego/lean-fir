@@ -1756,6 +1756,125 @@ theorem isSharedStep_deadObject_of_refines
           simp [isSharedStep, clearFailure, Word32.ofUInt32_ofNat_value,
             concrete, ConcreteError.toTrap]
 
+/--
+A successful semantic constructor decode at a related object address recovers
+the constructor descriptor already carried by the whole-heap relation.
+
+This removes descriptor existence from projection clients: the source
+operation establishes that the object is a live constructor, while
+`ConcreteRuntimeRel` supplies its concrete descriptor.  Object-field kind
+agreement remains a separate compiler-typing obligation.
+-/
+theorem ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject : Value}
+    {location : Location} {cell : HeapCell} {object : ConstructorObject}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (decoded :
+      getConstructor runtime sourceObject = .ok (location, cell, object)) :
+    ∃ info fieldKinds,
+      witness.descriptors.lookup? objectWord =
+        some (.constructor info fieldKinds) := by
+  cases objectRelated with
+  | tobject objectRelated =>
+      cases objectRelated with
+      | tagged taggedRelated =>
+          cases taggedRelated <;>
+            simp [getConstructor, getLiveCell] at decoded
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped locationFound =>
+              obtain ⟨semanticCell, semanticFound, cellRelated⟩ :=
+                related.heap.concreteToSemantic _ _ locationFound
+              cases liveEq : semanticCell.live with
+              | false =>
+                  simp only [getConstructor, getLiveCell, semanticFound,
+                    liveEq, Bool.false_eq_true, if_false, Bind.bind,
+                    Except.bind] at decoded
+                  contradiction
+              | true =>
+                  have liveRelated := cellRelated.live_of_eq_true liveEq
+                  cases liveRelated with
+                  | constructor descriptor _ _ _ _ _ _ _ =>
+                      exact ⟨_, _, descriptor⟩
+                  | boxed _ objectEq _ _ _ _ =>
+                      simp only [getConstructor, getLiveCell, semanticFound,
+                        liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                      rw [objectEq] at decoded
+                      contradiction
+                  | natural _ objectEq _ _ _ _ _ _ _ _ _ =>
+                      simp only [getConstructor, getLiveCell, semanticFound,
+                        liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                      rw [objectEq] at decoded
+                      contradiction
+                  | integer _ objectEq _ _ _ _ =>
+                      simp only [getConstructor, getLiveCell, semanticFound,
+                        liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                      rw [objectEq] at decoded
+                      contradiction
+                  | string _ objectEq _ _ _ _ =>
+                      simp only [getConstructor, getLiveCell, semanticFound,
+                        liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                      rw [objectEq] at decoded
+                      contradiction
+                  | closure closureRelated =>
+                      cases closureRelated with
+                      | closure objectEq _ _ _ _ _ _ _ _ _ =>
+                          simp only [getConstructor, getLiveCell, semanticFound,
+                            liveEq, ↓reduceIte, Bind.bind, Except.bind] at decoded
+                          rw [objectEq] at decoded
+                          contradiction
+
+/-- Successful object-field projection supplies the constructor decode needed
+to recover its concrete descriptor. -/
+theorem ConcreteRuntimeRel.constructorDescriptor_of_getObjectField
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
+    {index : Nat}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getObjectField runtime sourceObject index = .ok value) :
+    ∃ info fieldKinds,
+      witness.descriptors.lookup? objectWord =
+        some (.constructor info fieldKinds) := by
+  unfold getObjectField at projected
+  cases decoded : getConstructor runtime sourceObject with
+  | error fault =>
+      rw [decoded] at projected
+      contradiction
+  | ok result =>
+      rcases result with ⟨location, cell, object⟩
+      exact
+        FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+          related objectRelated decoded
+
+/-- Successful absolute-slot `USize` projection likewise supplies the
+constructor decode needed to recover its concrete descriptor. -/
+theorem ConcreteRuntimeRel.constructorDescriptor_of_getUSizeSlot
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {objectWord : Word32} {sourceObject value : Value}
+    {slot : Nat}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 objectWord) sourceObject)
+    (projected : getUSizeSlot runtime sourceObject slot = .ok value) :
+    ∃ info fieldKinds,
+      witness.descriptors.lookup? objectWord =
+        some (.constructor info fieldKinds) := by
+  unfold getUSizeSlot at projected
+  cases decoded : getConstructor runtime sourceObject with
+  | error fault =>
+      rw [decoded] at projected
+      contradiction
+  | ok result =>
+      rcases result with ⟨location, cell, object⟩
+      exact
+        FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+          related objectRelated decoded
+
 /-- Successful semantic projection identifies a mapped constructor and the
 checked concrete read returns a field related at its static descriptor kind. -/
 theorem ConcreteRuntimeRel.readObjectField_refines

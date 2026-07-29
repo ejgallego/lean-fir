@@ -172,6 +172,10 @@ Object, `USize`, and packed integer projections now share one generic
 numeric object/result locals, runtime import, concrete resolver contract, and
 physical object operand from the real pipeline and `StateRelated`, then
 compose the existing W6 heap refinements with any verified continuation.
+Successful object and `USize` source reads now recover the constructor
+descriptor directly from `ConcreteRuntimeRel`; clients no longer restate
+descriptor existence. Object projection retains only selected-field ABI-kind
+agreement, and `USize` projection has no remaining heap-shape premise.
 `DirectValueEvaluates` and `codeWP_of_directValueEvaluates` now assemble these
 one-node boundaries into the first real structural theorem: arbitrary finite
 return/direct-value spines are proved by induction while the target split and

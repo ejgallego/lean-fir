@@ -1617,9 +1617,9 @@ Certificate-free recursive correctness for an object-projection `let`.
 
 The production compiler and adapter determine both local slots, the concrete
 projection import, and the continuation split.  The source/state relation
-determines the physical object operand.  The only projection-specific dynamic
-invariant exposed to the caller is the constructor descriptor for that
-operand; the concrete read and result relation then follow from W6.
+determines the physical object operand. Descriptor existence follows from the
+successful source constructor read and `ConcreteRuntimeRel`; only ABI-kind
+agreement for the selected object field remains explicit.
 -/
 theorem ConcreteSupportedExport.codeWP_objectProjectionLet
     {program : Fir.LeanIR.ImpureProgram}
@@ -1659,13 +1659,13 @@ theorem ConcreteSupportedExport.codeWP_objectProjectionLet
       getObjectField sourceRuntime sourceObject index = .ok value)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (descriptorReady :
-      ∀ {objectWord : Word32},
+    (fieldKindAligned :
+      ∀ {objectWord : Word32} {info : LCNF.CtorInfo}
+          {fieldKinds : Array AbiKind},
         ValueRel witness .tobject (.word32 objectWord) sourceObject →
-          ∃ info fieldKinds,
-            witness.descriptors.lookup? objectWord =
-                some (.constructor info fieldKinds) ∧
-              fieldKinds[index]? = some resultKind)
+          witness.descriptors.lookup? objectWord =
+              some (.constructor info fieldKinds) →
+            fieldKinds[index]? = some resultKind)
     (localSetReady :
       ∀ {resultIndex : Nat} {resultWord : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -1706,8 +1706,10 @@ theorem ConcreteSupportedExport.codeWP_objectProjectionLet
   have tobjectRelated := physicalRelated.toTObject objectRefines
   cases tobjectRelated with
   | word32 objectRelated =>
-      obtain ⟨info, fieldKinds, descriptor, fieldKind⟩ :=
-        descriptorReady objectRelated
+      obtain ⟨info, fieldKinds, descriptor⟩ :=
+        FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getObjectField
+          stateRelated.1 objectRelated projected
+      have fieldKind := fieldKindAligned objectRelated descriptor
       obtain ⟨resultWord, concreteRead, _, _⟩ :=
         objectProjStep_of_refines stateRelated.1 objectRelated descriptor
           fieldKind projected
@@ -1727,7 +1729,8 @@ theorem ConcreteSupportedExport.codeWP_objectProjectionLet
 /--
 Certificate-free recursive correctness for a `USize` projection `let`.
 The source object lane is recovered from the compiler-assigned local; the
-constructor descriptor is the only additional heap-shape invariant.
+successful source read and whole-heap relation recover its constructor
+descriptor automatically.
 -/
 theorem ConcreteSupportedExport.codeWP_usizeProjectionLet
     {program : Fir.LeanIR.ImpureProgram}
@@ -1768,12 +1771,6 @@ theorem ConcreteSupportedExport.codeWP_usizeProjectionLet
       getUSizeSlot sourceRuntime sourceObject index = .ok (.usize value))
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (descriptorReady :
-      ∀ {objectWord : Word32},
-        ValueRel witness .tobject (.word32 objectWord) sourceObject →
-          ∃ info fieldKinds,
-            witness.descriptors.lookup? objectWord =
-              some (.constructor info fieldKinds))
     (localSetReady :
       ∀ {resultIndex : Nat},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -1811,7 +1808,8 @@ theorem ConcreteSupportedExport.codeWP_usizeProjectionLet
   cases tobjectRelated with
   | word32 objectRelated =>
       obtain ⟨info, fieldKinds, descriptor⟩ :=
-        descriptorReady objectRelated
+        FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getUSizeSlot
+          stateRelated.1 objectRelated projected
       obtain ⟨updated, targetSet⟩ := localSetReady resultFound
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.usizeProjectionCall callFound

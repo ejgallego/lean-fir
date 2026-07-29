@@ -58,6 +58,10 @@ Cross-cutting W6.5 state:
   object operand and arbitrary continuation; and
   `ConcreteCompilerCorrectnessContract.lean` checks that the public
   applications have no caller-supplied simulation premise.
+  Successful semantic object and `USize` reads plus `ConcreteRuntimeRel`
+  recover their constructor descriptor automatically; the object rule keeps
+  only selected-field ABI-kind agreement, while the `USize` rule exposes no
+  descriptor-readiness premise.
   `DirectValueEvaluates` and `codeWP_of_directValueEvaluates` now provide the
   first structural source-evaluation induction for arbitrarily long
   return/direct-value spines. The only step interface is the uniform

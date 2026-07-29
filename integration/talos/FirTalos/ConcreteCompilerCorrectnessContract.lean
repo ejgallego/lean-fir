@@ -435,8 +435,8 @@ example
 
 /--
 Object projection is compositional without a target-code certificate.  Static
-slots and calls are derived; the caller exposes only the semantic read, the
-constructor descriptor invariant, local capacity, and the continuation IH.
+slots and calls are derived; the caller exposes only the semantic read,
+selected-field ABI-kind agreement, local capacity, and the continuation IH.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -476,13 +476,13 @@ example
       getObjectField sourceRuntime sourceObject index = .ok value)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (descriptorReady :
-      ∀ {objectWord : Word32},
+    (fieldKindAligned :
+      ∀ {objectWord : Word32} {info : LCNF.CtorInfo}
+          {fieldKinds : Array AbiKind},
         ValueRel witness .tobject (.word32 objectWord) sourceObject →
-          ∃ info fieldKinds,
-            witness.descriptors.lookup? objectWord =
-                some (.constructor info fieldKinds) ∧
-              fieldKinds[index]? = some resultKind)
+          witness.descriptors.lookup? objectWord =
+              some (.constructor info fieldKinds) →
+            fieldKinds[index]? = some resultKind)
     (localSetReady :
       ∀ {resultIndex : Nat} {resultWord : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -510,7 +510,7 @@ example
       spec.targetFunction.body initial locals witness tail Q :=
   spec.codeWP_objectProjectionLet valueEq valueKind objectCompiled
     objectRefines localCompiled sourceLookup projected stateRelated
-    descriptorReady localSetReady continued
+    fieldKindAligned localSetReady continued
 
 /-- `USize` projection has the same certificate-free recursive boundary. -/
 example
@@ -552,12 +552,6 @@ example
       getUSizeSlot sourceRuntime sourceObject index = .ok (.usize value))
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (descriptorReady :
-      ∀ {objectWord : Word32},
-        ValueRel witness .tobject (.word32 objectWord) sourceObject →
-          ∃ info fieldKinds,
-            witness.descriptors.lookup? objectWord =
-              some (.constructor info fieldKinds))
     (localSetReady :
       ∀ {resultIndex : Nat},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -581,7 +575,7 @@ example
       spec.targetFunction.body initial locals witness tail Q :=
   spec.codeWP_usizeProjectionLet valueEq valueKind objectCompiled
     objectRefines localCompiled sourceLookup projected stateRelated
-    descriptorReady localSetReady continued
+    localSetReady continued
 
 /--
 Packed integer projection exposes only its operation-specific concrete read

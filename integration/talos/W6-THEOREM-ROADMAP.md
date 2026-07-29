@@ -388,7 +388,11 @@ acceptance tests pass.
    certificate. The zero-argument local-alias instance is constructive:
    `ConcreteLocalFrameAligned` makes compiler-resolved destination writes
    total and is preserved by `local.set`; the contract harness composes two
-   such declarations. Extend this runtime law across the existing
+   such declarations. Successful object and `USize` source projections now
+   recover constructor-descriptor existence from `ConcreteRuntimeRel`;
+   object projection retains only selected-field ABI-kind agreement and
+   `USize` projection retains no heap-shape premise. Extend the constructive
+   runtime law first to `USize` projection, then across the remaining existing
    allocation/projection refinements for the currently admitted direct-value
    fragment.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
