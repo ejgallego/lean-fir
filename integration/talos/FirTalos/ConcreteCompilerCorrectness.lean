@@ -2249,6 +2249,112 @@ inductive LocalAliasSupported (context : Fir.Wasm.Context) :
       LocalAliasSupported context decl
 
 /--
+Static admission for a direct `USize` projection.
+
+The predicate contains only source/compiler typing facts: the object and
+destination symbolic locals, the target-independent ABI refinement, and the
+selected source slot.  Numeric locals, imports, concrete words, and heap
+descriptors remain outputs of compilation and state refinement.
+-/
+inductive USizeProjectionSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (index : Nat) (objectId : FVarId) (objectKind : AbiKind)
+      (valueEq : decl.value = .uproj index objectId)
+      (resultKind : Fir.Wasm.letValueKind decl = .ok .usize)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .usize)) :
+      USizeProjectionSupported context decl
+
+/-- Every successful absolute-slot `USize` read produces an unboxed word. -/
+theorem getUSizeSlot_ok_eq_usize
+    {runtime : RuntimeState} {object result : Value} {slot : Nat}
+    (read : getUSizeSlot runtime object slot = .ok result) :
+    ∃ word, result = .usize word := by
+  unfold getUSizeSlot at read
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at read
+  cases constructorResult with
+  | error fault =>
+      simp [Bind.bind, Except.bind] at read
+  | ok constructor =>
+      obtain ⟨location, cell, value⟩ := constructor
+      simp only [Bind.bind, Except.bind] at read
+      by_cases bounded : value.objectFields.size ≤ slot
+      · rw [if_pos bounded] at read
+        generalize fieldEq :
+          value.usizeFields[slot - value.objectFields.size]? = fieldResult
+            at read
+        cases fieldResult with
+        | none =>
+            simp at read
+        | some word =>
+            simp [Pure.pure, Except.pure] at read
+            cases read
+            exact ⟨word, rfl⟩
+      · rw [if_neg bounded] at read
+        contradiction
+
+/--
+Invert a successful source `USize` projection without introducing a separate
+evaluation certificate.
+-/
+theorem sourceLetResult_usizeProjection_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {index : Nat} {objectId : FVarId}
+    (valueEq : decl.value = .uproj index objectId)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject value,
+      nextRuntime = sourceRuntime ∧
+        sourceValue = .usize value ∧
+        lookup sourceEnv objectId = some sourceObject ∧
+        getUSizeSlot sourceRuntime sourceObject index = .ok (.usize value) := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases projected : getUSizeSlot sourceRuntime sourceObject index with
+      | error fault =>
+          rw [projected] at sourceStep
+          contradiction
+      | ok projectedValue =>
+          rw [projected] at sourceStep
+          have pairEq :
+              (sourceRuntime, LetAction.value projectedValue) =
+                (nextRuntime, LetAction.value sourceValue) := by
+            exact Except.ok.inj sourceStep
+          have runtimeEq : sourceRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : projectedValue = sourceValue := by
+            exact LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst sourceValue
+          obtain ⟨value, resultEq⟩ := getUSizeSlot_ok_eq_usize projected
+          subst projectedValue
+          exact ⟨sourceObject, value, runtimeEq.symm, rfl, rfl, projected⟩
+
+/--
 The concrete frame has exactly the parameter and local capacity allocated for
 the selected symbolic function.  Runtime and witness components are ignored:
 this is a threaded resource invariant, separate from semantic state
@@ -2517,6 +2623,92 @@ theorem directLetRuntimeRefines_localAlias
     letStepSimulates_localAlias valueEq sourceLookup stateRelated resultFound
       resultKindAt sourcePhysical physicalRelated targetSet,
     nextFrameAligned⟩
+
+/--
+Uniform runtime-law instance for direct `USize` projections in any concrete
+supported export.
+
+The source evaluation supplies the object and successful semantic read; the
+compiler and adapter supply the numeric object/import slots; `StateRelated`
+supplies the physical object word; and `ConcreteRuntimeRel` recovers the
+constructor descriptor.  Exact frame capacity alone justifies the generated
+i64 destination write.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_usizeProjection
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (USizeProjectionSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    frameAligned sourceStep stateRelated valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨index, objectId, objectKind, valueEq, resultKind, objectCompiled,
+      objectRefines, resultCompiled⟩
+  obtain ⟨sourceObject, value, rfl, rfl, sourceLookup, projected⟩ :=
+    sourceLetResult_usizeProjection_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.usizeProj index))] :=
+    compileLetValue_usizeProjection valueEq resultKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId]) (operation := .usizeProj index) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨info, fieldKinds, descriptor⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.constructorDescriptor_of_getUSizeSlot
+              stateRelated.1 objectRelated projected
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            frameAligned.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId (.usize value))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i64 value) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.usizeProjectionCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_usizeProjection valueEq sourceLookup projected
+              stateRelated resultFound resultKindAt hObject objectRelated
+              descriptor imported spec.hostsSatisfy inBounds contracted params
+              results targetSet,
+            nextFrameAligned⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
 
 /--
 Structural, certificate-free partial correctness for the direct-value code

@@ -71,8 +71,14 @@ Cross-cutting W6.5 state:
   compiler-resolved local bounds, a separately threaded exact frame-shape
   invariant, and `StateRelated`; a two-alias contract harness exercises the
   structural composition without supplying target instructions or indices.
-  Discharging the same law from the listed allocation/projection refinements,
-  then adding control-flow, calls, externals, caches, and faults, remains;
+  Read-only `USize` projections now construct the same law from source-only
+  projection admission, production compiler/adapter inversion, the related
+  physical object word, automatically recovered constructor descriptor,
+  resolved concrete host contract, and the preserved frame-shape invariant.
+  The harness applies arbitrary admitted `USize`-projection spines with no
+  target or descriptor witness. Discharging the law for object/scalar
+  projection and allocation, then adding control-flow, calls, externals,
+  caches, and faults, remains;
 - the current UTF-8 string writer has exact byte readback and spatial-frame
   theorems; fresh allocation preserves the frontier/old heap and establishes
   `StringObjectRel`; exact-value descriptor binding preserves witness

@@ -3572,6 +3572,22 @@ slice constructs the uniform `DirectLetRuntimeRefines` instance for read-only
 `USize` projection from this boundary and exact local-frame capacity. No FIR
 semantic contract or executable ABI changed.
 
+W6.6eh constructs the first heap-reading instance of the uniform structural
+runtime law. `USizeProjectionSupported` records only the source projection,
+compiler-selected object/result ABI kinds, and the object-to-`tobject`
+refinement; it contains no numeric local, import, target instruction, concrete
+word, or descriptor. Successful `SourceLetResult` is inverted to the exact
+object lookup and `USize` read. Production compilation/adaptation then
+determines the numeric object slot and runtime import, `StateRelated` resolves
+the physical object word, `ConcreteRuntimeRel` supplies its constructor
+descriptor, and exact frame capacity makes the generated i64 destination
+write total. `ConcreteSupportedExport.directLetRuntimeRefines_usizeProjection`
+therefore discharges `DirectLetRuntimeRefines` for arbitrarily long admitted
+projection spines, and the contract harness applies the structural theorem
+without a translation certificate or heap-shape premise. Object projection is
+next; unlike `USize`, it retains selected-field ABI-kind agreement as a static
+typing obligation. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

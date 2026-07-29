@@ -391,10 +391,13 @@ acceptance tests pass.
    such declarations. Successful object and `USize` source projections now
    recover constructor-descriptor existence from `ConcreteRuntimeRel`;
    object projection retains only selected-field ABI-kind agreement and
-   `USize` projection retains no heap-shape premise. Extend the constructive
-   runtime law first to `USize` projection, then across the remaining existing
-   allocation/projection refinements for the currently admitted direct-value
-   fragment.
+   `USize` projection retains no heap-shape premise. The constructive runtime
+   law now covers arbitrary admitted `USize`-projection spines: compiler and
+   adapter inversion, related physical object resolution, automatic descriptor
+   recovery, resolved host execution, and total i64 local writes discharge the
+   uniform step interface. Extend it next to object projection, then across
+   the remaining allocation/projection refinements for the currently admitted
+   direct-value fragment.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

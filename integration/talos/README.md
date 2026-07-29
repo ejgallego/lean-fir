@@ -191,6 +191,12 @@ of `StateRelated`; compiler-resolved local lookup proves each write is
 in-bounds, and the checked write preserves that invariant. A two-alias contract
 harness obtains both generated read/write pairs and every numeric slot from
 the real compiler and adapter.
+The same law is now constructive for read-only `USize` projections:
+`USizeProjectionSupported` contains source/compiler typing facts only, while
+the real adapter, related local frame, concrete heap relation, and resolved
+host recover the numeric read/call/write prefix and its successful concrete
+step. The structural contract harness accepts arbitrary admitted projection
+spines without a descriptor or translation-certificate premise.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
