@@ -687,8 +687,9 @@ advance from 2 to 0 function imports. The complete text audit is
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
 builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
-self-contained copy of the Wasm-resident runtime, raw-layout smoke
-client, descriptor, final LCNF, checksums, and capability metadata. The
+self-contained copy of the Wasm-resident runtime, production browser adapter,
+raw-layout smoke client, descriptor, final LCNF, checksums, and capability
+metadata. The
 canonical `_build/prettyM-current` symlink is moved only after its immutable
 release has passed the checksum and smoke gates:
 
@@ -698,13 +699,17 @@ cd _build/prettyM-current
 node smoke.mjs
 ```
 
-This package is explicitly experimental and unversioned. Its module owns its
-memory and allocator and has zero imports while preserving the exact
-`MonadPrettyFormat`
-output/newline/start-tag/end-tags event stream. The plain
-rendered `String` remains available as the trace's text projection. Node and
-the Chrome Worker decode the resident result constructor directly and compare
-the exact event stream with the native Lean 4.32 oracle.
+The raw Wasm ABI remains explicitly experimental and unversioned. Its module
+owns its memory and allocator and has zero imports while preserving the exact
+`MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The
+browser adapter separately declares versioned API, compact `Std.Format` input,
+and ownership capabilities in `BUILD.json`. It validates and measures the
+input, performs one bulk resident allocation, constructs the Lean 4.32 raw
+graph directly in module memory, synchronizes the monotone frontier across
+repeated calls, decodes the styled `PrettyTrace`, and reports phase timings.
+The plain rendered `String` remains available as the trace's text projection.
+Node and the Chrome Worker exercise this adapter as well as the raw client and
+compare the exact event stream with the native Lean 4.32 oracle.
 
 The invocation-bearing coverage artifact exercises the same export after its
 ordinary `Format` graph has crossed the initial-runtime manifest boundary:

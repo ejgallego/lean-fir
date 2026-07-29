@@ -16,19 +16,79 @@ PrettyTrace := { text : String, eventsRev : List PrettyEvent }
 PrettyEvent := { kind : Nat, text : String, value : Nat }
 ```
 
-The JavaScript smoke client constructs ordinary Lean 4.32 `Format` heap
-objects directly. It does not introduce another format AST or a high-level
-adapter. This is intentional for the current compiler/runtime work: consumers
-use the same low-level representation that the generated entry point sees.
+`prettyM-browser-adapter.mjs` is the production-oriented browser boundary.
+It accepts a compact, versioned JavaScript description of `Std.Format`, then
+constructs ordinary Lean 4.32 `Format` heap objects directly in the exported
+module memory. It does not implement a second pretty printer or runtime.
+Consumers that need the compiler-facing boundary may still call the raw export
+and allocator operations directly.
 `eventsRev` preserves the complete reverse-chronological
 `MonadPrettyFormat` protocol: text output, newlines, tag starts, and tag ends.
 The `text` field is the plain `String` projection for consumers that
 intentionally do not observe styling.
 
-This boundary is experimental and unversioned. `BUILD.json` sets its ABI
-version to `null` and records capabilities rather than promising compatibility:
-the measured import count, memory owner, current frontier operations, and both
-the semantic and physical output types.
+The underlying Wasm boundary remains experimental and unversioned:
+`BUILD.json` keeps its ABI version at `null`. The browser adapter has its own
+versioned API, input-layout, and ownership capabilities so a consumer can
+negotiate that smaller surface without treating every raw runtime detail as
+stable.
+
+## Browser adapter
+
+The public input layout is
+`lean-4.32-Std.Format.compact/v1`. Its TypeScript-style shape is:
+
+```ts
+type NatInput = bigint | number /* safe integer */ | string /* canonical decimal */;
+type IntInput = bigint | number /* safe integer */ | string /* canonical decimal */;
+
+type Format =
+  | { kind: "nil" }
+  | { kind: "line" }
+  | { kind: "align", force: boolean }
+  | { kind: "text", text: string }
+  | { kind: "nest", indent: IntInput, body: Format }
+  | { kind: "append", left: Format, right: Format }
+  | { kind: "group", body: Format, behavior?: "allOrNone" | "fill" | 0 | 1 }
+  | { kind: "tag", tag: NatInput, body: Format };
+```
+
+Use it from a browser Window or Worker:
+
+```js
+import {
+  PrettyFormat as F,
+  fetchPrettyMAdapter,
+} from "./prettyM-browser-adapter.mjs";
+
+const prettyM = await fetchPrettyMAdapter(
+  new URL("./prettyM.wasm", import.meta.url),
+);
+const result = prettyM.render({
+  format: F.group(F.append(F.text("hello"), F.line())),
+  width: 80,
+  indent: 0,
+  column: 0,
+});
+console.log(result.trace.text);
+console.log(result.trace.events); // exact styling protocol
+console.log(result.timings);
+console.log(result.memory);
+```
+
+`prepare`, `execute`, and `decode` are also public for consumers that need
+phase-separated timings. `render` performs those three phases immediately.
+Startup timings (`fetchMs`, `compileMs`, and `instantiateMs`) are exposed as
+`adapter.startupTimings`; each result reports normalization, resident
+allocation, raw encoding, execution, decoding, and aggregate timings.
+
+The adapter borrows the JavaScript input and never mutates it. Each call
+encodes a fresh owned Lean graph and transfers it to the entry point. Returned
+raw addresses are not exposed: `decode` copies the text and exact event stream
+into JavaScript values. Module memory is a monotone bump arena for the lifetime
+of the adapter instance. The adapter reads and validates the resident frontier
+before and after every phase, and uses one `fir_heap_alloc` call for the entire
+input graph. Discard the adapter instance to reclaim its arena.
 
 ## Build the package
 
@@ -94,23 +154,23 @@ inside the module. The styling-only fixed constructor-tag mutation is resident
 as well. All 21 lazy-cache publication operations are resident too: their
 reachable constructor and closure graphs are marked persistent recursively in
 Wasm while the compiler-generated module globals continue to own the cached
-physical lanes. The ten Nat/Int operations reachable from `prettyM` are also
-resident for canonical immediate and one-limb W6 numeric values, including the
-signed 32-bit representation transitions and full 64-bit magnitudes.
-Multi-limb numeric inputs remain explicitly fail-closed pending the recursive
-limb extension. All eight UTF-8 String operations reachable from `prettyM` and
-its four String literals are resident as well. Natural String positions and
-results use the same one-limb numeric surface. The two failure-only
+physical lanes. The ten Nat/Int operations reachable from `prettyM` are
+resident for canonical immediate, promoted one-limb, and arbitrary multi-limb
+values, including signed representation transitions and carry/borrow across
+limbs. All eight UTF-8 String operations reachable from `prettyM` and its four
+String literals are resident as well. The two failure-only
 panic/inhabited fallbacks are resident unconditional traps, preserving the
 previous fail-closed behavior without a host import.
 
-The smoke client prepares ordinary Lean values directly in the exported
-memory, advances the monotone resident frontier before each call, decodes the
-raw trace graph, and checks both its rendered text and exact tag boundaries
-against an event oracle also guarded by native Lean 4.32. Keeping this package
-separate provides a coherent integration snapshot while allocation families
-move behind the resident boundary; it does not freeze that boundary as a
-supported ABI.
+The smoke clients prepare ordinary Lean values directly in the exported
+memory, advance the monotone resident frontier, decode the raw trace graph, and
+check both rendered text and exact tag boundaries against an event oracle also
+guarded by native Lean 4.32. The browser-adapter smoke reuses the same compact
+input across two calls, checks a multi-limb width, verifies one resident bulk
+allocation per input, and checks frontier synchronization. Keeping this
+package separate provides a coherent integration snapshot while allocation
+families move behind the resident boundary; only the explicitly versioned
+adapter capabilities are intended for consumer negotiation.
 
 The module descriptor also carries the retained `closureDispatch` and
 `closureDescriptors` tables. They assign the target and capture-layout IDs

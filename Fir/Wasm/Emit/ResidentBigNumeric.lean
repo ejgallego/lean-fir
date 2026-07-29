@@ -212,9 +212,7 @@ private def requireOrdinary : List Instruction :=
   trapWhenTrue (
     load32 valueParam headerFlagsOffset ++
     [.i32Const .uint32 persistentFlag, .i32And]) ++
-  trapUnlessTrue (
-    load32 valueParam headerRefCountOffset ++
-    equalsConst .uint32 1)
+  trapUnlessTrue (load32 valueParam headerRefCountOffset)
 
 private def requireReservedZero : List Instruction :=
   trapWhenTrue (load32 valueParam headerAux2Offset) ++

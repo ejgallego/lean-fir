@@ -10,6 +10,9 @@ import {
 import {
   instantiateModuleArtifact,
 } from "./runtime/integration/talos/artifact/module-client.mjs";
+import {
+  checkPrettyMBrowserAdapter,
+} from "./check-prettyM-browser-adapter.mjs";
 
 const bytes = fs.readFileSync(new URL("./prettyM.wasm", import.meta.url));
 const manifest = JSON.parse(
@@ -32,6 +35,22 @@ assert.equal(build.compatibility.status, "experimental-unversioned");
 assert.equal(build.compatibility.abiVersion, null);
 assert.equal(build.capabilities.memoryOwner, "module");
 assert.equal(build.capabilities.functionImportCount, functionImportCount);
+assert.equal(
+  build.capabilities.browserAdapter.apiVersion,
+  "fir.prettyM.browser/v1",
+);
+assert.equal(
+  build.capabilities.inputLayout.version,
+  "lean-4.32-Std.Format.compact/v1",
+);
+assert.equal(
+  build.capabilities.ownership.version,
+  "fir.prettyM.module-owned-transfer/v1",
+);
+assert.equal(
+  build.capabilities.ownership.allocator,
+  "single-bulk-resident-allocation-per-render",
+);
 assert.equal(build.functionImports, functionImportCount);
 assert.equal(build.memoryImports, 0);
 assert.equal(build.memoryExports, 1);
@@ -76,3 +95,4 @@ const host = new ConcreteHost(
 );
 const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
 console.log(checkConcretePrettyFormatTraceModule(artifact));
+console.log(await checkPrettyMBrowserAdapter({ bytes, manifest, build }));

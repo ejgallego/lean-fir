@@ -57,6 +57,9 @@ import {
 import {
   checkFetchedResidentClosureMatches,
 } from "./resident-closure-matches-client.mjs";
+import {
+  checkFetchedPrettyMBrowserAdapter,
+} from "./check-prettyM-browser-adapter.mjs";
 
 try {
   const results = await Promise.all([
@@ -196,6 +199,9 @@ try {
     ),
     checkFetchedResidentClosureMatches(
       "./_build/resident-closure-matches.wasm",
+    ),
+    checkFetchedPrettyMBrowserAdapter(
+      "./_build/prettyM-current/prettyM.wasm",
     ),
   ]);
   globalThis.postMessage({ ok: true, result: results.join("\n") });

@@ -60,6 +60,10 @@ install -m 0644 "$source_artifact.json" "$stage/prettyM.wasm.json"
 install -m 0644 "$source_artifact.lcnf" "$stage/prettyM.wasm.lcnf"
 install -m 0644 "$here/prettyM-package/README.md" "$stage/README.md"
 install -m 0644 "$here/prettyM-package/smoke.mjs" "$stage/smoke.mjs"
+install -m 0644 "$here/prettyM-browser-adapter.mjs" \
+  "$stage/prettyM-browser-adapter.mjs"
+install -m 0644 "$here/check-prettyM-browser-adapter.mjs" \
+  "$stage/check-prettyM-browser-adapter.mjs"
 
 runtime_files=(
   check-concrete-pretty-format-module.mjs
@@ -132,6 +136,60 @@ const build = {
       alignment: 8,
     },
     functionImportCount: functionImports,
+    browserAdapter: {
+      module: "prettyM-browser-adapter.mjs",
+      apiVersion: "fir.prettyM.browser/v1",
+      phases: ["prepare", "execute", "decode", "render"],
+      timings: [
+        "fetchMs",
+        "compileMs",
+        "instantiateMs",
+        "normalizeMs",
+        "allocateMs",
+        "encodeMs",
+        "prepareMs",
+        "executeMs",
+        "decodeMs",
+        "totalMs",
+      ],
+    },
+    inputLayout: {
+      version: "lean-4.32-Std.Format.compact/v1",
+      leanVersion: "4.32.0",
+      representation: "compact-discriminated-union",
+      constructors: [
+        "nil",
+        "line",
+        "align",
+        "text",
+        "nest",
+        "append",
+        "group",
+        "tag",
+      ],
+      naturalInput: [
+        "bigint",
+        "safe-integer",
+        "canonical-unsigned-decimal-string",
+      ],
+      integerInput: [
+        "bigint",
+        "safe-integer",
+        "canonical-signed-decimal-string",
+      ],
+      rawTarget: "Lean 4.32 Std.Format",
+    },
+    ownership: {
+      version: "fir.prettyM.module-owned-transfer/v1",
+      publicInput: "borrowed-immutable-javascript",
+      encodedInput: "fresh-owned-lean-graph-transferred-to-entry",
+      output: "decoded-javascript-copy",
+      rawAddressesExposed: false,
+      memoryOwner: "module",
+      allocator: "single-bulk-resident-allocation-per-render",
+      frontier: "monotone-resynchronized-before-and-after-each-phase",
+      reclamation: "instance-lifetime-bump-arena",
+    },
     output: {
       semantic: "PrettyTrace",
       physical: manifest.result,
@@ -157,6 +215,8 @@ NODE
     prettyM.wasm \
     prettyM.wasm.json \
     prettyM.wasm.lcnf \
+    prettyM-browser-adapter.mjs \
+    check-prettyM-browser-adapter.mjs \
     smoke.mjs \
     runtime/integration/talos/artifact/*.mjs \
     runtime/scripts/*.mjs > SHA256SUMS
