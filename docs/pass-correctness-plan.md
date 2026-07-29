@@ -763,6 +763,19 @@ kernel fixture with one retained paired allocation and one deleted
 source-only allocation exercises the object-write bridge against a genuinely
 non-empty target.
 
+The ledger is now proof-relevant execution history rather than a certificate
+reconstructed only at a final state. `LedgerShadowRuntimeRel` pairs the
+ordinary runtime relation with its current `TargetAllocationLedger`.
+`LedgerShadowRuntimeRel.empty` initializes both components,
+`allocLeftGarbage` leaves the target ledger unchanged for a deleted
+source-only allocation, and the proof-relevant `allocBoth` result extends the
+ledger using the actual larger renaming returned by paired allocation.
+`LedgerBinderReadyReachableMachineRelated` and its existential-renaming
+wrapper expose this stronger history to machine clients, while their
+`related` theorems forget it back to the established public relation. The
+non-empty-target fixture now obtains its source-only write fact from this
+carried history rather than constructing a final-state ledger by hand.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -836,9 +849,11 @@ instantiate the inductive ownership contract for arbitrary compiler-produced
 entry states from auditable static ownership facts: in particular, to carry
 the target allocation ledger through arbitrary exact executions and derive
 each local operation shape from compiler typing and ownership invariants. The
-ledger now solves the address-map part without assuming an empty target; it
-still has to be threaded through the compiler-client invariant rather than
-constructed only by focused fixtures.
+ledger now solves the address-map part without assuming an empty target, and
+its proof-relevant carrier covers the allocation primitives. It still has to
+be threaded through the full non-lockstep machine-step matcher and the
+compiler-client invariant so arbitrary selected edges receive that history
+rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -879,12 +894,13 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Lift `TargetAllocationLedger` into an entry-indexed exact ownership
-   invariant that initializes at the empty renaming, extends on paired
-   allocations, and remains unchanged on deleted source-only allocations.
-2. Use that invariant to derive the ledger and source-only facts selected by
-   arbitrary deleted write/reset/reuse edges, leaving only their local
-   compiler typing/heap-shape certificates.
+1. Thread `SomeLedgerBinderReadyReachableMachineRelated` through the
+   non-lockstep machine-step matcher, preserving the carried ledger across
+   paired and deleted source-only allocation transitions.
+2. Define the ledger-aware entry-indexed exact ownership contract and use it
+   to derive the ledger and source-only facts selected by arbitrary deleted
+   write/reset/reuse edges, leaving only their local compiler
+   typing/heap-shape certificates.
 3. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
