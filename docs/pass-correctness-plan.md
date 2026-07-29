@@ -733,6 +733,22 @@ target's empty frontier certifies that the concrete source reuse token names
 an unreachable compiler-owned cell. These two fixtures check both branches
 of the public bridge end to end.
 
+Ownership-sensitive operations now have a reusable static-to-dynamic split.
+`DeletedObjectSetLocalReadyAt`, `DeletedUSizeSetLocalReadyAt`, and
+`DeletedScalarSetLocalReadyAt` record root-independent environment, heap-shape,
+and slot-bound facts. `DeletedReuseSomeLocalReadyAt` does the same for a
+concrete reuse token, while `DeletedResetLocalReadyAt` records a successful
+reset outcome independently of its active roots. The write/reuse certificates
+become dynamically ready when their source location is absent from the
+address map; an empty related target frontier is a convenient sufficient
+condition. For reset,
+`ShadowRuntimeRel.leftRuntimeReachableFrame_of_rightNextLocation_zero` proves
+that an outcome preserving the allocation frontier and non-heap observables
+may rewrite any number of source-only garbage cells. The closed three-write,
+one-cell reset/reuse, and owned-child reset/reuse fixtures now consume these
+shared laws instead of rebuilding the mixed local/ownership existential at
+each edge.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -784,8 +800,9 @@ The remaining general problem is therefore not an operational matcher, a
 missing whole-program theorem, an implicit nullary-purity assumption, an
 unauditable policy graph, or a reachability-shaped client API. It is to
 instantiate the inductive ownership contract for arbitrary compiler-produced
-entry states from auditable static ownership facts, especially concrete reuse
-token reachability and source-only reset/write unreachability.
+entry states from auditable static ownership facts: in particular, to derive
+the now-explicit unmapped/source-only location premise and local operation
+shape from compiler typing and ownership invariants.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -826,11 +843,14 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Generalize the closed ownership fixtures into reusable static-to-dynamic
-   laws for deleted writes, resets, and concrete reuse tokens.
-2. Extend the actual-pass matrix when new ownership laws or semantic
+1. Package the local write/reset/reuse certificates into reusable
+   `ElimDeadExactOwnershipContract` combinators, beginning by replacing the
+   older reachability-quantified closed-writes endpoint.
+2. Derive the unmapped/source-only location premise from an auditable static
+   compiler ownership invariant, rather than an empty-target fixture shape.
+3. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
-3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
+4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract and prove the queued closure-application preservation consumers
    before that shared validation stack lands.
 
