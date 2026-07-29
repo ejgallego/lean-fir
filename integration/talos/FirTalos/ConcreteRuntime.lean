@@ -1413,6 +1413,100 @@ theorem externalStep_of_refines
     physicalOfLane_related refined.2.2.2⟩
   simp [externalStep, decoded, refined.1, resultLaneMatches]
 
+/--
+Constructive Talos host step for a pure external that returns one heap-backed
+arbitrary-precision integer.
+
+The source result fixes the exact allocation cost. One path budget constructs
+the concrete allocation and handler invocation, then the ordinary generated
+external host step returns the related wasm32 object lane and the exact
+residual budget.
+-/
+theorem integerExternalStep_of_budget
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store Host) (physicalArgs : List Wasm.Value)
+    (concreteArgs : List LaneValue) (semanticArgs : Array Value)
+    (witness : RefinementWitness) (semanticRuntime : RuntimeState)
+    (semanticImplementation : ExternalImpl)
+    (value : Int) (remainingBytes : Nat)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness
+      semanticRuntime)
+    (requestRelated : ConcreteExternalRequestRel witness
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      (operation.request semanticArgs))
+    (implementationRelated :
+      initial.host.externals.IntegerResultRefines semanticImplementation)
+    (resultKindEq : resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call (operation.request semanticArgs)
+          semanticRuntime =
+        .ok (semanticIntegerExternalResponse semanticRuntime value))
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (fits : integerAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateInteger initial.host.runtime.heap value = .ok (result, address) ∧
+        externalStep operation resultKind initial physicalArgs =
+          .Return
+            [physicalOfLane
+              (concreteIntegerExternalResponse initial.host.runtime
+                result address).value]
+            (replaceRuntime initial
+              (initial.host.runtime.applyExternalResponse
+                (concreteExternalRequest operation resultKind
+                  concreteArgs.toArray)
+                (concreteIntegerExternalResponse initial.host.runtime
+                  result address))) ∧
+        semanticImplementation.call (operation.request semanticArgs)
+            semanticRuntime =
+          .ok (semanticIntegerExternalResponse semanticRuntime value) ∧
+        witness.Extends
+          (witness.bindInteger semanticRuntime.nextLocation address value) ∧
+        ConcreteRuntimeRel
+          (initial.host.runtime.applyExternalResponse
+            (concreteExternalRequest operation resultKind concreteArgs.toArray)
+            (concreteIntegerExternalResponse initial.host.runtime result address))
+          (witness.bindInteger semanticRuntime.nextLocation address value)
+          (semanticExternalRuntimeAfter (operation.request semanticArgs)
+            semanticRuntime
+            (semanticIntegerExternalResponse semanticRuntime value)) ∧
+        PhysicalValueRel
+          (witness.bindInteger semanticRuntime.nextLocation address value)
+          resultKind
+          (physicalOfLane
+            (concreteIntegerExternalResponse initial.host.runtime
+              result address).value)
+          (semanticIntegerExternalResponse semanticRuntime value).value ∧
+        result.AddressSpaceBudget
+          (remainingBytes - integerAllocationBytes value) := by
+  obtain ⟨result, address, allocated, concreteInvoke, semanticInvoke, post,
+      remainingBudget⟩ :=
+    runtimeRelated.invoke_pure_integer_result_refines_of_budget
+      implementationRelated requestRelated
+        (by simp [concreteExternalRequest, resultKindEq])
+      semanticCalled budget fits
+  have laneMatches :
+      ((concreteIntegerExternalResponse initial.host.runtime result address).value.valueType ==
+        resultKind.valueType) = true := by
+    exact valueRel_physical_type_beq post.value
+  have operationStep :
+      externalStep operation resultKind initial physicalArgs =
+        .Return
+          [physicalOfLane
+            (concreteIntegerExternalResponse initial.host.runtime
+              result address).value]
+          (replaceRuntime initial
+            (initial.host.runtime.applyExternalResponse
+              (concreteExternalRequest operation resultKind concreteArgs.toArray)
+              (concreteIntegerExternalResponse initial.host.runtime
+                result address))) := by
+    simp [externalStep, decoded, concreteInvoke, laneMatches]
+  exact ⟨result, address, allocated, operationStep, semanticInvoke,
+    post.witnessExtension, post.runtime, physicalOfLane_related post.value,
+    remainingBudget⟩
+
 /-- Decode one supported integer/USize operand into the concrete boxing
 vocabulary while retaining ABI-shape failures at the Talos boundary. -/
 def decodeBoxedScalar (kind : BoxedScalarKind) (physical : Wasm.Value) :

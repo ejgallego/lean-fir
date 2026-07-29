@@ -82,13 +82,13 @@ Cross-cutting W6.5 state:
   three-step request/resume/bind protocol and a source-execution cost index,
   which can express response-dependent arbitrary-precision allocation.
   `correctBudgetedSpine` packages exact source trace execution and concrete
-  export termination from reusable direct/external runtime laws. No concrete
-  pure-Int call family is admitted by this framework slice yet; `Int.ofNat`
-  and `Int.neg` are the next instances. Their allocation base is now
-  constructive: `integerAllocationBytes` gives the exact current
-  header-plus-limb cost and `allocateInteger_eq_ok_of_budget` constructs the
-  heap result with the exact residual budget, deriving limb-count
-  encodability without an extra premise.
+  export termination from reusable direct/external runtime laws. The pure-Int
+  host boundary is now constructive: `integerAllocationBytes` gives the exact
+  current header-plus-limb cost,
+  `invoke_pure_integer_result_refines_of_budget` constructs the allocation,
+  response, and extended witness, and `integerExternalStep_of_budget` exposes
+  the resulting Talos host return and exact residual budget. Compiler-shaped
+  `Int.ofNat` and `Int.neg` call admission remains the next instance.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

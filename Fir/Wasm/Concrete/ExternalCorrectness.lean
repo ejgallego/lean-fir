@@ -403,4 +403,85 @@ theorem ConcreteExternalImpl.invoke_pure_integer_result_refines
     responseRelated
     (by rfl)
 
+/--
+Operation-family correctness law for pure concrete handlers that materialize
+an arbitrary-precision integer result.
+
+This is a property of the two external implementations, not an execution
+certificate for one compiled program. For every pair of related requests and
+every successful source integer response, any successful invocation of the
+canonical concrete allocator determines the handler's exact response.
+-/
+def ConcreteExternalImpl.IntegerResultRefines
+    (concreteImplementation : ConcreteExternalImpl)
+    (semanticImplementation : ExternalImpl) : Prop :=
+  ∀ {concreteBefore : ConcreteRuntimeState}
+      {beforeWitness : RefinementWitness}
+      {semanticBefore : RuntimeState}
+      {concreteRequest : ConcreteExternalRequest}
+      {semanticRequest : ExternalRequest}
+      {value : Int} {result : MemoryState} {address : Word32},
+    ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore →
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest →
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticIntegerExternalResponse semanticBefore value) →
+      allocateInteger concreteBefore.heap value = .ok (result, address) →
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteIntegerExternalResponse concreteBefore result address)
+
+/--
+One exact source-facing budget turns an integer-result implementation law into
+the complete pure-external refinement postcondition.
+
+Allocation success, the physical address, and the extended witness are all
+constructed internally. The result includes the exact residual budget so a
+structural compiler proof can continue with the remaining source path.
+-/
+theorem ConcreteRuntimeRel.invoke_pure_integer_result_refines_of_budget
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {value : Int} {remainingBytes : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (implementationRelated :
+      concreteImplementation.IntegerResultRefines semanticImplementation)
+    (requestRelated :
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticIntegerExternalResponse semanticBefore value))
+    (budget :
+      concreteBefore.heap.AddressSpaceBudget remainingBytes)
+    (fits : integerAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateInteger concreteBefore.heap value = .ok (result, address) ∧
+        concreteImplementation.invoke concreteRequest concreteBefore =
+          .ok (concreteBefore.applyExternalResponse concreteRequest
+              (concreteIntegerExternalResponse concreteBefore result address),
+            (concreteIntegerExternalResponse concreteBefore result address).value) ∧
+        semanticImplementation.call semanticRequest semanticBefore =
+          .ok (semanticIntegerExternalResponse semanticBefore value) ∧
+        ConcretePureExternalPost concreteBefore beforeWitness
+          (beforeWitness.bindInteger semanticBefore.nextLocation address value)
+          semanticBefore concreteRequest semanticRequest
+          (concreteIntegerExternalResponse concreteBefore result address)
+          (semanticIntegerExternalResponse semanticBefore value) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - integerAllocationBytes value) := by
+  obtain ⟨result, address, allocated, remainingBudget⟩ :=
+    runtimeRelated.heap.frontier.allocateInteger_eq_ok_of_budget value budget fits
+  have concreteCalled :=
+    implementationRelated runtimeRelated requestRelated semanticCalled allocated
+  obtain ⟨concreteInvoke, semanticInvoke, post⟩ :=
+    concreteImplementation.invoke_pure_integer_result_refines runtimeRelated
+      requestRelated resultKind allocated concreteCalled semanticCalled
+  exact ⟨result, address, allocated, concreteInvoke, semanticInvoke, post,
+    remainingBudget⟩
+
 end Fir.Wasm.Concrete

@@ -288,6 +288,51 @@ example
   valid.allocateInteger_eq_ok_of_budget value budget fits
 
 /--
+The pure integer-result external boundary is an operation-family law plus the
+source result and its exact budget. Callers do not supply the concrete
+allocation, result address, extended witness, or handler response.
+-/
+example
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {beforeWitness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {value : Int} {remainingBytes : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore beforeWitness semanticBefore)
+    (implementationRelated :
+      concreteImplementation.IntegerResultRefines semanticImplementation)
+    (requestRelated :
+      ConcreteExternalRequestRel beforeWitness concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = .tobject)
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticIntegerExternalResponse semanticBefore value))
+    (budget :
+      concreteBefore.heap.AddressSpaceBudget remainingBytes)
+    (fits : integerAllocationBytes value ≤ remainingBytes) :
+    ∃ result address,
+      allocateInteger concreteBefore.heap value = .ok (result, address) ∧
+        concreteImplementation.invoke concreteRequest concreteBefore =
+          .ok (concreteBefore.applyExternalResponse concreteRequest
+              (concreteIntegerExternalResponse concreteBefore result address),
+            (concreteIntegerExternalResponse concreteBefore result address).value) ∧
+        semanticImplementation.call semanticRequest semanticBefore =
+          .ok (semanticIntegerExternalResponse semanticBefore value) ∧
+        ConcretePureExternalPost concreteBefore beforeWitness
+          (beforeWitness.bindInteger semanticBefore.nextLocation address value)
+          semanticBefore concreteRequest semanticRequest
+          (concreteIntegerExternalResponse concreteBefore result address)
+          (semanticIntegerExternalResponse semanticBefore value) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - integerAllocationBytes value) :=
+  runtimeRelated.invoke_pure_integer_result_refines_of_budget
+    implementationRelated requestRelated resultKind semanticCalled budget fits
+
+/--
 An arbitrary finite natural-literal spine uses one source-computed budget
 across immediate, promoted-tag, and heap-limb representations.
 -/

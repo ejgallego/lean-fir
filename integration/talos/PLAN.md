@@ -3839,6 +3839,22 @@ delta. This is the constructive allocation base for the forthcoming
 calls. The classifier and heap layout remain deliberately unstable. No FIR
 semantic contract or executable ABI changed.
 
+W6.6ex lifts that capacity result through the executable external-host
+boundary. `ConcreteExternalImpl.IntegerResultRefines` states one reusable law
+for an entire pair of concrete and semantic handler implementations; it is
+not an execution certificate for a compiled program. Given a related request,
+the source's canonical integer response, and the exact source-sized budget,
+`invoke_pure_integer_result_refines_of_budget` constructs the allocation,
+physical address, concrete response, witness extension, related runtime/value,
+and exact residual budget. `integerExternalStep_of_budget` then packages the
+same result as the Talos host step consumed by generated external-call code.
+The contract harness checks that no allocation result, target instruction,
+numeric Wasm index, or per-program simulation witness reaches the caller.
+The next slice derives the external-call instruction and decoded operands
+from the compiler/adapter and instantiates this family for `Int.ofNat` and
+`Int.neg`. These proof-facing laws and the heap layout remain deliberately
+unstable. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

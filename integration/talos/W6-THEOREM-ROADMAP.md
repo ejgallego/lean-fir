@@ -161,7 +161,12 @@ mixed spines. `integerAllocationBytes` and
 constructive: the semantic `Int` fixes the current aligned heap extent, one
 wasm32 source budget constructs the allocation and limb writes, and the same
 proof derives metadata encodability plus exact residual headroom. Concrete
-`Int.ofNat`/`Int.neg` operation-family instances remain the next proof slice.
+`ConcreteExternalImpl.IntegerResultRefines` is the reusable implementation
+law, and `invoke_pure_integer_result_refines_of_budget` plus
+`integerExternalStep_of_budget` construct the full concrete response, witness
+extension, related result, Talos host return, and residual budget without
+allocation or target witnesses. Compiler/adapter inversion and the concrete
+`Int.ofNat`/`Int.neg` instances remain the next proof slice.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
