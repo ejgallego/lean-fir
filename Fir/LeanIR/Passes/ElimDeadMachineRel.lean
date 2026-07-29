@@ -8176,6 +8176,23 @@ def ExactShadowCodeView.runtimeDecision
   | .scalarSetDeleted _ _ => .deletedScalarSet
   | _ => .static
 
+/-- An exact let traversal whose target is not a let must have selected the
+deleted branch.  This shape theorem lets ownership-sensitive clients consume
+only the deleted certificate when retained and deleted readiness are
+intentionally incompatible. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+    (view : ExactShadowCodeView initial fuel final
+      (.let declaration sourceContinuation) target)
+    (targetNotLet :
+      ∀ targetDeclaration targetContinuation,
+        target ≠ .let targetDeclaration targetContinuation) :
+    view.runtimeDecision = .deletedLet := by
+  cases view with
+  | letRetained continuation keep =>
+      exact (targetNotLet _ _ rfl).elim
+  | letDeleted continuation absent safe =>
+      rfl
+
 /-- Dynamic, operation-specific obligations at one proof-relevant exact
 compiler edge.  The exact view chooses the applicable branch, while the
 source syntax supplies its operation operands.  Liveness coverage and
@@ -8198,6 +8215,17 @@ def ExactShadowCodeRuntimeReadyAt
   | .sset object _ _ field _ _, .deletedScalarSet =>
       DeletedScalarSetReadyAt state roots object field
   | _, _ => True
+
+/-- A selected deleted exact let edge consumes only its deleted dynamic
+certificate.  This is the ownership-sensitive counterpart of
+`let_of_ready`, where a retained certificate may be false by design. -/
+theorem ExactShadowCodeRuntimeReadyAt.letDeleted
+    {view : ExactShadowCodeView initial fuel final
+      (.let declaration continuation) target}
+    (decision : view.runtimeDecision = .deletedLet)
+    (ready : DeletedLetReadyAt state roots declaration) :
+    ExactShadowCodeRuntimeReadyAt state roots view := by
+  simpa [ExactShadowCodeRuntimeReadyAt, decision] using ready
 
 /-- Package the two possible dynamic obligations for one exact let edge.
 The proof-relevant view chooses the retained or deleted certificate, while

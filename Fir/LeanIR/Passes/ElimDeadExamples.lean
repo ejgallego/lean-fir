@@ -1690,6 +1690,135 @@ theorem deletedReuseSomeReady :
   · rfl
   · exact deletedReuseSomeDestinationUnreachable
 
+/-- Exact transparent provenance for the concrete-token reuse deletion. -/
+def deletedReuseSomeExactGraph :
+    ExactShadowCodeGraph 2 neutralUsed
+      deletedReuseBefore deletedReuseAfter :=
+  ExactShadowCodeGraph.ofResult deletedReuseShadowRun
+
+/-- The reuse fixture's exact graph carries the hereditary absence proof for
+its deleted result binder. -/
+theorem deletedReuseSomeExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed
+      deletedReuseSomeExactGraph.view := by
+  apply deletedReuseSomeExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+          (Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+          reuseTokenVar)
+        reuseArgVar)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.object, trivial⟩
+    · apply ScopedCodeWellFormedTree.ret
+      native_decide
+  · simp [deletedReuseBefore, deadReuseDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, live, dead]
+
+/-- At the deleted edge's roots, retained concrete-token reuse readiness is
+constructively false: the token names exactly the unreachable cell certified
+for source-only overwrite. -/
+theorem deletedReuseSomeRetainedNotReady :
+    ¬RetainedLetReadyAt deletedReuseSomeSourceState
+      (runtimeRoots deletedReuseSomeSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseSomeSourceState.env ++ []))
+      deadReuseDecl.value := by
+  intro retained
+  apply deletedReuseSomeDestinationUnreachable
+  have reachable := retained 0 (by
+    simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar])
+  simpa using reachable
+
+/-- Concrete-token reuse is ready only for the actual deleted edge.  Its
+unreachable destination proves deleted ownership safety; asking for retained
+reuse readiness at these roots would require the opposite reachability fact. -/
+theorem deletedReuseSomeExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      deletedReuseSomeSourceState
+      (runtimeRoots deletedReuseSomeSourceState.runtime
+        (envRootsOn neutralUsed deletedReuseSomeSourceState.env ++ []))
+      deletedReuseBefore deletedReuseAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedReuseSomeExactGraph, UsedSubset.refl neutralUsed,
+    deletedReuseSomeExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt deletedReuseSomeSourceState
+        (runtimeRoots deletedReuseSomeSourceState.runtime
+          (envRootsOn neutralUsed deletedReuseSomeSourceState.env ++ []))
+        deadReuseDecl := by
+    unfold deadReuseDecl letDecl
+    exact .reuse dead dead.name objType reuseTokenVar oneFieldInfo true
+      #[.fvar reuseArgVar] (by simpa using deletedReuseSomeReady)
+  have decision :
+      deletedReuseSomeExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedReuseSomeExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedReuseAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
+/-- The single-declaration reuse fixtures retain their exact hereditary
+compiler graph. -/
+theorem deletedReuseSomeProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      deletedReuseBeforeProgram deletedReuseAfterProgram := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [fixtureDecl `main deletedReuseBefore]
+    [fixtureDecl `main deletedReuseAfter]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code ⟨neutralUsed, 2, neutralUsed, Nat.le_refl 2,
+        deletedReuseSomeExactGraph, UsedSubset.refl neutralUsed,
+        deletedReuseSomeExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- Full exact-provenance machine readiness for the concrete-token reuse
+pair. -/
+theorem deletedReuseSomeExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 2
+      deletedReuseSomeSourceState deletedReuseTargetState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed deletedReuseSomeSourceState.env,
+    envRootsOn neutralUsed deletedReuseTargetState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseSomeProgramBinderReadyRelated
+  · exact .code deletedReuseSomeExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+      (by
+        simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+          deletedReuseSomeEnvReachableRelated)
+  · simpa [deletedReuseSomeSourceState, deletedReuseTargetState] using
+      deletedReuseSomeRuntimeRelated
+
+/-- The exact dispatcher preserves hereditary compiler provenance after the
+concrete-token reuse overwrites its unreachable owned cell. -/
+theorem deletedReuseSomeExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedReuseSomeSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedReuseTargetState targetAfter ∧
+        SomeBinderReadyReachableMachineRelated 2 sourceAfter targetAfter :=
+  deletedReuseSomeExactMachineReadyAt.related.matchCodeStep_of_ready
+    deletedReuseSomeExactMachineReadyAt rfl step
+
 theorem deletedWriteRuntimeRelated :
     ShadowRuntimeRel emptyAddressRenaming deletedWriteSourceRuntime
       ({} : RuntimeState)
