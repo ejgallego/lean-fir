@@ -12566,6 +12566,50 @@ def BinderReadyReachableMachineReadyAt
       (sourceControlRoots ++ sourceFrameRoots)
       (targetControlRoots ++ targetFrameRoots)
 
+/-- Full hereditary machine readiness indexed by the exact allocation ledger
+for the same address renaming used by active code, environments, and frames.
+This aligned form is the entry surface for the unified ledger dispatcher. -/
+def LedgerBinderReadyReachableMachineReadyAt
+    (fuel : Nat) (source target : MachineState) : Prop :=
+  ∃ rho sourceControlRoots targetControlRoots
+      sourceFrameRoots targetFrameRoots,
+    ∃ _ledger : TargetAllocationLedger rho target.runtime.nextLocation,
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+          source.program target.program ∧
+      BinderReadyReachableControlReadyAt fuel rho source target
+        sourceFrameRoots source.control target.control sourceControlRoots
+        targetControlRoots ∧
+      BinderReadyReachableFramesRelated fuel rho source.frames target.frames
+        sourceFrameRoots targetFrameRoots ∧
+      ShadowRuntimeRel rho source.runtime target.runtime
+        (sourceControlRoots ++ sourceFrameRoots)
+        (targetControlRoots ++ targetFrameRoots)
+
+/-- Ledger readiness contains the exact hidden-renaming structural relation
+needed by the dispatcher. -/
+theorem LedgerBinderReadyReachableMachineReadyAt.related
+    (ready :
+      LedgerBinderReadyReachableMachineReadyAt fuel source target) :
+    SomeLedgerBinderReadyReachableMachineRelated fuel source target := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, ledger, programs, control, frames,
+    runtime⟩
+  exact ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control.related, frames,
+    runtime⟩
+
+/-- Forgetting the owner table recovers ordinary hereditary readiness. -/
+theorem LedgerBinderReadyReachableMachineReadyAt.readyAt
+    (ready :
+      LedgerBinderReadyReachableMachineReadyAt fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, _ledger, programs, control, frames,
+    runtime⟩
+  exact ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames,
+    runtime⟩
+
 /-- Dropping the active dynamic premise recovers the strong hereditary machine
 relation under the same renaming and root decomposition. -/
 theorem BinderReadyReachableMachineReadyAt.related
@@ -24992,6 +25036,251 @@ theorem ExactShadowCodeBinderReady.match_deletedReuseSomeLetStep_ledger
     (ready.letDeleted_continuationGraph fuelBound usedBound)
     joins env ready.letDeleted_ambientAbsent runtime localReady sourceOnly step
 
+/-- Exact retained reuse dispatcher with allocation history.  A successful
+source step determines whether the token is failed or concrete; the two
+ledger primitives then respectively extend the paired allocation history or
+preserve it through an existing-cell overwrite. -/
+theorem ExactShadowCodeBinderReady.match_retainedReuseLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId token : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim
+          (LCNF.LetValue.reuse token info updateHeader arguments :
+            LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reuse token info updateHeader arguments :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (retainedReady : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceCurrent := {
+    sourceState with
+    control := .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } sourceContinuation) }
+  have noStep {observation : Observation}
+      (done : coreStep sourceCurrent = .done observation) : False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } sourceContinuation) } = sourceCurrent by rfl] at transition
+        rw [done] at transition
+        contradiction
+  generalize sourceTokenRead :
+    lookupValue sourceState.env token = sourceTokenResult
+  cases sourceTokenResult with
+  | error fault =>
+      have done : coreStep sourceCurrent =
+          .done (observe sourceCurrent (.fault fault)) := by
+        simp [sourceCurrent, coreStep, evalLetValue, sourceTokenRead, fail,
+          Bind.bind, Except.bind]
+      exact (noStep done).elim
+  | ok sourceToken =>
+      generalize sourceArgumentsRead :
+        evalArgs sourceState.env arguments = sourceArgumentsResult
+      cases sourceArgumentsResult with
+      | error fault =>
+          have done : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, coreStep, evalLetValue, sourceTokenRead,
+              sourceArgumentsRead, fail, Bind.bind, Except.bind]
+          exact (noStep done).elim
+      | ok sourceArguments =>
+          generalize sourceEffect :
+            reuse sourceState.runtime sourceToken info updateHeader
+              sourceArguments = sourceReuseResult
+          cases sourceReuseResult with
+          | error fault =>
+              have done : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, evalLetValue, sourceTokenRead,
+                  sourceArgumentsRead, sourceEffect, fail,
+                  Bind.bind, Except.bind]
+              exact (noStep done).elim
+          | ok sourcePair =>
+              obtain ⟨sourceRuntime, sourceValue⟩ := sourcePair
+              have arity : sourceArguments.size = info.size := by
+                apply Classical.byContradiction
+                intro mismatch
+                cases sourceToken with
+                | reuseToken location? =>
+                    cases location? <;>
+                      simp [reuse, allocCtor, mismatch, Bind.bind,
+                        Except.bind] at sourceEffect
+                | object reference =>
+                    simp [reuse] at sourceEffect
+                | usize value =>
+                    simp [reuse] at sourceEffect
+                | scalar value =>
+                    simp [reuse] at sourceEffect
+                | erased =>
+                    simp [reuse] at sourceEffect
+              cases sourceToken with
+              | reuseToken location? =>
+                  cases location? with
+                  | none =>
+                      exact ready.match_retainedReuseNoneLetStep_ledger
+                        fuelBound usedBound sourceState targetState programs
+                        frames joins env sourceTokenRead sourceArgumentsRead
+                        arity runtime
+                        (by simpa [sourceCurrent] using step)
+                  | some location =>
+                      exact ready.match_retainedReuseSomeLetStep_ledger
+                        fuelBound usedBound sourceState targetState programs
+                        frames joins env retainedReady sourceTokenRead
+                        sourceArgumentsRead arity sourceEffect runtime
+                        (by simpa [sourceCurrent] using step)
+              | object reference =>
+                  simp [reuse] at sourceEffect
+              | usize value =>
+                  simp [reuse] at sourceEffect
+              | scalar value =>
+                  simp [reuse] at sourceEffect
+              | erased =>
+                  simp [reuse] at sourceEffect
+
+/-- Exact deleted reuse dispatcher with allocation history.  The active
+runtime certificate already selects a successful runtime-neutral or owned
+reuse step.  Since the compiled target stutters, its incoming ledger is
+definitionally the post-step ledger. -/
+theorem ExactShadowCodeBinderReady.match_deletedReuseLetStep_ledger
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId token : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains fvarId = false}
+    {safe :
+      safeToElim
+        (LCNF.LetValue.reuse token info updateHeader arguments :
+          LCNF.LetValue .impure) = true}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letDeleted
+          (declaration := {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          }) continuation absent safe))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      { fvarId, binderName, type,
+        value := .reuse token info updateHeader arguments })
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  cases deletedReady with
+  | runtimeNeutral declaration value evaluated =>
+      exact ready.match_deletedRuntimeNeutralLetStep_ledger
+        fuelBound usedBound sourceState targetState programs frames joins env
+        runtime evaluated step
+  | reuse fvarId binderName type token info updateHeader arguments reuseReady =>
+      rcases coreStep_deletedReuse_of_ready_binderReady
+          sourceState targetState programs frames
+          (ready.letDeleted_continuationGraph fuelBound usedBound)
+          joins env ready.letDeleted_ambientAbsent runtime.runtime reuseReady with
+        ⟨nextRuntime, value, transition, afterRelated⟩
+      have afterLedger :
+          LedgerBinderReadyReachableMachineRelated fuel rho
+            { sourceState with
+              runtime := nextRuntime
+              env := bind sourceState.env fvarId value
+              control := .code sourceContinuation }
+            { targetState with control := .code targetContinuation } :=
+        ⟨by simpa using runtime.ledger, afterRelated⟩
+      rcases match_sourceOnlyCoreStep_binderReady_ledger
+          transition afterLedger step with
+        ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+      exact ⟨targetAfter, targetPath, relatedAfter⟩
+
 /-- Complete graph-level matcher for reuse lets.  The retained branch consumes
 the concrete-token ownership readiness above; deleted reuse keeps its
 source-only garbage/unreachable-cell certificate. -/
@@ -25683,6 +25972,144 @@ theorem SomeBinderReadyReachableMachineRelated.matchYieldedStep
                               afterRelated⟩
                           rcases match_internalCoreSteps_binderReady
                               sourceTransition targetTransition afterRelated
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+
+/-- Ledger-aware yielded advance. Bind and apply restoration only rearrange
+published roots; cache restoration may mark a returned object persistent but
+does not advance the allocation frontier. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchYieldedStep
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases related with ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | yielded value =>
+          cases sourceFrames : source.frames with
+          | nil =>
+              have done : coreStep source =
+                  .done (observe source (.returned sourceValue)) := by
+                simp [coreStep, sourceControl, sourceFrames]
+              cases step with
+              | internal transition =>
+                  rw [done] at transition
+                  contradiction
+              | external transition externalProof =>
+                  rw [done] at transition
+                  contradiction
+          | cons sourceHead sourceTail =>
+              cases targetFrames : target.frames with
+              | nil =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames
+              | cons targetHead targetTail =>
+                  rw [sourceFrames, targetFrames] at frames
+                  cases frames with
+                  | cons head tail =>
+                      cases head with
+                      | @bind used sourceContinuation targetContinuation
+                          sourceJoins targetJoins sourceEnv targetEnv fvarId
+                          graph joins env =>
+                          have sourceSame : { source with
+                              frames := .bind fvarId sourceContinuation
+                                sourceEnv sourceJoins :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .bind fvarId targetContinuation
+                                targetEnv targetJoins :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedBind_binderReadyReachableRelated
+                                (binder := fvarId) source target programs tail
+                                graph joins env value runtime with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          have afterLedger :
+                              LedgerBinderReadyReachableMachineRelated
+                                fuel rho _ _ :=
+                            ⟨by simpa using ledger, afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady_ledger
+                              sourceTransition targetTransition afterLedger
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+                      | @apply sourceArguments targetArguments arguments =>
+                          have sourceSame : { source with
+                              frames := .apply sourceArguments :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .apply targetArguments :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedApply_binderReadyReachableRelated
+                                source target programs tail value arguments
+                                runtime with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          have afterLedger :
+                              LedgerBinderReadyReachableMachineRelated
+                                fuel rho _ _ :=
+                            ⟨by simpa using ledger, afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady_ledger
+                              sourceTransition targetTransition afterLedger
+                              (by simpa only [sourceSame] using step) with
+                            ⟨targetPath, finalRelated⟩
+                          exact ⟨_, by simpa only [targetSame] using targetPath,
+                            ⟨rho, finalRelated⟩⟩
+                      | cache name =>
+                          have sourceSame : { source with
+                              frames := .cache name :: sourceTail,
+                              control := .yielded sourceValue } = source := by
+                            cases source
+                            simp_all
+                          have targetSame : { target with
+                              frames := .cache name :: targetTail,
+                              control := .yielded targetValue } = target := by
+                            cases target
+                            simp_all
+                          rcases
+                              coreStep_yieldedCache_binderReadyReachableRelated
+                                (name := name) source target programs tail value
+                                (by simpa using runtime) with
+                            ⟨sourceTransition, targetTransition,
+                              afterRelated⟩
+                          have afterLedger :
+                              LedgerBinderReadyReachableMachineRelated
+                                fuel rho _ _ :=
+                            ⟨by
+                              simpa [RuntimeState.setGlobal] using ledger,
+                              afterRelated⟩
+                          rcases match_internalCoreSteps_binderReady_ledger
+                              sourceTransition targetTransition afterLedger
                               (by simpa only [sourceSame] using step) with
                             ⟨targetPath, finalRelated⟩
                           exact ⟨_, by simpa only [targetSame] using targetPath,
@@ -28858,6 +29285,114 @@ theorem match_jumpCodeStep_binderReady
                 ⟨targetPath, finalRelated⟩
               exact ⟨computedTargetAfter, targetPath, finalRelated⟩
 
+/-- Ledger-aware hereditary jump dispatcher.  Join lookup and parameter
+binding only rearrange environments and published roots; the selected target
+step therefore retains the incoming allocation frontier and owner table. -/
+theorem match_jumpCodeStep_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (graph : ShadowCodeGraph fuel used
+      (.jmp join arguments) targetCode)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.jmp join arguments) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetCode } targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have targetEq := graph.jumpTarget
+  subst targetCode
+  let sourceCurrent := {
+    sourceState with control := .code (.jmp join arguments) }
+  let targetCurrent := {
+    targetState with control := .code (.jmp join arguments) }
+  have noStep {observation : Observation}
+      (sourceDone : coreStep sourceCurrent = .done observation) :
+      False := by
+    cases step with
+    | internal transition =>
+        rw [show { sourceState with
+          control := .code (.jmp join arguments) } = sourceCurrent by
+            rfl] at transition
+        rw [sourceDone] at transition
+        contradiction
+    | external transition externalProof =>
+        rw [show { sourceState with
+          control := .code (.jmp join arguments) } = sourceCurrent by
+            rfl] at transition
+        rw [sourceDone] at transition
+        contradiction
+  generalize sourceFoundEq :
+    findJoinPoint? sourceState.joins join = sourceFound
+  cases sourceFound with
+  | none =>
+      have sourceDone : coreStep sourceCurrent =
+          .done (observe sourceCurrent
+            (.fault (.unknownJoinPoint join))) := by
+        simp [sourceCurrent, coreStep, sourceFoundEq, fail]
+      exact (noStep sourceDone).elim
+  | some sourceDeclaration =>
+      generalize sourceEvaluatedEq :
+        evalArgs sourceState.env arguments = sourceEvaluation
+      cases sourceEvaluation with
+      | error fault =>
+          have sourceDone : coreStep sourceCurrent =
+              .done (observe sourceCurrent (.fault fault)) := by
+            simp [sourceCurrent, coreStep, sourceFoundEq,
+              sourceEvaluatedEq, fail]
+          exact (noStep sourceDone).elim
+      | ok sourceValues =>
+          generalize sourceBindingEq :
+            bindParamsOver sourceState.env sourceDeclaration.params
+              sourceValues = sourceBinding
+          cases sourceBinding with
+          | error fault =>
+              have sourceDone : coreStep sourceCurrent =
+                  .done (observe sourceCurrent (.fault fault)) := by
+                simp [sourceCurrent, coreStep, sourceFoundEq,
+                  sourceEvaluatedEq, sourceBindingEq, fail]
+              exact (noStep sourceDone).elim
+          | ok sourceNextEnv =>
+              rcases coreStep_jump_binderReadyReachableRelated
+                  (rho := rho) sourceState targetState programs frames graph
+                  joins env sourceFoundEq sourceEvaluatedEq sourceBindingEq
+                  runtime.runtime with
+                ⟨targetDeclaration, targetValues, targetNextEnv,
+                  computedSourceAfter, computedTargetAfter,
+                  targetFound, targetEvaluated, targetBinding,
+                  sourceTransition, targetTransition, afterRelated⟩
+              have targetFrontier :
+                  computedTargetAfter.runtime.nextLocation =
+                    targetState.runtime.nextLocation := by
+                have mapped := congrArg
+                  (fun result =>
+                    match result with
+                    | .next state => state.runtime.nextLocation
+                    | _ => targetState.runtime.nextLocation)
+                  targetTransition
+                simpa [coreStep, targetFound, targetEvaluated,
+                  targetBinding] using mapped.symm
+              have afterLedger :
+                  LedgerBinderReadyReachableMachineRelated fuel rho
+                    computedSourceAfter computedTargetAfter :=
+                ⟨by simpa [targetFrontier] using runtime.ledger,
+                  afterRelated⟩
+              rcases match_internalCoreSteps_binderReady_ledger
+                  sourceTransition targetTransition afterLedger step with
+                ⟨targetPath, finalRelated⟩
+              exact ⟨computedTargetAfter, targetPath, finalRelated⟩
+
 /-- Terminal exact-jump view lifted through live join lookup and parameter
 binding into the hereditary machine relation. -/
 theorem ExactShadowCodeBinderReady.match_jumpStep
@@ -28899,6 +29434,49 @@ theorem ExactShadowCodeBinderReady.match_jumpStep
       |>.toShadowCodeGraphAt fuelBound usedBound
   exact match_jumpCodeStep_binderReady sourceState targetState programs frames
     graph joins env runtime step
+
+/-- Terminal exact-jump view lifted through live join lookup while retaining
+the target allocation ledger. -/
+theorem ExactShadowCodeBinderReady.match_jumpStep_ledger
+    {initial ambient : UsedLocals}
+    {terminalFuel fuel : Nat}
+    {join : FVarId} {arguments : Array (LCNF.Arg .impure)}
+    (_ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.jump
+          (initial := initial) (fuel := terminalFuel)
+          (join := join) (arguments := arguments)))
+    (fuelBound : terminalFuel ≤ fuel)
+    (usedBound :
+      UsedSubset (collectArgs (initial.insert join) arguments) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (step : Step externals
+      { sourceState with control := .code (.jmp join arguments) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code (.jmp join arguments) }
+        targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let graph :=
+    (ExactShadowCodeView.jump
+      (initial := initial) (fuel := terminalFuel)
+      (join := join) (arguments := arguments)).toGraph
+      |>.toShadowCodeGraphAt fuelBound usedBound
+  exact match_jumpCodeStep_binderReady_ledger
+    sourceState targetState programs frames graph joins env runtime step
 
 /-- Graph-level semantic-step dispatcher for retained case tables.  A source
 step determines a successful discriminant lookup, tag read, and arm choice.
@@ -33433,6 +34011,465 @@ theorem ExactShadowCodeBinderReady.match_codeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- Unified ledger-aware hereditary dispatcher for one exact compiler edge.
+Every allocating family returns the extended renaming and its exact target
+owner table; source-only and in-place families retain the incoming ledger.
+The deleted nullary-`.fap` branch remains impossible by the dynamic exact-edge
+certificate. -/
+theorem ExactShadowCodeBinderReady.match_codeStep_ledger
+    {initial final ambient : UsedLocals}
+    {remaining fuel : Nat}
+    {sourceCode targetCode : LCNF.Code .impure}
+    {view :
+      ExactShadowCodeView initial remaining final sourceCode targetCode}
+    (ready : ExactShadowCodeBinderReady ambient view)
+    (fuelBound : remaining ≤ fuel)
+    (usedBound : UsedSubset final ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (runtimeReady : ExactShadowCodeRuntimeReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      view)
+    (step : Step externals
+      (withCodeControl sourceState sourceCode) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState targetCode) targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  cases view with
+  | @letRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation declaration continuation keep =>
+      rcases declaration with ⟨fvarId, binderName, type, value⟩
+      cases value with
+      | lit literalValue =>
+          rcases ready.match_retainedLiteralLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | erased =>
+          rcases ready.match_retainedErasedLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fvar function arguments =>
+          rcases ready.match_retainedFVarLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | ctor info arguments =>
+          rcases ready.match_retainedCtorLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | oproj index object =>
+          rcases ready.match_retainedObjectProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | uproj index object =>
+          rcases ready.match_retainedUSizeProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | sproj index offset object =>
+          rcases ready.match_retainedScalarProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reset count object =>
+          rcases ready.match_retainedResetLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reuse token info updateHeader arguments =>
+          have retainedReady : RetainedLetReadyAt sourceState
+              (runtimeRoots sourceState.runtime
+                (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+              (.reuse token info updateHeader arguments) := by
+            simpa [ExactShadowCodeRuntimeReadyAt,
+              ExactShadowCodeView.runtimeDecision] using runtimeReady
+          rcases ready.match_retainedReuseLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env retainedReady runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | fap name arguments =>
+          rcases ready.match_retainedFapLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | pap name arguments =>
+          rcases ready.match_retainedPapLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | box boxedType input =>
+          rcases ready.match_retainedBoxLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨larger, targetAfter, _extension, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨larger, afterRelated⟩⟩
+      | unbox object =>
+          rcases ready.match_retainedUnboxLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | isShared object =>
+          rcases ready.match_retainedIsSharedLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | proj _ _ _ impossible | const _ _ _ impossible =>
+          nomatch impossible
+  | @letDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation declaration continuation absent safe =>
+      have deletedReady : DeletedLetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          declaration := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases declaration with ⟨fvarId, binderName, type, value⟩
+      cases value with
+      | lit literalValue =>
+          rcases ready.match_deletedLiteralLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | erased =>
+          rcases ready.match_deletedErasedLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fvar function arguments =>
+          rcases ready.match_deletedFVarLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | ctor info arguments =>
+          rcases ready.match_deletedCtorLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | oproj index object =>
+          rcases ready.match_deletedObjectProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | uproj index object =>
+          rcases ready.match_deletedUSizeProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | sproj index offset object =>
+          rcases ready.match_deletedScalarProjectionLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reset count object =>
+          rcases ready.match_deletedResetLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | reuse token info updateHeader arguments =>
+          rcases ready.match_deletedReuseLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | fap name arguments =>
+          cases deletedReady with
+          | runtimeNeutral declaration value evaluated =>
+              cases argumentsResult :
+                  evalArgs sourceState.env arguments <;>
+                simp [evalLetValue, argumentsResult, Functor.map, Except.map]
+                  at evaluated
+      | pap name arguments =>
+          rcases ready.match_deletedPapLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | box boxedType input =>
+          rcases ready.match_deletedBoxLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | unbox object =>
+          rcases ready.match_deletedUnboxLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | isShared object =>
+          rcases ready.match_deletedIsSharedLetStep_ledger
+              fuelBound usedBound sourceState targetState programs frames
+              joins env runtime deletedReady
+              (by simpa [withCodeControl] using step) with
+            ⟨targetAfter, targetPath, afterRelated⟩
+          exact ⟨targetAfter,
+            by simpa [withCodeControl] using targetPath,
+            ⟨rho, afterRelated⟩⟩
+      | proj _ _ _ impossible | const _ _ _ impossible =>
+          nomatch impossible
+  | @joinRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId bodyUsed sourceBody targetBody binderName
+      params type continuation live body =>
+      rcases ready.match_retainedJoinStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @joinDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation fvarId binderName params type sourceBody continuation
+      absent =>
+      rcases ready.match_deletedJoinStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @cases beforeDiscr nextFuel sourceAlternatives
+      targetAlternatives discr typeName resultType alternatives =>
+      rcases ready.match_casesStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @jump terminalFuel join arguments =>
+      rcases ready.match_jumpStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @«return» terminalFuel result =>
+      rcases ready.match_returnStep_ledger fuelBound usedBound
+          sourceState targetState programs frames env runtime
+          (by simpa [withCodeControl] using step) with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @unreachable terminalFuel type =>
+      have done :
+          coreStep (withCodeControl sourceState (.unreach type)) =
+            .done (observe
+              (withCodeControl sourceState (.unreach type))
+              (.fault .unreachable)) := by
+        simp [withCodeControl, coreStep, fail]
+      cases step with
+      | internal transition =>
+          rw [done] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [done] at transition
+          contradiction
+  | @objectSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation live =>
+      rcases ready.match_objectSetRetainedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @objectSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation absent =>
+      have deletedReady : DeletedObjectSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_objectSetDeletedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @usizeSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation live =>
+      rcases ready.match_usizeSetRetainedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @usizeSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object index field continuation absent =>
+      have deletedReady : DeletedUSizeSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object index field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_usizeSetDeletedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @scalarSetRetained nextFuel continuationUsed sourceContinuation
+      targetContinuation object width offset field type continuation live =>
+      rcases ready.match_scalarSetRetainedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @scalarSetDeleted nextFuel continuationUsed sourceContinuation
+      targetContinuation object width offset field type continuation absent =>
+      have deletedReady : DeletedScalarSetReadyAt sourceState
+          (runtimeRoots sourceState.runtime
+            (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+          object field := by
+        simpa [ExactShadowCodeRuntimeReadyAt,
+          ExactShadowCodeView.runtimeDecision] using runtimeReady
+      rcases ready.match_scalarSetDeletedStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime
+          deletedReady step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter,
+        by simpa [withCodeControl] using targetPath,
+        ⟨rho, afterRelated⟩⟩
+  | @tagSet nextFuel continuationUsed sourceContinuation targetContinuation
+      object tag continuation =>
+      rcases ready.match_setTagStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @increment nextFuel continuationUsed sourceContinuation
+      targetContinuation object amount check persistent continuation =>
+      rcases ready.match_incrementStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @decrement nextFuel continuationUsed sourceContinuation
+      targetContinuation object amount check persistent objects continuation =>
+      rcases ready.match_decrementStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+  | @delete nextFuel continuationUsed sourceContinuation targetContinuation
+      object continuation =>
+      rcases ready.match_deleteStep_ledger fuelBound usedBound
+          sourceState targetState programs frames joins env runtime step with
+        ⟨targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
+
 /-- State-level hereditary active-code advance.  The machine readiness
 certificate exposes the exact compiler edge and its active runtime
 obligation, so the exact dispatcher preserves binder-ready provenance in the
@@ -33555,6 +34592,138 @@ theorem SomeBinderReadyReachableMachineRelated.matchExternalStep_of_ready
         NonLockstep.reaches_of_step
           (.external targetTransition targetExternal),
         resumedRelated⟩
+
+/-- State-level ledger-aware active-code advance.  Readiness aligns the exact
+compiler view, runtime relation, and owner table under one renaming, so the
+exact ledger dispatcher can preserve that history without reconciling hidden
+existential witnesses. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchCodeStep_of_ready
+    (_related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (ready : LedgerBinderReadyReachableMachineReadyAt fuel source target)
+    (sourceControl : source.control = .code sourceCode)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases ready with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, ledger, programs, control, frames,
+    runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | code exactReady joins env =>
+          rcases exactReady with
+            ⟨remaining, final, fuelBound, exact, usedBound, static,
+              runtimeReady⟩
+          have sourceSame :
+              withCodeControl source sourceCode = source := by
+            cases source
+            simp_all [withCodeControl]
+          have targetSame :
+              withCodeControl target targetCode = target := by
+            cases target
+            simp_all [withCodeControl]
+          simpa only [sourceSame, targetSame] using
+            (static.match_codeStep_ledger fuelBound usedBound source target
+              programs frames joins env ⟨runtime, ledger⟩ runtimeReady
+              (by simpa only [sourceSame] using step))
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+
+/-- Every internal machine step preserves exact target allocation history
+once the active-code case is supplied with aligned ledger readiness. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchNextStep_of_ready
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (ready : LedgerBinderReadyReachableMachineReadyAt fuel source target)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready ready sourceControl
+        (.internal sourceTransition)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep sourceControl
+        (.internal sourceTransition)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueNext sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated⟩
+
+/-- Every external machine step preserves exact target allocation history
+under the allocation-capable foreign-response contract. -/
+theorem
+    SomeLedgerBinderReadyReachableMachineRelated.matchExternalStep_of_ready
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (ready : LedgerBinderReadyReachableMachineReadyAt fuel source target)
+    (transition : coreStep source = .external request waiting)
+    (externalProof : externals request source.runtime response) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        (resumeExternal request waiting response) targetAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready ready sourceControl
+        (.external transition externalProof)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep sourceControl
+        (.external transition externalProof)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameExternalResponse compatible sourceControl
+          transition externalProof with
+        ⟨larger, targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨larger, afterRelated⟩⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueExternalResponse compatible sourceControl
+          transition externalProof with
+        ⟨larger, targetAfter, targetPath, afterRelated⟩
+      exact ⟨targetAfter, targetPath, ⟨larger, afterRelated⟩⟩
+
+/-- Unified non-lockstep ledger dispatcher for an arbitrary source semantic
+step. Internal and external controls share one aligned readiness witness; the
+foreign contract is consumed only by the external-response branch. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchStep_of_ready
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (ready : LedgerBinderReadyReachableMachineReadyAt fuel source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  cases step with
+  | internal transition =>
+      exact related.matchNextStep_of_ready ready transition
+  | @external waiting request response transition externalProof =>
+      exact related.matchExternalStep_of_ready compatible ready transition
+        externalProof
 
 /-- Every semantic source step has a finite matching target path while the
 strong structural relation and hereditary source runtime invariant are both
