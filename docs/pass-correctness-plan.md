@@ -811,6 +811,20 @@ allocation from empty runtimes through the exact non-lockstep theorem, while a
 deleted regression proves that the target ledger remains empty after the
 source-only closure allocation.
 
+The box family now carries the ledger through both of its runtime
+representations. `LedgerBoxBothResult` distinguishes a tagged scalar or
+`USize`, which preserves the current renaming and ledger, from a heap-backed
+box, which returns the actual paired allocation and extended owner ledger.
+The runtime proof first constructs this data-bearing result under `Nonempty`
+and then selects it with `Classical.choice`, because eliminating the
+proposition-valued value relation directly into data is not permitted.
+`LedgerBoxLeftGarbageResult` records either the source tagged value or the
+source-only heap allocation while preserving the target ledger. Hereditary
+retained/deleted matchers and exact traversal-view wrappers expose both cases
+at the compiler boundary. A retained large-`UInt64` fixture forces paired heap
+allocation through the exact wrapper, and a deleted regression proves that
+the target owner ledger remains empty after the source-only allocation.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -886,10 +900,11 @@ the target allocation ledger through arbitrary exact executions and derive
 each local operation shape from compiler typing and ownership invariants. The
 ledger now solves the address-map part without assuming an empty target, and
 its proof-relevant carrier covers the allocation primitives and the complete
-literal-, constructor-, and partial-application-let matchers. It still has to
-be threaded through the remaining allocation families, the unified
-non-lockstep dispatcher, and the compiler-client invariant so arbitrary
-selected edges receive that history rather than only focused fixtures.
+literal-, constructor-, partial-application-, and box-let matchers. It still
+has to be threaded through failed-token reuse, existing-address and external
+response branches, the unified non-lockstep dispatcher, and the
+compiler-client invariant so arbitrary selected edges receive that history
+rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -931,8 +946,8 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Extend the ledger-aware runtime result and exact non-lockstep matcher
-   pattern from the completed literal, constructor, and partial-application
-   families to boxes and failed-token reuse, covering both paired and deleted
+   pattern from the completed literal, constructor, partial-application, and
+   box families to failed-token reuse, covering both paired and deleted
    source-only allocations.
 2. Preserve the ledger through the no-allocation/existing-address matcher
    families and strengthen the foreign-response boundary when an external
