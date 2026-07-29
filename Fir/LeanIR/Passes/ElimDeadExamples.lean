@@ -2168,6 +2168,229 @@ theorem deletedCtorExactStepPreserved
   deletedCtorExactMachineReadyAt.related.matchCodeStep_of_ready
     deletedCtorExactMachineReadyAt rfl step
 
+/-- Exact compiler provenance for the two-step closed-box deletion.  The
+backwards pass first deletes the box, which also makes its scalar input
+literal dead, so both source lets disappear. -/
+def closedBoxExactGraph :
+    ExactShadowCodeGraph 3 neutralUsed closedBoxBefore closedBoxAfter :=
+  ExactShadowCodeGraph.ofResult closedBoxShadowRun
+
+/-- Hereditary static readiness for the complete closed-box graph.  The live
+result is an ambient declaration parameter; both local binders are fresh and
+carry canonical impure runtime types. -/
+theorem closedBoxExactBinderReady :
+    ExactShadowCodeBinderReady neutralUsed closedBoxExactGraph.view := by
+  apply closedBoxExactGraph.binderReady_of_canonical
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+  · apply ScopedCodeWellFormedTree.letE
+    · native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · apply freshForScope_of_not_contains
+      native_decide
+    · exact ⟨.uint64, trivial⟩
+    · apply ScopedCodeWellFormedTree.letE
+      · native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · apply freshForScope_of_not_contains
+        native_decide
+      · exact ⟨.object, .uint64⟩
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+  · simp [closedBoxBefore, closedBoxInputDecl, deletedBoxBefore,
+      deadBoxDecl, letDecl, codeBinderIds, BinderNamesUnique,
+      live, dead, boxInputVar]
+
+/-- Exact active-code readiness for the first source-only scalar literal. -/
+theorem closedBoxLiteralExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      closedBoxSourceBodyState
+      (runtimeRoots closedBoxSourceBodyState.runtime
+        (envRootsOn neutralUsed closedBoxSourceBodyState.env ++ []))
+      closedBoxBefore closedBoxAfter := by
+  refine ⟨3, neutralUsed, Nat.le_refl 3,
+    closedBoxExactGraph, UsedSubset.refl neutralUsed,
+    closedBoxExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt closedBoxSourceBodyState
+        (runtimeRoots closedBoxSourceBodyState.runtime
+          (envRootsOn neutralUsed closedBoxSourceBodyState.env ++ []))
+        closedBoxInputDecl := by
+    unfold closedBoxInputDecl letDecl
+    exact .literal boxInputVar boxInputVar.name u64Type
+      (.uint64 18446744073709551615)
+  have decision :
+      closedBoxExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      closedBoxExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [closedBoxAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
+/-- Exact active-code readiness for the second source-only edge, where the
+scalar input produced by the first step is boxed into unreachable garbage. -/
+theorem closedBoxAllocationExactCodeReadyAt :
+    BinderReadyShadowCodeReadyAt 3 neutralUsed
+      closedBoxSourceAfterLiteralState
+      (runtimeRoots closedBoxSourceAfterLiteralState.runtime
+        (envRootsOn neutralUsed closedBoxSourceAfterLiteralState.env ++ []))
+      deletedBoxBefore closedBoxAfter := by
+  refine ⟨2, neutralUsed, by omega,
+    deletedBoxExactGraph, UsedSubset.refl neutralUsed,
+    deletedBoxExactBinderReady, ?_⟩
+  have decision :
+      deletedBoxExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedBoxExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedBoxAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision
+    closedBoxAfterLiteralUnifiedReady
+
+/-- Exact hereditary program relation for the parameterized closed-box
+declaration. -/
+theorem closedBoxProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 3)
+      closedBoxBeforeProgram closedBoxAfterProgram := by
+  unfold ProgramRelated
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 3))
+    [decl `main #[param live] objType (.code closedBoxBefore)]
+    [decl `main #[param live] objType (.code closedBoxAfter)]
+  apply ListRel.cons
+  · exact {
+      name_eq := rfl
+      levelParams_eq := rfl
+      type_eq := rfl
+      params_eq := rfl
+      safe_eq := rfl
+      value := .code
+        ⟨neutralUsed, 3, neutralUsed, Nat.le_refl 3,
+          closedBoxExactGraph, UsedSubset.refl neutralUsed,
+          closedBoxExactBinderReady⟩
+      recursive_eq := rfl
+      inlineAttr_eq := rfl
+    }
+  · exact .nil
+
+/-- The concrete erased parameter is related to itself at the empty-runtime
+entry state. -/
+theorem closedBoxArgumentsRelated :
+    ArrayRel (ValueRel emptyAddressRenaming)
+      (#[.erased] : Array Value) #[.erased] := by
+  change ListRel (ValueRel emptyAddressRenaming) [.erased] [.erased]
+  exact .cons .erased .nil
+
+/-- Exact hereditary readiness before resolving the parameterized `main`
+declaration. -/
+theorem closedBoxInitialExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      closedBoxSourceInitialState closedBoxTargetInitialState := by
+  simpa [closedBoxSourceInitialState, closedBoxTargetInitialState] using
+    initialState_binderReadyReachableMachineReadyAt
+      closedBoxProgramBinderReadyRelated closedBoxArgumentsRelated
+
+/-- Full exact-provenance readiness at the first deleted let. -/
+theorem closedBoxLiteralExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      closedBoxSourceBodyState closedBoxTargetBodyState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed closedBoxSourceBodyState.env,
+    envRootsOn neutralUsed closedBoxTargetBodyState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      closedBoxProgramBinderReadyRelated
+  · exact .code closedBoxLiteralExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by
+        simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+          liveEnvReachableRelated)
+  · simpa [closedBoxSourceBodyState, closedBoxTargetBodyState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+
+/-- Full exact-provenance readiness after the literal step, while the target
+continues to stutter at the final return. -/
+theorem closedBoxAllocationExactMachineReadyAt :
+    BinderReadyReachableMachineReadyAt 3
+      closedBoxSourceAfterLiteralState closedBoxTargetBodyState := by
+  refine ⟨emptyAddressRenaming,
+    envRootsOn neutralUsed closedBoxSourceAfterLiteralState.env,
+    envRootsOn neutralUsed closedBoxTargetBodyState.env,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [closedBoxSourceAfterLiteralState, closedBoxSourceBodyState,
+      closedBoxTargetBodyState] using closedBoxProgramBinderReadyRelated
+  · exact .code closedBoxAllocationExactCodeReadyAt
+      (BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed)
+      (by simpa using closedBoxAfterLiteralEnvRelated)
+  · simpa using closedBoxAfterLiteralRuntimeRelated
+
+/-- Resolving the declaration entry preserves exact provenance and reaches
+the first ready source-only edge. -/
+theorem closedBoxInitialExactStepPreserved
+    (externals : ExternalSpec) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        closedBoxTargetInitialState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3
+        closedBoxSourceBodyState targetAfter :=
+  closedBoxInitialExactMachineReadyAt.related.matchNextStep_of_ready
+    closedBoxInitialExactMachineReadyAt closedBoxInitialSteps.1
+
+/-- The exact dispatcher preserves hereditary provenance while the source
+evaluates the deleted scalar literal and the target stutters. -/
+theorem closedBoxLiteralExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals closedBoxSourceBodyState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals closedBoxTargetBodyState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  closedBoxLiteralExactMachineReadyAt.related.matchCodeStep_of_ready
+    closedBoxLiteralExactMachineReadyAt rfl step
+
+/-- The exact dispatcher preserves hereditary provenance across the second
+source-only step, which allocates an unreachable scalar box. -/
+theorem closedBoxAllocationExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals closedBoxSourceAfterLiteralState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals closedBoxTargetBodyState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
+  closedBoxAllocationExactMachineReadyAt.related.matchCodeStep_of_ready
+    closedBoxAllocationExactMachineReadyAt rfl step
+
+/-- Composed exact regression: the source takes both deleted let steps while
+the target may follow the non-lockstep path selected by the dispatcher, and
+hereditary compiler provenance survives at the endpoint. -/
+theorem closedBoxTwoSourceOnlyStepsExactPreserved
+    (externals : ExternalSpec) :
+    ∃ sourceAfter targetAfter,
+      NonLockstep.Reaches externals closedBoxSourceBodyState sourceAfter ∧
+      NonLockstep.Reaches externals closedBoxTargetBodyState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter := by
+  rcases closedBoxBoxStepRelated with
+    ⟨nextRuntime, boxValue, boxTransition, _related⟩
+  let sourceAfterBox : MachineState := {
+    closedBoxSourceAfterLiteralState with
+    runtime := nextRuntime
+    env := bind closedBoxSourceAfterLiteralState.env dead boxValue
+    control := .code (.return live) }
+  have boxTransition' :
+      coreStep closedBoxSourceAfterLiteralState = .next sourceAfterBox := by
+    simpa [sourceAfterBox] using boxTransition
+  rcases closedBoxAllocationExactStepPreserved externals
+      (.internal boxTransition') with
+    ⟨targetAfter, targetPath, endpoint⟩
+  refine ⟨sourceAfterBox, targetAfter, ?_, targetPath, endpoint⟩
+  exact
+    (NonLockstep.reaches_of_step
+      (.internal closedBoxLiteralStepRelated.1)).trans
+    (NonLockstep.reaches_of_step (.internal boxTransition'))
+
 theorem deletedReuseNoneReady :
     DeletedReuseReadyAt deletedReuseNoneSourceState
       (runtimeRoots deletedReuseNoneSourceState.runtime
