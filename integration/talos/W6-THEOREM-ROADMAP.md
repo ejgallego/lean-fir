@@ -123,7 +123,11 @@ Both String rules now use the source-facing
 `AddressSpaceBudget` plus the related frontier constructs raw allocation,
 header installation, and the full UTF-8 payload write. The exact budget
 consumption theorem is the resource transport intended for allocating
-direct-value induction.
+direct-value induction. `codeWP_stringLiteralLet_of_budget` now consumes that
+transport and supplies the exact residual budget to an arbitrary
+compiler-selected continuation. The general structural induction still needs
+an indexed before/after resource law to automate this composition across
+mixed allocating spines.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
@@ -411,8 +415,10 @@ acceptance tests pass.
    Compiled constructor arguments now derive their mixed local/erased physical
    relation, exact i32 decoding, and pointwise source refinement, and both the
    recursive and finite nonempty-constructor theorems consume that boundary
-   without an opaque concrete step. Thread the remaining capacity through
-   sequential allocating paths next.
+   without an opaque concrete step. Exact residual budgets are now exposed by
+   object, String, and nonempty-constructor allocation; the String recursive
+   compiler theorem passes its remainder to the continuation. Generalize the
+   structural runtime law to before/after resource indices next.
 4. Extend the direct theorem across cases, effects, calls, externals, and lazy
    caches. Reuse the existing W6 operation lemmas, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.

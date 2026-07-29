@@ -51,6 +51,11 @@ Cross-cutting W6.5 state:
   allocation success from aligned wasm32 `AllocationCapacity`; the reusable
   `AddressSpaceBudget.consume` law exposes exact remaining headroom for the
   forthcoming structural allocating spine.
+  `codeWP_stringLiteralLet_of_budget` now performs the first recursive
+  transport: one source-path budget constructs the allocation and its exact
+  residual budget is passed to the generated continuation. The lower object
+  and nonempty-constructor allocation boundaries expose the corresponding
+  residual budgets as well.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

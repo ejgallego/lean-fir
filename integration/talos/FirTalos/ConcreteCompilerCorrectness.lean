@@ -1724,6 +1724,101 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet
     nextRuntimeRelated valueRelated
 
 /--
+Budget-threaded recursive correctness for a UTF-8 String-literal `let`.
+
+Unlike the single-step capacity rule, the continuation receives the exact
+residual wasm32 path budget after the concrete String extent has been
+allocated.  This is the first allocating recursive compiler rule that can be
+composed sequentially without supplying a fresh capacity premise at every
+source node.
+-/
+theorem ConcreteSupportedExport.codeWP_stringLiteralLet_of_budget
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {value : String}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context (.let decl continuation)
+        sourceModule sourceFunction target hosts exportName)
+    (valueEq : decl.value = .lit (.str value))
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .object)
+    (localCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .object))
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q : Wasm.Assertion Host}
+    {remainingBytes : Nat}
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (allocationFits :
+      align8 (headerBytes + (stringUtf8Bytes value).length) ≤ remainingBytes)
+    (localSetReady :
+      ∀ {resultIndex} {word : Word32},
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+            some resultIndex →
+          ∃ updated,
+            locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated)
+    (continued :
+      ∀ {heap : MemoryState} {word : Word32}
+          {targetRest resultIndex updated nextWitness},
+        CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest →
+          findFVar? (functionBindings sourceFunction) decl.fvarId =
+              some resultIndex →
+          locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+              some updated →
+          witness.Extends nextWitness →
+          ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+              (literal sourceRuntime (.str value)).1 →
+          PhysicalValueRel nextWitness .object
+              (.i32 (UInt32.ofNat word.value))
+              (literal sourceRuntime (.str value)).2 →
+          heap.AddressSpaceBudget
+              (remainingBytes -
+                align8
+                  (headerBytes + (stringUtf8Bytes value).length)) →
+          CodeWP context sourceModule sourceFunction [] target.wasmModule
+            hosts.env (literal sourceRuntime (.str value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.str value)).2)
+            continuation targetRest (replaceHeap initial heap) updated
+            nextWitness tail Q) :
+    CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+      sourceRuntime sourceEnv (.let decl continuation)
+      spec.targetFunction.body initial locals witness tail Q := by
+  obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
+      resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
+    CodeAdapted.stringLiteralLet_eq spec.localsAligned valueEq valueKind
+      localCompiled spec.bodyAdapted
+  obtain ⟨heap, word, allocated, remainingBudget⟩ :=
+    stateRelated.1.heap.frontier.allocateString_eq_ok_of_budget value budget
+      allocationFits
+  obtain ⟨updated, targetSet⟩ := localSetReady resultFound
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.stringLiteralCall callFound
+  rw [bodyEq]
+  apply codeWP_stringLiteral_let valueEq valueCompiled callFound stateRelated
+    resultFound resultKindAt allocated imported spec.hostsSatisfy inBounds
+    contracted params results targetSet
+  intro nextWitness extension nextRuntimeRelated valueRelated
+  exact continued continuationAdapted resultFound targetSet extension
+    nextRuntimeRelated valueRelated remainingBudget
+
+/--
 Certificate-free recursive correctness for an object-projection `let`.
 
 The production compiler and adapter determine both local slots, the concrete

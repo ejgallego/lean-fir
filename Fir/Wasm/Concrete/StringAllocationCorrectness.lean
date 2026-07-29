@@ -345,6 +345,37 @@ theorem allocateString_decompose
               subst address
               exact ⟨byteCount, middle, rfl, objectAllocation, byteWrite, rfl⟩
 
+/--
+A source-path budget both makes UTF-8 String allocation constructive and is
+transported to the final payload-written heap after subtracting the exact
+aligned String extent.
+-/
+theorem MemoryState.FrontierInvariant.allocateString_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant) (value : String)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits :
+      align8 (headerBytes + (stringUtf8Bytes value).length) ≤ remainingBytes) :
+    ∃ result address,
+      allocateString state value = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes -
+            align8 (headerBytes + (stringUtf8Bytes value).length)) := by
+  obtain ⟨result, address, allocated⟩ :=
+    valid.allocateString_eq_ok_of_capacity value
+      (budget.allocationCapacity (by simpa using fits))
+  obtain ⟨byteCount, middle, _, objectAllocation, _, cursorEq⟩ :=
+    allocateString_decompose state result value address allocated
+  have middleBudget :=
+    budget.allocateObject valid.cursorAligned fits objectAllocation
+  refine ⟨result, address, allocated, {
+    cursorPositive := ?_
+    endWithinAddressSpace := ?_ }⟩
+  · rw [cursorEq]
+    exact middleBudget.cursorPositive
+  · rw [cursorEq]
+    exact middleBudget.endWithinAddressSpace
+
 /-- String allocation preserves every byte owned by the old concrete heap. -/
 theorem allocateString_prefixExtension
     (state result : MemoryState) (value : String) (address : Word32)

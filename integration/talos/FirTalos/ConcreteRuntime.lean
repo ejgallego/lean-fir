@@ -2793,6 +2793,65 @@ theorem allocCtorNonemptyStep_of_refines_of_capacity
       semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits
       objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines allocated⟩
 
+/--
+Budget-threaded nonempty constructor boundary. In addition to constructing the
+host/source refinement step, it exports the exact residual wasm32 path budget.
+-/
+theorem allocCtorNonemptyStep_of_refines_of_budget
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {info : Lean.Compiler.LCNF.CtorInfo}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {remainingBytes : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size)
+    (decoded : decodeConstructorWords 0 physicalArgs = .ok fields)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ word, fields.toArray[index]? = some word ∧
+        ValueRel witness kind (.word32 word) value)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (fits :
+      (ConstructorLayout.ofInfo info).allocationBytes ≤ remainingBytes) :
+    ∃ heap address,
+      heap.AddressSpaceBudget
+          (remainingBytes - (ConstructorLayout.ofInfo info).allocationBytes) ∧
+        let nextWitness := witness.bindConstructor runtime.nextLocation address
+          info fieldKinds
+        witness.Extends nextWitness ∧
+          allocCtorStep info fieldKinds resultKind initial physicalArgs =
+            .Return [.i32 (UInt32.ofNat address.value)]
+              (replaceHeap initial heap) ∧
+          ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+            (semanticConstructorResult runtime info semanticFields) ∧
+          PhysicalValueRel nextWitness resultKind
+            (.i32 (UInt32.ofNat address.value))
+            (.object (.heap runtime.nextLocation)) ∧
+          allocCtor runtime info semanticFields =
+            .ok (semanticConstructorResult runtime info semanticFields,
+              .object (.heap runtime.nextLocation)) := by
+  obtain ⟨heap, address, allocated, remainingBudget⟩ :=
+    MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_budget
+      runtimeRelated.heap.frontier info fields.toArray arity nonempty tagFits
+        objectFieldsFit usizeFieldsFit scalarBytesFit budget fits
+  exact ⟨heap, address, remainingBudget,
+    allocCtorNonemptyStep_of_refines runtimeRelated argsLength decoded arity
+      semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits
+      objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines allocated⟩
+
 /-- A related physical value always decodes to the exact W6 lane witnessed by
 `ValueRel`. -/
 theorem decodePhysicalLane_of_related

@@ -227,7 +227,13 @@ capacity at both the memory and concrete-operation refinement boundaries; the
 compiler theorem derives argument decoding and pointwise field refinement
 from compilation, evaluation, and `StateRelated`, so its public recursive and
 finite APIs no longer accept a concrete constructor-step witness. Sequential
-allocating paths still need recursive address-budget threading.
+allocation now has its first recursive transport rule:
+`codeWP_stringLiteralLet_of_budget` gives an arbitrary generated continuation
+the exact residual source-path budget after UTF-8 allocation. Object and
+constructor allocation expose the same exact residual boundary below the
+compiler. The general direct-value induction still needs a before/after
+indexed runtime law before mixed allocating spines can use that transport
+automatically.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

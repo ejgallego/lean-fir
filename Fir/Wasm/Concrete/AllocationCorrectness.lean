@@ -322,6 +322,39 @@ theorem MemoryState.allocateObject_eq_ok_of_capacity
   rw [written]
   rfl
 
+/--
+A successful checked object allocation consumes exactly its aligned object
+extent from a larger source-path address-space budget. Header installation
+changes memory bytes but not the raw allocator frontier.
+-/
+theorem MemoryState.AddressSpaceBudget.allocateObject
+    {state result : MemoryState} {remainingBytes payloadBytes : Nat}
+    {kind : ObjectKind} {persistent : Bool}
+    {aux0 aux1 aux2 aux3 : UInt32} {address : Word32}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (cursorAligned : state.heapCursor % target.heapAlignment = 0)
+    (fits : align8 (headerBytes + payloadBytes) ≤ remainingBytes)
+    (allocated :
+      state.allocateObject kind payloadBytes persistent aux0 aux1 aux2 aux3 =
+        .ok (result, address)) :
+    result.AddressSpaceBudget
+      (remainingBytes - align8 (headerBytes + payloadBytes)) := by
+  obtain ⟨middle, rawAllocation, _, cursorEq, _⟩ :=
+    MemoryState.allocateObject_header state result kind payloadBytes persistent
+      aux0 aux1 aux2 aux3 address allocated
+  have rawPost :=
+    MemoryState.allocate_spec state middle
+      (align8 (headerBytes + payloadBytes)) address rawAllocation
+  have consumed :=
+    budget.consume cursorAligned (by simpa using fits) rawPost
+  exact {
+    cursorPositive := by
+      rw [cursorEq]
+      exact consumed.cursorPositive
+    endWithinAddressSpace := by
+      rw [cursorEq]
+      simpa using consumed.endWithinAddressSpace }
+
 /-- A successful object allocation passes the full checked live-header read,
 including address class, liveness, aligned allocation size, and bounds. -/
 theorem MemoryState.readLiveHeader_of_allocateObject_eq_ok

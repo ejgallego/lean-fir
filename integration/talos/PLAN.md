@@ -3687,6 +3687,23 @@ to consume `AddressSpaceBudget.consume` in the structural direct-value
 induction so sequential allocating paths retain enough headroom. No FIR
 semantic contract or executable ABI changed.
 
+W6.6eo establishes the first exact sequential resource transport.
+`AddressSpaceBudget.allocateObject` proves that a successful checked object
+allocation consumes precisely its aligned header-plus-payload extent.
+Specializations for complete UTF-8 String allocation and nonempty constructor
+allocation construct the allocation and expose the corresponding residual
+budget. The concrete constructor host theorem carries that result through
+witness extension and source/runtime refinement.
+`codeWP_stringLiteralLet_of_budget` then threads one source-path budget through
+the actual compiler/adaptor String prefix and gives the exact remainder to the
+arbitrary compiler-selected continuation; the contract harness checks this
+certificate-free interface. This is enough to compose sequential String
+allocations manually. The general structural theorem still preserves a
+single unindexed invariant, so the next slice replaces that resource component
+with a before/after indexed law and supplies allocating String and constructor
+instances. The resource interface remains deliberately unstable while that
+design is completed. No FIR semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

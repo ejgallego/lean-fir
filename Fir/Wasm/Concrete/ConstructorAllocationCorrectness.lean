@@ -155,6 +155,58 @@ theorem MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_capa
   rw [fieldWrite]
   rfl
 
+/--
+A source-path budget makes one nonempty constructor allocation constructive
+and transports the residual budget through header and field installation.
+-/
+theorem MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (info : LCNF.CtorInfo) (fields : Array Word32)
+    (arity : fields.size = info.size)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0))
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits :
+      (ConstructorLayout.ofInfo info).allocationBytes ≤ remainingBytes) :
+    ∃ result address,
+      allocateConstructor state info fields = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes -
+            (ConstructorLayout.ofInfo info).allocationBytes) := by
+  let layout := ConstructorLayout.ofInfo info
+  have layoutMinimum : headerBytes ≤ layout.allocationBytes := by
+    dsimp only [layout]
+    simp only [ConstructorLayout.ofInfo]
+    exact Nat.le_trans (by omega) (align8_ge _)
+  have layoutAligned : align8 layout.allocationBytes = layout.allocationBytes := by
+    apply align8_eq_of_mod_eq_zero
+    simpa [target, layout] using ConstructorLayout.ofInfo_allocation_aligned info
+  have allocationEq :
+      align8 (headerBytes + (layout.allocationBytes - headerBytes)) =
+        layout.allocationBytes := by
+    rw [Nat.add_sub_of_le layoutMinimum, layoutAligned]
+  obtain ⟨result, address, allocated⟩ :=
+    valid.allocateConstructor_nonempty_eq_ok_of_capacity info fields arity
+      nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit
+      (budget.allocationCapacity (by simpa [layout, layoutAligned] using fits))
+  obtain ⟨middle, objectAllocation, _, cursorEq⟩ :=
+    allocateConstructor_nonempty_decompose state result info fields address arity
+      nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit allocated
+  have middleBudget :=
+    budget.allocateObject valid.cursorAligned
+      (by simpa [layout, allocationEq] using fits) objectAllocation
+  refine ⟨result, address, allocated, {
+    cursorPositive := ?_
+    endWithinAddressSpace := ?_ }⟩
+  · rw [cursorEq]
+    exact middleBudget.cursorPositive
+  · rw [cursorEq]
+    simpa [layout, allocationEq] using middleBudget.endWithinAddressSpace
+
 /-- A public nonempty constructor allocation preserves every byte owned below
 the old frontier, so all previously decoded heap cells can be framed. -/
 theorem allocateConstructor_nonempty_prefixExtension

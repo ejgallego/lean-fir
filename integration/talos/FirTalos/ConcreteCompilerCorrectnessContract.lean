@@ -341,8 +341,9 @@ example
     allocated localSetReady continued
 
 /--
-The UTF-8 String instance keeps the same recursive certificate-free boundary
-and derives concrete allocation from explicit wasm32 headroom.
+The UTF-8 String instance keeps the recursive certificate-free boundary,
+derives concrete allocation from one source-path budget, and gives the exact
+residual budget to the compiler-selected continuation.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -370,11 +371,13 @@ example
     {witness : RefinementWitness}
     {tail : List Wasm.Value}
     {Q : Wasm.Assertion Host}
+    {remainingBytes : Nat}
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
-    (allocationCapacity :
-      initial.host.runtime.heap.AllocationCapacity
-        (align8 (headerBytes + (stringUtf8Bytes value).length)))
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (allocationFits :
+      align8 (headerBytes + (stringUtf8Bytes value).length) ≤ remainingBytes)
     (localSetReady :
       ∀ {resultIndex} {word : Word32},
         findFVar? (functionBindings sourceFunction) decl.fvarId =
@@ -397,6 +400,10 @@ example
           PhysicalValueRel nextWitness .object
               (.i32 (UInt32.ofNat word.value))
               (literal sourceRuntime (.str value)).2 →
+          heap.AddressSpaceBudget
+              (remainingBytes -
+                align8
+                  (headerBytes + (stringUtf8Bytes value).length)) →
           CodeWP context sourceModule sourceFunction [] target.wasmModule
             hosts.env (literal sourceRuntime (.str value)).1
             (bind sourceEnv decl.fvarId
@@ -406,8 +413,8 @@ example
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
       spec.targetFunction.body initial locals witness tail Q :=
-  spec.codeWP_stringLiteralLet valueEq valueKind localCompiled stateRelated
-    allocationCapacity localSetReady continued
+  spec.codeWP_stringLiteralLet_of_budget valueEq valueKind localCompiled
+    stateRelated budget allocationFits localSetReady continued
 
 /--
 The first compositional API check. A natural literal and its return require
