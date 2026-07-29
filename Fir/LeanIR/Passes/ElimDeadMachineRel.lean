@@ -13171,6 +13171,28 @@ def BinderReadyReachableExternalSpecCompatible
           (resumeExternal sourceRequest sourceWaiting sourceResponse)
           (resumeExternal targetRequest targetWaiting targetResponse)
 
+/-- Ledger-aware foreign-response contract. A response may allocate on both
+sides, but its selected post-response renaming must extend the suspended
+renaming and its resumed machine relation must carry the exact target owner
+ledger at the response frontier. This prevents a foreign implementation from
+rewriting the ownership history of pre-existing target addresses. -/
+def LedgerBinderReadyReachableExternalSpecCompatible
+    (externals : ExternalSpec) (fuel : Nat) : Prop :=
+  ∀ {rho sourceBefore targetBefore sourceRequest targetRequest
+      sourceWaiting targetWaiting sourceResponse},
+    ExternalRequestRel rho sourceRequest targetRequest →
+    coreStep sourceBefore = .external sourceRequest sourceWaiting →
+    coreStep targetBefore = .external targetRequest targetWaiting →
+    LedgerBinderReadyReachableMachineRelated fuel rho
+      sourceWaiting targetWaiting →
+    externals sourceRequest sourceBefore.runtime sourceResponse →
+      ∃ larger targetResponse,
+        RenamingExtends rho larger ∧
+        externals targetRequest targetBefore.runtime targetResponse ∧
+        LedgerBinderReadyReachableMachineRelated fuel larger
+          (resumeExternal sourceRequest sourceWaiting sourceResponse)
+          (resumeExternal targetRequest targetWaiting targetResponse)
+
 /-- Compiler-side laws are independent of the foreign environment: the
 well-formedness invariant supplies active readiness and is stable along
 related finite executions. -/
@@ -27749,6 +27771,70 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueExternal
                                           by simpa only [targetSame] using
                                             targetStep,
                                           waiting⟩
+
+/-- Match a named external call through its allocation-capable response.
+Request suspension preserves the incoming ledger; the foreign compatibility
+contract selects an extending renaming and the exact post-response ledger. -/
+theorem
+    SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameExternalResponse
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition :
+      coreStep source = .external sourceRequest sourceWaiting)
+    (externalProof :
+      externals sourceRequest source.runtime sourceResponse) :
+    ∃ larger targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        (resumeExternal sourceRequest sourceWaiting sourceResponse)
+        targetAfter := by
+  rcases related.matchInvokeNameExternal sourceControl sourceTransition with
+    ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+      waitingRelated⟩
+  rcases compatible requests sourceTransition targetTransition waitingRelated
+      externalProof with
+    ⟨larger, targetResponse, _extension, targetExternal, resumedRelated⟩
+  exact ⟨larger,
+    resumeExternal targetRequest targetWaiting targetResponse,
+    NonLockstep.reaches_of_step
+      (.external targetTransition targetExternal),
+    resumedRelated⟩
+
+/-- Match a closure-mediated external call through its allocation-capable
+response. Live closure/request matching retains the suspended owner table,
+then the foreign contract extends it across the returned heaps and value. -/
+theorem
+    SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueExternalResponse
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition :
+      coreStep source = .external sourceRequest sourceWaiting)
+    (externalProof :
+      externals sourceRequest source.runtime sourceResponse) :
+    ∃ larger targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        (resumeExternal sourceRequest sourceWaiting sourceResponse)
+        targetAfter := by
+  rcases related.matchInvokeValueExternal sourceControl sourceTransition with
+    ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+      waitingRelated⟩
+  rcases compatible requests sourceTransition targetTransition waitingRelated
+      externalProof with
+    ⟨larger, targetResponse, _extension, targetExternal, resumedRelated⟩
+  exact ⟨larger,
+    resumeExternal targetRequest targetWaiting targetResponse,
+    NonLockstep.reaches_of_step
+      (.external targetTransition targetExternal),
+    resumedRelated⟩
 
 /-- State-level terminal dispatcher for closure calls.  Invalid immediate
 callees, mapped dead cells, live non-closures, unknown declarations, and
