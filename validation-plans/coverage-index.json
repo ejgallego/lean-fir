@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 536,
-        "minimumComparisons": 536,
+        "minimumCases": 581,
+        "minimumComparisons": 581,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 536,
-        "minimumComparisons": 1072,
+        "minimumCases": 581,
+        "minimumComparisons": 1162,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 545,
-      "minimumTierCases": 1081,
-      "minimumComparisons": 1617
+      "minimumUniqueCases": 590,
+      "minimumTierCases": 1171,
+      "minimumComparisons": 1752
     },
     "machine": {
-      "minimumCases": 545,
-      "minimumInterpreterSteps": 4520,
+      "minimumCases": 590,
+      "minimumInterpreterSteps": 4790,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -154,6 +154,29 @@
         "ByteArray.size",
         "Fir.Validation.Corpus.NativeEffects.recordByteArrayImpl",
         "Fir.Validation.Corpus.NativeEffects.recordImpl",
+        "ISize.abs",
+        "ISize.add",
+        "ISize.complement",
+        "ISize.decEq",
+        "ISize.decLe",
+        "ISize.decLt",
+        "ISize.div",
+        "ISize.land",
+        "ISize.lor",
+        "ISize.mod",
+        "ISize.mul",
+        "ISize.neg",
+        "ISize.ofInt",
+        "ISize.ofNat",
+        "ISize.shiftLeft",
+        "ISize.shiftRight",
+        "ISize.sub",
+        "ISize.toInt",
+        "ISize.toInt16",
+        "ISize.toInt32",
+        "ISize.toInt64",
+        "ISize.toInt8",
+        "ISize.xor",
         "Int.add",
         "Int.decEq",
         "Int.decLe",
@@ -184,6 +207,7 @@
         "Int16.shiftLeft",
         "Int16.shiftRight",
         "Int16.sub",
+        "Int16.toISize",
         "Int16.toInt",
         "Int16.toInt32",
         "Int16.toInt64",
@@ -206,6 +230,7 @@
         "Int32.shiftLeft",
         "Int32.shiftRight",
         "Int32.sub",
+        "Int32.toISize",
         "Int32.toInt",
         "Int32.toInt16",
         "Int32.toInt64",
@@ -228,6 +253,7 @@
         "Int64.shiftLeft",
         "Int64.shiftRight",
         "Int64.sub",
+        "Int64.toISize",
         "Int64.toInt",
         "Int64.toInt16",
         "Int64.toInt32",
@@ -250,6 +276,7 @@
         "Int8.shiftLeft",
         "Int8.shiftRight",
         "Int8.sub",
+        "Int8.toISize",
         "Int8.toInt",
         "Int8.toInt16",
         "Int8.toInt32",

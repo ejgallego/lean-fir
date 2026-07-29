@@ -526,6 +526,114 @@ def int64ToInt16 (value : Int64) : Int16 :=
 def int64ToInt32 (value : Int64) : Int32 :=
   Int64.toInt32 value
 
+@[noinline]
+def addISize (left right : ISize) : ISize :=
+  ISize.add left right
+
+@[noinline]
+def subISize (left right : ISize) : ISize :=
+  ISize.sub left right
+
+@[noinline]
+def mulISize (left right : ISize) : ISize :=
+  ISize.mul left right
+
+@[noinline]
+def divISize (left right : ISize) : ISize :=
+  ISize.div left right
+
+@[noinline]
+def modISize (left right : ISize) : ISize :=
+  ISize.mod left right
+
+@[noinline]
+def landISize (left right : ISize) : ISize :=
+  ISize.land left right
+
+@[noinline]
+def lorISize (left right : ISize) : ISize :=
+  ISize.lor left right
+
+@[noinline]
+def xorISize (left right : ISize) : ISize :=
+  ISize.xor left right
+
+@[noinline]
+def shiftLeftISize (value count : ISize) : ISize :=
+  ISize.shiftLeft value count
+
+@[noinline]
+def shiftRightISize (value count : ISize) : ISize :=
+  ISize.shiftRight value count
+
+@[noinline]
+def complementISize (value : ISize) : ISize :=
+  ISize.complement value
+
+@[noinline]
+def negISize (value : ISize) : ISize :=
+  ISize.neg value
+
+@[noinline]
+def absISize (value : ISize) : ISize :=
+  ISize.abs value
+
+@[noinline]
+def decideISizeEq (left right : ISize) : Bool :=
+  decide (left = right)
+
+@[noinline]
+def decideISizeLt (left right : ISize) : Bool :=
+  decide (left < right)
+
+@[noinline]
+def decideISizeLe (left right : ISize) : Bool :=
+  decide (left ≤ right)
+
+@[noinline]
+def natToISize (value : Nat) : ISize :=
+  ISize.ofNat value
+
+@[noinline]
+def intToISize (value : Int) : ISize :=
+  ISize.ofInt value
+
+@[noinline]
+def isizeToInt (value : ISize) : Int :=
+  ISize.toInt value
+
+@[noinline]
+def int8ToISize (value : Int8) : ISize :=
+  Int8.toISize value
+
+@[noinline]
+def int16ToISize (value : Int16) : ISize :=
+  Int16.toISize value
+
+@[noinline]
+def int32ToISize (value : Int32) : ISize :=
+  Int32.toISize value
+
+@[noinline]
+def int64ToISize (value : Int64) : ISize :=
+  Int64.toISize value
+
+@[noinline]
+def isizeToInt8 (value : ISize) : Int8 :=
+  ISize.toInt8 value
+
+@[noinline]
+def isizeToInt16 (value : ISize) : Int16 :=
+  ISize.toInt16 value
+
+@[noinline]
+def isizeToInt32 (value : ISize) : Int32 :=
+  ISize.toInt32 value
+
+@[noinline]
+def isizeToInt64 (value : ISize) : Int64 :=
+  ISize.toInt64 value
+
 def idUInt8 (value : UInt8) : UInt8 :=
   value
 
@@ -2051,6 +2159,12 @@ private def int32CaseCodec : FixedWidthCaseCodec Int32 where
 private def int64CaseCodec : FixedWidthCaseCodec Int64 where
   schema := .bits 64
   datum value := .bits 64 value.toUInt64
+  externalTag := "fixed-width-signed-external"
+  conversionTag := "fixed-width-signed-conversion"
+
+private def isizeCaseCodec : FixedWidthCaseCodec ISize where
+  schema := .usize
+  datum value := .usize value.toUSize.toUInt64
   externalTag := "fixed-width-signed-external"
   conversionTag := "fixed-width-signed-conversion"
 
@@ -7361,6 +7475,33 @@ private def int64CaseFamily : SignedFixedWidthCaseFamily Int64 where
   decLt := Source.decideInt64Lt
   decLe := Source.decideInt64Le
 
+private def isizeCaseFamily : SignedFixedWidthCaseFamily ISize where
+  typeName := ``ISize
+  typeId := "isize"
+  sourceSuffix := "ISize"
+  width := System.Platform.numBits
+  wasmLaneTag := "i64"
+  codec := isizeCaseCodec
+  ofNat := Source.natToISize
+  ofInt := Source.intToISize
+  toInt := Source.isizeToInt
+  add := Source.addISize
+  sub := Source.subISize
+  mul := Source.mulISize
+  div := Source.divISize
+  modulo := Source.modISize
+  land := Source.landISize
+  lor := Source.lorISize
+  xor := Source.xorISize
+  shiftLeft := Source.shiftLeftISize
+  shiftRight := Source.shiftRightISize
+  complement := Source.complementISize
+  neg := Source.negISize
+  abs := Source.absISize
+  decEq := Source.decideISizeEq
+  decLt := Source.decideISizeLt
+  decLe := Source.decideISizeLe
+
 private def signedCrossConversionCases : Array Case := #[
   exactFixedWidthConversionExternalCase int8CaseCodec int16CaseCodec
     "int8-to-int16-sign-extend" ``Source.int8ToInt16 Source.int8ToInt16
@@ -7433,7 +7574,55 @@ private def signedCrossConversionCases : Array Case := #[
     ``Int64.toInt32 (Int64.ofInt (-2147483649))
     #["stress", "scalar", "int32", "int64", "signed", "conversion",
       "truncation", "narrowing", "underflow", "boundary", "i64"]
-    "Truncate Int64 negative 2147483649 to the signed Int32 maximum bit pattern"
+    "Truncate Int64 negative 2147483649 to the signed Int32 maximum bit pattern",
+  exactFixedWidthConversionExternalCase int8CaseCodec isizeCaseCodec
+    "int8-to-isize-sign-extend" ``Source.int8ToISize Source.int8ToISize
+    ``Int8.toISize (int8Value (-128))
+    #["stress", "scalar", "int8", "isize", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int8 minimum through the lossless Int8-to-ISize conversion",
+  exactFixedWidthConversionExternalCase int16CaseCodec isizeCaseCodec
+    "int16-to-isize-sign-extend" ``Source.int16ToISize Source.int16ToISize
+    ``Int16.toISize (Int16.ofInt (-32768))
+    #["stress", "scalar", "int16", "isize", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int16 minimum through the lossless Int16-to-ISize conversion",
+  exactFixedWidthConversionExternalCase int32CaseCodec isizeCaseCodec
+    "int32-to-isize-sign-extend" ``Source.int32ToISize Source.int32ToISize
+    ``Int32.toISize (Int32.ofInt (-2147483648))
+    #["stress", "scalar", "int32", "isize", "signed", "conversion",
+      "sign-extension", "widening", "boundary", "i64"]
+    "Sign-extend the Int32 minimum through the lossless Int32-to-ISize conversion",
+  exactFixedWidthConversionExternalCase int64CaseCodec isizeCaseCodec
+    "int64-to-isize-same-width" ``Source.int64ToISize Source.int64ToISize
+    ``Int64.toISize (Int64.ofInt (-9223372036854775808))
+    #["stress", "scalar", "int64", "isize", "signed", "conversion",
+      "same-width", "bit-pattern", "minimum", "boundary", "i64"]
+    "Preserve the signed minimum bit pattern across Int64-to-ISize conversion",
+  exactFixedWidthConversionExternalCase isizeCaseCodec int8CaseCodec
+    "isize-to-int8-truncate" ``Source.isizeToInt8 Source.isizeToInt8
+    ``ISize.toInt8 (ISize.ofInt (-129))
+    #["stress", "scalar", "int8", "isize", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate ISize negative 129 to the signed Int8 maximum bit pattern",
+  exactFixedWidthConversionExternalCase isizeCaseCodec int16CaseCodec
+    "isize-to-int16-truncate" ``Source.isizeToInt16 Source.isizeToInt16
+    ``ISize.toInt16 (ISize.ofInt (-32769))
+    #["stress", "scalar", "int16", "isize", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate ISize negative 32769 to the signed Int16 maximum bit pattern",
+  exactFixedWidthConversionExternalCase isizeCaseCodec int32CaseCodec
+    "isize-to-int32-truncate" ``Source.isizeToInt32 Source.isizeToInt32
+    ``ISize.toInt32 (ISize.ofInt (-2147483649))
+    #["stress", "scalar", "int32", "isize", "signed", "conversion",
+      "truncation", "narrowing", "underflow", "boundary", "i64"]
+    "Truncate ISize negative 2147483649 to the signed Int32 maximum bit pattern",
+  exactFixedWidthConversionExternalCase isizeCaseCodec int64CaseCodec
+    "isize-to-int64-same-width" ``Source.isizeToInt64 Source.isizeToInt64
+    ``ISize.toInt64 (ISize.ofInt (-9223372036854775808))
+    #["stress", "scalar", "int64", "isize", "signed", "conversion",
+      "same-width", "bit-pattern", "minimum", "boundary", "i64"]
+    "Preserve the signed minimum bit pattern across ISize-to-Int64 conversion"
 ]
 
 private def int16Cases : Array Case :=
@@ -7445,9 +7634,12 @@ private def int32Cases : Array Case :=
 private def int64Cases : Array Case :=
   signedFixedWidthCases int64CaseFamily
 
+private def isizeCases : Array Case :=
+  signedFixedWidthCases isizeCaseFamily
+
 def cases : Array Case :=
   preConversionCases ++ conversionCases ++ postConversionCases ++
-    int8Cases ++ int16Cases ++ int32Cases ++ int64Cases ++
+    int8Cases ++ int16Cases ++ int32Cases ++ int64Cases ++ isizeCases ++
       signedCrossConversionCases
 
 /-- Source-reachable final-impure forms whose execution coverage the corpus must preserve. -/
@@ -7479,25 +7671,28 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "small-word-nat-conversion").size == 15
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-cross-conversion").size == 32
+  validationCase.tags.contains "fixed-width-cross-conversion").size == 40
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-external").size == 112
+  validationCase.tags.contains "fixed-width-signed-external").size == 140
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "fixed-width-signed-conversion").size == 48
+  validationCase.tags.contains "fixed-width-signed-conversion").size == 65
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 43
+  validationCase.tags.contains "int8").size == 45
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int16").size == 43
+  validationCase.tags.contains "int16").size == 45
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int32").size == 43
+  validationCase.tags.contains "int32").size == 45
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int64").size == 43
+  validationCase.tags.contains "int64").size == 45
+
+#guard (cases.filter fun validationCase =>
+  validationCase.tags.contains "isize").size == 45
 
 #guard System.Platform.numBits == 64
 
