@@ -993,7 +993,20 @@ children; it lifts through `decLocation`, one checked value decrement, and the
 repeated `decValue` fold. Persistent and ordinary decrement semantic matchers
 then transport the ledger through their administrative or recursively
 mutating paths, and the exact-view wrapper closes the pass edge. This slice is
-integrated at `3f03055b`. General reset/reuse updates remain.
+integrated at `3f03055b`.
+
+Reset now preserves the ledger through all operational branches.
+`releaseResetField_nextLocation_eq_of_ok` reduces one cleared field to the
+erased no-op or an ordinary recursive decrement, its fold theorem composes
+that invariant across the cleared prefix, and
+`reset_nextLocation_eq_of_ok` covers tagged, shared, and unique-constructor
+results. `LedgerResetBothResult` packages the paired target effect, related
+reuse tokens, structural runtime relation, and unchanged target owner table.
+Retained and deleted hereditary matchers plus exact-view wrappers consume that
+package; deleted resets either use the common runtime-neutral rule or execute
+the ownership-certified transition only on the source. Together with the
+existing failed-token and concrete-token reuse matchers, this closes the
+general reset/reuse ledger family at `89d3bfbd`.
 
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
@@ -1076,9 +1089,10 @@ runtime-neutral erased/deleted layer, plus retained/deleted local-value
 applications, all three layout-field projection families, unboxing, and
 ownership queries, as well as named and closure external-request suspension.
 It now also covers retained/deleted object, `USize`, and scalar writes plus
-retained constructor-tag updates. The remaining existing-address work is
-general reset/reuse matching; allocation-capable external responses remain
-separate. Those families must then be assembled into the unified non-lockstep
+retained constructor-tag updates, the complete reference-count/delete family,
+and retained/deleted reset/reuse. The remaining execution-boundary work is
+allocation-capable external response resumption. That boundary must then be
+assembled with the completed internal families into the unified non-lockstep
 dispatcher and compiler-client invariant so arbitrary selected edges receive
 that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
@@ -1121,8 +1135,7 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Finish ledger preservation for the general reset/reuse matcher families.
-   Strengthen the foreign-response boundary when a response allocates, then
+1. Strengthen the foreign-response boundary when a response allocates, then
    assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
