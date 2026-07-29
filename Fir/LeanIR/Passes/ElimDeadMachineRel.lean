@@ -8588,6 +8588,31 @@ noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
     runtime := { runtime := specification.2, ledger := related.ledger }
   }
 
+/-- Narrowing the published roots does not change either runtime or the
+target allocation history. -/
+def LedgerShadowRuntimeRel.restrictExtra
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (roots : ListRel (ValueRel rho) leftRoots rightRoots)
+    (leftSubset : RootSubset leftRoots leftExtra)
+    (rightSubset : RootSubset rightRoots rightExtra) :
+    LedgerShadowRuntimeRel rho left right leftRoots rightRoots where
+  runtime := related.runtime.restrictExtra roots leftSubset rightSubset
+  ledger := related.ledger
+
+/-- Publishing a related cached global leaves both runtimes and the target
+allocation history unchanged. -/
+def LedgerShadowRuntimeRel.prependGlobal
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (values : ValueRel rho leftValue rightValue)
+    (leftFound : findGlobal? left.globals name = some leftValue)
+    (rightFound : findGlobal? right.globals name = some rightValue) :
+    LedgerShadowRuntimeRel rho left right
+      (leftValue :: leftExtra) (rightValue :: rightExtra) where
+  runtime := related.runtime.prependGlobal values leftFound rightFound
+  ledger := related.ledger
+
 /-- Hereditary exact machine correspondence equipped with the target
 allocation history for its exact address renaming. This is the machine-level
 surface on which write/reset/reuse clients can select ledger-based readiness
@@ -8638,6 +8663,451 @@ theorem LedgerShadowRuntimeRel.binderReadyMachineRelated
   refine ⟨runtime.ledger, sourceControlRoots, targetControlRoots,
     sourceFrameRoots, targetFrameRoots, programs, control, frames,
     runtime.runtime⟩
+
+/-- Entering a fully applied internal declaration only rearranges published
+roots, environments, and frames, so the incoming target allocation ledger is
+preserved exactly. -/
+theorem enterInternalDecl_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (body : BinderReadyShadowCodeGraph fuel used sourceCode targetCode)
+    (sourceBinding : bindParams params
+      (sourceArguments.extract 0 params.size) = .ok sourceEnv)
+    (targetBinding : bindParams params
+      (targetArguments.extract 0 params.size) = .ok targetEnv)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    let sourceExtraArguments :=
+      sourceArguments.extract params.size sourceArguments.size
+    let targetExtraArguments :=
+      targetArguments.extract params.size targetArguments.size
+    let sourcePreparedFrames :=
+      let frames := if sourceExtraArguments.isEmpty then sourceFrames
+        else .apply sourceExtraArguments :: sourceFrames
+      if params.isEmpty && sourceArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    let targetPreparedFrames :=
+      let frames := if targetExtraArguments.isEmpty then targetFrames
+        else .apply targetExtraArguments :: targetFrames
+      if params.isEmpty && targetArguments.isEmpty then
+        .cache name :: frames
+      else frames
+    LedgerBinderReadyReachableMachineRelated fuel rho
+      { sourceState with
+        env := sourceEnv
+        joins := []
+        frames := sourcePreparedFrames
+        control := .code sourceCode }
+      { targetState with
+        env := targetEnv
+        joins := []
+        frames := targetPreparedFrames
+        control := .code targetCode } := by
+  refine ⟨runtime.ledger, ?_⟩
+  exact enterInternalDecl_binderReadyReachableRelated
+    sourceState targetState programs frames arguments body
+    sourceBinding targetBinding runtime.runtime
+
+/-- A successful fully applied internal declaration lookup preserves the
+incoming ledger while entering the exact paired bodies. -/
+theorem invokeDecl_foundCode_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel)
+        sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetDeclaration targetCode sourceAfter targetAfter,
+      targetState.program.findDecl? name = some targetDeclaration ∧
+      targetDeclaration.value = .code targetCode ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  rcases binderReadyShadowProgram_findDecl_of_some programs sourceFound with
+    ⟨targetDeclaration, targetFound, declarations⟩
+  have valueRelated := declarations.value
+  generalize targetValueEq : targetDeclaration.value = targetDeclValue
+    at valueRelated
+  rw [sourceValue] at valueRelated
+  cases valueRelated with
+  | code bodyRelated =>
+      rename_i targetCode
+      rcases bodyRelated with ⟨used, body⟩
+      have callArguments : ArrayRel (ValueRel rho)
+          (sourceArguments.extract 0 sourceDeclaration.params.size)
+          (targetArguments.extract 0 sourceDeclaration.params.size) :=
+        arrayRel_extract arguments 0 sourceDeclaration.params.size
+      have binding := bindParams_relOn (rho := rho)
+        (params := sourceDeclaration.params) used callArguments
+      rw [sourceBinding] at binding
+      generalize targetBinding : bindParams sourceDeclaration.params
+          (targetArguments.extract 0 sourceDeclaration.params.size) =
+            targetBindingResult at binding
+      cases targetBindingResult with
+      | error fault => cases binding
+      | ok targetEnv =>
+          cases binding with
+          | ok _envRelated =>
+              have targetBinding' : bindParams targetDeclaration.params
+                  (targetArguments.extract 0 targetDeclaration.params.size) =
+                    .ok targetEnv := by
+                simpa [← declarations.params_eq] using targetBinding
+              have progress := invokeDecl_code_reachableRelated
+                (fuel := fuel) (rho := rho) (used := used)
+                sourceState targetState
+                (forgetBinderReadyShadowProgram programs)
+                frames.related arguments body.toShadowCodeGraph
+                declarations.params_eq sourceFound targetFound
+                sourceValue targetValueEq sourceEnough sourceBinding
+                targetBinding' runtime.runtime
+              rcases progress with
+                ⟨sourceStep, targetStep, _structuralAfter⟩
+              have hereditaryAfter :=
+                enterInternalDecl_binderReadyReachableRelated_ledger
+                  (fuel := fuel) (rho := rho) (used := used) (name := name)
+                  sourceState targetState programs frames arguments body
+                  sourceBinding targetBinding runtime
+              have hereditaryAfter' :
+                  LedgerBinderReadyReachableMachineRelated fuel rho
+                    (match invokeDecl sourceState name sourceArguments with
+                      | .next state => state
+                      | _ => sourceState)
+                    (match invokeDecl targetState name targetArguments with
+                      | .next state => state
+                      | _ => targetState) := by
+                rw [sourceStep, targetStep]
+                simpa [declarations.params_eq] using hereditaryAfter
+              rw [sourceStep, targetStep] at hereditaryAfter'
+              exact ⟨targetDeclaration, targetCode, _, _,
+                targetFound, targetValueEq, sourceStep, targetStep,
+                hereditaryAfter'⟩
+
+/-- Under-application allocates one paired closure and records that exact
+fresh pair in the target allocation ledger. -/
+theorem invokeDecl_partial_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (paramsEq : sourceDeclaration.params = targetDeclaration.params)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (targetFound : targetState.program.findDecl? name =
+      some targetDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let allocated := runtime.allocClosureBoth
+    (name := name)
+    (leftArity := sourceDeclaration.params.size)
+    (rightArity := targetDeclaration.params.size)
+    arguments frames.roots (congrArg Array.size paramsEq)
+  let sourceRuntime := (alloc sourceState.runtime
+    (.closure name sourceDeclaration.params.size sourceArguments)).1
+  let targetRuntime := (alloc targetState.runtime
+    (.closure name targetDeclaration.params.size targetArguments)).1
+  let sourceValue : Value := .object
+    (alloc sourceState.runtime
+      (.closure name sourceDeclaration.params.size sourceArguments)).2
+  let targetValue : Value := .object
+    (alloc targetState.runtime
+      (.closure name targetDeclaration.params.size targetArguments)).2
+  have values : ValueRel allocated.larger sourceValue targetValue := by
+    simpa [sourceValue, targetValue] using allocated.values
+  have nextRuntime :
+      LedgerShadowRuntimeRel allocated.larger sourceRuntime targetRuntime
+        (sourceValue :: sourceFrameRoots)
+        (targetValue :: targetFrameRoots) := by
+    simpa [sourceRuntime, targetRuntime, sourceValue, targetValue] using
+      allocated.runtime
+  let sourceAfter := sourceState.withValue sourceRuntime sourceValue
+  let targetAfter := targetState.withValue targetRuntime targetValue
+  have argumentSize := arrayRel_size_eq arguments
+  have targetTooFew :
+      targetArguments.size < targetDeclaration.params.size := by
+    rw [← paramsEq, ← argumentSize]
+    exact sourceTooFew
+  have sourceStep : invokeDecl sourceState name sourceArguments =
+      .next sourceAfter := by
+    unfold invokeDecl
+    rw [sourceFound]
+    simp only
+    rw [if_pos sourceTooFew]
+  have targetStep : invokeDecl targetState name targetArguments =
+      .next targetAfter := by
+    unfold invokeDecl
+    rw [targetFound]
+    simp only
+    rw [if_pos targetTooFew]
+  refine ⟨allocated.larger, sourceAfter, targetAfter, allocated.extension,
+    sourceStep, targetStep, ?_⟩
+  exact nextRuntime.binderReadyMachineRelated programs
+    (.yielded values) (frames.monoRenaming allocated.extension)
+
+/-- Hereditary lookup selects the target declaration before invoking the
+ledger-aware under-application rule. -/
+theorem invokeDecl_foundPartial_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      invokeDecl sourceState name sourceArguments = .next sourceAfter ∧
+      invokeDecl targetState name targetArguments = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  rcases binderReadyShadowProgram_findDecl_of_some programs sourceFound with
+    ⟨targetDeclaration, targetFound, declarations⟩
+  exact invokeDecl_partial_binderReadyReachableRelated_ledger
+    sourceState targetState programs frames arguments declarations.params_eq
+    sourceFound targetFound sourceTooFew runtime
+
+/-- Named dispatch to an under-applied declaration records the paired closure
+allocation selected by the declaration-level ledger theorem. -/
+theorem coreStep_invokeName_foundPartial_of_declReady_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceTooFew : sourceArguments.size < sourceDeclaration.params.size)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ larger sourceAfter targetAfter,
+      RenamingExtends rho larger ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : BinderReadyReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : LedgerShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundPartial_binderReadyReachableRelated_ledger
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceTooFew invokeRuntime with
+    ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
+      nextRelated⟩
+  have targetReady :=
+    sourceReady.related arguments runtime.runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨larger, sourceAfter, targetAfter, extension, steps.1, steps.2,
+    nextRelated⟩
+
+/-- Fully applied named dispatch enters exact internal bodies without changing
+the target allocation frontier or owner ledger. -/
+theorem coreStep_invokeName_foundCode_of_declReady_binderReady_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceReady : InvokeNameDeclReady sourceState.runtime name
+      sourceArguments)
+    (sourceFound : sourceState.program.findDecl? name =
+      some sourceDeclaration)
+    (sourceValue : sourceDeclaration.value = .code sourceCode)
+    (sourceEnough : ¬ sourceArguments.size < sourceDeclaration.params.size)
+    (sourceBinding : bindParams sourceDeclaration.params
+      (sourceArguments.extract 0 sourceDeclaration.params.size) =
+        .ok sourceEnv)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ sourceAfter targetAfter,
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  let sourceInvoke := {
+    sourceState with control := .invokeName name sourceArguments }
+  let targetInvoke := {
+    targetState with control := .invokeName name targetArguments }
+  have invokePrograms : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceInvoke.program targetInvoke.program := by
+    simpa [sourceInvoke, targetInvoke] using programs
+  have invokeFrames : BinderReadyReachableFramesRelated fuel rho
+      sourceInvoke.frames targetInvoke.frames sourceFrameRoots
+      targetFrameRoots := by
+    simpa [sourceInvoke, targetInvoke] using frames
+  have invokeFound : sourceInvoke.program.findDecl? name =
+      some sourceDeclaration := by
+    simpa [sourceInvoke] using sourceFound
+  have invokeRuntime : LedgerShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  rcases invokeDecl_foundCode_binderReadyReachableRelated_ledger
+      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
+      invokeFrames arguments invokeFound sourceValue sourceEnough sourceBinding
+      invokeRuntime with
+    ⟨targetDeclaration, targetCode, sourceAfter, targetAfter,
+      targetFound, targetValue, sourceStep, targetStep, nextRelated⟩
+  have targetReady :=
+    sourceReady.related arguments runtime.runtime.globals
+  have steps := coreStep_invokeName_of_declReady
+    sourceState targetState sourceAfter targetAfter sourceReady targetReady
+    (by simpa [sourceInvoke] using sourceStep)
+    (by simpa [targetInvoke] using targetStep)
+  exact ⟨sourceAfter, targetAfter, steps.1, steps.2, nextRelated⟩
+
+/-- An empty named-call cache hit publishes the related global result while
+preserving the incoming target allocation history. -/
+theorem coreStep_invokeName_cacheHit_binderReadyReachableRelated_ledger
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (sourceEmpty : sourceArguments.isEmpty = true)
+    (sourceGlobal : findGlobal? sourceState.runtime.globals name =
+      some sourceValue)
+    (runtime : LedgerShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (sourceArguments.toList ++ sourceFrameRoots)
+      (targetArguments.toList ++ targetFrameRoots)) :
+    ∃ targetValue sourceAfter targetAfter,
+      findGlobal? targetState.runtime.globals name = some targetValue ∧
+      coreStep { sourceState with
+        control := .invokeName name sourceArguments } = .next sourceAfter ∧
+      coreStep { targetState with
+        control := .invokeName name targetArguments } = .next targetAfter ∧
+      LedgerBinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter := by
+  have globals := findGlobal?_related runtime.runtime.globals name
+  rw [sourceGlobal] at globals
+  cases targetGlobal : findGlobal? targetState.runtime.globals name with
+  | none =>
+      rw [targetGlobal] at globals
+      cases globals
+  | some targetValue =>
+      rw [targetGlobal] at globals
+      cases globals with
+      | some values =>
+          have published := runtime.prependGlobal values sourceGlobal
+            targetGlobal
+          have sourceSubset : RootSubset
+              (sourceValue :: sourceFrameRoots)
+              (sourceValue :: sourceArguments.toList ++ sourceFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have targetSubset : RootSubset
+              (targetValue :: targetFrameRoots)
+              (targetValue :: targetArguments.toList ++ targetFrameRoots) := by
+            intro value member
+            simp only [List.mem_cons] at member ⊢
+            rcases member with same | frameRoot
+            · subst value
+              exact List.mem_cons_self
+            · exact List.mem_cons_of_mem _
+                (List.mem_append_right _ frameRoot)
+          have nextRuntime := published.restrictExtra
+            (.cons values frames.roots) sourceSubset targetSubset
+          let sourceAfter := {
+            sourceState with control := .yielded sourceValue }
+          let targetAfter := {
+            targetState with control := .yielded targetValue }
+          have argumentSize := arrayRel_size_eq arguments
+          have targetEmpty : targetArguments.isEmpty = true := by
+            simpa [Array.isEmpty, argumentSize] using sourceEmpty
+          have sourceStep : coreStep { sourceState with
+              control := .invokeName name sourceArguments } =
+              .next sourceAfter := by
+            simp [coreStep, sourceEmpty, sourceGlobal, sourceAfter]
+          have targetStep : coreStep { targetState with
+              control := .invokeName name targetArguments } =
+              .next targetAfter := by
+            simp [coreStep, targetEmpty, targetGlobal, targetAfter]
+          refine ⟨targetValue, sourceAfter, targetAfter, rfl,
+            sourceStep, targetStep, ?_⟩
+          exact nextRuntime.binderReadyMachineRelated programs
+            (.yielded values) frames
 
 /-- Root-independent operational shape for a deleted object-field write.
 The compiler ownership argument is deliberately absent: it is supplied later
@@ -23858,6 +24328,149 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeNameNext
                       coreStep_invokeName_cacheHit_binderReadyReachableRelated
                         source target programs frames arguments sourceEmpty
                         sourceGlobal runtime with
+                    ⟨targetValue, sourceNext, targetNext, targetGlobal,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨rho, nextRelated⟩⟩
+
+/-- Ledger-aware hereditary matcher for every internal named-call
+transition. Internal entry and cache hits preserve the current ledger;
+under-application returns the extended ledger selected by paired closure
+allocation. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeNameNext
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeLedgerBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have targetSame : { target with
+              control := .invokeName name targetArguments } = target := by
+            cases target
+            simp_all
+          have sourceTransition' :
+              coreStep { source with
+                control := .invokeName name sourceArguments } =
+                  .next sourceAfter := by
+            simpa only [sourceSame] using sourceTransition
+          have ledgerRuntime : LedgerShadowRuntimeRel rho
+              source.runtime target.runtime
+              (sourceArguments.toList ++ sourceFrameRoots)
+              (targetArguments.toList ++ targetFrameRoots) := {
+            runtime
+            ledger
+          }
+          have matchDeclaration
+              (sourceReady : InvokeNameDeclReady source.runtime
+                name sourceArguments) :
+              ∃ targetAfter,
+                coreStep target = .next targetAfter ∧
+                SomeLedgerBinderReadyReachableMachineRelated fuel
+                  sourceAfter targetAfter := by
+            cases sourceFound :
+                source.program.findDecl? name with
+            | none =>
+                cases sourceReady with
+                | nonempty nonempty =>
+                    simp [coreStep, nonempty, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+                | cacheMiss empty miss =>
+                    simp [coreStep, empty, miss, invokeDecl, sourceFound, fail]
+                      at sourceTransition'
+            | some sourceDeclaration =>
+                by_cases sourceTooFew :
+                    sourceArguments.size < sourceDeclaration.params.size
+                · rcases
+                      coreStep_invokeName_foundPartial_of_declReady_binderReady_ledger
+                        source target programs frames arguments sourceReady
+                        sourceFound sourceTooFew ledgerRuntime with
+                    ⟨larger, sourceNext, targetNext, extension,
+                      sourceStep, targetStep, nextRelated⟩
+                  rw [sourceStep] at sourceTransition'
+                  cases sourceTransition'
+                  exact ⟨targetNext,
+                    by simpa only [targetSame] using targetStep,
+                    ⟨larger, nextRelated⟩⟩
+                · cases sourceBinding :
+                      bindParams sourceDeclaration.params
+                        (sourceArguments.extract 0
+                          sourceDeclaration.params.size) with
+                  | error fault =>
+                      cases sourceReady with
+                      | nonempty nonempty =>
+                          simp [coreStep, nonempty, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                      | cacheMiss empty miss =>
+                          simp [coreStep, empty, miss, invokeDecl, sourceFound,
+                            sourceTooFew, sourceBinding, fail]
+                            at sourceTransition'
+                  | ok sourceEnv =>
+                      cases sourceValue : sourceDeclaration.value with
+                      | code sourceCode =>
+                          rcases
+                              coreStep_invokeName_foundCode_of_declReady_binderReady_ledger
+                                source target programs frames arguments
+                                sourceReady sourceFound sourceValue
+                                sourceTooFew sourceBinding ledgerRuntime with
+                            ⟨sourceNext, targetNext, sourceStep, targetStep,
+                              nextRelated⟩
+                          rw [sourceStep] at sourceTransition'
+                          cases sourceTransition'
+                          exact ⟨targetNext,
+                            by simpa only [targetSame] using targetStep,
+                            ⟨rho, nextRelated⟩⟩
+                      | extern sourceInfo =>
+                          cases sourceReady with
+                          | nonempty nonempty =>
+                              simp [coreStep, nonempty, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+                          | cacheMiss empty miss =>
+                              simp [coreStep, empty, miss, invokeDecl,
+                                sourceFound, sourceTooFew, sourceBinding,
+                                sourceValue] at sourceTransition'
+          cases sourceEmpty : sourceArguments.isEmpty with
+          | false =>
+              exact matchDeclaration (.nonempty sourceEmpty)
+          | true =>
+              cases sourceGlobal :
+                  findGlobal? source.runtime.globals name with
+              | none =>
+                  exact matchDeclaration
+                    (.cacheMiss sourceEmpty sourceGlobal)
+              | some sourceValue =>
+                  rcases
+                      coreStep_invokeName_cacheHit_binderReadyReachableRelated_ledger
+                        source target programs frames arguments sourceEmpty
+                        sourceGlobal ledgerRuntime with
                     ⟨targetValue, sourceNext, targetNext, targetGlobal,
                       sourceStep, targetStep, nextRelated⟩
                   rw [sourceStep] at sourceTransition'
