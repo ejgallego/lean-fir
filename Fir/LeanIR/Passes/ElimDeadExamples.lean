@@ -3637,49 +3637,31 @@ theorem nonemptyTargetAllocationLedger_objectSetReady :
           (runtimeRoots nonemptyLedgerSourceRuntime
             [.object (.heap 0)])
           dead 0 .erased := by
-  rcases emptyRuntime_shadowRelated.allocBoth
+  let paired := LedgerShadowRuntimeRel.empty.allocBoth
       (HeapObjectRel.natural 7)
       (by simp [RootSubset, HeapObject.ownedValues])
       (by simp [RootSubset, HeapObject.ownedValues])
-      false with
-    ⟨rho, _, values, paired⟩
-  have mapping : rho.forward 0 = some 0 := by
-    have mappedValue :
-        ValueRel rho (.object (.heap 0)) (.object (.heap 0)) := by
-      simpa [alloc] using values
-    cases mappedValue with
-    | heap mapping => exact mapping
-  let ledger :
-      TargetAllocationLedger rho
-        nonemptyLedgerTargetRuntime.nextLocation := {
-    owner := fun _ => 0
-    reverseMapped := by
-      intro rightLocation bounded
-      have rightEq : rightLocation = 0 := by
-        apply Nat.eq_zero_of_le_zero
-        apply Nat.le_of_lt_succ
-        simpa [nonemptyLedgerTargetRuntime,
-          nonemptyLedgerPairedRuntime, alloc] using bounded
-      subst rightLocation
-      exact rho.leftInverse mapping
-  }
-  have fresh : rho.forward 1 = none := by
-    apply paired.leftMappingFresh
+      false
+  let sourceOnlyRuntime :=
+    paired.runtime.allocLeftGarbage (.ctor deletedWriteObject) false
+  have fresh : paired.larger.forward 1 = none := by
+    apply paired.runtime.runtime.leftMappingFresh
     simp [alloc]
-  have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
-    ledger.sourceOnly_of_forwardUnmapped fresh
+  have sourceOnly :
+      SourceOnlyUnderTargetLedger sourceOnlyRuntime.ledger 1 :=
+    sourceOnlyRuntime.ledger.sourceOnly_of_forwardUnmapped fresh
   have related :
-      ShadowRuntimeRel rho
+      ShadowRuntimeRel paired.larger
         nonemptyLedgerSourceRuntime nonemptyLedgerTargetRuntime
         [.object (.heap 0)] [.object (.heap 0)] := by
     simpa [nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
-      nonemptyLedgerPairedRuntime, alloc] using
-      paired.allocLeftGarbage (.ctor deletedWriteObject) false
-  refine ⟨rho, ledger, related, sourceOnly, ?_⟩
+      nonemptyLedgerPairedRuntime, alloc] using sourceOnlyRuntime.runtime
+  refine ⟨paired.larger, sourceOnlyRuntime.ledger,
+    related, sourceOnly, ?_⟩
   exact
     nonemptyLedgerObjectSetLocalReady
       |>.deletedReadyAt_of_targetAllocationLedger
-        related ledger sourceOnly
+        related sourceOnlyRuntime.ledger sourceOnly
 
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState

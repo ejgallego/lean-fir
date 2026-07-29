@@ -7405,6 +7405,29 @@ def TargetAllocationLedger.extend
       simp [AddressRenaming.extend, newest,
         ledger.reverseMapped rightLocation old]
 
+/-- Extend a target ledger along any larger address renaming that preserves
+the old reverse mappings and maps one fresh source owner to the new target
+frontier. This is the form consumed by allocation theorems that return an
+existentially chosen larger renaming. -/
+def TargetAllocationLedger.extendOfMapping
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (extension : RenamingExtends rho larger)
+    (left : Location)
+    (mapping : larger.forward left = some rightFrontier) :
+    TargetAllocationLedger larger (rightFrontier + 1) where
+  owner := fun rightLocation =>
+    if rightLocation = rightFrontier then left
+    else ledger.owner rightLocation
+  reverseMapped := by
+    intro rightLocation bounded
+    by_cases newest : rightLocation = rightFrontier
+    · subst rightLocation
+      simp [larger.leftInverse mapping]
+    · have old : rightLocation < rightFrontier :=
+        Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+      simp [newest, extension.reverse
+        (ledger.reverseMapped rightLocation old)]
+
 /-- A source-only location remains outside the ledger after a paired
 allocation whose new source owner is different from it. -/
 theorem TargetAllocationLedger.sourceOnly_extend
@@ -7422,6 +7445,25 @@ theorem TargetAllocationLedger.sourceOnly_extend
   · have old : rightLocation < rightFrontier :=
       Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
     simpa [TargetAllocationLedger.extend, newest] using
+      sourceOnly rightLocation old
+
+/-- Source-only provenance is preserved by an existentially chosen paired
+allocation whenever the newly paired source owner is different. -/
+theorem TargetAllocationLedger.sourceOnly_extendOfMapping
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location)
+    (extension : RenamingExtends rho larger)
+    (different : left ≠ location)
+    (mapping : larger.forward left = some rightFrontier) :
+    SourceOnlyUnderTargetLedger
+      (ledger.extendOfMapping extension left mapping) location := by
+  intro rightLocation bounded
+  by_cases newest : rightLocation = rightFrontier
+  · subst rightLocation
+    simpa [TargetAllocationLedger.extendOfMapping] using different
+  · have old : rightLocation < rightFrontier :=
+      Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+    simpa [TargetAllocationLedger.extendOfMapping, newest] using
       sourceOnly rightLocation old
 
 /-- An address already known to be absent from the renaming is outside every
@@ -7474,6 +7516,144 @@ theorem TargetAllocationLedger.sourceOnly_iff_forward_eq_none
   constructor
   · exact ledger.forward_eq_none_of_sourceOnly related
   · exact ledger.sourceOnly_of_forwardUnmapped
+
+/-- Reachable-runtime correspondence strengthened with the allocation history
+needed to distinguish paired target allocations from source-only compiler
+garbage. Unlike a ledger reconstructed from a final relation witness, this
+proof-relevant refinement rules out irrelevant mappings by construction. -/
+structure LedgerShadowRuntimeRel (rho : AddressRenaming)
+    (left right : RuntimeState)
+    (leftExtra rightExtra : List Value) : Type where
+  runtime : ShadowRuntimeRel rho left right leftExtra rightExtra
+  ledger : TargetAllocationLedger rho right.nextLocation
+
+/-- Empty runtimes start with the empty renaming and empty allocation
+ledger. -/
+def LedgerShadowRuntimeRel.empty :
+    LedgerShadowRuntimeRel emptyAddressRenaming
+      ({} : RuntimeState) ({} : RuntimeState) [] [] where
+  runtime := emptyRuntime_shadowRelated
+  ledger := TargetAllocationLedger.empty emptyAddressRenaming
+
+/-- A deleted source-only allocation preserves the target ledger exactly. -/
+def LedgerShadowRuntimeRel.allocLeftGarbage
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (object : HeapObject) (persistent : Bool) :
+    LedgerShadowRuntimeRel rho (alloc left object persistent).1 right
+      leftExtra rightExtra where
+  runtime := related.runtime.allocLeftGarbage object persistent
+  ledger := related.ledger
+
+/-- Proof-relevant result of one paired allocation. The larger renaming is
+selected together with its relation and ledger evidence. -/
+structure LedgerAllocBothResult
+    (rho : AddressRenaming) (left right : RuntimeState)
+    (leftExtra rightExtra : List Value)
+    (leftObject rightObject : HeapObject) (persistent : Bool) : Type where
+  larger : AddressRenaming
+  extension : RenamingExtends rho larger
+  values :
+    ValueRel larger (.object (alloc left leftObject persistent).2)
+      (.object (alloc right rightObject persistent).2)
+  runtime :
+    LedgerShadowRuntimeRel larger
+      (alloc left leftObject persistent).1
+      (alloc right rightObject persistent).1
+      (.object (alloc left leftObject persistent).2 :: leftExtra)
+      (.object (alloc right rightObject persistent).2 :: rightExtra)
+
+/-- A retained paired allocation extends both the address renaming and its
+target allocation ledger with the returned fresh pair. -/
+noncomputable def LedgerShadowRuntimeRel.allocBoth
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (objects : HeapObjectRel rho leftObject rightObject)
+    (leftOwned : RootSubset leftObject.ownedValues.toList
+      (runtimeRoots left leftExtra))
+    (rightOwned : RootSubset rightObject.ownedValues.toList
+      (runtimeRoots right rightExtra))
+    (persistent : Bool) :
+    LedgerAllocBothResult rho left right leftExtra rightExtra
+      leftObject rightObject persistent := by
+  let witness :=
+    related.runtime.allocBoth objects leftOwned rightOwned persistent
+  let larger := Classical.choose witness
+  have specification := Classical.choose_spec witness
+  have extension := specification.1
+  have values := specification.2.1
+  have runtime := specification.2.2
+  have mapping :
+      larger.forward left.nextLocation = some right.nextLocation := by
+    have mappedValue :
+        ValueRel larger
+          (.object (.heap left.nextLocation))
+          (.object (.heap right.nextLocation)) := by
+      simpa [alloc, larger] using values
+    cases mappedValue with
+    | heap mapping => exact mapping
+  exact {
+    larger
+    extension
+    values
+    runtime := {
+      runtime
+      ledger := by
+        simpa [alloc, larger] using related.ledger.extendOfMapping
+          extension left.nextLocation mapping
+    }
+  }
+
+/-- Hereditary exact machine correspondence equipped with the target
+allocation history for its exact address renaming. This is the machine-level
+surface on which write/reset/reuse clients can select ledger-based readiness
+without reconstructing history from an arbitrary final relation witness. -/
+def LedgerBinderReadyReachableMachineRelated
+    (fuel : Nat) (rho : AddressRenaming)
+    (source target : MachineState) : Prop :=
+  ∃ _ledger : TargetAllocationLedger rho target.runtime.nextLocation,
+    BinderReadyReachableMachineRelated fuel rho source target
+
+/-- Hide the exact renaming while retaining its allocation ledger. -/
+def SomeLedgerBinderReadyReachableMachineRelated
+    (fuel : Nat) (source target : MachineState) : Prop :=
+  ∃ rho, LedgerBinderReadyReachableMachineRelated fuel rho source target
+
+/-- Forgetting allocation history recovers the existing hereditary exact
+machine relation. -/
+theorem LedgerBinderReadyReachableMachineRelated.related
+    (related :
+      LedgerBinderReadyReachableMachineRelated fuel rho source target) :
+    BinderReadyReachableMachineRelated fuel rho source target :=
+  related.choose_spec
+
+/-- Forget both the ledger and its exact renaming. -/
+theorem SomeLedgerBinderReadyReachableMachineRelated.related
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated fuel source target) :
+    SomeBinderReadyReachableMachineRelated fuel source target := by
+  rcases related with ⟨rho, ledger, structural⟩
+  exact ⟨rho, structural⟩
+
+/-- Assemble the ledger-carrying machine relation from the ordinary exact
+control/frame components and a ledger-carrying runtime relation. -/
+theorem LedgerShadowRuntimeRel.binderReadyMachineRelated
+    (runtime : LedgerShadowRuntimeRel rho
+      source.runtime target.runtime
+      (sourceControlRoots ++ sourceFrameRoots)
+      (targetControlRoots ++ targetFrameRoots))
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      source.program target.program)
+    (control : BinderReadyReachableControlRelated fuel rho
+      source.env source.joins source.control
+      target.env target.joins target.control
+      sourceControlRoots targetControlRoots)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      source.frames target.frames sourceFrameRoots targetFrameRoots) :
+    LedgerBinderReadyReachableMachineRelated fuel rho source target := by
+  refine ⟨runtime.ledger, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames,
+    runtime.runtime⟩
 
 /-- Root-independent operational shape for a deleted object-field write.
 The compiler ownership argument is deliberately absent: it is supplied later
