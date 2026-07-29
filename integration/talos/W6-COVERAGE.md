@@ -114,6 +114,14 @@ Cross-cutting W6.5 state:
   `correctBudgetedScalarExternalSpine` derive zero-cost compiler-shaped calls
   and arbitrary finite direct/decision spines with unchanged heap budget and
   witness.
+  `PureExternalSupported` now combines the integer, natural, and scalar
+  source admissions. The external-step contract records exact preservation
+  of the installed handler table, so generic invariant composition retains
+  all three operation-family laws across every direct or external node.
+  `correctBudgetedPureExternalSpine` closes arbitrary finite spines mixing
+  all current direct operations with integer construction/arithmetic,
+  `Int.natAbs`, and `Int.decLt`, from one path budget and the three initially
+  installed family laws.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

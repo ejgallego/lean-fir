@@ -3951,6 +3951,26 @@ direct/`Int.decLt` spines. The generic runtime law may support more scalar
 names later, but admission remains explicit and deliberately unstable. No FIR
 semantic contract or executable ABI changed.
 
+W6.6fd composes the three proved pure-result families under one structural
+invariant. `ExternalLetRuntimeRefinesWithCost` now records preservation of the
+installed concrete handler table; generic disjunction, invariant-extension,
+and invariant-transport laws use that fact to retain `IntegerResultRefines`,
+`NaturalResultRefines`, and `ScalarResultRefines` simultaneously.
+`PureExternalSupported` is the source-facing union, and
+`externalLetRuntimeRefinesWithCost_pureExternal` supplies its uniform runtime
+law. The matching direct law retains the same combined frame.
+
+`correctBudgetedPureExternalSpine` therefore proves one arbitrary finite
+source spine that freely interleaves the complete current direct family,
+`Int.ofNat`/`Int.neg`/`Int.add`/`Int.sub`, `Int.natAbs`, and `Int.decLt`.
+Its caller supplies source evaluation, one exact path budget, and the three
+installed operation-family laws once; compiler code, numeric indices,
+concrete result representations, target steps, and witness extensions remain
+internal. The contract harness checks both the compositional runtime law and
+the whole-export application. These proof-facing admission and invariant
+surfaces are deliberately unstable. No FIR semantic contract or executable
+ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

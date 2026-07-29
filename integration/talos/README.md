@@ -300,6 +300,14 @@ They use the separate nonallocating `ScalarResultRefines` law.
 `PureScalarExternalSupported` initially admits `Int.decLt` at the exact
 `.uint8` ABI kind, and `correctBudgetedScalarExternalSpine` proves arbitrary
 finite direct/decision spines while preserving the heap budget and witness.
+The three families also compose without restricting a source spine to one
+result kind. `PureExternalSupported` admits their union,
+`ConcreteBudgetedPureExternalFrame` retains all three installed handler laws,
+and `correctBudgetedPureExternalSpine` proves arbitrary finite interleavings
+of the full direct family with integer construction/arithmetic, `Int.natAbs`,
+and `Int.decLt`. Its caller supplies the three family laws once and no
+per-node runtime law, target witness, allocation result, or representation
+choice.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

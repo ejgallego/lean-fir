@@ -187,7 +187,16 @@ nonallocating scalar-result family. `ScalarResultRefines`,
 `scalarExternalStep`, `PureScalarExternalSupported`, and
 `externalLetRuntimeRefinesWithCost_pureScalar` now instantiate that family,
 with `correctBudgetedScalarExternalSpine` closing the finite export. The
-structural theorem itself did not need to change.
+structural theorem itself did not need to change. The result families now
+also compose: the strengthened external runtime law exposes preservation of
+the concrete handler table, `ConcreteBudgetedPureExternalFrame` retains the
+integer, natural, and scalar implementation laws simultaneously, and
+`PureExternalSupported` admits their source-facing union.
+`correctBudgetedPureExternalSpine` consequently closes one arbitrary finite
+whole-export proof whose source path mixes the full direct family,
+`Int.ofNat`/`Int.neg`/`Int.add`/`Int.sub`, `Int.natAbs`, and `Int.decLt`.
+Only the source evaluation, initial relation/frame, exact path budget, and
+three operation-family laws cross the public boundary.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,
