@@ -1008,6 +1008,15 @@ the ownership-certified transition only on the source. Together with the
 existing failed-token and concrete-token reuse matchers, this closes the
 general reset/reuse ledger family at `89d3bfbd`.
 
+Allocation-capable foreign responses now have an explicit ledger contract.
+`LedgerBinderReadyReachableExternalSpecCompatible` requires the post-response
+renaming to extend the suspended one and requires the resumed pair to carry
+the exact target owner table at the response frontier. Named and
+closure-mediated external-call matchers preserve the incoming ledger through
+request suspension, take one related target external step, and return the
+larger post-response ledger. This boundary is integrated at `63750e62`; it
+does not assume that foreign calls are allocation-free.
+
 The closed three-write chain also exercises the full client composition.
 `closedWritesExactOwnershipContract` packages its separate source and target
 finite graphs, one-step preservation, and exact-pair readiness as an
@@ -1090,11 +1099,10 @@ applications, all three layout-field projection families, unboxing, and
 ownership queries, as well as named and closure external-request suspension.
 It now also covers retained/deleted object, `USize`, and scalar writes plus
 retained constructor-tag updates, the complete reference-count/delete family,
-and retained/deleted reset/reuse. The remaining execution-boundary work is
-allocation-capable external response resumption. That boundary must then be
-assembled with the completed internal families into the unified non-lockstep
-dispatcher and compiler-client invariant so arbitrary selected edges receive
-that history rather than only focused fixtures.
+retained/deleted reset/reuse, and allocation-capable external response
+resumption. The completed families must now be assembled into the unified
+non-lockstep dispatcher and compiler-client invariant so arbitrary selected
+edges receive that history rather than only focused fixtures.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1135,8 +1143,7 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Strengthen the foreign-response boundary when a response allocates, then
-   assemble the unified
+1. Assemble the unified
    `SomeLedgerBinderReadyReachableMachineRelated` step dispatcher.
 2. Define the ledger-aware entry-indexed exact ownership contract and use it
    to derive the ledger and source-only facts selected by arbitrary deleted
