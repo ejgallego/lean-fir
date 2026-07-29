@@ -696,15 +696,35 @@ Canonical invocation entries and all non-code controls reconstruct strong
 readiness without an active-edge premise. Hereditary yielded steps preserve
 exact provenance through bind, apply, and cache frames; internal named calls
 preserve it through cache hits, partial-application allocation, and internal
-declaration entry.
+declaration entry. Closure calls and external waiting/resumption are covered
+as well, so the exact machine dispatcher now spans every code and non-code
+control reachable by the interpreter.
 
-The remaining work is to preserve the strong relation through closure calls
-and external waiting/resumption, then derive each active exact edge's dynamic
-runtime obligation from compiler-facing source invariants. Discharging that
-source-side obligation yields `BinderReadyReachablyCodeReady` for
-compiler-produced entry states and closes the transparent whole-program
-forward theorem modulo the explicit foreign-semantics and nullary-constant
-contracts.
+The checked whole-program endpoints expose the remaining semantic boundary in
+three useful forms:
+
+- exact runtime/ownership readiness for each future related pair;
+- a hereditary source-only runtime/ownership invariant;
+- a source-machine invariant for every selected entry, projected
+  automatically into the non-lockstep relation.
+
+Closed end-to-end fixtures now discharge those premises for deleted object and
+scalar writes, failed-token reuse, concrete-token reuse, reset/reuse with an
+owned child, partial-application closure allocation, and heap-backed scalar
+boxing. Each fixture includes the finite source execution graph, concrete heap
+shape or ownership facts, compiler well-formedness, a successful transparent
+program run, and a public `LoweringCorrect` theorem. The PAP/box fixture also
+pins the actual Lean 4.32 pass to the transparent target while proving that
+both unreachable allocations may be omitted.
+
+The remaining general problem is therefore not an operational matcher. It is
+to state and derive the source runtime/ownership contract for arbitrary
+compiler-produced entry states. `ProgramElimDeadWellFormed` cannot imply that
+contract by itself: the well-formed nullary-`.fap` counterexample has an
+observable external effect under FIR's unrestricted foreign semantics.
+A compiler-facing theorem must add a semantic purity/ownership premise (or
+exclude the disputed rule) and retain the explicit foreign-compatibility
+contract.
 
 ### Open semantic boundaries
 
@@ -733,14 +753,18 @@ regression.
 
 ## Immediate proof queue
 
-1. Add hereditary closure-call progress and external waiting/resumption
-   matchers.
-2. State and prove the source runtime/ownership invariant that supplies
-   `ExactShadowCodeRuntimeReadyAt`, including the nullary-`.fap` exclusion.
-3. Derive `BinderReadyReachablyCodeReady` from
-   `ProgramElimDeadWellFormed`, the successful compiler graph, and that
-   runtime invariant; then specialize the program theorem.
-4. Expand actual-pass conformance fixtures around each completed family.
+1. Define the compiler-facing semantic admissibility contract that supplies
+   source runtime/ownership readiness, separates foreign compatibility, and
+   makes the nullary-`.fap` policy explicit.
+2. Derive `SourceRuntimeOwnershipInitialInvariantOn` (or the weaker
+   exact-provenance form where ownership-sensitive reuse requires it) from
+   that contract, `ProgramElimDeadWellFormed`, and a successful transparent
+   compiler graph.
+3. Specialize `shadowProgram_loweringCorrect_sourceMachineInvariant` to the
+   new admissibility contract, yielding the general transparent
+   whole-program theorem.
+4. Continue actual-pass conformance and closed execution-graph fixtures at
+   semantic boundaries that refine or falsify the proposed contract.
 
 In parallel, the Wasm lane continues from the same final-impure semantic
 boundary and runs constructor/projection artifacts through the shared
