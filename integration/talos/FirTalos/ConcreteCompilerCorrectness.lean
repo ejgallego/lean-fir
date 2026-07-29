@@ -3006,14 +3006,27 @@ def declarationExternalRequest (declaration : LCNF.Decl .impure)
   args }
 
 /--
-Source/compiler admission for the pure arbitrary-precision integer
-construction family.
+Source-facing names whose successful pure response is an arbitrary-precision
+integer. Keeping this admission family explicit separates the evolving set of
+supported Lean externals from the name-agnostic compiler/adapter/refinement
+proof.
+-/
+inductive PureIntegerExternalName : Lean.Name → Prop where
+  | intOfNat : PureIntegerExternalName ``Int.ofNat
+  | intNeg : PureIntegerExternalName ``Int.neg
+  | intAdd : PureIntegerExternalName ``Int.add
+  | intSub : PureIntegerExternalName ``Int.sub
 
-The relation admits exactly `Int.ofNat` and `Int.neg`, records their real
+/--
+Source/compiler admission for the pure arbitrary-precision integer
+result family.
+
+The relation admits the names in `PureIntegerExternalName`, records their real
 `compileArgs`/`evalArgs` results and source external response, and indexes the
 step by the semantic result's exact heap cost. It contains no adapted program,
 numeric Wasm index, concrete response, allocation result, or refinement
-witness.
+witness. The operation-family witness is intentionally unused by the generic
+lowering proof; it is the source-facing gate that can grow independently.
 -/
 inductive PureIntegerExternalSupported
     (context : Fir.Wasm.Context) (externals : ExternalImpl) :
@@ -3025,8 +3038,7 @@ inductive PureIntegerExternalSupported
       (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
       (target : LCNF.Decl .impure) (value : Int)
       (valueEq : decl.value = .fap name args)
-      (operation :
-        name = ``Int.ofNat ∨ name = ``Int.neg)
+      (operation : PureIntegerExternalName name)
       (nonempty : args.isEmpty = false)
       (targetFound : context.program.findDecl? name = some target)
       (targetExternal : ∃ metadata, target.value = .extern metadata)
@@ -3910,8 +3922,8 @@ def ExternalLetRuntimeRefinesWithCost
 
 /--
 The production compiler, adapter, concrete resolver, and reusable external
-implementation law jointly discharge the `Int.ofNat`/`Int.neg` step of the
-budgeted structural theorem.
+implementation law jointly discharge every name in
+`PureIntegerExternalName` for the budgeted structural theorem.
 
 All physical arguments, decoded lanes, the import/local indices, allocation
 address, response, and extended witness are constructed inside the proof.
@@ -5570,7 +5582,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
 /--
 The complete current direct family preserves the frame used by pure integer
 external calls. Thus aliases, literals, projections, constructors, and
-`Int.ofNat`/`Int.neg` calls may share one budgeted structural induction.
+integer construction/arithmetic calls may share one budgeted structural
+induction.
 -/
 theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_integerExternal
     {program : Fir.LeanIR.ImpureProgram}
@@ -6088,8 +6101,8 @@ theorem ConcreteSupportedExport.correctBudgetedSpine
 
 /--
 Concrete whole-export partial correctness for spines that interleave every
-currently admitted direct operation with pure `Int.ofNat`/`Int.neg` external
-calls.
+currently admitted direct operation with the pure integer construction and
+arithmetic external family.
 
 The caller supplies source evaluation, the initial representation/frame
 relation, one exact path budget, and the installed external implementation's

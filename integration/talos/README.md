@@ -274,7 +274,8 @@ representation from one source-facing budget. The reusable
 Talos-step theorems now add the exact response, witness extension, related
 runtime/value, and unused headroom without caller-supplied allocation or
 target witnesses. `PureIntegerExternalSupported` admits compiler-shaped
-`Int.ofNat` and `Int.neg`, and
+integer construction and arithmetic calls selected by
+`PureIntegerExternalName`: `Int.ofNat`, `Int.neg`, `Int.add`, and `Int.sub`.
 `externalLetRuntimeRefinesWithCost_pureInteger` reconstructs their argument
 prefix, external import, host contract, allocation, local write, exact source
 trace, and residual budget from production compilation and static resolver
@@ -284,9 +285,10 @@ installed concrete external implementation. The generic lift
 all current direct operations, and
 `correctBudgetedIntegerExternalSpine` proves a named export correct for
 arbitrary finite interleavings of those direct operations with
-`Int.ofNat`/`Int.neg`. Its caller supplies only source evaluation, the initial
-state/frame relation, one exact path budget, and the initially installed
-handler law. This proof-facing surface is intentionally unstable.
+the four admitted pure integer operations. Its caller supplies only source
+evaluation, the initial state/frame relation, one exact path budget, and the
+initially installed handler law. This proof-facing surface is intentionally
+unstable.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

@@ -3901,6 +3901,21 @@ can enlarge the source-facing integer operation family without changing this
 structural theorem. These proof-facing laws remain deliberately unstable. No
 FIR semantic contract or executable ABI changed.
 
+W6.6fa performs that first family extension. The new
+`PureIntegerExternalName` relation makes the source-facing gate explicit and
+admits `Int.ofNat`, `Int.neg`, `Int.add`, and `Int.sub`. The generic
+compiler/adapter/resolver proof remains name-agnostic: successful source
+evaluation fixes the exact canonical integer response and cost, while the
+installed `IntegerResultRefines` law constructs the concrete allocation and
+related result. Consequently the existing
+`correctBudgetedIntegerExternalSpine` theorem now covers construction and
+binary arithmetic calls without any new target witness or structural proof.
+The contract harness checks all four name constructors. The next external
+family boundary is the distinct result representation used by operations such
+as `Int.natAbs` or `Int.decLt`; it should not be folded into the integer-result
+law. These proof-facing gates remain deliberately unstable. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

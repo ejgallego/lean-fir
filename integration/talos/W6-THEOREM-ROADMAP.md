@@ -166,17 +166,18 @@ law, and `invoke_pure_integer_result_refines_of_budget` plus
 `integerExternalStep_of_budget` construct the full concrete response, witness
 extension, related result, Talos host return, and residual budget without
 allocation or target witnesses. `PureIntegerExternalSupported` now admits
-exactly `Int.ofNat` and `Int.neg`; argument decoding, named-call inversion,
-static external resolver alignment, and
+the explicit `PureIntegerExternalName` family: `Int.ofNat`, `Int.neg`,
+`Int.add`, and `Int.sub`. Argument decoding, named-call inversion, static
+external resolver alignment, and
 `externalLetRuntimeRefinesWithCost_pureInteger` derive their complete
 compiler-shaped external step without target witnesses. Lifting the existing
 direct-operation laws through the installed-handler invariant is complete:
 the strengthened costed direct law preserves `Host.externals`, the generic
 lift threads `IntegerResultRefines`, and
 `correctBudgetedIntegerExternalSpine` consumes both direct and pure-Int
-families in one finite whole-export proof. The next external slice can widen
-the source-facing integer operation family without changing this structural
-theorem.
+families in one finite whole-export proof. The next external result family
+must account for the distinct representation of results such as `Nat` or
+`UInt8`; the structural theorem itself does not need to change.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

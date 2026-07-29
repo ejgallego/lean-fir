@@ -338,6 +338,11 @@ package and the installed operation-family implementation law. Its interface
 contains no target code, numeric indices, physical operands, concrete
 response, allocation result, or per-program simulation certificate.
 -/
+example : PureIntegerExternalName ``Int.ofNat := .intOfNat
+example : PureIntegerExternalName ``Int.neg := .intNeg
+example : PureIntegerExternalName ``Int.add := .intAdd
+example : PureIntegerExternalName ``Int.sub := .intSub
+
 example
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -685,8 +690,8 @@ example
 /--
 The concrete mixed endpoint needs no runtime-law arguments for the operation
 families already proved by W6. Direct helpers preserve the installed external
-implementation, so `Int.ofNat`/`Int.neg` calls may occur anywhere in the same
-budgeted source spine.
+implementation, so pure integer construction and arithmetic calls may occur
+anywhere in the same budgeted source spine.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
