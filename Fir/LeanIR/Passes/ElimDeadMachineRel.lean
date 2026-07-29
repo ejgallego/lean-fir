@@ -8193,6 +8193,22 @@ theorem ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
   | letDeleted continuation absent safe =>
       rfl
 
+/-- A retained let preserves its declaration at the target head.  Therefore
+excluding that particular declaration is enough to select the deleted
+branch, even when the target begins with some different retained let. -/
+theorem ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_same_let
+    (view : ExactShadowCodeView initial fuel final
+      (.let declaration sourceContinuation) target)
+    (targetNotSameLet :
+      ∀ targetContinuation,
+        target ≠ .let declaration targetContinuation) :
+    view.runtimeDecision = .deletedLet := by
+  cases view with
+  | letRetained continuation keep =>
+      exact (targetNotSameLet _ rfl).elim
+  | letDeleted continuation absent safe =>
+      rfl
+
 /-- A let value that is not safe to erase forces the retained exact branch.
 This selector is independent of target shape and is the proof-relevant
 counterpart of the compiler's second `keep` disjunct. -/

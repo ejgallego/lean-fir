@@ -118,6 +118,25 @@ def closedReuseBefore : LCNF.Code .impure :=
 def closedReuseAfter : LCNF.Code .impure :=
   .let closedReuseLiveDecl <| .return live
 
+def closedConcreteReuseObjectDecl : LCNF.LetDecl .impure :=
+  letDecl resetObjectVar objType (.ctor oneFieldInfo #[.erased])
+
+def closedConcreteReuseTokenDecl : LCNF.LetDecl .impure :=
+  letDecl reuseTokenVar objType (.reset 1 resetObjectVar)
+
+/-- Closed concrete-token reuse fixture.  The constructor is reset to a
+compiler-owned token and then reused, but the resulting object is dead. -/
+def closedConcreteReuseBefore : LCNF.Code .impure :=
+  .let closedReuseLiveDecl <|
+  .let closedConcreteReuseObjectDecl <|
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedConcreteReuseAfter : LCNF.Code .impure :=
+  closedReuseAfter
+
 def deletedReuseBefore : LCNF.Code .impure :=
   .let deadReuseDecl (.return live)
 
@@ -244,6 +263,8 @@ def checkFixtures : CoreM Unit := do
   checkActualElimDead `elimDeadWrites deletedWritesBefore deletedWritesAfter
   checkActualElimDead `elimDeadClosedWrites closedWritesBefore closedWritesAfter
   checkActualElimDead `elimDeadClosedReuse closedReuseBefore closedReuseAfter
+  checkActualElimDead `elimDeadClosedConcreteReuse
+    closedConcreteReuseBefore closedConcreteReuseAfter
   checkActualElimDead `elimDeadReuse deletedReuseBefore deletedReuseAfter
   checkActualElimDead `elimDeadReset deletedResetBefore deletedResetAfter
   checkActualElimDead `elimDeadLargeNat
@@ -295,6 +316,12 @@ def closedReuseBeforeProgram : ImpureProgram :=
 
 def closedReuseAfterProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main closedReuseAfter] }
+
+def closedConcreteReuseBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedConcreteReuseBefore] }
+
+def closedConcreteReuseAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main closedConcreteReuseAfter] }
 
 def deletedReuseBeforeProgram : ImpureProgram :=
   { decls := #[fixtureDecl `main deletedReuseBefore] }
@@ -487,6 +514,29 @@ theorem closedReuseShadowRun :
     neutralUsed, shadowCode?, safeToElim, collectLetValue, liveMember, tokenAbsent,
     argumentAbsent, deadAbsent]
 
+theorem closedConcreteReuseShadowRun :
+    shadowCode? 6 {} closedConcreteReuseBefore =
+      some (closedConcreteReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have objectAbsent :
+      resetObjectVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [closedConcreteReuseBefore, closedConcreteReuseAfter,
+    closedConcreteReuseObjectDecl, closedConcreteReuseTokenDecl,
+    closedReuseAfter, closedReuseArgDecl, closedReuseLiveDecl,
+    deadReuseDecl, letDecl, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, collectArgs, collectArgList, collectArg,
+    liveMember, objectAbsent, tokenAbsent, argumentAbsent, deadAbsent]
+
 theorem deletedResetShadowRun :
     shadowCode? 2 {} deletedResetBefore =
       some (deletedResetAfter, neutralUsed) := by
@@ -579,6 +629,14 @@ theorem closedReuseProgramShadowRelated :
   simp [shadowProgram?, shadowDecls?, shadowDecl?,
     closedReuseBeforeProgram, closedReuseAfterProgram,
     fixtureDecl, decl, closedReuseShadowRun]
+
+theorem closedConcreteReuseProgramShadowRelated :
+    ProgramRelated (ShadowCodeRelated 6)
+      closedConcreteReuseBeforeProgram closedConcreteReuseAfterProgram := by
+  apply shadowProgram_related
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedConcreteReuseBeforeProgram, closedConcreteReuseAfterProgram,
+    fixtureDecl, decl, closedConcreteReuseShadowRun]
 
 theorem deletedReuseProgramShadowRelated :
     ProgramRelated (ShadowCodeRelated 2)
@@ -6792,5 +6850,936 @@ theorem closedReuseProgramLoweringCorrect
     closedReuseBeforeProgramElimDeadWellFormed
     closedReuseShadowProgramRun compatible
     (closedReuseSourceRuntimeOwnershipInitialInvariant externals)
+
+/-- Concrete states for the closed concrete-token branch.  The source-only
+constructor lives at location zero, reset converts it into a token, and reuse
+overwrites the same unreachable cell. -/
+def closedConcreteReuseObjectEnv : Env :=
+  bind closedReuseLiveEnv resetObjectVar (.object (.heap 0))
+
+def closedConcreteReuseResetObject : ConstructorObject :=
+  { closedReuseAllocatedObject with
+    objectFields := #[.object (.tagged 0)] }
+
+def closedConcreteReuseResetCell : HeapCell :=
+  { object := .ctor closedConcreteReuseResetObject }
+
+def closedConcreteReuseResetRuntime : RuntimeState :=
+  { closedReuseAllocation.1 with
+    heap := [(0, closedConcreteReuseResetCell)] }
+
+def closedConcreteReuseTokenEnv : Env :=
+  bind closedConcreteReuseObjectEnv reuseTokenVar
+    (.reuseToken (some 0))
+
+def closedConcreteReuseArgEnv : Env :=
+  bind closedConcreteReuseTokenEnv reuseArgVar .erased
+
+def closedConcreteReuseAfterLiveCode : LCNF.Code .impure :=
+  .let closedConcreteReuseObjectDecl <|
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedConcreteReuseAfterObjectCode : LCNF.Code .impure :=
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedConcreteReuseAfterResetCode : LCNF.Code .impure :=
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def closedConcreteReuseAfterArgCode : LCNF.Code .impure :=
+  .let deadReuseDecl <| .return live
+
+def closedConcreteReuseSourceOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code closedConcreteReuseBefore
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceObjectState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code closedConcreteReuseAfterLiveCode
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceResetState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code closedConcreteReuseAfterObjectCode
+    env := closedConcreteReuseObjectEnv
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceArgState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code closedConcreteReuseAfterResetCode
+    env := closedConcreteReuseTokenEnv
+    runtime := closedConcreteReuseResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceReuseState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code closedConcreteReuseAfterArgCode
+    env := closedConcreteReuseArgEnv
+    runtime := closedConcreteReuseResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .code (.return live)
+    env := bind closedConcreteReuseArgEnv dead (.object (.heap 0))
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedConcreteReuseArgEnv dead (.object (.heap 0))
+    runtime := closedReuseAllocation.1
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseSourceCachedState : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .yielded (.object (.tagged 0))
+    env := bind closedConcreteReuseArgEnv dead (.object (.heap 0))
+    runtime := closedReuseAllocation.1.setGlobal `main
+      (.object (.tagged 0)) }
+
+def closedConcreteReuseSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseBeforeProgram
+    control := .invokeValue (.object (.tagged 0)) arguments
+    env := bind closedConcreteReuseArgEnv dead (.object (.heap 0))
+    runtime := closedReuseAllocation.1 }
+
+theorem closedConcreteReuseSourceEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState closedConcreteReuseBeforeProgram `main arguments) =
+      .next (closedConcreteReuseSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedConcreteReuseBeforeProgram,
+      Program.findDecl?, invokeDecl, closedConcreteReuseSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedConcreteReuseSourceOuterStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceOuterState arguments) =
+      .next (closedConcreteReuseSourceObjectState arguments) := by
+  rfl
+
+theorem closedConcreteReuseSourceObjectStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceObjectState arguments) =
+      .next (closedConcreteReuseSourceResetState arguments) := by
+  have evaluated :
+      evalLetValue (closedConcreteReuseSourceObjectState arguments)
+          closedConcreteReuseObjectDecl =
+        .ok (closedReuseAllocation.1,
+          .value (.object (.heap 0))) := by
+    simp [evalLetValue, closedConcreteReuseSourceObjectState,
+      closedConcreteReuseAfterLiveCode,
+      closedConcreteReuseObjectDecl, letDecl, evalArgs, evalArg,
+      allocCtor, alloc, oneFieldInfo, closedReuseAllocation,
+      closedReuseAllocatedObject, Functor.map, Except.map,
+      Bind.bind, Except.bind, Pure.pure, Except.pure]
+  change coreStep {
+      closedConcreteReuseSourceObjectState arguments with
+      control := .code
+        (.let closedConcreteReuseObjectDecl
+          closedConcreteReuseAfterObjectCode) } =
+    .next (closedConcreteReuseSourceResetState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedConcreteReuseSourceResetStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceResetState arguments) =
+      .next (closedConcreteReuseSourceArgState arguments) := by
+  rfl
+
+theorem closedConcreteReuseSourceArgStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceArgState arguments) =
+      .next (closedConcreteReuseSourceReuseState arguments) := by
+  rfl
+
+theorem closedConcreteReuseSourceReuseStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceReuseState arguments) =
+      .next (closedConcreteReuseSourceReturnState arguments) := by
+  have evaluated :
+      evalLetValue (closedConcreteReuseSourceReuseState arguments)
+          deadReuseDecl =
+        .ok (closedReuseAllocation.1,
+          .value (.object (.heap 0))) := by
+    simp [evalLetValue, closedConcreteReuseSourceReuseState,
+      closedConcreteReuseAfterArgCode, deadReuseDecl, letDecl,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      closedConcreteReuseResetRuntime, closedConcreteReuseResetCell,
+      closedConcreteReuseResetObject, lookupValue, evalArgs, evalArg,
+      Impure.bind, lookup, reuseTokenVar, reuseArgVar, reuse,
+      getLiveCell, setCell, findCell?, replaceCell, alloc,
+      oneFieldInfo,
+      closedReuseAllocation, closedReuseAllocatedObject,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      closedConcreteReuseSourceReuseState arguments with
+      control := .code (.let deadReuseDecl (.return live)) } =
+    .next (closedConcreteReuseSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem closedConcreteReuseSourceReturnStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseSourceReturnState arguments) =
+      .next (closedConcreteReuseSourceYieldedState arguments) := by
+  rfl
+
+theorem closedConcreteReuseSourceYieldedStepEmpty :
+    coreStep (closedConcreteReuseSourceYieldedState #[]) =
+      .next closedConcreteReuseSourceCachedState := by
+  rfl
+
+theorem closedConcreteReuseSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedConcreteReuseSourceYieldedState arguments) =
+      .next (closedConcreteReuseSourceInvokingState arguments) := by
+  simp [coreStep, closedConcreteReuseSourceYieldedState,
+    neutralEntryFrames, notEmpty,
+    closedConcreteReuseSourceInvokingState]
+
+/-- Complete source execution graph for the concrete-token branch. -/
+inductive ClosedConcreteReuseSourceReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      ClosedConcreteReuseSourceReachable arguments
+        (initialState closedConcreteReuseBeforeProgram `main arguments)
+  | outer :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceOuterState arguments)
+  | object :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceObjectState arguments)
+  | reset :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceResetState arguments)
+  | argument :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceArgState arguments)
+  | reuse :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceReuseState arguments)
+  | ret :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceReturnState arguments)
+  | yielded :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedConcreteReuseSourceReachable arguments
+        closedConcreteReuseSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedConcreteReuseSourceReachable arguments
+        (closedConcreteReuseSourceInvokingState arguments)
+
+theorem closedConcreteReuseSourceReachable_step
+    (reachable :
+      ClosedConcreteReuseSourceReachable arguments before)
+    (step : Step externals before after) :
+    ClosedConcreteReuseSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceOuterStep arguments) .object step
+  | object =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceObjectStep arguments) .reset step
+  | reset =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceResetStep arguments) .argument step
+  | argument =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceArgStep arguments) .reuse step
+  | reuse =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceReuseStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedConcreteReuseSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          closedConcreteReuseSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedConcreteReuseSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedConcreteReuseSourceCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [closedConcreteReuseSourceCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedConcreteReuseSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedConcreteReuseSourceInvokingState,
+            coreStep, invokeClosure, fail] at transition
+
+def closedConcreteReuseTargetOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseAfterProgram
+    control := .code closedConcreteReuseAfter
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseTargetReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseAfterProgram
+    control := .code (.return live)
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseTargetYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseAfterProgram
+    control := .yielded (.object (.tagged 0))
+    env := closedReuseLiveEnv
+    frames := neutralEntryFrames arguments }
+
+def closedConcreteReuseTargetCachedState : MachineState :=
+  { program := closedConcreteReuseAfterProgram
+    control := .yielded (.object (.tagged 0))
+    env := closedReuseLiveEnv
+    runtime := ({} : RuntimeState).setGlobal `main
+      (.object (.tagged 0)) }
+
+def closedConcreteReuseTargetInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := closedConcreteReuseAfterProgram
+    control := .invokeValue (.object (.tagged 0)) arguments
+    env := closedReuseLiveEnv }
+
+theorem closedConcreteReuseTargetEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState closedConcreteReuseAfterProgram `main arguments) =
+      .next (closedConcreteReuseTargetOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, closedConcreteReuseAfterProgram,
+      Program.findDecl?, invokeDecl, closedConcreteReuseTargetOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem closedConcreteReuseTargetOuterStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseTargetOuterState arguments) =
+      .next (closedConcreteReuseTargetReturnState arguments) := by
+  rfl
+
+theorem closedConcreteReuseTargetReturnStep
+    (arguments : Array Value) :
+    coreStep (closedConcreteReuseTargetReturnState arguments) =
+      .next (closedConcreteReuseTargetYieldedState arguments) := by
+  rfl
+
+theorem closedConcreteReuseTargetYieldedStepEmpty :
+    coreStep (closedConcreteReuseTargetYieldedState #[]) =
+      .next closedConcreteReuseTargetCachedState := by
+  rfl
+
+theorem closedConcreteReuseTargetYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (closedConcreteReuseTargetYieldedState arguments) =
+      .next (closedConcreteReuseTargetInvokingState arguments) := by
+  simp [coreStep, closedConcreteReuseTargetYieldedState,
+    neutralEntryFrames, notEmpty,
+    closedConcreteReuseTargetInvokingState]
+
+inductive ClosedConcreteReuseTargetReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      ClosedConcreteReuseTargetReachable arguments
+        (initialState closedConcreteReuseAfterProgram `main arguments)
+  | outer :
+      ClosedConcreteReuseTargetReachable arguments
+        (closedConcreteReuseTargetOuterState arguments)
+  | ret :
+      ClosedConcreteReuseTargetReachable arguments
+        (closedConcreteReuseTargetReturnState arguments)
+  | yielded :
+      ClosedConcreteReuseTargetReachable arguments
+        (closedConcreteReuseTargetYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      ClosedConcreteReuseTargetReachable arguments
+        closedConcreteReuseTargetCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      ClosedConcreteReuseTargetReachable arguments
+        (closedConcreteReuseTargetInvokingState arguments)
+
+theorem closedConcreteReuseTargetReachable_step
+    (reachable :
+      ClosedConcreteReuseTargetReachable arguments before)
+    (step : Step externals before after) :
+    ClosedConcreteReuseTargetReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (closedConcreteReuseTargetEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (closedConcreteReuseTargetOuterStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (closedConcreteReuseTargetReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          closedConcreteReuseTargetYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (closedConcreteReuseTargetYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [closedConcreteReuseTargetCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [closedConcreteReuseTargetCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [closedConcreteReuseTargetInvokingState,
+            coreStep, invokeClosure, fail] at transition
+      | external transition response =>
+          simp [closedConcreteReuseTargetInvokingState,
+            coreStep, invokeClosure, fail] at transition
+
+/-- Every target state has an empty allocation frontier and no active copy of
+the concrete `reuse` declaration. -/
+def ClosedConcreteReuseTargetRuntimeShape
+    (state : MachineState) : Prop :=
+  state.runtime.nextLocation = 0 ∧
+    ∀ code, state.control = .code code →
+      ∀ continuation, code ≠ .let deadReuseDecl continuation
+
+theorem closedConcreteReuseTargetReachable_runtimeShape
+    (reachable :
+      ClosedConcreteReuseTargetReachable arguments state) :
+    ClosedConcreteReuseTargetRuntimeShape state := by
+  cases reachable <;>
+    simp [ClosedConcreteReuseTargetRuntimeShape, initialState,
+      closedConcreteReuseTargetOuterState,
+      closedConcreteReuseTargetReturnState,
+      closedConcreteReuseTargetYieldedState,
+      closedConcreteReuseTargetCachedState,
+      closedConcreteReuseTargetInvokingState,
+      closedConcreteReuseAfter, closedReuseAfter,
+      closedReuseLiveDecl, deadReuseDecl, letDecl,
+      RuntimeState.setGlobal, RuntimeState.markPersistent]
+
+theorem closedConcreteReuseResetEffect :
+    reset closedReuseAllocation.1 1 (.object (.heap 0)) =
+      .ok (closedConcreteReuseResetRuntime,
+        .reuseToken (some 0)) := by
+  rfl
+
+/-- The related target's empty allocation frontier excludes the source-only
+constructor from every actual control/frame root decomposition.  Resetting
+that cell therefore preserves the reachable runtime. -/
+theorem closedConcreteReuseResetReady_of_shadowRuntime
+    (target : MachineState)
+    (runtime :
+      ShadowRuntimeRel rho
+        (closedConcreteReuseSourceResetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedResetReadyAt
+      (closedConcreteReuseSourceResetState arguments)
+      (runtimeRoots
+        (closedConcreteReuseSourceResetState arguments).runtime
+        sourceRoots)
+      1 resetObjectVar := by
+  have unreachable :
+      ¬Reachable
+        (closedConcreteReuseSourceResetState arguments).runtime.heap
+        (runtimeRoots
+          (closedConcreteReuseSourceResetState arguments).runtime
+          sourceRoots)
+        0 :=
+    runtime.leftUnreachable_of_rightNextLocation_zero
+      targetEmpty 0
+  have found :
+      findCell?
+          (closedConcreteReuseSourceResetState arguments).runtime.heap
+          0 =
+        some ({ object := .ctor closedReuseAllocatedObject } :
+          HeapCell) := by
+    rfl
+  rcases setCell_reachableFrame_of_unreachable found unreachable
+      runtime.leftHeapFresh closedConcreteReuseResetCell with
+    ⟨after, effect, frame⟩
+  have known :
+      setCell
+          (closedConcreteReuseSourceResetState arguments).runtime
+          0 closedConcreteReuseResetCell =
+        .ok closedConcreteReuseResetRuntime := by
+    rfl
+  rw [known] at effect
+  injection effect with afterEq
+  subst after
+  refine .mk (.object (.heap 0)) (.reuseToken (some 0))
+    closedConcreteReuseResetRuntime ?_ ?_ frame
+  · simp [closedConcreteReuseSourceResetState,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup,
+      resetObjectVar, live]
+  · simpa [closedConcreteReuseSourceResetState] using
+      closedConcreteReuseResetEffect
+
+/-- The exact pair supplies both the deleted reset certificate and the saved
+frame roots selected by the compiler residual. -/
+theorem closedConcreteReuseResetPairReady
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 6
+      (closedConcreteReuseSourceResetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 6
+      (closedConcreteReuseSourceResetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedConcreteReuseSourceResetState arguments).control =
+        .code closedConcreteReuseAfterObjectCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have resetReady :=
+        closedConcreteReuseResetReady_of_shadowRuntime
+          target runtime targetShape.1
+      have removed :
+          DeletedLetReadyAt
+            (closedConcreteReuseSourceResetState arguments)
+            (runtimeRoots
+              (closedConcreteReuseSourceResetState arguments).runtime
+              (envRootsOn used
+                (closedConcreteReuseSourceResetState arguments).env ++
+                sourceFrameRoots))
+            closedConcreteReuseTokenDecl := by
+        unfold closedConcreteReuseTokenDecl letDecl
+        exact .reset reuseTokenVar reuseTokenVar.name objType
+          1 resetObjectVar (by simpa using resetReady)
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.let_of_ready
+              removed (by trivial)⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+/-- Concrete-token reuse overwrites only the same source-only cell already
+shown unreachable by the related target's empty frontier. -/
+theorem closedConcreteReuseReady_of_shadowRuntime
+    (target : MachineState)
+    (runtime :
+      ShadowRuntimeRel rho
+        (closedConcreteReuseSourceReuseState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0) :
+    DeletedReuseReadyAt
+      (closedConcreteReuseSourceReuseState arguments)
+      (runtimeRoots
+        (closedConcreteReuseSourceReuseState arguments).runtime
+        sourceRoots)
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  refine .some 0 closedConcreteReuseResetCell
+    closedConcreteReuseResetObject #[.erased] ?_ ?_ ?_ ?_ ?_ ?_ ?_
+  · simp [closedConcreteReuseSourceReuseState,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar]
+  · simp [closedConcreteReuseSourceReuseState,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar]
+    rfl
+  · rfl
+  · rfl
+  · rfl
+  · rfl
+  · exact runtime.leftUnreachable_of_rightNextLocation_zero
+      targetEmpty 0
+
+/-- Exact provenance selects deletion of the concrete reuse because no
+reachable target is headed by the same declaration. -/
+theorem closedConcreteReusePairReady
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related : SomeBinderReadyReachableMachineRelated 6
+      (closedConcreteReuseSourceReuseState arguments) target) :
+    BinderReadyReachableMachineReadyAt 6
+      (closedConcreteReuseSourceReuseState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedConcreteReuseSourceReuseState arguments).control =
+        .code closedConcreteReuseAfterArgCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision :
+          exact.view.runtimeDecision = .deletedLet :=
+        exact.view
+          |>.runtimeDecision_eq_deletedLet_of_target_not_same_let
+            (targetShape.2 targetCode targetControl)
+      have reuseReady :=
+        closedConcreteReuseReady_of_shadowRuntime
+          target runtime targetShape.1
+      have removed :
+          DeletedLetReadyAt
+            (closedConcreteReuseSourceReuseState arguments)
+            (runtimeRoots
+              (closedConcreteReuseSourceReuseState arguments).runtime
+              (envRootsOn used
+                (closedConcreteReuseSourceReuseState arguments).env ++
+                sourceFrameRoots))
+            deadReuseDecl := by
+        unfold deadReuseDecl letDecl
+        exact .reuse dead dead.name objType reuseTokenVar
+          oneFieldInfo true #[.fvar reuseArgVar]
+          (by simpa using reuseReady)
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem closedConcreteReuseBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      closedConcreteReuseBefore := by
+  unfold closedConcreteReuseBefore closedReuseLiveDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem closedConcreteReuseObjectSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedConcreteReuseSourceObjectState arguments)
+      sourceFrameRoots closedConcreteReuseAfterLiveCode := by
+  unfold closedConcreteReuseAfterLiveCode
+    closedConcreteReuseObjectDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.erased] ?_ rfl
+  simp [closedConcreteReuseSourceObjectState,
+    closedReuseLiveEnv, evalArgs, evalArg]
+  rfl
+
+theorem closedConcreteReuseArgSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (closedConcreteReuseSourceArgState arguments)
+      sourceFrameRoots closedConcreteReuseAfterResetCode := by
+  unfold closedConcreteReuseAfterResetCode closedReuseArgDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem closedConcreteReuseReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+theorem closedConcreteReuseOuterSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (closedConcreteReuseSourceOuterState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedConcreteReuseBefore :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedConcreteReuseBeforeSourceRuntimeReadyAt
+    (closedConcreteReuseSourceOuterState arguments)
+    sourceFrameRoots bounded exact subset static
+
+theorem closedConcreteReuseObjectSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (closedConcreteReuseSourceObjectState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedConcreteReuseAfterLiveCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedConcreteReuseObjectSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem closedConcreteReuseArgSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (closedConcreteReuseSourceArgState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = closedConcreteReuseAfterResetCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedConcreteReuseArgSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem closedConcreteReuseReturnSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (closedConcreteReuseSourceReturnState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = .return live :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact closedConcreteReuseReturnSourceRuntimeReadyAt
+    (closedConcreteReuseSourceReturnState arguments)
+    sourceFrameRoots bounded exact subset static
+
+/-- Every related reachable source/target pair has the exact dynamic
+certificate selected by its compiler residual. -/
+theorem closedConcreteReuseSourceReachable_pairReady
+    (sourceReachable :
+      ClosedConcreteReuseSourceReachable arguments source)
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (related :
+      SomeBinderReadyReachableMachineRelated 6 source target) :
+    BinderReadyReachableMachineReadyAt 6 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseOuterSourceMachineReadyAt arguments)
+  | object =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseObjectSourceMachineReadyAt arguments)
+  | reset =>
+      exact closedConcreteReuseResetPairReady targetShape related
+  | argument =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseArgSourceMachineReadyAt arguments)
+  | reuse =>
+      exact closedConcreteReusePairReady targetShape related
+  | ret =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseReturnSourceMachineReadyAt arguments)
+  | yielded =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceYieldedState] at control
+  | cached empty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceInvokingState] at control
+
+theorem closedConcreteReuseSourceReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedConcreteReuseBeforeProgram `main arguments)
+      state) :
+    ClosedConcreteReuseSourceReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        ClosedConcreteReuseSourceReachable arguments before →
+          ClosedConcreteReuseSourceReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih
+          (closedConcreteReuseSourceReachable_step ready head)
+  exact preserves steps .entry
+
+theorem closedConcreteReuseTargetReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState closedConcreteReuseAfterProgram `main arguments)
+      state) :
+    ClosedConcreteReuseTargetReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        ClosedConcreteReuseTargetReachable arguments before →
+          ClosedConcreteReuseTargetReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih
+          (closedConcreteReuseTargetReachable_step ready head)
+  exact preserves steps .entry
+
+theorem closedConcreteReuseExactRuntimeOwnershipInitialInvariant
+    (externals : ExternalSpec) :
+    ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals 6)
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] := by
+  intro entry member sourceArguments targetArguments argumentsRelated
+  have entryEq : entry = `main := by
+    simpa using member
+  subst entry
+  intro sourceAfter targetAfter sourcePath targetPath related
+  have sourceReachable :=
+    closedConcreteReuseSourceReachable_of_reaches sourcePath
+  have targetReachable :=
+    closedConcreteReuseTargetReachable_of_reaches targetPath
+  exact closedConcreteReuseSourceReachable_pairReady
+    sourceReachable
+    (closedConcreteReuseTargetReachable_runtimeShape
+      targetReachable)
+    related
+
+theorem closedConcreteReuseBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed
+      closedConcreteReuseBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique,
+          closedConcreteReuseBeforeProgram, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [closedConcreteReuseBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE (.letE (.letE (.letE .ret))))
+    · intro declaration member
+      simp [closedConcreteReuseBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩
+            (.letE ⟨.object, trivial⟩
+              (.letE ⟨.object, trivial⟩ .ret))))
+  · intro declaration member
+    simp [closedConcreteReuseBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+      closedConcreteReuseBefore, closedReuseLiveDecl,
+      closedConcreteReuseObjectDecl,
+      closedConcreteReuseTokenDecl, closedReuseArgDecl,
+      deadReuseDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds,
+      live, resetObjectVar, reuseTokenVar, reuseArgVar, dead]
+
+theorem closedConcreteReuseShadowProgramRun :
+    shadowProgram? 6 closedConcreteReuseBeforeProgram =
+      some closedConcreteReuseAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    closedConcreteReuseBeforeProgram,
+    closedConcreteReuseAfterProgram,
+    fixtureDecl, decl, closedConcreteReuseShadowRun]
+
+/-- Whole-program semantic correctness for the closed concrete-token branch.
+The source allocates, resets, and reuses one compiler-owned cell; the target
+omits the entire dead suffix while preserving every observable root. -/
+theorem closedConcreteReuseProgramLoweringCorrect
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 6) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] :=
+  shadowProgram_loweringCorrect_exactRuntimeOwnership
+    closedConcreteReuseBeforeProgramElimDeadWellFormed
+    closedConcreteReuseShadowProgramRun compatible
+    (closedConcreteReuseExactRuntimeOwnershipInitialInvariant
+      externals)
 
 end Fir.LeanIR.Passes.ElimDeadExamples
