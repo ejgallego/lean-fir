@@ -3619,6 +3619,21 @@ families. This is deliberately successful-step partial correctness:
 source-failing uninitialized coordinate cannot yet have exact concrete fault
 correspondence. No FIR semantic contract or executable ABI changed.
 
+W6.6ek adds the complete nonallocating literal family to the same structural
+theorem. `ImmediateLiteralKind` classifies `UInt8`, `UInt16`, `UInt32`,
+`UInt64`, and `USize` literals by their exact compiler ABI kind. Its derived
+functions determine the symbolic constant, adapted Talos instruction,
+physical lane, and semantic value; clients supply none of those as
+translation evidence. `directLetRuntimeRefines_immediateLiteral` proves the
+constant/write step using only exact local-frame capacity, and
+`ReadOnlyDirectSupported` now permits these literals to interleave with
+aliases and all three projection families. The audit also identifies the next
+resource boundary precisely: constructors, heap `Nat` values, and strings
+cannot use this invariant because source allocation is unbounded while the
+wasm32 heap is finite. Their structural law must thread a remaining-capacity
+condition rather than assume concrete allocation totality. No FIR semantic
+contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

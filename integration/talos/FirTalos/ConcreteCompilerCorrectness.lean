@@ -2249,6 +2249,169 @@ inductive LocalAliasSupported (context : Fir.Wasm.Context) :
       LocalAliasSupported context decl
 
 /--
+The nonallocating literal forms and their exact compiler ABI kind.
+
+The relation is source-facing. Its derived symbolic instruction, Talos
+instruction, physical value, and semantic value are functions of this
+classification rather than caller-provided translation evidence.
+-/
+inductive ImmediateLiteralKind : LCNF.LitValue → AbiKind → Type where
+  | uint8 (value : UInt8) : ImmediateLiteralKind (.uint8 value) .uint8
+  | uint16 (value : UInt16) : ImmediateLiteralKind (.uint16 value) .uint16
+  | uint32 (value : UInt32) : ImmediateLiteralKind (.uint32 value) .uint32
+  | uint64 (value : UInt64) : ImmediateLiteralKind (.uint64 value) .uint64
+  | usize (value : UInt64) : ImmediateLiteralKind (.usize value) .usize
+
+namespace ImmediateLiteralKind
+
+def sourceValue {literal : LCNF.LitValue} {kind : AbiKind} :
+    ImmediateLiteralKind literal kind → Value
+  | .uint8 value => .scalar (.uint8 value)
+  | .uint16 value => .scalar (.uint16 value)
+  | .uint32 value => .scalar (.uint32 value)
+  | .uint64 value => .scalar (.uint64 value)
+  | .usize value => .usize value
+
+def symbolicInstruction {literal : LCNF.LitValue} {kind : AbiKind} :
+    ImmediateLiteralKind literal kind → Fir.Wasm.Instruction
+  | .uint8 value => .i32Const .uint8 (UInt32.ofNat value.toNat)
+  | .uint16 value => .i32Const .uint16 (UInt32.ofNat value.toNat)
+  | .uint32 value => .i32Const .uint32 value
+  | .uint64 value => .i64Const .uint64 value
+  | .usize value => .i64Const .usize value
+
+def targetInstruction {literal : LCNF.LitValue} {kind : AbiKind} :
+    ImmediateLiteralKind literal kind → Wasm.Instruction
+  | .uint8 value => .const (UInt32.ofNat value.toNat)
+  | .uint16 value => .const (UInt32.ofNat value.toNat)
+  | .uint32 value => .const value
+  | .uint64 value => .constI64 value
+  | .usize value => .constI64 value
+
+def physical {literal : LCNF.LitValue} {kind : AbiKind} :
+    ImmediateLiteralKind literal kind → Wasm.Value
+  | .uint8 value => .i32 (UInt32.ofNat value.toNat)
+  | .uint16 value => .i32 (UInt32.ofNat value.toNat)
+  | .uint32 value => .i32 value
+  | .uint64 value => .i64 value
+  | .usize value => .i64 value
+
+@[simp] theorem sourceLiteral
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind) (runtime : RuntimeState) :
+    Fir.LeanIR.Impure.literal runtime literal =
+      (runtime, shape.sourceValue) := by
+  cases shape <;> simp [sourceValue, Fir.LeanIR.Impure.literal]
+
+theorem physicalRelated
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (witness : RefinementWitness) :
+    PhysicalValueRel witness kind shape.physical shape.sourceValue := by
+  cases shape with
+  | uint8 value =>
+      simpa [physical, sourceValue] using
+        (PhysicalValueRel.word32
+          (ValueRel.uint8
+            (witness := witness) (word := Word32.ofUInt8 value) rfl))
+  | uint16 value =>
+      simpa [physical, sourceValue] using
+        (PhysicalValueRel.word32
+          (ValueRel.uint16
+            (witness := witness) (word := Word32.ofUInt16 value) rfl))
+  | uint32 value =>
+      simpa [physical, sourceValue] using
+        (PhysicalValueRel.word32
+          (ValueRel.uint32
+            (witness := witness) (word := Word32.ofUInt32 value) rfl))
+  | uint64 value =>
+      simpa [physical, sourceValue] using
+        (PhysicalValueRel.word64
+          (ValueRel.uint64 (witness := witness) (value := value)))
+  | usize value =>
+      simpa [physical, sourceValue] using
+        (PhysicalValueRel.word64
+          (ValueRel.usize (witness := witness) (value := value)))
+
+theorem compileLetValue_eq
+    {context : Fir.Wasm.Context} {decl : LCNF.LetDecl .impure}
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (valueEq : decl.value = .lit literal)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok kind) :
+    Fir.Wasm.compileLetValue context decl =
+      .ok [shape.symbolicInstruction] := by
+  cases shape <;>
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind,
+      AbiKind.acceptsLiteral, Fir.Wasm.literalKind, Fir.Wasm.compileLiteral,
+      symbolicInstruction, Bind.bind, Except.bind, pure, Except.pure]
+
+theorem instructions_eq
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind) :
+    instructions sourceModule sourceFunction labels
+        [shape.symbolicInstruction] =
+      .ok [shape.targetInstruction] := by
+  cases shape <;>
+    simp [instructions, instruction, symbolicInstruction, targetInstruction,
+      Bind.bind, Except.bind, pure, Except.pure]
+
+theorem wp_let
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {rest : Wasm.Program} {Q : Wasm.Assertion Host}
+    {store : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {tail : List Wasm.Value}
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (targetSet :
+      locals.set? resultIndex shape.physical = some updated)
+    (continued :
+      Wasm.wp module rest Q store { updated with values := tail } hostEnv) :
+    Wasm.wp module
+      (shape.targetInstruction :: .localSet resultIndex :: rest)
+      Q store { locals with values := tail } hostEnv := by
+  cases shape with
+  | uint8 value =>
+      simpa [physical, targetInstruction] using
+        wp_i32Const_let (UInt32.ofNat value.toNat) tail targetSet continued
+  | uint16 value =>
+      simpa [physical, targetInstruction] using
+        wp_i32Const_let (UInt32.ofNat value.toNat) tail targetSet continued
+  | uint32 value =>
+      simpa [physical, targetInstruction] using
+        wp_i32Const_let value tail targetSet continued
+  | uint64 value =>
+      simpa [physical, targetInstruction] using
+        wp_i64Const_let value tail targetSet continued
+  | usize value =>
+      simpa [physical, targetInstruction] using
+        wp_i64Const_let value tail targetSet continued
+
+end ImmediateLiteralKind
+
+/--
+Static admission for a nonallocating integer or `USize` literal.
+
+Only the source literal classification and compiler-selected destination are
+recorded. The emitted instruction, physical constant, and semantic result are
+derived from `ImmediateLiteralKind`.
+-/
+inductive ImmediateLiteralSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (literal : LCNF.LitValue) (resultKind : AbiKind)
+      (valueEq : decl.value = .lit literal)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, resultKind))
+      (shape : ImmediateLiteralKind literal resultKind) :
+      ImmediateLiteralSupported context decl
+
+/--
 Static admission for a direct `USize` projection.
 
 The predicate contains only source/compiler typing facts: the object and
@@ -2555,6 +2718,37 @@ theorem sourceLetResult_scalarProjection_eq
           exact ⟨sourceObject, scalar, runtimeEq.symm, rfl, rfl, projected⟩
 
 /--
+Invert a successful nonallocating literal source step. The literal
+classification fixes both its unchanged runtime and exact semantic value.
+-/
+theorem sourceLetResult_immediateLiteral_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (valueEq : decl.value = .lit literal)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    nextRuntime = sourceRuntime ∧ sourceValue = shape.sourceValue := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  rw [shape.sourceLiteral] at sourceStep
+  change
+    Except.ok (sourceRuntime, LetAction.value shape.sourceValue) =
+      Except.ok (nextRuntime, LetAction.value sourceValue)
+    at sourceStep
+  have pairEq :
+      (sourceRuntime, LetAction.value shape.sourceValue) =
+        (nextRuntime, LetAction.value sourceValue) :=
+    Except.ok.inj sourceStep
+  exact ⟨(congrArg Prod.fst pairEq).symm,
+    LetAction.value.inj (congrArg Prod.snd pairEq).symm⟩
+
+/--
 The concrete frame has exactly the parameter and local capacity allocated for
 the selected symbolic function.  Runtime and witness components are ignored:
 this is a threaded resource invariant, separate from semantic state
@@ -2689,6 +2883,49 @@ theorem DirectLetRuntimeRefines.or
   | inr rightSupported =>
       exact right rightSupported invariant sourceStep stateRelated valueCompiled
         valueAdapted resultFound
+
+/--
+One compiler-produced immediate literal is simulated by its generated
+constant and destination write. No host call, heap transition, or witness
+extension is involved.
+-/
+theorem letStepSimulates_immediateLiteral
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {decl : LCNF.LetDecl .impure} {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {resultIndex : Nat} {witness : RefinementWitness}
+    {literal : LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl sourceRuntime
+        shape.sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some kind)
+    (targetSet :
+      locals.set? resultIndex shape.physical = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      [shape.targetInstruction]
+      sourceRuntime sourceRuntime sourceEnv shape.sourceValue initial initial
+      locals updated resultIndex witness witness := by
+  have nextRelated :
+      StateRelated sourceFunction sourceRuntime
+        (bind sourceEnv decl.fvarId shape.sourceValue) initial updated witness := by
+    have bound :=
+      initialRelated.bindPhysical resultFound resultKindAt
+        (shape.physicalRelated witness) targetSet
+    simpa [initialRelated.clearFailure] using bound
+  refine ⟨sourceStep, initialRelated, nextRelated, ?_⟩
+  intro rest Q tail continued
+  exact shape.wp_let targetSet continued
 
 /--
 One zero-argument local alias is simulated by the generated `local.get` /
@@ -2856,6 +3093,69 @@ theorem directLetRuntimeRefines_localAlias
   exact ⟨targetStore, updated, witness,
     letStepSimulates_localAlias valueEq sourceLookup stateRelated resultFound
       resultKindAt sourcePhysical physicalRelated targetSet,
+    nextFrameAligned⟩
+
+/--
+Uniform runtime-law instance for every nonallocating integer or `USize`
+literal.
+
+The source classification derives the semantic value, compiler instruction,
+adapted Talos constant, and related physical lane. Exact frame capacity is the
+only runtime resource premise.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_immediateLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ImmediateLiteralSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex witness supported
+    frameAligned sourceStep stateRelated valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨literal, resultKind, valueEq, valueKind, resultCompiled, shape⟩
+  obtain ⟨rfl, rfl⟩ :=
+    sourceLetResult_immediateLiteral_eq shape valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [shape.symbolicInstruction] :=
+    shape.compileLetValue_eq valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  have expectedAdapted :
+      instructions sourceModule sourceFunction labels
+          [shape.symbolicInstruction] =
+        .ok [shape.targetInstruction] :=
+    shape.instructions_eq
+  rw [expectedAdapted] at valueAdapted
+  injection valueAdapted with targetValueEq
+  subst targetValue
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+    frameAligned.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId shape.sourceValue)
+      (nextStore := targetStore)
+      (nextWitness := witness)
+      (physical := shape.physical) resultFound
+  exact ⟨targetStore, updated, witness,
+    letStepSimulates_immediateLiteral shape sourceStep stateRelated resultFound
+      resultKindAt targetSet,
     nextFrameAligned⟩
 
 /--
@@ -3129,13 +3429,15 @@ changing the structural theorem. -/
 def ReadOnlyDirectSupported (context : Fir.Wasm.Context)
     (decl : LCNF.LetDecl .impure) : Prop :=
   LocalAliasSupported context decl ∨
-    USizeProjectionSupported context decl ∨
-      ObjectProjectionSupported context decl ∨
-        ScalarProjectionSupported context decl
+    ImmediateLiteralSupported context decl ∨
+      USizeProjectionSupported context decl ∨
+        ObjectProjectionSupported context decl ∨
+          ScalarProjectionSupported context decl
 
 /--
-Mixed local-alias, object, `USize`, and successful packed-integer projection
-spines share one uniform runtime law and the same exact-frame invariant.
+Mixed local aliases, immediate literals, object, `USize`, and successful
+packed-integer projection spines share one uniform runtime law and the same
+exact-frame invariant.
 -/
 theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
     {program : Fir.LeanIR.ImpureProgram}
@@ -3158,17 +3460,20 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_readOnlyDirect
       target.wasmModule hosts.env
         (fun decl =>
           LocalAliasSupported context decl ∨
-            (USizeProjectionSupported context decl ∨
-              (ObjectProjectionSupported context decl ∨
-                ScalarProjectionSupported context decl)))
+            (ImmediateLiteralSupported context decl ∨
+              (USizeProjectionSupported context decl ∨
+                (ObjectProjectionSupported context decl ∨
+                  ScalarProjectionSupported context decl))))
         (ConcreteLocalFrameAligned sourceFunction)
   apply DirectLetRuntimeRefines.or
   · exact directLetRuntimeRefines_localAlias spec.localsAligned
   · apply DirectLetRuntimeRefines.or
-    · exact spec.directLetRuntimeRefines_usizeProjection
+    · exact spec.directLetRuntimeRefines_immediateLiteral
     · apply DirectLetRuntimeRefines.or
-      · exact spec.directLetRuntimeRefines_objectProjection
-      · exact spec.directLetRuntimeRefines_scalarProjection
+      · exact spec.directLetRuntimeRefines_usizeProjection
+      · apply DirectLetRuntimeRefines.or
+        · exact spec.directLetRuntimeRefines_objectProjection
+        · exact spec.directLetRuntimeRefines_scalarProjection
 
 /--
 Structural, certificate-free partial correctness for the direct-value code

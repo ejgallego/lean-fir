@@ -202,10 +202,13 @@ target-independent source typing relation between `UInt8/16/32/64` semantic
 constructors and their ABI lanes. `scalarProjStep_of_refines` derives the
 matching concrete read and physical value for every successful source read.
 `DirectLetRuntimeRefines.or` and `ReadOnlyDirectSupported` compose local
-aliases plus all three projection families into arbitrary mixed spines. The
-structural contract harness accepts them without a descriptor, concrete read,
-numeric layout, or translation-certificate premise. This success theorem does
-not weaken the recorded uninitialized-coordinate fault discrepancy:
+aliases, nonallocating `UInt8/16/32/64` and `USize` literals, plus all three
+projection families into arbitrary mixed spines. Literal classification
+derives the symbolic constant, adapted Talos instruction, physical value, and
+semantic value without a target witness. The structural contract harness
+accepts the combined fragment without a descriptor, concrete read, numeric
+layout, or translation-certificate premise. This success theorem does not
+weaken the recorded uninitialized-coordinate fault discrepancy:
 `FIR-BUG-wasm-none-uninitialized-scalar-projection` remains the boundary for
 full structured-fault correspondence.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export

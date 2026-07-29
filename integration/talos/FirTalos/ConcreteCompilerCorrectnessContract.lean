@@ -198,10 +198,33 @@ example
   spec.directLetRuntimeRefines_scalarProjection
 
 /--
+All nonallocating integer and `USize` literals obtain their constant/write
+runtime law from the same source classification.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ImmediateLiteralSupported context)
+      (ConcreteLocalFrameAligned sourceFunction) :=
+  spec.directLetRuntimeRefines_immediateLiteral
+
+/--
 A whole mixed read-only direct-value spine obtains its runtime law from the
-concrete supported export. Local aliases plus object, `USize`, and successful
-packed-integer projections may be interleaved; the client supplies neither
-target instructions/import indices nor concrete heap-read witnesses.
+concrete supported export. Local aliases, immediate literals, plus object,
+`USize`, and successful packed-integer projections may be interleaved; the
+client supplies neither target instructions/import indices nor concrete
+heap-read witnesses.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
