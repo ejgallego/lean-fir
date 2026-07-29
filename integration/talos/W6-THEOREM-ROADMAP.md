@@ -247,6 +247,20 @@ inversion and concrete direct-comparison rule for `.uint8` discriminators.
 without a host import or dynamic range premise.
 `correctBudgetedPureExternalScalarUInt8Cases` exposes arbitrary scalar-chain
 length and nesting at the whole-export boundary.
+The structural theorem now has a parallel no-result effect boundary.
+`EffectSupportedPredicate` keeps source evaluation target-free, and
+`EffectRuntimeRefines` asks one reusable implementation theorem for each
+admitted operation family. `PersistentOwnershipEffectSupported` admits the
+compiler-erased persistent increment/decrement family;
+`CodeAdapted.incPersistent_eq` and `CodeAdapted.decPersistent_eq` invert the
+production compiler, while `effectRuntimeRefines_persistentOwnership` proves
+the exact no-op simulation for every invariant.
+`correctBudgetedPureExternalPersistentOwnership` therefore covers arbitrary
+finite nesting and interleaving of these effects with default cases, current
+direct operations, and resident numeric externals at unchanged allocation
+budget. The next effect instances should reuse this structural condition for
+generated host-call prefixes rather than introduce program-specific
+certificates.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

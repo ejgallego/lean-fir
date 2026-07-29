@@ -211,6 +211,64 @@ theorem CodeAdapted.let_eq
                             restAdapted, rfl, targetEq.symm⟩
 
 /--
+Inversion of the real compiler at a persistent increment.
+
+Persistent ownership operations are erased by lowering, so successful
+compilation and adaptation of the whole node is exactly successful compilation
+and adaptation of its continuation.
+-/
+theorem CodeAdapted.incPersistent_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.inc objectId amount check true continuation) target) :
+    CodeAdapted context sourceModule sourceFunction labels continuation
+      target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp at core
+  exact ⟨symbolic, Fir.Wasm.finishCompileResult_eq_ok_iff.mpr core,
+    targetCompiled⟩
+
+/--
+Inversion of the real compiler at a persistent decrement.
+
+As for persistent increments, the compiler emits no target instruction, so the
+same symbolic and adapted programs compile the continuation.
+-/
+theorem CodeAdapted.decPersistent_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {objectId : FVarId}
+    {amount : Nat}
+    {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels
+        (.dec objectId amount check true objectFields? continuation) target) :
+    CodeAdapted context sourceModule sourceFunction labels continuation
+      target := by
+  rcases adapted with ⟨symbolic, compiled, targetCompiled⟩
+  have core := Fir.Wasm.finishCompileResult_eq_ok_iff.mp compiled
+  rw [Fir.Wasm.compileCodeCore.eq_def] at core
+  simp at core
+  exact ⟨symbolic, Fir.Wasm.finishCompileResult_eq_ok_iff.mpr core,
+    targetCompiled⟩
+
+/--
 A case node containing only its default alternative compiles and adapts to
 exactly that selected branch. This is an inverse compiler fact: no
 target-level branch witness is supplied by the caller.
@@ -3720,13 +3778,52 @@ theorem DirectValueEvaluates.toBudgetedSpineEvaluates
       simpa [DirectValuePathCost] using
         (BudgetedSpineEvaluates.letValue supported sourceStep ih)
 
+/-- Source-facing admission shape for one successful no-result effect node. -/
+abbrev EffectSupportedPredicate :=
+  RuntimeState → Env → LCNF.Code .impure → LCNF.Code .impure →
+    RuntimeState → Prop
+
+/-- Empty effect family used by code fragments that admit no effect nodes. -/
+def NoEffectsSupported : EffectSupportedPredicate :=
+  fun _ _ _ _ _ => False
+
+/--
+Source-facing admission for compiler-erased persistent ownership operations.
+
+Both operations resume in the same runtime and environment. The admission
+contains no target program, numeric index, or translation witness.
+-/
+inductive PersistentOwnershipEffectSupported : EffectSupportedPredicate where
+  | inc
+      (sourceRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (amount : Nat)
+      (check : Bool)
+      (continuation : LCNF.Code .impure) :
+      PersistentOwnershipEffectSupported sourceRuntime sourceEnv
+        (.inc objectId amount check true continuation) continuation
+        sourceRuntime
+  | dec
+      (sourceRuntime : RuntimeState)
+      (sourceEnv : Env)
+      (objectId : FVarId)
+      (amount : Nat)
+      (check : Bool)
+      (objectFields? : Option Nat)
+      (continuation : LCNF.Code .impure) :
+      PersistentOwnershipEffectSupported sourceRuntime sourceEnv
+        (.dec objectId amount check true objectFields? continuation)
+        continuation sourceRuntime
+
 /--
 Budgeted successful source evaluation for mixed direct/external code with
-selected case branches.
+selected case branches and admitted no-result effects.
 
-Case selection consumes no heap budget and carries only a source-facing
-admission fact plus the executable interpreter's `SourceCaseResult`.
-Compilation and target branch structure remain absent from the relation.
+Cases and effects carry only source-facing admission facts plus the executable
+interpreter step. Neither generated target structure nor an operation proof is
+stored in the relation. Both node families consume zero heap-allocation budget;
+their reusable runtime laws are supplied once to the structural theorem.
 -/
 inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
     (externals : ExternalImpl)
@@ -3736,13 +3833,14 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
         RuntimeState → Value → Nat → Prop)
     (CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
+    (EffectSupported : EffectSupportedPredicate)
     (directCost : LCNF.LetDecl .impure → Nat) :
     RuntimeState → Env → LCNF.Code .impure → RuntimeState → Value → Nat → Prop where
   | ret
       (sourceLookup : lookup sourceEnv result = some sourceValue) :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        (.return result) sourceRuntime sourceValue 0
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv (.return result) sourceRuntime sourceValue 0
   | letValue
       (supported : DirectSupported decl)
       (sourceStep :
@@ -3750,12 +3848,12 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
           sourceValue)
       (continued :
         BudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported directCost nextRuntime
+          ExternalSupported CaseSupported EffectSupported directCost nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultRuntime
           resultValue continuationCost) :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        (.let decl continuation) resultRuntime resultValue
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv (.let decl continuation) resultRuntime resultValue
         (directCost decl + continuationCost)
   | externalLet
       (supported :
@@ -3766,12 +3864,12 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
           continuation nextRuntime sourceValue)
       (continued :
         BudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported directCost nextRuntime
+          ExternalSupported CaseSupported EffectSupported directCost nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultRuntime
           resultValue continuationCost) :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        (.let decl continuation) resultRuntime resultValue
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv (.let decl continuation) resultRuntime resultValue
         (stepCost + continuationCost)
   | caseOf
       (supported : CaseSupported sourceRuntime sourceEnv cases selected)
@@ -3779,11 +3877,26 @@ inductive BudgetedCodeEvaluates (context : Fir.Wasm.Context)
         SourceCaseResult sourceRuntime sourceEnv cases selected)
       (continued :
         BudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-          selected resultRuntime resultValue requiredBytes) :
+          ExternalSupported CaseSupported EffectSupported directCost
+          sourceRuntime sourceEnv selected resultRuntime resultValue
+          requiredBytes) :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        (.cases cases) resultRuntime resultValue requiredBytes
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv (.cases cases) resultRuntime resultValue
+        requiredBytes
+  | effect
+      (supported :
+        EffectSupported sourceRuntime sourceEnv code continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        BudgetedCodeEvaluates context externals DirectSupported
+          ExternalSupported CaseSupported EffectSupported directCost nextRuntime
+          sourceEnv continuation resultRuntime resultValue requiredBytes) :
+      BudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv code resultRuntime resultValue requiredBytes
 
 /-- The mixed code relation denotes an exact finite interpreter run. -/
 theorem BudgetedCodeEvaluates.execEvaluates
@@ -3795,6 +3908,7 @@ theorem BudgetedCodeEvaluates.execEvaluates
         RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
     {directCost : LCNF.LetDecl .impure → Nat}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -3803,8 +3917,9 @@ theorem BudgetedCodeEvaluates.execEvaluates
     {requiredBytes : Nat}
     (evaluation :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        sourceCode resultRuntime resultValue requiredBytes) :
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
       (ReturnedObservation resultRuntime resultValue) := by
@@ -3817,8 +3932,13 @@ theorem BudgetedCodeEvaluates.execEvaluates
       exact sourceExternalLetResult_thenExecEvaluates sourceStep ih
   | caseOf _ sourceStep _ ih =>
       exact sourceCaseResult_thenExecEvaluates sourceStep ih
+  | effect _ sourceStep _ ih =>
+      exact sourceEffectResult_thenExecEvaluates sourceStep ih
 
-/-- Every budgeted direct/external spine is mixed code with no case nodes. -/
+/--
+Every budgeted direct/external spine is mixed code with no case or effect
+nodes.
+-/
 theorem BudgetedSpineEvaluates.toBudgetedCodeEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
@@ -3839,8 +3959,8 @@ theorem BudgetedSpineEvaluates.toBudgetedCodeEvaluates
         ExternalSupported directCost sourceRuntime sourceEnv sourceCode
         resultRuntime resultValue requiredBytes) :
     BudgetedCodeEvaluates context externals DirectSupported ExternalSupported
-      CaseSupported directCost sourceRuntime sourceEnv sourceCode resultRuntime
-      resultValue requiredBytes := by
+      CaseSupported NoEffectsSupported directCost sourceRuntime sourceEnv
+      sourceCode resultRuntime resultValue requiredBytes := by
   induction evaluation with
   | ret sourceLookup =>
       exact .ret sourceLookup
@@ -5162,6 +5282,103 @@ def ExternalLetRuntimeRefinesWithCost
           Invariant (remainingBytes - stepCost) nextRuntime
             (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
             nextWitness
+
+/--
+Uniform runtime condition for one successful no-result effect node.
+
+The source admission and executable source step contain no target evidence.
+For every successful production compiler/adapter output, the implementation
+law recovers the adapted continuation, executes the generated effect prefix,
+and re-establishes the resource invariant at unchanged allocation budget.
+This is an operation-family theorem condition, not a per-program certificate.
+-/
+def EffectRuntimeRefines
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (EffectSupported : EffectSupportedPredicate)
+    (Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : LCNF.Code .impure}
+      {target : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {remainingBytes : Nat}
+      {witness : RefinementWitness},
+    EffectSupported sourceRuntime sourceEnv code continuation nextRuntime →
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness →
+      CodeAdapted context sourceModule sourceFunction labels code target →
+      ∃ targetRest nextStore nextWitness,
+        CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest ∧
+          EffectStepSimulates context sourceModule sourceFunction labels module
+            hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+            targetRest targetStore nextStore targetLocals witness nextWitness ∧
+          Invariant remainingBytes nextRuntime sourceEnv nextStore targetLocals
+            nextWitness
+
+/-- The empty effect family satisfies every invariant vacuously. -/
+theorem effectRuntimeRefines_noEffects
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv NoEffectsSupported Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported
+  exact False.elim supported
+
+/--
+The compiler-erased persistent ownership family implements the generic effect
+condition for every invariant.
+
+The production compiler inversion recovers the continuation target. Source and
+concrete execution then both take a no-op step, preserving runtime, store,
+locals, witness, externals, trace, and the unchanged allocation budget.
+-/
+theorem effectRuntimeRefines_persistentOwnership
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv PersistentOwnershipEffectSupported Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported _sourceStep stateRelated
+    invariant adapted
+  cases supported with
+  | inc =>
+      have continuationAdapted := CodeAdapted.incPersistent_eq adapted
+      exact ⟨target, targetStore, witness, continuationAdapted,
+        effectStepSimulates_inc_persistent stateRelated continuationAdapted,
+        invariant⟩
+  | dec =>
+      have continuationAdapted := CodeAdapted.decPersistent_eq adapted
+      exact ⟨target, targetStore, witness, continuationAdapted,
+        effectStepSimulates_dec_persistent stateRelated continuationAdapted,
+        invariant⟩
 
 /--
 A postcondition is stable for a generated case arm when any selected-arm
@@ -9244,7 +9461,8 @@ theorem codeWP_of_budgetedSpineEvaluates
 
 /--
 Cost-indexed structural partial correctness for mixed direct/external code
-with selected case branches, retaining the exact explicit Wasm return.
+with selected case branches and no-result effects, retaining the exact
+explicit Wasm return.
 
 The return-only postcondition is the natural compositional boundary for
 generated case arms: it is unchanged by the arm-resumption wrapper. The public
@@ -9274,14 +9492,16 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
         RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
     {directCost : LCNF.LetDecl .impure → Nat}
     {Invariant :
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
         RefinementWitness → Prop}
     (evaluation :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        sourceCode resultRuntime resultValue requiredBytes)
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes)
     (adapted :
       CodeAdapted context sourceModule sourceFunction labels sourceCode target)
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -9297,7 +9517,10 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
         labels module hostEnv externals ExternalSupported Invariant)
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction labels module
-        hostEnv CaseSupported) :
+        hostEnv CaseSupported)
+    (effectRuntimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv EffectSupported Invariant) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels module hostEnv
           sourceRuntime sourceEnv sourceCode target initial locals witness []
@@ -9395,14 +9618,26 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
             rfl)
           continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
+  | effect supported sourceStep continued ih =>
+      obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+          nextInvariant⟩ :=
+        effectRuntimeRefines supported sourceStep stateRelated invariant adapted
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.2.1 nextInvariant
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_effect step continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
 
 /--
 Public cost-indexed structural partial correctness for mixed direct/external
-code with selected case branches.
+code with selected case branches and no-result effects.
 
-`CaseRuntimeRefines` is the sole additional theorem condition over the spine
-theorem. It is uniform over production compiler/adapter outputs and therefore
-remains an implementation law rather than a per-program certificate.
+`CaseRuntimeRefines` and `EffectRuntimeRefines` are the two additional theorem
+conditions over the spine theorem. Both are uniform over production
+compiler/adapter outputs and therefore remain implementation laws rather than
+per-program certificates.
 -/
 theorem codeWP_of_budgetedCodeEvaluates
     {context : Fir.Wasm.Context}
@@ -9429,14 +9664,16 @@ theorem codeWP_of_budgetedCodeEvaluates
         RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
     {directCost : LCNF.LetDecl .impure → Nat}
     {Invariant :
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
         RefinementWitness → Prop}
     (evaluation :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        sourceCode resultRuntime resultValue requiredBytes)
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes)
     (adapted :
       CodeAdapted context sourceModule sourceFunction labels sourceCode target)
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -9453,6 +9690,9 @@ theorem codeWP_of_budgetedCodeEvaluates
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction labels module
         hostEnv CaseSupported)
+    (effectRuntimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv EffectSupported Invariant)
     (parameterCount : parameters.length = targetFunction.numParams)
     (resultCount : targetFunction.results.length = 1) :
     ∃ resultStore resultWitness resultKind physical,
@@ -9469,7 +9709,7 @@ theorem codeWP_of_budgetedCodeEvaluates
       runtimeRelated, failureClear, valueRelated⟩ :=
     codeWP_of_budgetedCodeEvaluates_exactReturn evaluation adapted localsAligned
       stateRelated invariant directRuntimeRefines externalRuntimeRefines
-      caseRuntimeRefines
+      caseRuntimeRefines effectRuntimeRefines
   refine ⟨resultStore, resultWitness, resultKind, physical, ?_,
     runtimeRelated, failureClear, valueRelated⟩
   apply exactWP.conseq
@@ -9574,9 +9814,9 @@ theorem ConcreteSupportedExport.correctBudgetedSpine
 
 /--
 Whole-export partial correctness for mixed direct/external code with selected
-case branches.
+case branches and no-result effects.
 
-The three runtime laws are operation-family implementation theorems,
+The four runtime laws are operation-family implementation theorems,
 universally quantified over production compiler outputs. The only
 program-specific premise is a successful source evaluation and its selected
 branches; no translation certificate is accepted.
@@ -9607,14 +9847,16 @@ theorem ConcreteSupportedExport.correctBudgetedCode
         RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
     {directCost : LCNF.LetDecl .impure → Nat}
     {Invariant :
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
         RefinementWitness → Prop}
     (evaluation :
       BudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported directCost sourceRuntime sourceEnv
-        sourceCode resultRuntime resultValue requiredBytes)
+        ExternalSupported CaseSupported EffectSupported directCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -9630,6 +9872,9 @@ theorem ConcreteSupportedExport.correctBudgetedCode
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction []
         target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction []
+        target.wasmModule hosts.env EffectSupported Invariant)
     (parameterCount :
       parameters.length = spec.targetFunction.numParams) :
     ExecEvaluates externals
@@ -9646,7 +9891,7 @@ theorem ConcreteSupportedExport.correctBudgetedCode
       (parameters := parameters) (callerTail := callerTail)
       evaluation spec.bodyAdapted spec.localsAligned stateRelated invariant
       directRuntimeRefines externalRuntimeRefines caseRuntimeRefines
-      parameterCount spec.singleResult
+      effectRuntimeRefines parameterCount spec.singleResult
   have parameterPrefix :
       (parameters ++ callerTail).take spec.targetFunction.numParams =
         parameters := by
@@ -10057,8 +10302,9 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalDefaultCases
       BudgetedCodeEvaluates context externals
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
-        DefaultOnlyCaseSupported directLetAllocationCost sourceRuntime
-        sourceEnv sourceCode resultRuntime resultValue requiredBytes)
+        DefaultOnlyCaseSupported NoEffectsSupported directLetAllocationCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -10090,7 +10336,80 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalDefaultCases
       scalarImplementation⟩
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    caseRuntimeRefines_defaultOnly parameterCount
+    caseRuntimeRefines_defaultOnly effectRuntimeRefines_noEffects
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of
+compiler-erased persistent ownership operations, default-only cases, and the
+complete current direct/pure-external family.
+
+Every admitted persistent increment or decrement is an exact source and target
+no-op. It therefore consumes no heap budget and preserves the complete
+budgeted local frame, including world, trace, concrete heap, locals, witness,
+and external implementation laws.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalPersistentOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported PersistentOwnershipEffectSupported
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩
+    (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+    (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
+    caseRuntimeRefines_defaultOnly
+    effectRuntimeRefines_persistentOwnership parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of normalized
@@ -10128,8 +10447,8 @@ theorem
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (ObjectConstructorCasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -10161,7 +10480,8 @@ theorem
       scalarImplementation⟩
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_objectConstructorCases parameterCount
+    spec.caseRuntimeRefines_objectConstructorCases
+    effectRuntimeRefines_noEffects parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of normalized
@@ -10199,8 +10519,8 @@ theorem
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (ScalarUInt8CasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -10232,7 +10552,8 @@ theorem
       scalarImplementation⟩
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_scalarUInt8Cases parameterCount
+    spec.caseRuntimeRefines_scalarUInt8Cases effectRuntimeRefines_noEffects
+    parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of singleton
@@ -10269,8 +10590,8 @@ theorem
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (SingleObjectConstructorCaseSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -10302,7 +10623,8 @@ theorem
       scalarImplementation⟩
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_singleObjectConstructor parameterCount
+    spec.caseRuntimeRefines_singleObjectConstructor
+    effectRuntimeRefines_noEffects parameterCount
 
 /--
 Concrete whole-export partial correctness for arbitrary nesting of ordered
@@ -10335,8 +10657,8 @@ theorem
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (TwoObjectConstructorDefaultCasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -10368,7 +10690,8 @@ theorem
       scalarImplementation⟩
     (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
     (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-    spec.caseRuntimeRefines_twoObjectConstructorDefault parameterCount
+    spec.caseRuntimeRefines_twoObjectConstructorDefault
+    effectRuntimeRefines_noEffects parameterCount
 
 /--
 Whole-export partial correctness for the current budgeted direct-value

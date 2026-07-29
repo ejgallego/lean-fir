@@ -343,6 +343,17 @@ from the value relation and requiring no host import.
 `correctBudgetedPureExternalScalarUInt8Cases` closes arbitrary scalar-chain
 length and nesting around the same mixed family. The singleton and two-arm
 object APIs remain compatibility corollaries.
+The structural relation also admits successful no-result effects through
+`EffectSupportedPredicate`. `EffectRuntimeRefines` is the reusable
+operation-family theorem condition over production compiler outputs; it is
+not a per-program translation certificate.
+`PersistentOwnershipEffectSupported` supplies the first instance for
+compiler-erased persistent increments and decrements.
+`effectRuntimeRefines_persistentOwnership` proves both are exact no-ops for
+every invariant, and
+`correctBudgetedPureExternalPersistentOwnership` closes arbitrary
+interleavings with default cases, all current direct operations, and the ten
+resident numeric declarations at zero additional heap budget.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

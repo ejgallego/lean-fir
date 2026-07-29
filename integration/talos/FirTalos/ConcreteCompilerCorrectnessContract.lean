@@ -1224,6 +1224,25 @@ example
   spec.caseRuntimeRefines_twoObjectConstructorDefault
 
 /--
+Persistent increments and decrements satisfy the generic no-result effect
+condition for every invariant. Their source and compiled target steps are
+exact no-ops.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv PersistentOwnershipEffectSupported Invariant :=
+  effectRuntimeRefines_persistentOwnership
+
+/--
 The mixed whole-export theorem admits arbitrary nesting of sole-default cases
 around every currently proved direct and resident numeric operation.
 -/
@@ -1251,8 +1270,9 @@ example
       BudgetedCodeEvaluates context externals
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
-        DefaultOnlyCaseSupported directLetAllocationCost sourceRuntime
-        sourceEnv sourceCode resultRuntime resultValue requiredBytes)
+        DefaultOnlyCaseSupported NoEffectsSupported directLetAllocationCost
+        sourceRuntime sourceEnv sourceCode resultRuntime resultValue
+        requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -1280,6 +1300,68 @@ example
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctBudgetedPureExternalDefaultCases evaluation stateRelated
+    frameAligned budget integerImplementation naturalImplementation
+    scalarImplementation parameterCount
+
+/--
+The whole-export theorem admits arbitrary interleaving of compiler-erased
+persistent ownership effects with default cases, direct operations, and pure
+externals, without charging heap budget for either ownership node.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported PersistentOwnershipEffectSupported
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedPureExternalPersistentOwnership evaluation stateRelated
     frameAligned budget integerImplementation naturalImplementation
     scalarImplementation parameterCount
 
@@ -1313,8 +1395,8 @@ example
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (ObjectConstructorCasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -1375,8 +1457,8 @@ example
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (ScalarUInt8CasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -1436,8 +1518,8 @@ example
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (SingleObjectConstructorCaseSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -1497,8 +1579,8 @@ example
         (BudgetedDirectSupported context)
         (PureExternalSupported context externals)
         (TwoObjectConstructorDefaultCasesSupported context)
-        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
-        resultValue requiredBytes)
+        NoEffectsSupported directLetAllocationCost sourceRuntime sourceEnv
+        sourceCode resultRuntime resultValue requiredBytes)
     (stateRelated :
       StateRelated sourceFunction sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)

@@ -4095,6 +4095,30 @@ family. The contract harness checks both the generic runtime law and
 whole-export endpoint. No FIR semantic contract, concrete layout, executable
 ABI, or W7 helper signature changed.
 
+W6.6fk extends the same certificate-free structural induction through
+successful no-result effect nodes. `EffectSupportedPredicate` records only
+the source code, continuation, and next runtime, while
+`EffectRuntimeRefines` is the uniform operation-family condition over every
+successful production compiler/adapter output. The generic
+`codeWP_of_budgetedCodeEvaluates` theorem now composes direct, external, case,
+and effect laws without embedding a target witness in source evaluation.
+
+The first constructive effect instance is compiler-erased persistent
+ownership. `PersistentOwnershipEffectSupported` admits persistent increments
+and decrements whose source continuation keeps the same runtime. Production
+inversions `CodeAdapted.incPersistent_eq` and
+`CodeAdapted.decPersistent_eq` recover the adapted continuation, and
+`effectRuntimeRefines_persistentOwnership` proves both operations are exact
+source/concrete no-ops for every invariant. Consequently
+`correctBudgetedPureExternalPersistentOwnership` closes arbitrary
+interleavings of those effects, default-only cases, the current direct
+family, and all ten resident numeric externals. Persistent operations consume
+zero heap budget and preserve world, trace, concrete heap, locals, witness,
+and installed external laws exactly. The contract harness checks the generic
+effect law and whole-export endpoint. The proof-facing admission surface is
+deliberately unstable. No FIR semantic contract, concrete layout, executable
+ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -149,6 +149,16 @@ Cross-cutting W6.5 state:
   `.uint8` comparison family, deriving the dynamic tag range from
   `StateRelated`; `correctBudgetedPureExternalScalarUInt8Cases` closes
   arbitrary chain length and nesting without a host import.
+  `EffectSupportedPredicate`, `EffectRuntimeRefines`, and the effect constructor
+  of `BudgetedCodeEvaluates` extend the same induction through successful
+  no-result effects without storing target evidence.
+  `PersistentOwnershipEffectSupported` is the first constructive instance:
+  production inversion recovers the continuation for compiler-erased
+  persistent increment/decrement nodes, and
+  `effectRuntimeRefines_persistentOwnership` preserves every invariant at zero
+  budget. `correctBudgetedPureExternalPersistentOwnership` composes arbitrary
+  such effects with default cases and the complete current
+  direct/resident-numeric family.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical
