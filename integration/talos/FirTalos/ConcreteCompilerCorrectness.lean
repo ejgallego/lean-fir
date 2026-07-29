@@ -6146,6 +6146,58 @@ inductive ScalarProjectionSupported (context : Fir.Wasm.Context) :
       ScalarProjectionSupported context decl
 
 /--
+Source-state compatibility for typed unboxing.
+
+Tagged objects are representation-polymorphic. A heap object is compatible
+when its live semantic box contains a scalar whose constructor agrees with
+the requested result kind. This judgment intentionally mentions no concrete
+word, descriptor map, memory read, or target execution witness.
+-/
+inductive SourceUnboxKindCompatible (runtime : RuntimeState)
+    (kind : BoxedScalarKind) : Value → Prop where
+  | tagged :
+      SourceUnboxKindCompatible runtime kind (.object (.tagged payload))
+  | heap
+      (storedType : Expr) (scalar : BoxedScalar)
+      (found : findCell? runtime.heap location = some cell)
+      (live : cell.live = true)
+      (objectEq :
+        cell.object = .boxed storedType scalar.semanticValue)
+      (kindEq : scalar.kind = kind) :
+      SourceUnboxKindCompatible runtime kind (.object (.heap location))
+
+/--
+Static admission for one successful typed unbox.
+
+The final premise is the source typing boundary omitted by FIR's deliberately
+type-erased heap-unbox semantics: a successful source operand must be tagged
+or contain a live boxed scalar of the compiler-selected result kind.
+-/
+inductive UnboxSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (objectId : FVarId) (objectKind : AbiKind)
+      (kind : BoxedScalarKind)
+      (valueEq : decl.value = .unbox objectId)
+      (resultTypeEq : decl.type = kind.semanticType)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok kind.abiKind)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, kind.abiKind))
+      (kindCompatible :
+        ∀ {sourceRuntime : RuntimeState} {sourceEnv : Env}
+            {sourceObject sourceValue : Value},
+          lookup sourceEnv objectId = some sourceObject →
+            unbox sourceRuntime kind.semanticType sourceObject =
+              .ok sourceValue →
+            SourceUnboxKindCompatible sourceRuntime kind sourceObject) :
+      UnboxSupported context decl
+
+/--
 Static admission for a successful `isShared` observation.
 
 The predicate contains only the source declaration and compiler-local typing
@@ -6166,6 +6218,107 @@ inductive IsSharedSupported (context : Fir.Wasm.Context) :
         Fir.Wasm.getLocal context decl.fvarId =
           .ok (.localGet decl.fvarId, .uint8)) :
       IsSharedSupported context decl
+
+/--
+Source compatibility and the ordinary runtime relation reconstruct every
+representation-specific premise of checked concrete unboxing.
+
+For a tagged object, the concrete read is representation-polymorphic. For a
+heap object, the source scalar constructor identifies the same boxed kind as
+the live-cell relation, which recovers the frozen descriptor and checked
+linear-memory read.
+-/
+theorem ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
+    {concrete : ConcreteRuntimeState}
+    {witness : RefinementWitness} {runtime : RuntimeState}
+    {word : Word32} {kind : BoxedScalarKind}
+    {sourceObject sourceValue : Value}
+    (runtimeRelated : ConcreteRuntimeRel concrete witness runtime)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (compatible :
+      SourceUnboxKindCompatible runtime kind sourceObject)
+    (unboxed :
+      unbox runtime kind.semanticType sourceObject = .ok sourceValue) :
+    ∃ scalar,
+      UnboxObjectRel witness word kind sourceObject ∧
+        readBoxedScalar concrete.heap kind word = .ok scalar ∧
+        sourceValue = scalar.semanticValue := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          cases compatible
+          obtain ⟨concreteRead, semanticRead, _⟩ :=
+            runtimeRelated.heap.readBoxedScalar_tagged_refines
+              taggedRelated kind
+          exact ⟨BoxedScalar.ofPayload kind _, .tagged taggedRelated,
+            concreteRead, Except.ok.inj (unboxed.symm.trans semanticRead)⟩
+      | heap heapRelated =>
+          cases compatible with
+          | heap storedType scalar found live compatibleObjectEq
+              compatibleKindEq =>
+              cases heapRelated with
+              | mapped mapped =>
+                  obtain ⟨actualCell, actualFound, cellRelated⟩ :=
+                    runtimeRelated.heap.concreteToSemantic _ _ mapped
+                  rw [found] at actualFound
+                  injection actualFound with cellEq
+                  subst actualCell
+                  cases cellRelated with
+                  | dead semanticCount semanticDead descriptor deadRelated =>
+                      simp_all
+                  | live liveRelated =>
+                      cases liveRelated with
+                      | constructor descriptor objectEq objectRelated
+                          headerRead headerKind refCount persistent cellLive =>
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
+                      | @boxed actualKind actualScalar header cell descriptor
+                          objectEq boxedRelated refCount persistent cellLive =>
+                          have boxedEq :
+                              HeapObject.boxed actualKind.semanticType
+                                  actualScalar.semanticValue =
+                                HeapObject.boxed storedType
+                                  scalar.semanticValue :=
+                            objectEq.symm.trans compatibleObjectEq
+                          have scalarValueEq :
+                              actualScalar.semanticValue =
+                                scalar.semanticValue :=
+                            (HeapObject.boxed.inj boxedEq).2
+                          have actualKindEq :
+                              actualScalar.kind = scalar.kind := by
+                            cases actualScalar <;> cases scalar <;>
+                              simp_all [BoxedScalar.semanticValue,
+                                BoxedScalar.kind]
+                          have descriptorKindEq :
+                              actualKind = kind := by
+                            exact boxedRelated.scalarKind.symm.trans
+                              (actualKindEq.trans compatibleKindEq)
+                          subst actualKind
+                          obtain ⟨decoded, concreteRead, valueEq, _⟩ :=
+                            runtimeRelated.heap.readBoxedScalar_heap_refines
+                              mapped descriptor unboxed
+                          exact ⟨decoded, .heap (.mapped mapped) descriptor,
+                            concreteRead, valueEq⟩
+                      | natural descriptor objectEq headerRead headerKind
+                          marker extent limbsFit decoded refCount persistent
+                          cellLive =>
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
+                      | integer descriptor objectEq objectRelated refCount
+                          persistent cellLive =>
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
+                      | string descriptor objectEq objectRelated refCount
+                          persistent cellLive =>
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
+                      | closure closureRelated =>
+                          obtain ⟨function, arity, captures, objectEq⟩ :=
+                            closureRelated.objectEq
+                          rw [compatibleObjectEq] at objectEq
+                          contradiction
 
 /-- Direct source `let` evaluation is deterministic at fixed source state,
 environment, and declaration. -/
@@ -6456,6 +6609,61 @@ theorem sourceLetResult_scalarProjection_eq
             getScalarField_ok_eq_scalar projected
           subst projectedValue
           exact ⟨sourceObject, scalar, runtimeEq.symm, rfl, rfl, projected⟩
+
+/--
+Invert a successful typed-unbox declaration to its source object lookup and
+canonical scalar-kind operation. No concrete representation evidence is
+introduced.
+-/
+theorem sourceLetResult_unbox_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {objectId : FVarId} {kind : BoxedScalarKind}
+    (valueEq : decl.value = .unbox objectId)
+    (resultTypeEq : decl.type = kind.semanticType)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject,
+      nextRuntime = sourceRuntime ∧
+        lookup sourceEnv objectId = some sourceObject ∧
+        unbox sourceRuntime kind.semanticType sourceObject =
+          .ok sourceValue := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded, resultTypeEq] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases evaluated :
+          unbox sourceRuntime kind.semanticType sourceObject with
+      | error fault =>
+          rw [evaluated] at sourceStep
+          contradiction
+      | ok actualValue =>
+          rw [evaluated] at sourceStep
+          have pairEq :
+              (sourceRuntime, LetAction.value actualValue) =
+                (nextRuntime, LetAction.value sourceValue) :=
+            Except.ok.inj sourceStep
+          have runtimeEq : sourceRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : actualValue = sourceValue :=
+            LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst actualValue
+          exact ⟨sourceObject, runtimeEq.symm, rfl, evaluated⟩
 
 /-- Every successful sharing observation returns the direct `UInt8` lane. -/
 theorem isShared_ok_eq_uint8
@@ -11863,6 +12071,99 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_scalarProjection
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Cost-indexed runtime-law instance for successful typed unboxing.
+
+The source step and source-only kind-compatibility premise determine the
+semantic scalar. Production lowering and adaptation determine the object
+local and typed runtime call. `StateRelated` then reconstructs the concrete
+word, frozen heap descriptor (when needed), checked read, and exact physical
+result lane. The operation preserves the full heap budget.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_unbox
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (UnboxSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨objectId, objectKind, kind, valueEq, resultTypeEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, kindCompatible⟩
+  obtain ⟨sourceObject, rfl, sourceLookup, unboxed⟩ :=
+    sourceLetResult_unbox_eq valueEq resultTypeEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.unbox kind.abiKind))] :=
+    compileLetValue_unbox valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .unbox kind.abiKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          have compatible := kindCompatible sourceLookup unboxed
+          obtain ⟨scalar, unboxObjectRelated, concreteRead, sourceValueEq⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
+              stateRelated.1 objectRelated compatible unboxed
+          subst sourceValue
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId scalar.semanticValue)
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := physicalOfLane scalar.lane) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.unboxCall callFound
+          exact ⟨clearFailure targetStore, updated, witness,
+            letStepSimulates_unbox valueEq resultTypeEq sourceLookup unboxed
+              stateRelated resultFound resultKindAt hObject
+              unboxObjectRelated concreteRead imported spec.hostsSatisfy
+              inBounds contracted params results targetSet,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            nextFrameAligned, by
+              simpa [directLetAllocationCost, valueEq, clearFailure] using
+                budgeted.2⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 Cost-indexed runtime-law instance for successful sharing observations.
 
 Production lowering and adaptation determine the object local and concrete
@@ -11952,8 +12253,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_isShared
 /--
 Current mixed allocating structural fragment: local aliases, immediate
 integer/`USize` literals, representation-polymorphic natural literals,
-successful object/`USize`/packed-scalar projections and sharing observations,
-UTF-8 String literals, and nonempty constructors.
+successful object/`USize`/packed-scalar projections, typed unboxing and sharing
+observations, UTF-8 String literals, and nonempty constructors.
 -/
 def BudgetedDirectSupported (context : Fir.Wasm.Context)
     (decl : LCNF.LetDecl .impure) : Prop :=
@@ -11963,9 +12264,10 @@ def BudgetedDirectSupported (context : Fir.Wasm.Context)
         USizeProjectionSupported context decl ∨
           ObjectProjectionSupported context decl ∨
             ScalarProjectionSupported context decl ∨
-              IsSharedSupported context decl ∨
-                StringLiteralSupported context decl ∨
-                  NonemptyConstructorSupported context decl
+              UnboxSupported context decl ∨
+                IsSharedSupported context decl ∨
+                  StringLiteralSupported context decl ∨
+                    NonemptyConstructorSupported context decl
 
 /--
 The cost-indexed runtime law composes natural/String/constructor allocation
@@ -12000,9 +12302,10 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
                 (USizeProjectionSupported context decl ∨
                   (ObjectProjectionSupported context decl ∨
                     (ScalarProjectionSupported context decl ∨
-                      (IsSharedSupported context decl ∨
-                        (StringLiteralSupported context decl ∨
-                          NonemptyConstructorSupported context decl))))))))
+                      (UnboxSupported context decl ∨
+                        (IsSharedSupported context decl ∨
+                          (StringLiteralSupported context decl ∨
+                            NonemptyConstructorSupported context decl)))))))))
       directLetAllocationCost (ConcreteBudgetedLocalFrame sourceFunction)
   apply DirectLetRuntimeRefinesWithCost.or
   · exact directLetRuntimeRefinesWithCost_localAlias spec.localsAligned
@@ -12017,10 +12320,12 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect
           · apply DirectLetRuntimeRefinesWithCost.or
             · exact spec.directLetRuntimeRefinesWithCost_scalarProjection
             · apply DirectLetRuntimeRefinesWithCost.or
-              · exact spec.directLetRuntimeRefinesWithCost_isShared
+              · exact spec.directLetRuntimeRefinesWithCost_unbox
               · apply DirectLetRuntimeRefinesWithCost.or
-                · exact spec.directLetRuntimeRefines_stringLiteral
-                · exact spec.directLetRuntimeRefines_nonemptyConstructor
+                · exact spec.directLetRuntimeRefinesWithCost_isShared
+                · apply DirectLetRuntimeRefinesWithCost.or
+                  · exact spec.directLetRuntimeRefines_stringLiteral
+                  · exact spec.directLetRuntimeRefines_nonemptyConstructor
 
 /--
 The complete current direct family preserves the frame used by pure integer

@@ -4350,6 +4350,31 @@ external implementation, and both closure-descriptor tables. Extending
 existing mixed whole-export theorem. No FIR semantic contract, concrete
 layout, executable ABI, or W7 helper signature changed.
 
+W6.6fv adds successful typed unboxing to the same certificate-free budgeted
+direct family. `SourceUnboxKindCompatible` states the genuinely necessary
+source condition: tagged objects are representation-polymorphic, while a
+live semantic heap box must contain a scalar whose constructor agrees with
+the compiler-selected one of the five supported integer/`USize` result kinds.
+`UnboxSupported` combines that source judgment with the declaration type and
+source-local compiler equations. It contains no concrete word, descriptor
+lookup, checked memory read, numeric target slot, target syntax, or execution
+certificate.
+
+`ConcreteRuntimeRel.unboxFacts_of_sourceCompatible` derives the tagged or heap
+`UnboxObjectRel`, frozen heap descriptor, checked `readBoxedScalar`, and exact
+semantic result from the ordinary state relation. Production lowering and
+adaptation recover the unary `local.get; call` prefix;
+`ConcreteSupportedExport.unboxCall` recovers the installed typed concrete
+contract through a narrow public resolver theorem.
+`directLetRuntimeRefinesWithCost_unbox` composes those facts with the existing
+generated unbox step, exact i32/i64 destination write, arbitrary continuation,
+and unchanged heap/budget/metadata frame. Extending `BudgetedDirectSupported`
+makes compatible unboxing available in every existing mixed whole-export
+theorem. The source compatibility premise is necessary because FIR heap
+unboxing deliberately ignores its stored type annotation; without it, a
+program can box one scalar width and request another. No FIR semantic
+contract, concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

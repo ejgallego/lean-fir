@@ -198,6 +198,51 @@ example
   spec.directLetRuntimeRefines_scalarProjection
 
 /--
+The typed-unbox compatibility boundary is source-only. Tagged operands are
+polymorphic; heap operands expose the live semantic cell and stored scalar
+kind, never a concrete address or descriptor lookup.
+-/
+example
+    (runtime : RuntimeState) (kind : BoxedScalarKind) (payload : UInt64) :
+    SourceUnboxKindCompatible runtime kind (.object (.tagged payload)) :=
+  .tagged
+
+example
+    {runtime : RuntimeState} {kind : BoxedScalarKind}
+    {location : Location} {cell : HeapCell}
+    (storedType : Expr) (scalar : BoxedScalar)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .boxed storedType scalar.semanticValue)
+    (kindEq : scalar.kind = kind) :
+    SourceUnboxKindCompatible runtime kind (.object (.heap location)) :=
+  .heap storedType scalar found live objectEq kindEq
+
+/--
+Successful compatible unboxing satisfies the indexed direct runtime law
+without a concrete object word, descriptor lookup, checked memory read,
+numeric target index, or operation witness.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (UnboxSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) :=
+  spec.directLetRuntimeRefinesWithCost_unbox
+
+/--
 Successful `isShared` observations satisfy the indexed direct runtime law
 without target indices, a concrete object word, or an operation witness.
 -/

@@ -133,11 +133,13 @@ instance now derives mixed arguments and exact residual layout cost, so
 arbitrary finite constructor spines use the same theorem. Mixed read-only
 composition now includes cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar projections
-and `isShared` observations through `BudgetedDirectSupported`. These
-read-only instances preserve the concrete heap exactly and return the full
-residual address-space budget. The sharing admission contains only
-source/compiler local typing; production output and `StateRelated` recover
-the concrete call and object word.
+plus compatible typed unboxing and `isShared` observations through
+`BudgetedDirectSupported`. These read-only instances preserve the concrete
+heap exactly and return the full residual address-space budget. Typed-unbox
+admission exposes only a source-state scalar-kind compatibility judgment;
+production output and `StateRelated` recover the concrete word, descriptor,
+checked read, call, and exact i32/i64 result lane. Sharing admission needs only
+source/compiler local typing.
 Natural literals now use the same indexed law. `naturalAllocationBytes`
 classifies their concrete cost as zero for wasm32-tagged immediates, an
 aligned one-slot object for promoted source tags, or an aligned limb object

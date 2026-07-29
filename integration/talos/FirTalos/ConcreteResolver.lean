@@ -69,6 +69,13 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .delete => some deleteFn
   | .getTag => some getTagFn
 
+/-- Every concrete boxed-scalar kind resolves to its matching typed-unbox
+host. This is the public proof boundary for the resolver's private scalar
+classification table. -/
+@[simp] theorem hostFn?_unbox_abiKind (kind : Fir.Wasm.Concrete.BoxedScalarKind) :
+    hostFn? (.unbox kind.abiKind) = some (unboxFn kind) := by
+  cases kind <;> rfl
+
 /-- The concrete resolver implements exactly the four packed-integer scalar
 setter kinds used by the W6 scalar-mutation refinement theorem. This public
 boundary keeps the resolver's classification function private. -/
