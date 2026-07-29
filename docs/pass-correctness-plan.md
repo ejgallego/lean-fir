@@ -716,6 +716,25 @@ then combines one of those dynamic certificates with
 whole-program endpoint; address-parametric foreign compatibility remains a
 separate, explicit consumer premise.
 
+The first compiler-facing policy is now explicit as well.
+`NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
+exactly a deleted nullary `.fap`; retained nullary applications remain
+admissible. Its mutual `result` theorem reconstructs the underlying
+`shadowCode?`/`shadowAltList?` equations, so this policy cannot certify a
+different pass. `NoDeletedNullaryFapProgramRun` lifts it through declarations
+and whole programs.
+
+`ElimDeadCompilerAdmissibleRun` combines that conservative pass policy with
+the independently checked `ElimDeadRuntimeAdmissibility` package.
+`ElimDeadCompilerAdmissibleRun.loweringCorrect` is therefore the strict
+compiler-client endpoint under FIR's current impure semantics. The neutral
+positive fixture constructs the package end to end, while
+`deadNullaryFapNotCompilerAdmissible` proves that the known effectful
+counterexample cannot inhabit it. No suitable purity field was found in the
+audited Lean 4.32 input to `elimDeadVars`; `Decl.safe` records termination
+safety, not observational purity. A future semantics may replace this
+conservative rejection with a stuttering certificate for selected constants.
+
 Closed end-to-end fixtures now discharge those premises for deleted object and
 scalar writes, failed-token reuse, concrete-token reuse, reset/reuse with an
 owned child, partial-application closure allocation, and heap-backed scalar
@@ -725,10 +744,11 @@ program run, and a public `LoweringCorrect` theorem. The PAP/box fixture also
 pins the actual Lean 4.32 pass to the transparent target while proving that
 both unreachable allocations may be omitted.
 
-The remaining general problem is therefore not an operational matcher or a
-missing whole-program theorem. It is to supply
+The remaining general problem is therefore not an operational matcher, a
+missing whole-program theorem, or an implicit nullary-purity assumption. It is
+to derive the explicit conservative pass policy and
 `ElimDeadRuntimeAdmissibility` for arbitrary compiler-produced entry states
-from an upstream semantic purity/ownership contract.
+from auditable compiler provenance and ownership invariants.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -747,7 +767,8 @@ contract.
   `LoweringCorrect` for one concrete external specification. Whole-pass
   correctness must therefore either exclude such programs, record the
   compiler's constant-purity invariant, or require a semantic stuttering
-  certificate.
+  certificate. The current `ElimDeadCompilerAdmissibleRun` endpoint chooses
+  the conservative exclusion and has positive and negative kernel fixtures.
 - `FIR-BUG-impure-none-external-spec-address-parametricity` is represented by
   the explicit `ReachableExternalSpecCompatible` premise. Arbitrary foreign
   semantics may inspect raw heap addresses and cannot be transported across a
@@ -767,15 +788,15 @@ regression.
 
 ## Immediate proof queue
 
-1. State the upstream compiler purity/ownership contract needed to construct
-   `ElimDeadRuntimeAdmissibility`, with an explicit policy for removable
-   nullary `.fap` applications and concrete reuse capabilities.
-2. Prove the contract-to-admissibility bridge, using the source-machine form
-   where possible and the exact-provenance form for ownership-sensitive
-   reset/reuse paths.
+1. Derive `NoDeletedNullaryFapProgramRun` from an auditable compiler-side
+   provenance/checker, since Lean 4.32 exposes no upstream purity field that
+   justifies deleting effectful nullary applications.
+2. State and prove the ownership contract-to-`ElimDeadRuntimeAdmissibility`
+   bridge, using the source-machine form where possible and exact provenance
+   for ownership-sensitive reset/reuse paths.
 3. Continue actual-pass conformance and closed execution-graph fixtures at
-   semantic boundaries that refine or falsify that proposed upstream
-   contract.
+   semantic boundaries that refine or falsify those compiler-facing
+   contracts.
 4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract before that shared validation stack lands.
 
