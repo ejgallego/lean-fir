@@ -16,12 +16,16 @@ function synchronize(host) {
 
 function naturalInput(host, value) {
   synchronize(host);
-  return host.allocateNatural(BigInt(value)) | 0;
+  const result = host.allocateNatural(BigInt(value)) | 0;
+  synchronize(host);
+  return result;
 }
 
 function integerInput(host, value) {
   synchronize(host);
-  return host.allocateInteger(BigInt(value)) | 0;
+  const result = host.allocateInteger(BigInt(value)) | 0;
+  synchronize(host);
+  return result;
 }
 
 function naturalValue(host, physical) {

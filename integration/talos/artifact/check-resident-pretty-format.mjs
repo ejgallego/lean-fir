@@ -20,10 +20,12 @@ const residentCachePath = process.argv[17];
 const styledCachePath = process.argv[18];
 const residentNumericPath = process.argv[19];
 const styledNumericPath = process.argv[20];
-const residentStringPath = process.argv[21];
-const styledStringPath = process.argv[22];
-const residentClosedPath = process.argv[23];
-const styledClosedPath = process.argv[24];
+const residentBigNumericPath = process.argv[21];
+const styledBigNumericPath = process.argv[22];
+const residentStringPath = process.argv[23];
+const styledStringPath = process.argv[24];
+const residentClosedPath = process.argv[25];
+const styledClosedPath = process.argv[26];
 assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentProjectionPath && residentClosurePath && residentMatchPath &&
   residentAllocatorPath && residentConstructorPath && residentNaturalPath &&
@@ -31,6 +33,7 @@ assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   residentIncrementPath && residentReleasePath && styledReleasePath &&
   styledTagSetterPath && residentCachePath && styledCachePath &&
   residentNumericPath && styledNumericPath &&
+  residentBigNumericPath && styledBigNumericPath &&
   residentStringPath && styledStringPath &&
   residentClosedPath && styledClosedPath,
   "usage: node check-resident-pretty-format.mjs " +
@@ -42,6 +45,7 @@ assert.ok(baselinePath && getTagPath && residentRuntimePath &&
   "STYLED_RELEASES.wasm STYLED_TAG_SETTERS.wasm " +
   "RESIDENT_CACHE.wasm STYLED_CACHE.wasm " +
   "RESIDENT_NUMERIC.wasm STYLED_NUMERIC.wasm " +
+  "RESIDENT_BIG_NUMERIC.wasm STYLED_BIG_NUMERIC.wasm " +
   "RESIDENT_STRING.wasm STYLED_STRING.wasm " +
   "RESIDENT_CLOSED.wasm STYLED_CLOSED.wasm");
 
@@ -78,6 +82,8 @@ const residentCache = readArtifact(residentCachePath);
 const styledCache = readArtifact(styledCachePath);
 const residentNumeric = readArtifact(residentNumericPath);
 const styledNumeric = readArtifact(styledNumericPath);
+const residentBigNumeric = readArtifact(residentBigNumericPath);
+const styledBigNumeric = readArtifact(styledBigNumericPath);
 const residentString = readArtifact(residentStringPath);
 const styledString = readArtifact(styledStringPath);
 const residentClosed = readArtifact(residentClosedPath);
@@ -358,8 +364,32 @@ assert.equal(
   "resident styled numeric descriptor and Wasm imports disagree",
 );
 assert.equal(
-  functionImportCount(residentString) + 12,
+  functionImportCount(residentBigNumeric),
   functionImportCount(residentNumeric),
+  "arbitrary-precision numeric linking changed the function-import frontier",
+);
+assert.equal(functionImportCount(residentBigNumeric), 14,
+  "resident arbitrary-precision numeric prettyM frontier changed");
+assert.equal(
+  residentBigNumeric.manifest.imports.length,
+  functionImportCount(residentBigNumeric),
+  "resident arbitrary-precision numeric descriptor and Wasm imports disagree",
+);
+assert.equal(
+  functionImportCount(styledBigNumeric),
+  functionImportCount(styledNumeric),
+  "styled arbitrary-precision numeric linking changed the function-import frontier",
+);
+assert.equal(functionImportCount(styledBigNumeric), 14,
+  "resident styled arbitrary-precision numeric prettyM frontier changed");
+assert.equal(
+  styledBigNumeric.manifest.imports.length,
+  functionImportCount(styledBigNumeric),
+  "resident styled arbitrary-precision numeric descriptor and Wasm imports disagree",
+);
+assert.equal(
+  functionImportCount(residentString) + 12,
+  functionImportCount(residentBigNumeric),
   "resident String closure did not remove exactly twelve function imports",
 );
 assert.equal(functionImportCount(residentString), 2,
@@ -371,7 +401,7 @@ assert.equal(
 );
 assert.equal(
   functionImportCount(styledString) + 12,
-  functionImportCount(styledNumeric),
+  functionImportCount(styledBigNumeric),
   "resident styled String closure did not remove exactly twelve function imports",
 );
 assert.equal(functionImportCount(styledString), 2,
@@ -482,6 +512,16 @@ assert.equal(
   "resident styled numeric prettyM imports memory",
 );
 assert.equal(
+  residentBigNumeric.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident arbitrary-precision numeric prettyM imports memory",
+);
+assert.equal(
+  styledBigNumeric.imports.filter(({ kind }) => kind === "memory").length,
+  0,
+  "resident styled arbitrary-precision numeric prettyM imports memory",
+);
+assert.equal(
   residentString.imports.filter(({ kind }) => kind === "memory").length,
   0,
   "resident String prettyM imports memory",
@@ -510,6 +550,7 @@ for (const artifact of [
   residentReleases,
   residentCache,
   residentNumeric,
+  residentBigNumeric,
   residentString,
 ]) {
   assert.deepStrictEqual(
@@ -564,23 +605,43 @@ assert.deepStrictEqual(
   "resident styled numeric linking changed the closure-descriptor table",
 );
 assert.deepStrictEqual(
-  residentString.manifest.closureDispatch,
+  residentBigNumeric.manifest.closureDispatch,
   residentNumeric.manifest.closureDispatch,
+  "resident arbitrary-precision numeric linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  residentBigNumeric.manifest.closureDescriptors,
+  residentNumeric.manifest.closureDescriptors,
+  "resident arbitrary-precision numeric linking changed the closure-descriptor table",
+);
+assert.deepStrictEqual(
+  styledBigNumeric.manifest.closureDispatch,
+  styledNumeric.manifest.closureDispatch,
+  "resident styled arbitrary-precision numeric linking changed the closure-dispatch table",
+);
+assert.deepStrictEqual(
+  styledBigNumeric.manifest.closureDescriptors,
+  styledNumeric.manifest.closureDescriptors,
+  "resident styled arbitrary-precision numeric linking changed the closure-descriptor table",
+);
+assert.deepStrictEqual(
+  residentString.manifest.closureDispatch,
+  residentBigNumeric.manifest.closureDispatch,
   "resident String linking changed the closure-dispatch table",
 );
 assert.deepStrictEqual(
   residentString.manifest.closureDescriptors,
-  residentNumeric.manifest.closureDescriptors,
+  residentBigNumeric.manifest.closureDescriptors,
   "resident String linking changed the closure-descriptor table",
 );
 assert.deepStrictEqual(
   styledString.manifest.closureDispatch,
-  styledNumeric.manifest.closureDispatch,
+  styledBigNumeric.manifest.closureDispatch,
   "resident styled String linking changed the closure-dispatch table",
 );
 assert.deepStrictEqual(
   styledString.manifest.closureDescriptors,
-  styledNumeric.manifest.closureDescriptors,
+  styledBigNumeric.manifest.closureDescriptors,
   "resident styled String linking changed the closure-descriptor table",
 );
 assert.deepStrictEqual(
@@ -645,6 +706,31 @@ for (const [artifact, label] of [
   assert.ok(artifact.exports.some(({ name, kind }) =>
     name === "memory" && kind === "memory"),
   `${label} memory export is missing`);
+}
+for (const [artifact, label] of [
+  [residentBigNumeric, "resident arbitrary-precision numeric"],
+  [styledBigNumeric, "resident styled arbitrary-precision numeric"],
+  [residentString, "resident String"],
+  [styledString, "resident styled String"],
+  [residentClosed, "closed resident"],
+  [styledClosed, "closed resident styled"],
+]) {
+  for (const name of [
+    "fir_big_ext_Int_ofNat",
+    "fir_big_ext_Int_decLt",
+    "fir_big_ext_Int_natAbs",
+    "fir_big_ext_Int_sub",
+    "fir_big_ext_Int_add",
+    "fir_big_ext_Nat_add",
+    "fir_big_ext_Nat_decEq",
+    "fir_big_ext_Nat_sub",
+    "fir_big_ext_Nat_decLt",
+    "fir_big_ext_Nat_decLe",
+  ]) {
+    assert.ok(artifact.exports.some((entry) =>
+      entry.name === name && entry.kind === "function"),
+    `${label} arbitrary-precision helper export ${name} is missing`);
+  }
 }
 for (const [artifact, label] of [
   [residentClosed, "closed resident"],
@@ -869,8 +955,9 @@ console.log(
   `PASS resident prettyM internalized getTag, isShared, projection, and match families, ` +
   `then installed its allocator and internalized constructors, immediate Naturals, ` +
   `closure allocations, setters, increments, recursive releases, and the ` +
-  `styled constructor-tag write, lazy-cache publication, and one-limb ` +
-  `resident Nat/Int operations, then UTF-8 String operations/literals and ` +
+  `styled constructor-tag write, lazy-cache publication, one-limb ` +
+  `resident Nat/Int operations, arbitrary-precision Nat/Int operations, ` +
+  `then UTF-8 String operations/literals and ` +
   `fail-closed fallback traps ` +
   `(${functionImportCount(baseline)} → ${functionImportCount(getTagResident)} → ` +
   `${functionImportCount(residentRuntime)} → ` +
@@ -886,12 +973,14 @@ console.log(
   `${functionImportCount(residentReleases)} → ` +
   `${functionImportCount(residentCache)} → ` +
   `${functionImportCount(residentNumeric)} → ` +
+  `${functionImportCount(residentBigNumeric)} → ` +
   `${functionImportCount(residentString)} → ` +
   `${functionImportCount(residentClosed)} function imports; styled ` +
   `${functionImportCount(styledReleases)} → ` +
   `${functionImportCount(styledTagSetters)} → ` +
   `${functionImportCount(styledCache)} → ` +
   `${functionImportCount(styledNumeric)} → ` +
+  `${functionImportCount(styledBigNumeric)} → ` +
   `${functionImportCount(styledString)} → ` +
   `${functionImportCount(styledClosed)})`,
 );

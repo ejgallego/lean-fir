@@ -7,6 +7,7 @@ import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
+import Fir.Wasm.Emit.ResidentBigNumeric
 import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
@@ -216,6 +217,20 @@ def emitResidentNumeric (path : System.FilePath) : IO Unit := do
   IO.println
     s!"resident-numeric: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
+def emitResidentBigNumeric (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentBigNumeric.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident arbitrary-precision numeric encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentBigNumeric.manifest.compress
+  IO.println
+    s!"resident-big-numeric: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
 def emitResidentString (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
     Fir.Wasm.Emit.ResidentString.residentExampleModule
@@ -315,6 +330,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-releases <output.wasm>\n" ++
     "       fir-wasm-artifact resident-cache <output.wasm>\n" ++
     "       fir-wasm-artifact resident-numeric <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-big-numeric <output.wasm>\n" ++
     "       fir-wasm-artifact resident-string <output.wasm>\n" ++
     "       fir-wasm-artifact resident-fallbacks <output.wasm>\n" ++
     "       fir-wasm-artifact resident-is-shared <output.wasm>\n" ++
@@ -369,6 +385,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-numeric", output] =>
         emitResidentNumeric output
+        return 0
+    | ["resident-big-numeric", output] =>
+        emitResidentBigNumeric output
         return 0
     | ["resident-string", output] =>
         emitResidentString output

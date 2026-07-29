@@ -43,6 +43,9 @@ node run-resident-cache.mjs _build/resident-cache.wasm
 lake exe fir-wasm-artifact resident-numeric \
   _build/resident-numeric.wasm
 node run-resident-numeric.mjs _build/resident-numeric.wasm
+lake exe fir-wasm-artifact resident-big-numeric \
+  _build/resident-big-numeric.wasm
+node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm
@@ -99,6 +102,7 @@ resident_pretties=(
   "source-pretty-format-resident-releases"
   "source-pretty-format-resident-cache"
   "source-pretty-format-resident-numeric"
+  "source-pretty-format-resident-big-numeric"
   "source-pretty-format-resident-string"
   "source-pretty-format-resident-closed"
   "source-pretty-format-trace-resident-constructors"
@@ -110,6 +114,7 @@ resident_pretties=(
   "source-pretty-format-trace-resident-tag-setters"
   "source-pretty-format-trace-resident-cache"
   "source-pretty-format-trace-resident-numeric"
+  "source-pretty-format-trace-resident-big-numeric"
   "source-pretty-format-trace-resident-string"
   "source-pretty-format-trace-resident-closed"
 )
@@ -164,6 +169,8 @@ cmp _build/source-pretty-format-resident-releases.wasm.lcnf \
 cmp _build/source-pretty-format-resident-cache.wasm.lcnf \
   _build/source-pretty-format-resident-numeric.wasm.lcnf
 cmp _build/source-pretty-format-resident-numeric.wasm.lcnf \
+  _build/source-pretty-format-resident-big-numeric.wasm.lcnf
+cmp _build/source-pretty-format-resident-big-numeric.wasm.lcnf \
   _build/source-pretty-format-resident-string.wasm.lcnf
 cmp _build/source-pretty-format-resident-string.wasm.lcnf \
   _build/source-pretty-format-resident-closed.wasm.lcnf
@@ -182,6 +189,8 @@ cmp _build/source-pretty-format-trace-resident-tag-setters.wasm.lcnf \
 cmp _build/source-pretty-format-trace-resident-cache.wasm.lcnf \
   _build/source-pretty-format-trace-resident-numeric.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-numeric.wasm.lcnf \
+  _build/source-pretty-format-trace-resident-big-numeric.wasm.lcnf
+cmp _build/source-pretty-format-trace-resident-big-numeric.wasm.lcnf \
   _build/source-pretty-format-trace-resident-string.wasm.lcnf
 cmp _build/source-pretty-format-trace-resident-string.wasm.lcnf \
   _build/source-pretty-format-trace-resident-closed.wasm.lcnf
@@ -205,6 +214,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-trace-resident-cache.wasm \
   _build/source-pretty-format-resident-numeric.wasm \
   _build/source-pretty-format-trace-resident-numeric.wasm \
+  _build/source-pretty-format-resident-big-numeric.wasm \
+  _build/source-pretty-format-trace-resident-big-numeric.wasm \
   _build/source-pretty-format-resident-string.wasm \
   _build/source-pretty-format-trace-resident-string.wasm \
   _build/source-pretty-format-resident-closed.wasm \
@@ -213,6 +224,14 @@ node run-resident-numeric.mjs \
   _build/source-pretty-format-resident-numeric.wasm
 node run-resident-numeric.mjs \
   _build/source-pretty-format-trace-resident-numeric.wasm
+node run-resident-big-numeric.mjs \
+  _build/source-pretty-format-resident-big-numeric.wasm
+node run-resident-big-numeric.mjs \
+  _build/source-pretty-format-trace-resident-big-numeric.wasm
+node run-resident-big-numeric.mjs \
+  _build/source-pretty-format-resident-string.wasm
+node run-resident-big-numeric.mjs \
+  _build/source-pretty-format-trace-resident-string.wasm
 node run-resident-string.mjs \
   _build/source-pretty-format-resident-string.wasm
 node run-resident-string.mjs \
@@ -220,6 +239,10 @@ node run-resident-string.mjs \
 node run-resident-string.mjs \
   _build/source-pretty-format-resident-closed.wasm
 node run-resident-string.mjs \
+  _build/source-pretty-format-trace-resident-closed.wasm
+node run-resident-big-numeric.mjs \
+  _build/source-pretty-format-resident-closed.wasm
+node run-resident-big-numeric.mjs \
   _build/source-pretty-format-trace-resident-closed.wasm
 node run-resident-fallbacks.mjs \
   _build/source-pretty-format-resident-closed.wasm
@@ -472,6 +495,13 @@ lake exe fir-wasm-artifact resident-numeric \
 cmp "$first/resident/numeric.wasm" "$second/resident/numeric.wasm"
 cmp "$first/resident/numeric.wasm.json" \
   "$second/resident/numeric.wasm.json"
+lake exe fir-wasm-artifact resident-big-numeric \
+  "$first/resident/big-numeric.wasm"
+lake exe fir-wasm-artifact resident-big-numeric \
+  "$second/resident/big-numeric.wasm"
+cmp "$first/resident/big-numeric.wasm" "$second/resident/big-numeric.wasm"
+cmp "$first/resident/big-numeric.wasm.json" \
+  "$second/resident/big-numeric.wasm.json"
 lake exe fir-wasm-artifact resident-string \
   "$first/resident/string.wasm"
 lake exe fir-wasm-artifact resident-string \

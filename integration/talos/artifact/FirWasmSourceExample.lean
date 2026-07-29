@@ -613,9 +613,35 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident numeric Format module: {repr error}"
+  let residentBigNumericArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeBigNumeric
+        residentNumericArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError
+          "failed to compile arbitrary-precision numeric Format facade: {repr error}"
+  unless residentBigNumericArtifact.module.imports.size == 14 do
+    throwError "resident Format arbitrary-precision numeric frontier changed"
+  unless Fir.Wasm.Emit.ResidentBigNumeric.externalHelperNames.all
+      residentBigNumericArtifact.module.exports.contains do
+    throwError "resident Format arbitrary-precision numeric helper exports changed"
+  unless residentBigNumericArtifact.module.closureDispatch ==
+      residentNumericArtifact.module.closureDispatch &&
+      residentBigNumericArtifact.module.closureDescriptors ==
+        residentNumericArtifact.module.closureDescriptors &&
+      residentBigNumericArtifact.formattedLcnf ==
+        residentNumericArtifact.formattedLcnf do
+    throwError
+      "arbitrary-precision numeric linking changed source or closure metadata"
+  match ← residentBigNumericArtifact.write
+      "_build/source-pretty-format-resident-big-numeric.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError
+        "failed to write arbitrary-precision numeric Format module: {repr error}"
   let residentStringOperationsArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringOperations
-        residentNumericArtifact with
+        residentBigNumericArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident String Format facade: {repr error}"
@@ -633,11 +659,11 @@ run_cmd do
       residentStringArtifact.module.exports.contains do
     throwError "resident Format String helper exports changed"
   unless residentStringArtifact.module.closureDispatch ==
-      residentNumericArtifact.module.closureDispatch &&
+      residentBigNumericArtifact.module.closureDispatch &&
       residentStringArtifact.module.closureDescriptors ==
-        residentNumericArtifact.module.closureDescriptors &&
+        residentBigNumericArtifact.module.closureDescriptors &&
       residentStringArtifact.formattedLcnf ==
-        residentNumericArtifact.formattedLcnf do
+        residentBigNumericArtifact.formattedLcnf do
     throwError "resident String linking changed source or closure metadata"
   match ← residentStringArtifact.write
       "_build/source-pretty-format-resident-string.wasm" with

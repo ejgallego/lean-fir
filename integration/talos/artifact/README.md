@@ -111,6 +111,9 @@ node run-resident-cache.mjs _build/resident-cache.wasm
 lake exe fir-wasm-artifact resident-numeric \
   _build/resident-numeric.wasm
 node run-resident-numeric.mjs _build/resident-numeric.wasm
+lake exe fir-wasm-artifact resident-big-numeric \
+  _build/resident-big-numeric.wasm
+node run-resident-big-numeric.mjs _build/resident-big-numeric.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm
@@ -408,6 +411,8 @@ node check-resident-pretty-format.mjs \
   _build/source-pretty-format-trace-resident-cache.wasm \
   _build/source-pretty-format-resident-numeric.wasm \
   _build/source-pretty-format-trace-resident-numeric.wasm \
+  _build/source-pretty-format-resident-big-numeric.wasm \
+  _build/source-pretty-format-trace-resident-big-numeric.wasm \
   _build/source-pretty-format-resident-string.wasm \
   _build/source-pretty-format-trace-resident-string.wasm \
   _build/source-pretty-format-resident-closed.wasm \
@@ -650,6 +655,16 @@ follow-up before this helper family can claim an unbounded contract. Plain and
 styled artifacts both advance from 24 to 14 function imports without changing
 final LCNF or closure metadata. The text audit is now
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14`.
+
+The versioned arbitrary-precision checkpoint keeps those stable one-limb
+exports for W6 proof work while redirecting compiler-generated calls to a
+second helper family. It validates and operates on canonical immediate,
+promoted, and arbitrary-limb W6 Natural/Integer values with 64-bit
+little-endian limbs. Node and browser clients cover carry growth, borrow
+collapse, signed cancellation, comparison, and 256–384-bit results in the
+standalone, linked plain/styled, two-import String, and final zero-import
+artifacts. This is a capability expansion at the same 14-import frontier and
+does not alter final LCNF or closure metadata.
 
 The next checkpoint internalizes all eight UTF-8 String declarations reachable
 from `prettyM` and then its four String literals. The helpers consume and

@@ -314,9 +314,34 @@ run_cmd do
   | .ok () => pure ()
   | .error error =>
       throwError "failed to write resident styled numeric module: {repr error}"
+  let bigNumericArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.internalizeBigNumeric numericArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError
+          "failed to compile arbitrary-precision resident styled numeric module: {repr error}"
+  unless bigNumericArtifact.module.imports.size == 14 do
+    throwError "resident styled arbitrary-precision numeric frontier changed"
+  unless Fir.Wasm.Emit.ResidentBigNumeric.externalHelperNames.all
+      bigNumericArtifact.module.exports.contains do
+    throwError
+      "resident styled arbitrary-precision numeric helper exports changed"
+  unless bigNumericArtifact.module.closureDispatch ==
+      numericArtifact.module.closureDispatch &&
+      bigNumericArtifact.module.closureDescriptors ==
+        numericArtifact.module.closureDescriptors &&
+      bigNumericArtifact.formattedLcnf == numericArtifact.formattedLcnf do
+    throwError
+      "resident styled arbitrary-precision numeric linking changed metadata"
+  match ← bigNumericArtifact.write
+      "_build/source-pretty-format-trace-resident-big-numeric.wasm" with
+  | .ok () => pure ()
+  | .error error =>
+      throwError
+        "failed to write arbitrary-precision resident styled numeric module: {repr error}"
   let stringOperationsArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringOperations
-        numericArtifact with
+        bigNumericArtifact with
     | .ok artifact => pure artifact
     | .error error =>
         throwError "failed to compile resident styled String module: {repr error}"
@@ -334,10 +359,10 @@ run_cmd do
       stringArtifact.module.exports.contains do
     throwError "resident styled String helper exports changed"
   unless stringArtifact.module.closureDispatch ==
-      numericArtifact.module.closureDispatch &&
+      bigNumericArtifact.module.closureDispatch &&
       stringArtifact.module.closureDescriptors ==
-        numericArtifact.module.closureDescriptors &&
-      stringArtifact.formattedLcnf == numericArtifact.formattedLcnf do
+        bigNumericArtifact.module.closureDescriptors &&
+      stringArtifact.formattedLcnf == bigNumericArtifact.formattedLcnf do
     throwError "resident styled String linking changed source or closure metadata"
   match ← stringArtifact.write
       "_build/source-pretty-format-trace-resident-string.wasm" with

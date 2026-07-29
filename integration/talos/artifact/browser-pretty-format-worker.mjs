@@ -34,6 +34,9 @@ import {
   checkFetchedResidentNumeric,
 } from "./resident-numeric-client.mjs";
 import {
+  checkFetchedResidentBigNumeric,
+} from "./resident-big-numeric-client.mjs";
+import {
   checkFetchedResidentString,
 } from "./resident-string-client.mjs";
 import {
@@ -71,6 +74,7 @@ try {
     checkFetchedResidentReleases("./_build/resident-releases.wasm"),
     checkFetchedResidentCache("./_build/resident-cache.wasm"),
     checkFetchedResidentNumeric("./_build/resident-numeric.wasm"),
+    checkFetchedResidentBigNumeric("./_build/resident-big-numeric.wasm"),
     checkFetchedResidentString("./_build/resident-string.wasm"),
     checkFetchedResidentFallbacks("./_build/resident-fallbacks.wasm"),
     checkFetchedPrettyFormat("./_build/source-pretty-format-module.wasm"),
@@ -111,6 +115,15 @@ try {
       "./_build/source-pretty-format-resident-numeric.wasm",
     ),
     checkFetchedConcretePrettyFormat(
+      "./_build/source-pretty-format-resident-big-numeric.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
+      "./_build/source-pretty-format-resident-big-numeric.wasm",
+    ),
+    checkFetchedConcretePrettyFormat(
+      "./_build/source-pretty-format-resident-string.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
       "./_build/source-pretty-format-resident-string.wasm",
     ),
     checkFetchedResidentString(
@@ -120,6 +133,9 @@ try {
       "./_build/source-pretty-format-resident-closed.wasm",
     ),
     checkFetchedResidentString(
+      "./_build/source-pretty-format-resident-closed.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
       "./_build/source-pretty-format-resident-closed.wasm",
     ),
     checkFetchedResidentFallbacks(
@@ -144,6 +160,15 @@ try {
       "./_build/source-pretty-format-trace-resident-numeric.wasm",
     ),
     checkFetchedConcretePrettyFormatTrace(
+      "./_build/source-pretty-format-trace-resident-big-numeric.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
+      "./_build/source-pretty-format-trace-resident-big-numeric.wasm",
+    ),
+    checkFetchedConcretePrettyFormatTrace(
+      "./_build/source-pretty-format-trace-resident-string.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
       "./_build/source-pretty-format-trace-resident-string.wasm",
     ),
     checkFetchedResidentString(
@@ -153,6 +178,9 @@ try {
       "./_build/source-pretty-format-trace-resident-closed.wasm",
     ),
     checkFetchedResidentString(
+      "./_build/source-pretty-format-trace-resident-closed.wasm",
+    ),
+    checkFetchedResidentBigNumeric(
       "./_build/source-pretty-format-trace-resident-closed.wasm",
     ),
     checkFetchedResidentFallbacks(
