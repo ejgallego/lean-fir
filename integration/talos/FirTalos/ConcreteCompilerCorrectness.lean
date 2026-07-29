@@ -3133,6 +3133,69 @@ inductive PureNaturalExternalSupported
         decl continuation nextRuntime sourceValue stepCost
 
 /--
+Source-facing pure externals returning an unboxed scalar lane. The result kind
+is indexed explicitly so admitting a name cannot silently reinterpret an
+`i32` as a different scalar width.
+-/
+inductive PureScalarExternalName :
+    Lean.Name → BoxedScalarKind → Prop where
+  | intDecLt : PureScalarExternalName ``Int.decLt .uint8
+
+/--
+Source/compiler admission for pure nonallocating scalar-result externals.
+
+The semantic scalar determines the exact ABI lane. The zero cost is recorded
+as the execution index; all target code, indices, physical operands, and
+response witnesses are reconstructed by the compiler theorem.
+-/
+inductive PureScalarExternalSupported
+    (context : Fir.Wasm.Context) (externals : ExternalImpl) :
+    RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+      RuntimeState → Value → Nat → Prop where
+  | intro
+      (name : Lean.Name) (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
+      (argumentKinds : Array AbiKind) (semanticArgs : Array Value)
+      (target : LCNF.Decl .impure) (scalar : BoxedScalar)
+      (valueEq : decl.value = .fap name args)
+      (operation : PureScalarExternalName name scalar.kind)
+      (nonempty : args.isEmpty = false)
+      (targetFound : context.program.findDecl? name = some target)
+      (targetExternal : ∃ metadata, target.value = .extern metadata)
+      (valueKind :
+        Fir.Wasm.letValueKind decl = .ok scalar.kind.abiKind)
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args =
+          .ok (argumentCode, argumentKinds))
+      (argumentsEvaluated :
+        evalArgs sourceEnv args = .ok semanticArgs)
+      (signature :
+        ExternalTypes.signature {
+          params := target.params.map (·.type)
+          result := target.type } =
+            .ok {
+              params := argumentKinds
+              results := #[scalar.kind.abiKind] })
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, scalar.kind.abiKind))
+      (semanticCalled :
+        externals.call (declarationExternalRequest target semanticArgs)
+            sourceRuntime =
+          .ok (semanticScalarExternalResponse sourceRuntime scalar))
+      (nextRuntimeEq :
+        nextRuntime =
+          semanticExternalRuntimeAfter
+            (declarationExternalRequest target semanticArgs) sourceRuntime
+            (semanticScalarExternalResponse sourceRuntime scalar))
+      (sourceValueEq :
+        sourceValue =
+          (semanticScalarExternalResponse sourceRuntime scalar).value)
+      (stepCostEq : stepCost = 0) :
+      PureScalarExternalSupported context externals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue stepCost
+
+/--
 Static source/compiler admission for a nonempty constructor allocation.
 The relation records only source layout bounds and successful symbolic
 compilation. Physical arguments, numeric target indices, the concrete address,
@@ -3797,6 +3860,22 @@ def ConcreteBudgetedNaturalExternalFrame
     FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
       targetStore.host.externals externals
 
+/--
+Budgeted local-frame invariant for nonallocating scalar-result external
+spines. The heap budget is unchanged by each scalar call, while the installed
+implementation law is threaded across surrounding direct operations.
+-/
+def ConcreteBudgetedScalarExternalFrame
+    (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+      sourceEnv targetStore targetLocals witness ∧
+    FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+      targetStore.host.externals externals
+
 theorem ConcreteLocalFrameAligned.validIndex
     {sourceFunction : Fir.Wasm.Function}
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
@@ -4420,6 +4499,216 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
   subst sourceValue
   subst stepCost
   exact ⟨nextStore, updated, nextWitness, by simpa [requestEq] using step,
+    ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
+      nextImplementation⟩⟩
+
+/--
+Compiler-shaped correctness for the admitted pure scalar-result family,
+initially `Int.decLt`.
+
+The semantic scalar determines the result ABI and exact lane. Production
+compilation, adaptation, static resolution, operand decoding, and destination
+binding are all reconstructed internally, while the heap budget and witness
+remain unchanged.
+-/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureScalarExternalSupported context externals)
+      (ConcreteBudgetedScalarExternalFrame sourceFunction externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported _stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨name, args, argumentCode, argumentKinds, semanticArgs, declaration, scalar,
+      valueEq, _family, nonempty, targetFound, targetExternal, valueKind,
+      argumentsCompiled, argumentsEvaluated, signature, resultCompiled,
+      semanticCalled, nextRuntimeEq, sourceValueEq, stepCostEq⟩
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (argumentCode ++ [.call (.declaration name)]) := by
+    simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+      targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+  have valueCodeEq :
+      valueCode = argumentCode ++ [.call (.declaration name)] := by
+    rw [expectedCompiled] at valueCompiled
+    exact (Except.ok.inj valueCompiled).symm
+  subst valueCode
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_declaration_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨physicalArgs, argumentsReady, physicalLength, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
+      argumentsAdapted argumentsEvaluated stateRelated
+  obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
+      concreteRelated⟩ :=
+    argumentsRelated.decodePhysicalLanes 0
+  have programTargetFound :
+      program.findDecl? name = some declaration := by
+    rw [← spec.contextProgram]
+    exact targetFound
+  obtain ⟨externalOperation, resultKind, imp, operationName,
+      operationMatches, resultSignature, imported, inBounds, contracted,
+      parameterCount, resultCount⟩ :=
+    spec.externalCall programTargetFound targetExternal callFound
+  have operationSignature :
+      externalOperation.signature = {
+        params := argumentKinds
+        results := #[scalar.kind.abiKind] } := by
+    have signatureMatch := operationMatches.signature
+    rw [signature] at signatureMatch
+    exact (Except.ok.inj signatureMatch).symm
+  have resultKindEq : resultKind = scalar.kind.abiKind := by
+    have resultAt :=
+      congrArg (fun results : Array AbiKind => results[0]?) resultSignature
+    symm
+    simpa [operationSignature] using resultAt
+  have declarationName : name = declaration.name :=
+    operationName.symm.trans operationMatches.name
+  have requestEq :
+      externalOperation.request semanticArgs =
+        declarationExternalRequest declaration semanticArgs := by
+    simp [ExternalOperation.request, declarationExternalRequest,
+      operationName, declarationName, operationMatches.paramTypes,
+      operationMatches.resultType]
+  have requestRelated :
+      ConcreteExternalRequestRel witness
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        (externalOperation.request semanticArgs) := by
+    refine {
+      name := rfl
+      paramTypes := rfl
+      resultType := rfl
+      paramTypesSize := operationMatches.paramTypesSize
+      paramKindsSize := ?_
+      argsSize := ?_
+      arguments := ?_ }
+    · change externalOperation.signature.params.size = semanticArgs.size
+      rw [operationSignature]
+      simpa using semanticLength.symm
+    · change concreteArgs.toArray.size = semanticArgs.size
+      simpa using concreteLength.trans semanticLength.symm
+    · intro index kind lane semantic kindAt laneAt semanticAt
+      change externalOperation.signature.params[index]? = some kind at kindAt
+      change concreteArgs.toArray[index]? = some lane at laneAt
+      change semanticArgs[index]? = some semantic at semanticAt
+      exact concreteRelated index kind lane semantic
+        (by rw [operationSignature] at kindAt; simpa using kindAt)
+        (by simpa using laneAt) (by simpa using semanticAt)
+  have semanticCalled' :
+      externals.call (externalOperation.request semanticArgs) sourceRuntime =
+        .ok (semanticScalarExternalResponse sourceRuntime scalar) := by
+    rw [requestEq]
+    exact semanticCalled
+  have decoded' :
+      decodePhysicalLanes 0 externalOperation.signature.params.toList
+        physicalArgs = .ok concreteArgs := by
+    simpa [operationSignature] using decoded
+  obtain ⟨operationStep, _, nextRuntimeRelated, resultRelated⟩ :=
+    scalarExternalStep externalOperation resultKind targetStore physicalArgs
+      concreteArgs semanticArgs witness sourceRuntime externals scalar decoded'
+      stateRelated.1 requestRelated invariant.2 resultKindEq semanticCalled'
+  have resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some scalar.kind.abiKind := by
+    obtain ⟨actualIndex, actualFound, actualKindAt⟩ :=
+      spec.localsAligned resultCompiled
+    rw [resultFound] at actualFound
+    injection actualFound with indexEq
+    subst actualIndex
+    exact actualKindAt
+  let response :=
+    concreteScalarExternalResponse targetStore.host.runtime scalar
+  let nextStore :=
+    replaceRuntime targetStore
+      (targetStore.host.runtime.applyExternalResponse
+        (concreteExternalRequest externalOperation resultKind
+          concreteArgs.toArray)
+        response)
+  obtain ⟨updated, targetSet, updatedFrame⟩ :=
+    invariant.1.1.set?
+      (nextRuntime := semanticExternalRuntimeAfter
+        (externalOperation.request semanticArgs) sourceRuntime
+        (semanticScalarExternalResponse sourceRuntime scalar))
+      (nextEnv := bind sourceEnv decl.fvarId
+        (semanticScalarExternalResponse sourceRuntime scalar).value)
+      (nextStore := nextStore) (nextWitness := witness)
+      (physical := physicalOfLane response.value) resultFound
+  have failureClear : nextStore.host.failure? = none := by
+    simp [nextStore, replaceRuntime, clearFailure]
+  have nextRuntimeRelated' :
+      ConcreteRuntimeRel nextStore.host.runtime witness
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticScalarExternalResponse sourceRuntime scalar)) := by
+    simpa [nextStore, response, replaceRuntime, clearFailure] using
+      nextRuntimeRelated
+  have nextStateRelated :
+      StateRelated sourceFunction
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticScalarExternalResponse sourceRuntime scalar))
+        (bind sourceEnv decl.fvarId
+          (semanticScalarExternalResponse sourceRuntime scalar).value)
+        nextStore updated witness :=
+    stateRelated.bindAfter (.refl witness) nextRuntimeRelated' failureClear
+      resultFound resultKindAt
+      (by simpa [resultKindEq, response] using resultRelated)
+      targetSet
+  have parameterCount' : imp.params.length = physicalArgs.length := by
+    calc
+      imp.params.length = externalOperation.signature.params.size :=
+        parameterCount
+      _ = argumentKinds.size := by simp [operationSignature]
+      _ = physicalArgs.length := physicalLength.symm
+  have step :
+      ExternalLetStepSimulates context sourceFunction target.wasmModule
+        hosts.env externals decl continuation
+        (targetArguments ++ [.call callIndex]) sourceRuntime
+        (semanticExternalRuntimeAfter
+          (externalOperation.request semanticArgs) sourceRuntime
+          (semanticScalarExternalResponse sourceRuntime scalar))
+        sourceEnv (semanticScalarExternalResponse sourceRuntime scalar).value
+        targetStore nextStore targetLocals updated resultIndex witness
+        witness := by
+    refine ⟨?_, stateRelated, nextStateRelated, ?_⟩
+    · simpa [nextRuntimeEq, sourceValueEq, requestEq] using sourceStep
+    · intro rest Q tail continued
+      simpa [List.append_assoc] using
+        wp_external_ready_let externalOperation resultKind tail
+          argumentsReady imported spec.hostsSatisfy inBounds contracted
+          parameterCount' resultCount operationStep targetSet continued
+  have nextBudget :
+      nextStore.host.runtime.heap.AddressSpaceBudget remainingBytes := by
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteScalarExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using invariant.1.2
+  have nextImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        nextStore.host.externals externals := by
+    change
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        targetStore.host.externals externals
+    exact invariant.2
+  subst nextRuntime
+  subst sourceValue
+  subst stepCost
+  exact ⟨nextStore, updated, witness, by simpa [requestEq] using step,
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
@@ -5948,6 +6237,46 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_naturalEx
             concrete externals)
       spec.directLetRuntimeRefines_budgetedDirect
 
+/--
+The complete direct family preserves the installed nonallocating scalar-result
+implementation law.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_scalarExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedScalarExternalFrame sourceFunction externals) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BudgetedDirectSupported context)
+      directLetAllocationCost
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteBudgetedLocalFrame sourceFunction remainingBytes sourceRuntime
+            sourceEnv targetStore targetLocals witness ∧
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            targetStore.host.externals externals)
+  exact
+    DirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+      (ExternalInvariant :=
+        fun concrete =>
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            concrete externals)
+      spec.directLetRuntimeRefines_budgetedDirect
+
 /-- Current constructive read-only direct-value admission. The disjunction is
 deliberately source-facing and can grow operation by operation without
 changing the structural theorem. -/
@@ -6580,6 +6909,91 @@ theorem ConcreteSupportedExport.correctBudgetedNaturalExternalSpine
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_naturalExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureNatural externals)
+      parameterCount spec.singleResult
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultRuntimeRelated, failureClear, valueRelated, rfl⟩
+
+/--
+Concrete whole-export partial correctness for spines interleaving the current
+direct family with admitted pure nonallocating scalar externals, initially
+`Int.decLt`.
+-/
+theorem ConcreteSupportedExport.correctBudgetedScalarExternalSpine
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureScalarExternalSupported context externals)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (implementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+      resultRuntimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedSpineEvaluates
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned stateRelated
+      ⟨⟨frameAligned, budget⟩, implementation⟩
+      (spec.directLetRuntimeRefines_budgetedDirect_scalarExternal externals)
+      (spec.externalLetRuntimeRefinesWithCost_pureScalar externals)
       parameterCount spec.singleResult
   have parameterPrefix :
       (parameters ++ callerTail).take spec.targetFunction.numParams =

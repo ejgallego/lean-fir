@@ -296,6 +296,10 @@ appropriate post-witness. `PureNaturalExternalSupported` initially admits
 `Int.natAbs`, and `correctBudgetedNaturalExternalSpine` proves arbitrary
 finite direct/`natAbs` spines without caller-supplied target or representation
 witnesses. Scalar results such as `Int.decLt` remain outside this family.
+They use the separate nonallocating `ScalarResultRefines` law.
+`PureScalarExternalSupported` initially admits `Int.decLt` at the exact
+`.uint8` ABI kind, and `correctBudgetedScalarExternalSpine` proves arbitrary
+finite direct/decision spines while preserving the heap budget and witness.
 `ConcreteCompilerCorrectnessContract.lean` keeps the finite export
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under

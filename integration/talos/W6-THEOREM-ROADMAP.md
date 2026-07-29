@@ -183,8 +183,11 @@ promoted-tag, and limb-object cases under one existential post-witness.
 `externalLetRuntimeRefinesWithCost_pureNatural` and
 `correctBudgetedNaturalExternalSpine` instantiate that family for
 `Int.natAbs`. The remaining `UInt8` case, including `Int.decLt`, is a
-nonallocating scalar-result family; the structural theorem itself does not
-need to change.
+nonallocating scalar-result family. `ScalarResultRefines`,
+`scalarExternalStep`, `PureScalarExternalSupported`, and
+`externalLetRuntimeRefinesWithCost_pureScalar` now instantiate that family,
+with `correctBudgetedScalarExternalSpine` closing the finite export. The
+structural theorem itself did not need to change.
 `ConstructorArgsCompiled` is a syntax-directed characterization proved from
 the production `compileArgs` fold. Combined with successful source evaluation,
 real Talos adaptation, `LocalLayoutAligned`, and `StateRelated`,

@@ -3938,6 +3938,19 @@ nonallocating scalar-result family. These proof-facing response, cost, and
 admission surfaces are deliberately unstable. No FIR semantic contract or
 executable ABI changed.
 
+W6.6fc adds the nonallocating scalar-result family.
+`concreteScalarExternalResponse` and `semanticScalarExternalResponse` reuse
+`BoxedScalar` as an ABI-indexed lane vocabulary without allocating a box.
+`ScalarResultRefines` preserves the heap and witness exactly, and
+`scalarExternalStep` derives the related Talos return and exact event trace.
+`PureScalarExternalName` initially admits `Int.decLt` only at `.uint8`;
+`externalLetRuntimeRefinesWithCost_pureScalar` reconstructs its production
+compiler, adapter, resolver, operand, and destination facts at zero allocation
+cost. `correctBudgetedScalarExternalSpine` closes arbitrary finite
+direct/`Int.decLt` spines. The generic runtime law may support more scalar
+names later, but admission remains explicit and deliberately unstable. No FIR
+semantic contract or executable ABI changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

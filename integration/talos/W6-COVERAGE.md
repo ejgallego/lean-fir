@@ -108,6 +108,12 @@ Cross-cutting W6.5 state:
   `correctBudgetedNaturalExternalSpine` derive its compiler-shaped host step
   and arbitrary finite direct/`natAbs` whole-export spines without target or
   representation witnesses. `Int.decLt` remains a separate scalar lane.
+  That lane is now covered by the nonallocating `ScalarResultRefines` family:
+  `PureScalarExternalSupported` admits `Int.decLt` only as `.uint8`, and
+  `externalLetRuntimeRefinesWithCost_pureScalar` plus
+  `correctBudgetedScalarExternalSpine` derive zero-cost compiler-shaped calls
+  and arbitrary finite direct/decision spines with unchanged heap budget and
+  witness.
   `ConstructorArgsCompiled`, `constructorArgsReady_of_compileArgs`,
   `constructorLet_eq`, `codeWP_constructorLet`, and
   `correctConstructorReturn` derive mixed local/erased argument code, physical

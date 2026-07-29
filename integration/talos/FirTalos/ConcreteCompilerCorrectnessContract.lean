@@ -434,6 +434,68 @@ example
       semanticCalled budget fits
 
 /--
+`Int.decLt` is admitted only at its exact `UInt8` result kind. The generic
+scalar runtime law preserves the heap and witness and returns the canonical
+unboxed lane.
+-/
+example : PureScalarExternalName ``Int.decLt .uint8 := .intDecLt
+
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureScalarExternalSupported context externals)
+      (ConcreteBudgetedScalarExternalFrame sourceFunction externals) :=
+  spec.externalLetRuntimeRefinesWithCost_pureScalar externals
+
+example
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {witness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {scalar : BoxedScalar}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore witness semanticBefore)
+    (implementationRelated :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        concreteImplementation semanticImplementation)
+    (requestRelated :
+      ConcreteExternalRequestRel witness concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = scalar.kind.abiKind)
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticScalarExternalResponse semanticBefore scalar)) :
+    concreteImplementation.invoke concreteRequest concreteBefore =
+        .ok (concreteBefore.applyExternalResponse concreteRequest
+            (concreteScalarExternalResponse concreteBefore scalar),
+          (concreteScalarExternalResponse concreteBefore scalar).value) ∧
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticScalarExternalResponse semanticBefore scalar) ∧
+      ConcretePureExternalPost concreteBefore witness witness semanticBefore
+        concreteRequest semanticRequest
+        (concreteScalarExternalResponse concreteBefore scalar)
+        (semanticScalarExternalResponse semanticBefore scalar) := by
+  have concreteCalled :=
+    implementationRelated runtimeRelated requestRelated semanticCalled
+  exact
+    FirTalos.Concrete.ConcreteExternalImpl.invoke_pure_scalar_result_refines
+      runtimeRelated requestRelated resultKind concreteCalled semanticCalled
+
+/--
 An arbitrary finite natural-literal spine uses one source-computed budget
 across immediate, promoted-tag, and heap-limb representations.
 -/
@@ -866,6 +928,60 @@ example
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctBudgetedNaturalExternalSpine evaluation stateRelated frameAligned
+    budget implementation parameterCount
+
+/--
+The scalar-result whole-export endpoint needs no allocation or representation
+witness from its caller.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedSpineEvaluates context externals
+        (BudgetedDirectSupported context)
+        (PureScalarExternalSupported context externals)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (implementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedScalarExternalSpine evaluation stateRelated frameAligned
     budget implementation parameterCount
 
 /--

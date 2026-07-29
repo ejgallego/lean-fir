@@ -523,6 +523,115 @@ theorem ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
   exact ⟨result, word, afterWitness, allocated, concreteInvoke, semanticInvoke,
     post, remainingBudget⟩
 
+/--
+Canonical concrete response for a pure nonallocating scalar external.
+`BoxedScalar` is reused here only as the ABI-indexed scalar vocabulary; no
+heap box is allocated.
+-/
+def concreteScalarExternalResponse
+    (before : ConcreteRuntimeState) (scalar : BoxedScalar) :
+    ConcreteExternalResponse := {
+  value := scalar.lane
+  heap := before.heap
+  world := before.world }
+
+/-- Matching source response for a pure nonallocating scalar external. -/
+def semanticScalarExternalResponse
+    (before : RuntimeState) (scalar : BoxedScalar) : ExternalResponse := {
+  value := scalar.semanticValue
+  heap := before.heap
+  nextLocation := before.nextLocation
+  world := before.world }
+
+/--
+Nonallocating scalar responses preserve the witness and heap exactly while
+returning the lane selected by the scalar's ABI kind.
+-/
+theorem ConcreteRuntimeRel.scalarExternalResponse
+    {concreteBefore : ConcreteRuntimeState}
+    {witness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore witness semanticBefore)
+    (semanticRequest : ExternalRequest) (scalar : BoxedScalar) :
+    ConcreteExternalResponseRel witness witness semanticRequest semanticBefore
+      scalar.kind.abiKind
+      (concreteScalarExternalResponse concreteBefore scalar)
+      (semanticScalarExternalResponse semanticBefore scalar) := by
+  exact {
+    witnessExtension := .refl witness
+    heap := runtimeRelated.heap.auxiliary
+      (by simp [semanticExternalRuntimeAfter, semanticScalarExternalResponse])
+      (by simp [semanticExternalRuntimeAfter, semanticScalarExternalResponse])
+    value := scalar.valueRel witness
+    world := runtimeRelated.world }
+
+/--
+End-to-end pure-external refinement for a nonallocating scalar result. No
+allocation result or post-witness is needed: both are definitionally the
+incoming state.
+-/
+theorem ConcreteExternalImpl.invoke_pure_scalar_result_refines
+    {concreteImplementation : ConcreteExternalImpl}
+    {semanticImplementation : ExternalImpl}
+    {concreteBefore : ConcreteRuntimeState}
+    {witness : RefinementWitness}
+    {semanticBefore : RuntimeState}
+    {concreteRequest : ConcreteExternalRequest}
+    {semanticRequest : ExternalRequest}
+    {scalar : BoxedScalar}
+    (runtimeRelated :
+      ConcreteRuntimeRel concreteBefore witness semanticBefore)
+    (requestRelated : ConcreteExternalRequestRel witness
+      concreteRequest semanticRequest)
+    (resultKind : concreteRequest.resultKind = scalar.kind.abiKind)
+    (concreteCalled :
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteScalarExternalResponse concreteBefore scalar))
+    (semanticCalled :
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticScalarExternalResponse semanticBefore scalar)) :
+    concreteImplementation.invoke concreteRequest concreteBefore =
+        .ok (concreteBefore.applyExternalResponse concreteRequest
+            (concreteScalarExternalResponse concreteBefore scalar),
+          (concreteScalarExternalResponse concreteBefore scalar).value) ∧
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticScalarExternalResponse semanticBefore scalar) ∧
+      ConcretePureExternalPost concreteBefore witness witness semanticBefore
+        concreteRequest semanticRequest
+        (concreteScalarExternalResponse concreteBefore scalar)
+        (semanticScalarExternalResponse semanticBefore scalar) := by
+  have responseRelated : ConcreteExternalResponseRel witness witness
+      semanticRequest semanticBefore concreteRequest.resultKind
+      (concreteScalarExternalResponse concreteBefore scalar)
+      (semanticScalarExternalResponse semanticBefore scalar) := by
+    rw [resultKind]
+    exact FirTalos.Concrete.ConcreteRuntimeRel.scalarExternalResponse
+      runtimeRelated semanticRequest scalar
+  exact concreteImplementation.invoke_pure_result_refines runtimeRelated
+    requestRelated concreteCalled semanticCalled responseRelated (by rfl)
+
+/--
+Reusable implementation law for pure scalar-result handlers. It applies to
+all integer scalar widths and `USize`; a source-facing name family chooses the
+operations admitted by compiler correctness.
+-/
+def ConcreteExternalImpl.ScalarResultRefines
+    (concreteImplementation : ConcreteExternalImpl)
+    (semanticImplementation : ExternalImpl) : Prop :=
+  ∀ {concreteBefore : ConcreteRuntimeState}
+      {witness : RefinementWitness}
+      {semanticBefore : RuntimeState}
+      {concreteRequest : ConcreteExternalRequest}
+      {semanticRequest : ExternalRequest}
+      {scalar : BoxedScalar},
+    ConcreteRuntimeRel concreteBefore witness semanticBefore →
+      ConcreteExternalRequestRel witness concreteRequest semanticRequest →
+      semanticImplementation.call semanticRequest semanticBefore =
+        .ok (semanticScalarExternalResponse semanticBefore scalar) →
+      concreteImplementation.call concreteRequest concreteBefore =
+        .ok (concreteScalarExternalResponse concreteBefore scalar)
+
 /-- Fresh string allocation grows the proof witness exactly once and exposes
 the compiler's precise `.object` result lane. -/
 theorem allocateString_liveHeapRel_extends
@@ -1793,6 +1902,79 @@ theorem naturalExternalStep_of_budget
   exact ⟨result, word, afterWitness, allocated, operationStep, semanticInvoke,
     post.witnessExtension, post.runtime, physicalOfLane_related post.value,
     remainingBudget⟩
+
+/--
+Constructive Talos host step for a pure nonallocating scalar external.
+The source scalar fixes its ABI kind and exact lane; the heap, witness, and
+available address-space budget remain unchanged.
+-/
+theorem scalarExternalStep
+    (operation : ExternalOperation) (resultKind : AbiKind)
+    (initial : Wasm.Store Host) (physicalArgs : List Wasm.Value)
+    (concreteArgs : List LaneValue) (semanticArgs : Array Value)
+    (witness : RefinementWitness) (semanticRuntime : RuntimeState)
+    (semanticImplementation : ExternalImpl) (scalar : BoxedScalar)
+    (decoded : decodePhysicalLanes 0 operation.signature.params.toList
+      physicalArgs = .ok concreteArgs)
+    (runtimeRelated : ConcreteRuntimeRel initial.host.runtime witness
+      semanticRuntime)
+    (requestRelated : ConcreteExternalRequestRel witness
+      (concreteExternalRequest operation resultKind concreteArgs.toArray)
+      (operation.request semanticArgs))
+    (implementationRelated :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals semanticImplementation)
+    (resultKindEq : resultKind = scalar.kind.abiKind)
+    (semanticCalled :
+      semanticImplementation.call (operation.request semanticArgs)
+          semanticRuntime =
+        .ok (semanticScalarExternalResponse semanticRuntime scalar)) :
+    externalStep operation resultKind initial physicalArgs =
+        .Return
+          [physicalOfLane
+            (concreteScalarExternalResponse initial.host.runtime scalar).value]
+          (replaceRuntime initial
+            (initial.host.runtime.applyExternalResponse
+              (concreteExternalRequest operation resultKind concreteArgs.toArray)
+              (concreteScalarExternalResponse initial.host.runtime scalar))) ∧
+      semanticImplementation.call (operation.request semanticArgs)
+          semanticRuntime =
+        .ok (semanticScalarExternalResponse semanticRuntime scalar) ∧
+      ConcreteRuntimeRel
+        (initial.host.runtime.applyExternalResponse
+          (concreteExternalRequest operation resultKind concreteArgs.toArray)
+          (concreteScalarExternalResponse initial.host.runtime scalar))
+        witness
+        (semanticExternalRuntimeAfter (operation.request semanticArgs)
+          semanticRuntime
+          (semanticScalarExternalResponse semanticRuntime scalar)) ∧
+      PhysicalValueRel witness resultKind
+        (physicalOfLane
+          (concreteScalarExternalResponse initial.host.runtime scalar).value)
+        (semanticScalarExternalResponse semanticRuntime scalar).value := by
+  have concreteCalled :=
+    implementationRelated runtimeRelated requestRelated semanticCalled
+  obtain ⟨concreteInvoke, semanticInvoke, post⟩ :=
+    FirTalos.Concrete.ConcreteExternalImpl.invoke_pure_scalar_result_refines
+      runtimeRelated requestRelated
+      (by simpa [concreteExternalRequest] using resultKindEq)
+      concreteCalled semanticCalled
+  have laneMatches :
+      ((concreteScalarExternalResponse initial.host.runtime scalar).value.valueType ==
+        resultKind.valueType) = true := by
+    exact valueRel_physical_type_beq post.value
+  have operationStep :
+      externalStep operation resultKind initial physicalArgs =
+        .Return
+          [physicalOfLane
+            (concreteScalarExternalResponse initial.host.runtime scalar).value]
+          (replaceRuntime initial
+            (initial.host.runtime.applyExternalResponse
+              (concreteExternalRequest operation resultKind concreteArgs.toArray)
+              (concreteScalarExternalResponse initial.host.runtime scalar))) := by
+    simp [externalStep, decoded, concreteInvoke, laneMatches]
+  exact ⟨operationStep, semanticInvoke, post.runtime,
+    physicalOfLane_related post.value⟩
 
 /-- Decode one supported integer/USize operand into the concrete boxing
 vocabulary while retaining ABI-shape failures at the Talos boundary. -/
