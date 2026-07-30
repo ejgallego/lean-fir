@@ -1099,8 +1099,21 @@ order plus a source-prefix frame into the source-only and owner-preservation
 premises required by reset/reuse. The retained-prefix client now consumes
 these laws and the common
 `deletedReadyAt_of_targetAllocationLedger` bridge instead of rebuilding the
-renaming inverse and runtime frame locally. Compiler typing/heap-shape and
-general reachable-state derivations remain to be extracted.
+renaming inverse and runtime frame locally. Compiler typing and general
+ownership-lifecycle derivations remain to be extracted.
+
+The next extraction lands at `5a437fae`.
+`NonLockstep.Reaches.invariant` packages finite-path invariant induction and
+replaces seven repeated step-count proofs. `ReuseSomeSuccessShape` derives the
+pre-write live constructor cell and arity from a successful concrete-token
+`reuse`, while `DeletedResetLocalReadyAt.of_evalLetValue` derives the complete
+local reset outcome from the same interpreter evaluation used by the execution
+graph. The focused, one-cell, owned-child, and retained-prefix clients now
+build every reset/reuse local-readiness certificate through these operational
+laws instead of separately reducing heap cells and reset effects. The
+remaining gap is the genuinely static one: carry compiler allocation and
+ownership facts through arbitrary executions so those successful evaluations
+and source-only selections do not depend on enumerated fixture states.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1216,9 +1229,10 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Derive reusable compiler typing/heap-shape and reachable-state laws for
-   write/reset/reuse. Environment lookup transport and allocation-ledger
-   owner/source-only/frame laws are already extracted; arbitrary checked
-   entries must still avoid finite execution-graph enumeration.
+   write/reset/reuse. Environment and ledger transport, finite-path invariant
+   induction, and successful reset/reuse operational shapes are extracted;
+   arbitrary checked entries must still derive the operation's allocation and
+   ownership lifecycle without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
