@@ -201,6 +201,69 @@ boundary. Use `--extra-source` for local generated modules that must be linked
 with the entry module. Deploy the `.manifest.json`, `.mjs`, and `.wasm` files
 together; the manifest filenames are relative to its own URL.
 
+## Measuring native versus Emscripten
+
+`benchmark.sh` builds `RuntimeSmoke` once through the production Emscripten
+driver and once as an optimized native executable, then records two distinct
+phases:
+
+- cold startup: whole-process elapsed time, plus an internal initialization
+  boundary;
+- steady execution: repeated initialized calls to
+  `fir_lcnf_c_runtime_checksum`, excluding process and module startup.
+
+The workload exercises array growth and folding, `Std.HashMap`, `Except`,
+captured closures, and strings. Every native and Wasm result must match the
+independent JavaScript oracle. Measured runs alternate
+native/Emscripten and Emscripten/native order. Process warmups are stored
+separately from measured rows.
+
+Run the default six-pass report after the Emscripten setup:
+
+```sh
+bash integration/lcnf-c-wasm/benchmark.sh
+```
+
+Each invocation creates a fresh directory under
+`_build/lcnf-c-wasm/performance/` and refuses to overwrite evidence. It
+preserves:
+
+- `report/raw-runs.jsonl`: every pass, sequence, command, checksum, elapsed
+  time, RSS, and observable host thread count;
+- `report/warmups.jsonl`: excluded process warmups;
+- `report/identity-check.json`: before/after Git, tracked-diff, executable,
+  input, and artifact identities;
+- `report/report.json`: distributions, paired ratios, order effects, artifact
+  sizes, toolchains, host metadata, and evidence classifications.
+
+The report parses the Wasm memory import itself and requires a shared-memory
+declaration for the threaded profile. Its `threadedRuntimeEnvelope` compares
+the whole native process with Node plus the thread-enabled Emscripten runtime.
+It deliberately does not claim that RSS, thread-count, or startup differences
+are caused solely by pthread support; isolating that cost would require a
+separately built, otherwise comparable single-threaded Lean runtime.
+
+Timing is noisy evidence. Hashes, byte lengths, exact commands, and the Wasm
+memory declaration are deterministic evidence. Defaults use one process
+warmup, six order-balanced passes, 4,096 logical rounds per call, 128 measured
+calls, and four in-process warmup calls. Override them explicitly when needed:
+
+```sh
+FIR_LCNF_C_WASM_PERF_OUT=/tmp/fir-perf-run \
+FIR_LCNF_C_WASM_PERF_PASSES=10 \
+FIR_LCNF_C_WASM_PERF_WARMUPS=2 \
+FIR_LCNF_C_WASM_PERF_ROUNDS=8192 \
+FIR_LCNF_C_WASM_PERF_ITERATIONS=128 \
+FIR_LCNF_C_WASM_PERF_IN_PROCESS_WARMUPS=4 \
+  bash integration/lcnf-c-wasm/benchmark.sh
+```
+
+Pass counts must be even. A report with fewer than six passes, no process
+warmups, or a median steady sample below 10 ms is marked as screening
+evidence. A relative median absolute deviation or absolute AB/BA order effect
+of at least 10% marks timing as inconclusive. The raw rows and deterministic
+artifact evidence remain valid.
+
 ## Running the experimental WASI profile
 
 The frozen WASI setup also installs under `.deps/lcnf-c-wasm`:

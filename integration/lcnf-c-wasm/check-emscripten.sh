@@ -14,6 +14,8 @@ done
 
 mkdir -p "$out_dir"
 
+node "$lane_dir/test-benchmark-report.mjs"
+
 generated_c="$out_dir/HeapSmoke.c"
 runtime_generated_c="$out_dir/RuntimeSmoke.c"
 native_generated_o="$out_dir/RuntimeSmoke.native.o"
