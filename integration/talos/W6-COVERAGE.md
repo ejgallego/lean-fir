@@ -104,6 +104,14 @@ Cross-cutting W6.5 state:
   the response-sized allocation budget. The corresponding object-constructor
   and scalar-`UInt8` endpoints now admit the same mixed fragment under their
   production comparison chains.
+  `EffectRuntimeRefines` now exposes exact installed-handler preservation, and
+  `ConcreteReuseCapacityPureExternalOwnershipFrame` combines the mixed
+  pure-external frame with closure-descriptor agreement. The complete
+  ownership/tag/object/`USize`/packed-integer effect family preserves this
+  combined frame. Three whole-export endpoints—default-only,
+  object-constructor, and scalar-`UInt8` cases—therefore admit arbitrary
+  finite interleavings of every current facts-indexed direct, external-result,
+  case, and no-result effect family under one certificate-free theorem.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated

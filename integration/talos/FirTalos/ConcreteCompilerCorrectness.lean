@@ -7760,8 +7760,9 @@ def EffectRuntimeRefines
           EffectStepSimulates context sourceModule sourceFunction labels module
             hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
             targetRest targetStore nextStore targetLocals witness nextWitness ∧
-          Invariant remainingBytes nextRuntime sourceEnv nextStore targetLocals
-            nextWitness
+          nextStore.host.externals = targetStore.host.externals ∧
+            Invariant remainingBytes nextRuntime sourceEnv nextStore targetLocals
+              nextWitness
 
 /-- The empty effect family satisfies every invariant vacuously. -/
 theorem effectRuntimeRefines_noEffects
@@ -7815,6 +7816,94 @@ theorem EffectRuntimeRefines.or
       exact leftRefines supported sourceStep stateRelated invariant adapted
   | right supported =>
       exact rightRefines supported sourceStep stateRelated invariant adapted
+
+/--
+Every effect implementation law retains an arbitrary property of the
+installed external-handler table once the law exposes exact table
+preservation.
+
+This is the effect-side counterpart of the direct- and external-result frame
+combinators. It keeps handler semantics in the threaded invariant without
+requiring an operation-specific proof for each installed pure external.
+-/
+theorem EffectRuntimeRefines.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : EffectSupportedPredicate}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Supported Invariant) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv Supported
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated invariant.1 adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved, nextInvariant, by
+      simpa [externalsPreserved] using invariant.2⟩
+
+/--
+Transport a uniform effect law across two pointwise-equivalent invariant
+presentations. This is useful for choosing one canonical nesting order when
+several independently preserved runtime resources are composed.
+-/
+theorem EffectRuntimeRefines.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : EffectSupportedPredicate}
+    {Old New :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (runtimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Supported Old)
+    (toOld :
+      ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness,
+        New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness →
+          Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness)
+    (toNew :
+      ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness,
+        Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness →
+          New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv Supported New := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated
+      (toOld remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness invariant)
+      adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved,
+    toNew remainingBytes nextRuntime sourceEnv nextStore targetLocals
+      nextWitness nextInvariant⟩
 
 /--
 Resolver/adaptor alignment specialized to the concrete reference-count
@@ -8141,12 +8230,12 @@ theorem effectRuntimeRefines_persistentOwnership
       have continuationAdapted := CodeAdapted.incPersistent_eq adapted
       exact ⟨target, targetStore, witness, continuationAdapted,
         effectStepSimulates_inc_persistent stateRelated continuationAdapted,
-        invariant⟩
+        rfl, invariant⟩
   | dec =>
       have continuationAdapted := CodeAdapted.decPersistent_eq adapted
       exact ⟨target, targetStore, witness, continuationAdapted,
         effectStepSimulates_dec_persistent stateRelated continuationAdapted,
-        invariant⟩
+        rfl, invariant⟩
 
 /--
 Ordinary reference-count increment implements the generic effect condition
@@ -8216,7 +8305,8 @@ theorem
         · rw [externalsEq]
           exact scalarImplementation
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Ordinary recursive decrement implements the generic effect condition for the
@@ -8292,7 +8382,8 @@ theorem
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Successful explicit deletion implements the generic effect condition for the
@@ -8361,7 +8452,8 @@ theorem
         · rw [externalsEq]
           exact scalarImplementation
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Ordinary increment also preserves the ownership-aware frame.
@@ -8435,7 +8527,8 @@ theorem
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Explicit deletion preserves the ownership-aware frame.
@@ -8508,7 +8601,8 @@ theorem
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Successful constructor-tag mutation implements the generic effect condition
@@ -8585,7 +8679,8 @@ theorem
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Successful FVar object-field mutation implements the generic effect condition
@@ -8697,7 +8792,8 @@ theorem
             exact ⟨nextBaseInvariant, by
               simpa [replaceHeap, clearFailure] using invariant.2⟩
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
-            continuationAdapted, step, nextInvariant⟩
+            continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
@@ -8806,7 +8902,8 @@ theorem
             exact ⟨nextBaseInvariant, by
               simpa [replaceHeap, clearFailure] using invariant.2⟩
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
-            continuationAdapted, step, nextInvariant⟩
+            continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
@@ -8888,7 +8985,8 @@ theorem
         exact ⟨nextBaseInvariant, by
           simpa [replaceHeap, clearFailure] using invariant.2⟩
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Successful packed-integer field mutation implements the generic effect
@@ -9004,7 +9102,9 @@ theorem
               exact ⟨nextBaseInvariant, by
                 simpa [replaceHeap, clearFailure] using invariant.2⟩
             exact ⟨targetRest, replaceHeap targetStore heap, witness,
-              continuationAdapted, step, nextInvariant⟩
+              continuationAdapted, step, by
+                simp [replaceHeap, clearFailure],
+              nextInvariant⟩
       | word64 objectRelated => cases objectRelated
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
@@ -13563,6 +13663,25 @@ def ConcreteReuseCapacityOwnershipFrame
     targetStore.host.closureDescriptors = witness.closureDescriptors
 
 /--
+Canonical facts-indexed frame for code that may interleave pure external
+results with recursive ownership and constructor mutation.
+
+The pure-external frame owns the authoritative reuse facts, source ordinary
+tokens, local alignment, wasm32 budget, and all installed result-handler laws.
+The final conjunct supplies the immutable closure-descriptor agreement needed
+by recursive decrement and deletion.
+-/
+def ConcreteReuseCapacityPureExternalOwnershipFrame
+    (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
+    (facts : ReuseCapacityFacts) (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+      remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness ∧
+    targetStore.host.closureDescriptors = witness.closureDescriptors
+
+/--
 Thread the ownership-strengthened reuse frame across a same-witness heap
 effect.
 
@@ -15432,6 +15551,54 @@ def ReuseCapacityExternalLetRuntimeRefinesWithCost
                   nextWitness
 
 /--
+A facts-indexed external-result law lifts through closure-descriptor
+agreement. Successful result allocation preserves the host descriptor table
+and extends a witness without changing its descriptor table, so agreement is
+retained independently of the response representation.
+-/
+theorem
+    ReuseCapacityExternalLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported
+        Invariant) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals ExternalSupported
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant.1 sourceStep valueCompiled
+      valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved,
+    witnessDescriptorsPreserved, transfer, nextInvariant,
+    hostDescriptorsPreserved.trans
+      (invariant.2.trans witnessDescriptorsPreserved.symm)⟩
+
+/--
 Lift one transport-strengthened pure-external operation-family law to the
 facts-indexed reuse frame.
 
@@ -15757,7 +15924,7 @@ theorem
         resultInvariant, failureClear, valueRelated⟩
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
-          nextInvariant⟩ :=
+          _externalsPreserved, nextInvariant⟩ :=
         effectRuntimeRefines _ supported sourceStep
           (frameRelated invariant).stateRelated invariant adapted
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
@@ -15954,7 +16121,7 @@ theorem
         resultInvariant, failureClear, valueRelated⟩
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
-          nextInvariant⟩ :=
+          _externalsPreserved, nextInvariant⟩ :=
         effectRuntimeRefines _ supported sourceStep
           (frameRelated invariant).stateRelated invariant adapted
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
@@ -17095,6 +17262,46 @@ theorem
       spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
 
 /--
+The complete facts-indexed direct family preserves the pure external handler
+laws and closure-descriptor agreement simultaneously.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+            remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors)
+  exact
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
+      (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+        externals)
+
+/--
 Finite whole-export partial correctness for arbitrary interleavings of
 successful validated reuse and every operation in `BudgetedDirectSupported`.
 -/
@@ -17197,8 +17404,8 @@ theorem
         · simpa [cursor] using budget.cursorPositive
         · simpa [cursor] using budget.endWithinAddressSpace
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextCapacity, nextOrdinary, frameAligned,
-        by
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩
 
@@ -17261,7 +17468,7 @@ theorem
             witness.closureDescriptors := by
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step,
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
@@ -17325,7 +17532,7 @@ theorem
             witness.closureDescriptors := by
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step,
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
@@ -17388,7 +17595,7 @@ theorem
             witness.closureDescriptors := by
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step,
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
@@ -17443,7 +17650,8 @@ theorem
         invariant.ofReplaceHeapEffectStep step capacity
           (setTag_ordinaryPersistenceTransport updated) cursor
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 FVar object-field mutation preserves the ownership-strengthened reuse frame.
@@ -17528,7 +17736,8 @@ theorem
             invariant.ofReplaceHeapEffectStep step capacity
               (modifyConstructor_ordinaryPersistenceTransport updated) cursor
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
-            continuationAdapted, step, nextInvariant⟩
+            continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
@@ -17610,7 +17819,8 @@ theorem
             invariant.ofReplaceHeapEffectStep step capacity
               (modifyConstructor_ordinaryPersistenceTransport updated) cursor
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
-            continuationAdapted, step, nextInvariant⟩
+            continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
@@ -17666,7 +17876,8 @@ theorem
         invariant.ofReplaceHeapEffectStep step capacity
           (setUSizeSlot_ordinaryPersistenceTransport updated) cursor
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
-        continuationAdapted, step, nextInvariant⟩
+        continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        nextInvariant⟩
 
 /--
 Supported packed-integer field mutation preserves the
@@ -17755,7 +17966,9 @@ theorem
               invariant.ofReplaceHeapEffectStep step capacity
                 (setScalarField_ordinaryPersistenceTransport updated) cursor
             exact ⟨targetRest, replaceHeap targetStore heap, witness,
-              continuationAdapted, step, nextInvariant⟩
+              continuationAdapted, step, by
+                simp [replaceHeap, clearFailure],
+              nextInvariant⟩
       | word64 objectRelated => cases objectRelated
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
@@ -17991,6 +18204,84 @@ theorem
   apply EffectRuntimeRefines.or
   · exact spec.effectRuntimeRefines_reuseOwnershipAndTag
   · exact spec.effectRuntimeRefines_allFieldMutation_reuseCapacityOwnership
+
+/--
+The complete current ownership/tag/field-mutation family preserves the
+canonical facts-indexed frame with all installed pure-external handler laws.
+
+The operation theorems establish reuse-capacity and descriptor preservation.
+The generic effect boundary supplies exact handler-table preservation; the
+final invariant transport only normalizes conjunction order.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals facts) := by
+  let ExternalInvariant : ConcreteExternalImpl → Prop :=
+    fun concrete =>
+      concrete.IntegerResultRefines externals ∧
+        FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            concrete externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            concrete externals
+  have preserved :
+      EffectRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env
+          (OwnershipTagAndAllFieldMutationEffectSupported context)
+        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness =>
+          ConcreteReuseCapacityOwnershipFrame sourceFunction facts
+                remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+                witness ∧
+            ExternalInvariant targetStore.host.externals) :=
+    EffectRuntimeRefines.preservingExternalInvariant
+      (Invariant := ConcreteReuseCapacityOwnershipFrame sourceFunction facts)
+      (ExternalInvariant := ExternalInvariant)
+      (spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation
+        (labels := labels) (facts := facts))
+  apply
+    EffectRuntimeRefines.mapInvariant
+      (Old := fun remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness =>
+        ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+              sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals)
+      (New := ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals facts)
+      preserved
+  · intro remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+      witness invariant
+    change
+      (ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors) ∧
+        ExternalInvariant targetStore.host.externals
+    exact ⟨⟨invariant.1.1, invariant.2⟩, invariant.1.2⟩
+  · intro remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+      witness invariant
+    change
+      (ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) ∧
+        targetStore.host.closureDescriptors = witness.closureDescriptors
+    exact ⟨⟨invariant.1.1, invariant.2⟩, invariant.1.2⟩
 
 /--
 The complete facts-indexed direct family may interleave with compiler-erased
@@ -19068,6 +19359,45 @@ theorem
     (fun supported => supported.reuseCapacityLetFacts? _)
 
 /--
+The mixed pure-external facts law preserves closure-descriptor agreement as
+well as all installed result-handler laws and the authoritative reuse facts.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals) := by
+  change
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+              witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors)
+  exact
+    ReuseCapacityExternalLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
+      (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal
+        externals)
+
+/--
 First whole-export endpoint that combines authoritative reuse-capacity facts
 with the complete pure integer-, natural-, and scalar-result external family.
 
@@ -19234,6 +19564,186 @@ theorem
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
     spec.caseRuntimeRefines_scalarUInt8Cases
     (fun _ => effectRuntimeRefines_noEffects) parameterCount
+
+/--
+Whole-export partial correctness for arbitrary finite interleavings of all
+facts-indexed direct/reuse operations, pure integer/natural/scalar external
+results, the complete ownership/tag/field-mutation family, and default-only
+case wrappers.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalOwnershipTagAllFieldMutationDefaultCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals) DefaultOnlyCaseSupported
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals
+        facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+      externals)
+    caseRuntimeRefines_defaultOnly
+    (fun _ =>
+      spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
+        externals)
+    parameterCount
+
+/--
+The same mixed fragment with normalized object-constructor discriminator
+chains. Case selection executes the production-generated comparisons while
+retaining the complete facts, external-handler, ownership, and budget frame.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalOwnershipTagAllFieldMutationObjectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (ObjectConstructorCasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals
+        facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+      externals)
+    spec.caseRuntimeRefines_objectConstructorCases
+    (fun _ =>
+      spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
+        externals)
+    parameterCount
+
+/--
+The same mixed fragment with normalized scalar-`UInt8` discriminator chains.
+The result is a single certificate-free structural theorem covering all four
+currently proved node families under one authoritative resource invariant.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalOwnershipTagAllFieldMutationScalarUInt8Cases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (ScalarUInt8CasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals
+        facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
+      externals)
+    spec.caseRuntimeRefines_scalarUInt8Cases
+    (fun _ =>
+      spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
+        externals)
+    parameterCount
 
 /--
 All current direct helpers preserve the ownership descriptor agreement in
@@ -19896,7 +20406,7 @@ theorem codeWP_of_budgetedCodeEvaluates_exactReturn
         resultRuntimeRelated, failureClear, valueRelated⟩
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
-          nextInvariant⟩ :=
+          _externalsPreserved, nextInvariant⟩ :=
         effectRuntimeRefines supported sourceStep stateRelated invariant adapted
       obtain ⟨resultStore, resultWitness, resultKind, physical,
           continuationWP, resultRuntimeRelated, failureClear,

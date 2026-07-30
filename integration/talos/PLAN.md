@@ -4717,8 +4717,27 @@ the normalized recursive `getTag` comparison chain, while
 `correctReuseBudgetedDirectPureExternalScalarUInt8Cases` reconstructs the
 import-free scalar chain. Either selected branch may contain further
 direct/reuse operations and response-producing pure externals; case dispatch
-retains the exact fact map and byte budget. Ownership and mutation effects
-will use the descriptor-strengthened version of this composite frame.
+retains the exact fact map and byte budget.
+
+W6.6gv closes the next composition boundary.
+`EffectRuntimeRefines` now exposes exact preservation of the installed
+external-handler table, which every proved no-result helper already provides.
+Its generic handler-invariant and invariant-transport combinators avoid
+re-proving the three pure result laws for each ownership or mutation
+operation. `ConcreteReuseCapacityPureExternalOwnershipFrame` is the canonical
+combined resource: authoritative facts, ordinary tokens, local alignment,
+wasm32 budget, all pure `Int`/`Nat`/scalar handler laws, and host/witness
+closure-descriptor agreement.
+
+The direct and external-result families preserve that frame independently,
+and the complete ownership/tag/object/`USize`/packed-integer effect union now
+does as well.
+`correctReuseBudgetedDirectPureExternalOwnershipTagAllFieldMutationDefaultCases`
+and its object-constructor and scalar-`UInt8` variants are the first
+facts-indexed whole-export theorems to admit all four current structural node
+families simultaneously. Their only execution premise is the finite
+source-facing evaluation; no target program, branch witness, or execution
+certificate appears in it.
 
 ## Parallel agent packages
 

@@ -732,8 +732,21 @@ acceptance tests pass.
    `correctReuseBudgetedDirectPureExternalObjectConstructorCases` and
    `correctReuseBudgetedDirectPureExternalScalarUInt8Cases` extend that mixed
    endpoint through both discriminating case families with unchanged facts
-   and budget on branch entry. The next composition boundary is the
-   descriptor-strengthened mixed frame for ownership and mutation effects.
+   and budget on branch entry.
+   `EffectRuntimeRefines` now exposes exact installed-handler preservation,
+   and its generic lifting theorem threads the three pure result laws across
+   every proved no-result helper.
+   `ConcreteReuseCapacityPureExternalOwnershipFrame` combines those laws with
+   authoritative reuse facts, ordinary tokens, the exact byte budget, and
+   host/witness closure-descriptor agreement. The direct, external-result,
+   and complete ownership/tag/all-field-mutation families all preserve this
+   one frame.
+   `correctReuseBudgetedDirectPureExternalOwnershipTagAllFieldMutationDefaultCases`
+   and its object-constructor and scalar-`UInt8` variants consequently cover
+   arbitrary finite interleavings of all four currently proved structural
+   node families without target evidence.
+   The next structural boundary is to instantiate the same facts-indexed
+   contracts for calls and lazy-cache publication.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
