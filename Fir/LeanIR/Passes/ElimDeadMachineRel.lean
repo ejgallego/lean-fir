@@ -12491,6 +12491,596 @@ theorem SourceMachineOwnershipBelowFrontier.retainedReuseLetStep
                   simp [coreStep, evalLetValue, tokenRead, argumentsRead,
                     reuse, fail, Bind.bind, Except.bind] at transition
 
+/-- The complete ownership carrier is closed under every executable impure
+`let` family. Impossible pure-only `proj` and `const` constructors are
+eliminated by their purity witnesses. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let declaration continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  rcases declaration with ⟨fvarId, binderName, type, value⟩
+  cases value with
+  | lit literalValue =>
+      exact bounded.retainedLiteralLetStep step
+  | erased =>
+      exact bounded.retainedErasedLetStep step
+  | fvar function arguments =>
+      exact bounded.retainedFVarLetStep step
+  | ctor info arguments =>
+      exact bounded.retainedCtorLetStep step
+  | oproj index object =>
+      exact bounded.retainedObjectProjectionLetStep step
+  | uproj index object =>
+      exact bounded.retainedUSizeProjectionLetStep step
+  | sproj width offset object =>
+      exact bounded.retainedScalarProjectionLetStep step
+  | reset count object =>
+      exact bounded.retainedResetLetStep step
+  | reuse token info updateHeader arguments =>
+      exact bounded.retainedReuseLetStep step
+  | fap name arguments =>
+      exact bounded.retainedFapLetStep step
+  | pap name arguments =>
+      exact bounded.retainedPapLetStep step
+  | box boxedType input =>
+      exact bounded.retainedBoxLetStep step
+  | unbox object =>
+      exact bounded.retainedUnboxLetStep step
+  | isShared object =>
+      exact bounded.retainedIsSharedLetStep step
+  | proj _ _ _ impossible | const _ _ _ impossible =>
+      nomatch impossible
+
+/-- Installing a join point changes only control and the join environment,
+neither of which contributes an ownership obligation. -/
+theorem SourceMachineOwnershipBelowFrontier.joinCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.jp declaration continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  have afterBounded :=
+    bounded.withControlAndJoins
+      (.code continuation)
+      ((declaration.fvarId, declaration) :: state.joins)
+  apply afterBounded.ofStepNext _ step
+  rfl
+
+/-- A successful jump evaluates already bounded arguments and binds them over
+the current complete environment before transferring control to the join
+body. -/
+theorem SourceMachineOwnershipBelowFrontier.jumpCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with control := .code (.jmp target arguments) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize declarationRead :
+    findJoinPoint? state.joins target = declarationResult
+  cases declarationResult with
+  | none =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, declarationRead, fail] at transition
+      | external transition externalProof =>
+          simp [coreStep, declarationRead, fail] at transition
+  | some declaration =>
+      generalize argumentsRead :
+        evalArgs state.env arguments = argumentsResult
+      cases argumentsResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, declarationRead, argumentsRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, declarationRead, argumentsRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok argumentValues =>
+          generalize binding :
+            bindParamsOver state.env declaration.params argumentValues =
+              bindingResult
+          cases bindingResult with
+          | error fault =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, declarationRead, argumentsRead, binding,
+                    fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, declarationRead, argumentsRead, binding,
+                    fail, Bind.bind, Except.bind] at transition
+          | ok nextEnv =>
+              have argumentValuesBelow :
+                  HeapLocationsBelowFrontier
+                    state.runtime argumentValues.toList :=
+                EnvironmentBelowFrontier.of_evalArgs
+                  (@bounded.env) arguments argumentValues argumentsRead
+              have nextEnvBelow :
+                  EnvironmentBelowFrontier state.runtime nextEnv :=
+                EnvironmentBelowFrontier.bindParamsOver
+                  (@bounded.env) argumentValuesBelow binding
+              have afterBounded :
+                  SourceMachineOwnershipBelowFrontier
+                    { state with
+                      env := nextEnv
+                      control := .code declaration.value } := {
+                heap := bounded.heap
+                env := nextEnvBelow
+                frames := bounded.frames
+              }
+              apply afterBounded.ofStepNext _ step
+              simp [coreStep, declarationRead, argumentsRead, binding,
+                Bind.bind, Except.bind]
+
+/-- A successful case split changes only control after reading the
+discriminant tag, so ownership is inherited unchanged. -/
+theorem SourceMachineOwnershipBelowFrontier.casesCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with control := .code (.cases cases) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize discriminantRead :
+    lookupValue state.env cases.discr = discriminantResult
+  cases discriminantResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, discriminantRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, discriminantRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok discriminant =>
+      generalize tagRead :
+        getTag state.runtime discriminant = tagResult
+      cases tagResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, discriminantRead, tagRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, discriminantRead, tagRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok tag =>
+          generalize selected :
+            chooseAlt tag cases.alts.toList = selectedCode
+          cases selectedCode with
+          | none =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, discriminantRead, tagRead, selected,
+                    fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, discriminantRead, tagRead, selected,
+                    fail, Bind.bind, Except.bind] at transition
+          | some code =>
+              have afterBounded :=
+                bounded.withControlAndJoins (.code code) state.joins
+              apply afterBounded.ofStepNext _ step
+              simp [coreStep, discriminantRead, tagRead, selected,
+                Bind.bind, Except.bind]
+
+/-- Returning an environment value changes only control. The yielded value is
+already bounded because complete environment ownership covers every local. -/
+theorem SourceMachineOwnershipBelowFrontier.returnCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with control := .code (.return result) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize resultRead :
+    lookupValue state.env result = resultValue
+  cases resultValue with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, resultRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, resultRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok value =>
+      have afterBounded :=
+        bounded.withControlAndJoins (.yielded value) state.joins
+      apply afterBounded.ofStepNext _ step
+      simp [coreStep, resultRead, Bind.bind, Except.bind]
+
+/-- A successful object-field instruction installs a value evaluated from the
+complete source environment, so the machine-level object-write law applies. -/
+theorem SourceMachineOwnershipBelowFrontier.objectSetCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code
+          (.oset object index fieldArgument continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  generalize fieldRead :
+    evalArg state.env fieldArgument = fieldResult
+  cases objectResult with
+  | error objectFault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      cases fieldResult with
+      | error fieldFault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok field =>
+          generalize write :
+            setObjectField state.runtime objectValue index field =
+              writeResult
+          cases writeResult with
+          | error fault =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+          | ok nextRuntime =>
+              have afterBounded :=
+                (bounded.setObjectFieldState fieldRead write)
+                  |>.withControlAndJoins
+                    (.code continuation) state.joins
+              apply afterBounded.ofStepNext _ step
+              simp [coreStep, objectRead, fieldRead, write,
+                Bind.bind, Except.bind]
+
+/-- An absolute `USize` slot write changes no owned edge and lifts directly
+through the complete machine ownership carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.usizeSetCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.uset object slot field continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  generalize fieldRead :
+    lookupValue state.env field = fieldResult
+  cases objectResult with
+  | error objectFault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      cases fieldResult with
+      | error fieldFault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok fieldValue =>
+          generalize write :
+            setUSizeSlot state.runtime objectValue slot fieldValue =
+              writeResult
+          cases writeResult with
+          | error fault =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+          | ok nextRuntime =>
+              have afterBounded :=
+                (bounded.setUSizeSlotState write)
+                  |>.withControlAndJoins
+                    (.code continuation) state.joins
+              apply afterBounded.ofStepNext _ step
+              simp [coreStep, objectRead, fieldRead, write,
+                Bind.bind, Except.bind]
+
+/-- A packed-scalar instruction changes only constructor metadata and
+therefore preserves the complete ownership carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.scalarSetCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code
+          (.sset object width offset field type continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  generalize fieldRead :
+    lookupValue state.env field = fieldResult
+  cases objectResult with
+  | error objectFault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, objectRead, fieldRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      cases fieldResult with
+      | error fieldFault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok fieldValue =>
+          generalize write :
+            setScalarField state.runtime objectValue
+              width offset fieldValue = writeResult
+          cases writeResult with
+          | error fault =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, objectRead, fieldRead, write, fail,
+                    Bind.bind, Except.bind] at transition
+          | ok nextRuntime =>
+              have afterBounded :=
+                (bounded.setScalarFieldState write)
+                  |>.withControlAndJoins
+                    (.code continuation) state.joins
+              apply afterBounded.ofStepNext _ step
+              simp [coreStep, objectRead, fieldRead, write,
+                Bind.bind, Except.bind]
+
+/-- Constructor-tag mutation uses the fixed-frontier tag law and then changes
+only control. -/
+theorem SourceMachineOwnershipBelowFrontier.setTagCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.setTag object tag continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize write :
+        setTag state.runtime objectValue tag = writeResult
+      cases writeResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, objectRead, write, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, objectRead, write, fail,
+                Bind.bind, Except.bind] at transition
+      | ok nextRuntime =>
+          have afterBounded :=
+            (bounded.setTagState write)
+              |>.withControlAndJoins
+                (.code continuation) state.joins
+          apply afterBounded.ofStepNext _ step
+          simp [coreStep, objectRead, write,
+            Bind.bind, Except.bind]
+
+/-- An increment instruction is control-only for a statically persistent
+operand and otherwise uses the fixed-frontier reference-count law. -/
+theorem SourceMachineOwnershipBelowFrontier.incrementCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code
+          (.inc object amount check persistent continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  by_cases persistentBranch : persistent = true
+  · have afterBounded :=
+      bounded.withControlAndJoins (.code continuation) state.joins
+    apply afterBounded.ofStepNext _ step
+    simp [coreStep, persistentBranch]
+  · generalize objectRead :
+      lookupValue state.env object = objectResult
+    cases objectResult with
+    | error fault =>
+        cases step with
+        | internal transition =>
+            simp [coreStep, persistentBranch, objectRead, fail,
+              Bind.bind, Except.bind] at transition
+        | external transition externalProof =>
+            simp [coreStep, persistentBranch, objectRead, fail,
+              Bind.bind, Except.bind] at transition
+    | ok value =>
+        generalize increment :
+          incValue state.runtime value amount check = incrementResult
+        cases incrementResult with
+        | error fault =>
+            cases step with
+            | internal transition =>
+                simp [coreStep, persistentBranch, objectRead, increment,
+                  fail, Bind.bind, Except.bind] at transition
+            | external transition externalProof =>
+                simp [coreStep, persistentBranch, objectRead, increment,
+                  fail, Bind.bind, Except.bind] at transition
+        | ok nextRuntime =>
+            have afterBounded :=
+              (bounded.incValueState increment)
+                |>.withControlAndJoins
+                  (.code continuation) state.joins
+            apply afterBounded.ofStepNext _ step
+            simp [coreStep, persistentBranch, objectRead, increment,
+              Bind.bind, Except.bind]
+
+/-- A decrement instruction is likewise control-only for persistent operands;
+the ordinary branch may recursively release cells but preserves ownership. -/
+theorem SourceMachineOwnershipBelowFrontier.decrementCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code
+          (.dec object amount check persistent type continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  by_cases persistentBranch : persistent = true
+  · have afterBounded :=
+      bounded.withControlAndJoins (.code continuation) state.joins
+    apply afterBounded.ofStepNext _ step
+    simp [coreStep, persistentBranch]
+  · generalize objectRead :
+      lookupValue state.env object = objectResult
+    cases objectResult with
+    | error fault =>
+        cases step with
+        | internal transition =>
+            simp [coreStep, persistentBranch, objectRead, fail,
+              Bind.bind, Except.bind] at transition
+        | external transition externalProof =>
+            simp [coreStep, persistentBranch, objectRead, fail,
+              Bind.bind, Except.bind] at transition
+    | ok value =>
+        generalize decrement :
+          decValue state.runtime value amount check = decrementResult
+        cases decrementResult with
+        | error fault =>
+            cases step with
+            | internal transition =>
+                simp [coreStep, persistentBranch, objectRead, decrement,
+                  fail, Bind.bind, Except.bind] at transition
+            | external transition externalProof =>
+                simp [coreStep, persistentBranch, objectRead, decrement,
+                  fail, Bind.bind, Except.bind] at transition
+        | ok nextRuntime =>
+            have afterBounded :=
+              (bounded.decValueState decrement)
+                |>.withControlAndJoins
+                  (.code continuation) state.joins
+            apply afterBounded.ofStepNext _ step
+            simp [coreStep, persistentBranch, objectRead, decrement,
+              Bind.bind, Except.bind]
+
+/-- Compiler-owned deletion changes only the selected cell header (or accepts
+the erased sentinel), then transfers control with complete ownership intact. -/
+theorem SourceMachineOwnershipBelowFrontier.deleteCodeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with control := .code (.del object continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok value =>
+      generalize deletion :
+        deleteValue state.runtime value = deletionResult
+      cases deletionResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, objectRead, deletion, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, objectRead, deletion, fail,
+                Bind.bind, Except.bind] at transition
+      | ok nextRuntime =>
+          have afterBounded :=
+            (bounded.deleteValueState deletion)
+              |>.withControlAndJoins
+                (.code continuation) state.joins
+          apply afterBounded.ofStepNext _ step
+          simp [coreStep, objectRead, deletion,
+            Bind.bind, Except.bind]
+
+/-- Every successful semantic step from active impure code preserves complete
+source-machine ownership. This is deliberately independent of compiler
+liveness: it is a source interpreter invariant consumed by all exact and
+structural compiler simulations. -/
+theorem SourceMachineOwnershipBelowFrontier.codeStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with control := .code code } after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  cases code with
+  | «let» declaration continuation =>
+      exact bounded.retainedLetStep step
+  | jp declaration continuation =>
+      exact bounded.joinCodeStep step
+  | jmp target arguments =>
+      exact bounded.jumpCodeStep step
+  | cases cases =>
+      exact bounded.casesCodeStep step
+  | «fun» _ _ impossible =>
+      nomatch impossible
+  | «return» result =>
+      exact bounded.returnCodeStep step
+  | unreach type =>
+      have done :
+          coreStep { state with control := .code (.unreach type) } =
+            .done (observe
+              { state with control := .code (.unreach type) }
+              (.fault .unreachable)) := by
+        simp [coreStep, fail]
+      cases step with
+      | internal transition =>
+          rw [done] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [done] at transition
+          contradiction
+  | oset object index fieldArgument continuation =>
+      exact bounded.objectSetCodeStep step
+  | uset object slot field continuation =>
+      exact bounded.usizeSetCodeStep step
+  | sset object width offset field type continuation =>
+      exact bounded.scalarSetCodeStep step
+  | setTag object tag continuation =>
+      exact bounded.setTagCodeStep step
+  | inc object amount check persistent continuation =>
+      exact bounded.incrementCodeStep step
+  | dec object amount check persistent type continuation =>
+      exact bounded.decrementCodeStep step
+  | del object continuation =>
+      exact bounded.deleteCodeStep step
+
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
 garbage. Unlike a ledger reconstructed from a final relation witness, this
@@ -41776,6 +42366,53 @@ theorem ExactShadowCodeBinderReady.match_codeStep
         ⟨targetAfter, targetPath, afterRelated⟩
       exact ⟨targetAfter, targetPath, ⟨rho, afterRelated⟩⟩
 
+/-- The exact active-code dispatcher and the source interpreter ownership
+invariant compose without strengthening the compiler relation: the existing
+non-lockstep target path is retained, while the concrete source step supplies
+ownership of its successor independently. -/
+theorem ExactShadowCodeBinderReady.match_codeStep_withOwnership
+    {initial final ambient : UsedLocals}
+    {remaining fuel : Nat}
+    {sourceCode targetCode : LCNF.Code .impure}
+    {view :
+      ExactShadowCodeView initial remaining final sourceCode targetCode}
+    (ready : ExactShadowCodeBinderReady ambient view)
+    (fuelBound : remaining ≤ fuel)
+    (usedBound : UsedSubset final ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (runtimeReady : ExactShadowCodeRuntimeReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      view)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState sourceCode) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        (withCodeControl targetState targetCode) targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases ready.match_codeStep fuelBound usedBound
+      sourceState targetState programs frames joins env runtime runtimeReady
+      step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  have afterOwnership :
+      SourceMachineOwnershipBelowFrontier sourceAfter :=
+    ownership.codeStep
+      (by simpa [withCodeControl] using step)
+  exact ⟨targetAfter, targetPath, afterRelated, afterOwnership⟩
+
 /-- Unified ledger-aware hereditary dispatcher for one exact compiler edge.
 Every allocating family returns the extended renaming and its exact target
 owner table; source-only and in-place families retain the incoming ledger.
@@ -42280,6 +42917,35 @@ theorem SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready
   | invokeValue targetFunction targetArguments =>
       rw [sourceControl, targetControl] at control
       cases control
+
+/-- State-level active-code matching retains the existing hereditary
+non-lockstep result and additionally certifies complete ownership of the
+concrete source successor. -/
+theorem SomeBinderReadyReachableMachineRelated.matchCodeStep_of_ready_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (sourceControl : source.control = .code sourceCode)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases related.matchCodeStep_of_ready ready sourceControl step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  have sourceSame :
+      { source with control := .code sourceCode } = source := by
+    cases source
+    simp_all
+  have afterOwnership :
+      SourceMachineOwnershipBelowFrontier sourceAfter :=
+    ownership.codeStep (code := sourceCode)
+      (by
+        rw [sourceSame]
+        exact step)
+  exact ⟨targetAfter, targetPath, afterRelated, afterOwnership⟩
 
 /-- Every internal machine step preserves hereditary exact provenance once
 the active-code case is supplied with its binder-ready readiness witness. -/
