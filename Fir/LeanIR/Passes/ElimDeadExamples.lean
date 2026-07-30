@@ -5013,6 +5013,23 @@ theorem deletedCtorSourceOnlySurvivesPairedAllocation :
   · exact deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
   · rfl
 
+/-- The source runtime produced by the deleted constructor allocation
+satisfies the reusable ownership bound at its new frontier. -/
+theorem deletedCtorLifecycleSourceOwnershipBelowFrontier :
+    HeapOwnershipBelowFrontier
+      deletedCtorLifecycleSourceOnly.nextRuntime := by
+  change HeapOwnershipBelowFrontier
+    (alloc ({} : RuntimeState)
+      (.ctor {
+        tag := oneFieldInfo.cidx
+        objectFields := #[.erased]
+        usizeFields := Array.replicate oneFieldInfo.usize 0
+        scalarFields := []
+      }) false).1
+  apply HeapOwnershipBelowFrontier.empty.alloc
+  intro child member
+  simp [HeapObject.ownedValues] at member
+
 /-- The stronger hereditary certificate survives the same paired allocation.
 The deleted constructor is a leaf, so its closure excludes the fresh source
 frontier; the generic lifecycle theorem transports both its heap closure and
@@ -5058,25 +5075,12 @@ theorem deletedCtorHeapClosureSurvivesPairedAllocation :
     simp [HeapObject.ownedValues] at member
   have closure :=
     objectBinding.closure_of_no_heap_children found noChildren
-  have wellFormed :
-      HeapOwnershipBelowFrontier
-        deletedCtorLifecycleSourceOnly.nextRuntime := by
-    change HeapOwnershipBelowFrontier
-      (alloc ({} : RuntimeState)
-        (.ctor {
-          tag := oneFieldInfo.cidx
-          objectFields := #[.erased]
-          usizeFields := Array.replicate oneFieldInfo.usize 0
-          scalarFields := []
-        }) false).1
-    apply HeapOwnershipBelowFrontier.empty.alloc
-    intro child member
-    simp [HeapObject.ownedValues] at member
   exact
     deletedCtorLifecyclePaired
       |>.heapClosureBinding_of_heapOwnershipBelowFrontier
         deletedCtorLifecycleSourceOnly.runtime.ledger
-        closure wellFormed ⟨_, found⟩
+        closure deletedCtorLifecycleSourceOwnershipBelowFrontier
+          ⟨_, found⟩
 
 /-- Bind the deleted constructor under the object local consumed by reset. -/
 noncomputable def deletedCtorLifecycleResetState : MachineState :=
@@ -5093,6 +5097,14 @@ noncomputable def deletedCtorLifecycleResetLocalReady :
       (binderName := reuseTokenVar.name)
       (type := objType)
   rfl
+
+/-- The successful reset result retains the source runtime's static ownership
+bound without a fixture-specific heap calculation. -/
+theorem deletedCtorLifecycleResetPreservesOwnershipBelowFrontier :
+    HeapOwnershipBelowFrontier
+      deletedCtorLifecycleResetLocalReady.nextRuntime :=
+  deletedCtorLifecycleSourceOwnershipBelowFrontier.reset
+    deletedCtorLifecycleResetLocalReady.effect
 
 /-- The concrete reset token installed in the successor environment retains
 the deleted constructor's certified source-only address. -/

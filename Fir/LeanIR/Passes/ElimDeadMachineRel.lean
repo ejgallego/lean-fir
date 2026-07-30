@@ -7534,6 +7534,35 @@ structure HeapOwnershipBelowFrontier
     Value.object (.heap child) ∈ cell.object.ownedValues.toList →
       child < runtime.nextLocation
 
+/-- Ownership-graph-preserving heap rewrites transport the static address
+bound whenever they retain the allocation frontier. -/
+theorem HeapOwnershipBelowFrontier.transportOwnershipFrame
+    (wellFormed : HeapOwnershipBelowFrontier before)
+    (ownership : HeapOwnershipFrame before.heap after.heap)
+    (frontier : after.nextLocation = before.nextLocation) :
+    HeapOwnershipBelowFrontier after := by
+  constructor
+  · intro location cell foundAfter
+    have objectRead := ownership location
+    rw [foundAfter] at objectRead
+    cases foundBefore : findCell? before.heap location with
+    | none =>
+        simp [foundBefore] at objectRead
+    | some oldCell =>
+        simpa [frontier] using wellFormed.cell_lt foundBefore
+  · intro parent cell child foundAfter member
+    have objectRead := ownership parent
+    rw [foundAfter] at objectRead
+    cases foundBefore : findCell? before.heap parent with
+    | none =>
+        simp [foundBefore] at objectRead
+    | some oldCell =>
+        simp only [foundBefore, Option.map_some, Option.some.injEq]
+          at objectRead
+        apply Nat.lt_of_lt_of_eq
+          (wellFormed.owned_lt foundBefore ?_) frontier.symm
+        simpa [objectRead] using member
+
 /-- Every location reachable from a known heap root lies below the fresh
 frontier of an ownership-bounded heap. -/
 theorem HeapOwnershipBelowFrontier.reachable_lt
@@ -8377,6 +8406,62 @@ theorem setCell_findCell_eq_of_ne_of_ok
   subst actual
   exact frame other different
 
+/-- Replacing an existing heap cell preserves the fresh-frontier ownership
+bound when every heap reference owned by the replacement already lies below
+the unchanged frontier. -/
+theorem HeapOwnershipBelowFrontier.setCell
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (found : findCell? runtime.heap location = some current)
+    (replacementOwnedBelow : ∀ {child},
+      Value.object (.heap child) ∈ replacement.object.ownedValues.toList →
+        child < runtime.nextLocation)
+    (effect :
+      Fir.LeanIR.Impure.setCell runtime location replacement = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  obtain ⟨actual, actualEffect, target, frame,
+      _length, frontier, _globals, _world, _trace⟩ :=
+    setCell_spec_of_find runtime location current replacement found
+  rw [effect] at actualEffect
+  have same : result = actual := Except.ok.inj actualEffect
+  subst actual
+  constructor
+  · intro other cell foundAfter
+    by_cases here : other = location
+    · subst other
+      simpa [frontier] using wellFormed.cell_lt found
+    · have oldFound :
+          findCell? runtime.heap other = some cell := by
+        rw [← frame other here]
+        exact foundAfter
+      simpa [frontier] using wellFormed.cell_lt oldFound
+  · intro parent cell child foundAfter member
+    by_cases here : parent = location
+    · subst parent
+      rw [target] at foundAfter
+      have cellEq : replacement = cell :=
+        Option.some.inj foundAfter
+      subst cell
+      simpa [frontier] using replacementOwnedBelow member
+    · have oldFound :
+          findCell? runtime.heap parent = some cell := by
+        rw [← frame parent here]
+        exact foundAfter
+      simpa [frontier] using wellFormed.owned_lt oldFound member
+
+/-- Header-only cell updates preserve the ownership bound without any new
+address premise because the owned object graph is unchanged. -/
+theorem HeapOwnershipBelowFrontier.setCell_sameObject
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (found : findCell? runtime.heap location = some current)
+    (objectEq : replacement.object = current.object)
+    (effect :
+      Fir.LeanIR.Impure.setCell runtime location replacement = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  apply wellFormed.setCell found _ effect
+  intro child member
+  rw [objectEq] at member
+  exact wellFormed.owned_lt found member
+
 /-- A recursive release changes only the ownership closure of its root and
 never changes the ownership graph itself. -/
 structure DecLocationFuelFrame
@@ -9155,6 +9240,50 @@ theorem releaseResetFields_nextLocation_eq_of_ok
               (releaseResetField_nextLocation_eq_of_ok headEq)
   exact foldFrontier fields.toList runtime result effect
 
+/-- Fuel-bounded recursive release preserves the ownership bound: it changes
+only cell headers, retains the ownership graph, and does not allocate. -/
+theorem HeapOwnershipBelowFrontier.decLocationFuel
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.decLocationFuel fuel runtime location = .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.transportOwnershipFrame
+    (decLocationFuel_frame_of_ok effect).ownership
+    (decLocationFuel_nextLocation_eq_of_ok effect)
+
+/-- The public recursive release operation preserves the ownership bound. -/
+theorem HeapOwnershipBelowFrontier.decLocation
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect : Fir.LeanIR.Impure.decLocation runtime location = .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.transportOwnershipFrame
+    (decLocation_frame_of_ok effect).ownership
+    (decLocation_nextLocation_eq_of_ok effect)
+
+/-- Releasing one reset field preserves the ownership bound. -/
+theorem HeapOwnershipBelowFrontier.releaseResetField
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.releaseResetField runtime value = .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.transportOwnershipFrame
+    (releaseResetField_frame_of_ok effect).ownership
+    (releaseResetField_nextLocation_eq_of_ok effect)
+
+/-- Releasing an array of reset fields preserves the ownership bound across
+the complete successful fold. -/
+theorem HeapOwnershipBelowFrontier.releaseResetFields
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Array.foldlM
+        (fun next field =>
+          Fir.LeanIR.Impure.releaseResetField next field)
+        runtime fields = .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.transportOwnershipFrame
+    (releaseResetFields_frame_of_ok effect).ownership
+    (releaseResetFields_nextLocation_eq_of_ok effect)
+
 /-- Reset only decrements or replaces existing cells. Even its unique-object
 branch, which clears a prefix and recursively releases its former fields,
 therefore preserves the allocation frontier on every successful result. -/
@@ -9244,6 +9373,128 @@ theorem reset_nextLocation_eq_of_ok
   | scalar value => simp [reset] at effect
   | erased => simp [reset] at effect
   | reuseToken location? => simp [reset] at effect
+
+/-- Every successful reset preserves the heap ownership bound. Shared
+objects delegate to recursive release; unique constructors replace their
+owned-field prefix only with tagged sentinels and then release the removed
+fields, so neither branch can introduce an address at or above the frontier. -/
+theorem HeapOwnershipBelowFrontier.reset
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.reset runtime count value =
+        .ok (result, token)) :
+    HeapOwnershipBelowFrontier result := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          have pairEq := Except.ok.inj effect
+          have runtimeEq : runtime = result :=
+            congrArg Prod.fst pairEq
+          subst result
+          exact wellFormed
+      | heap location =>
+          unfold Fir.LeanIR.Impure.reset at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime location = cellResult at effect
+          cases cellResult with
+          | error fault =>
+              simp at effect
+          | ok cell =>
+              have found :
+                  findCell? runtime.heap location = some cell :=
+                (getLiveCell_shape_of_ok cellEq).1
+              simp only at effect
+              by_cases shared : cell.persistent || cell.rc != 1
+              · rw [if_pos shared] at effect
+                generalize decEq :
+                  Fir.LeanIR.Impure.decLocation runtime location =
+                    decResult at effect
+                cases decResult with
+                | error fault =>
+                    simp at effect
+                | ok nextRuntime =>
+                    have pairEq := Except.ok.inj effect
+                    have runtimeEq : nextRuntime = result :=
+                      congrArg Prod.fst pairEq
+                    subst result
+                    exact wellFormed.decLocation decEq
+              · rw [if_neg shared] at effect
+                generalize objectEq : cell.object = heapObject at effect
+                cases heapObject with
+                | ctor object =>
+                    simp only at effect
+                    by_cases tooMany :
+                        count > object.objectFields.size
+                    · rw [if_pos tooMany] at effect
+                      simp at effect
+                    · rw [if_neg tooMany] at effect
+                      let cleared :=
+                        object.objectFields.mapIdx fun index field =>
+                          if index < count then
+                            .object (.tagged 0)
+                          else field
+                      let replacement : HeapCell :=
+                        { cell with object := .ctor {
+                            object with objectFields := cleared } }
+                      generalize setEq :
+                        Fir.LeanIR.Impure.setCell
+                            runtime location replacement =
+                          setResult at effect
+                      cases setResult with
+                      | error fault =>
+                          simp at effect
+                      | ok parent =>
+                          have replacementOwnedBelow : ∀ {child},
+                              Value.object (.heap child) ∈
+                                  replacement.object.ownedValues.toList →
+                                child < runtime.nextLocation := by
+                            intro child member
+                            have clearedMember :
+                                Value.object (.heap child) ∈
+                                  cleared.toList := by
+                              simpa [replacement,
+                                HeapObject.ownedValues] using member
+                            have oldMember :=
+                              heap_mem_of_mem_clearPrefix
+                                object.objectFields clearedMember
+                            apply wellFormed.owned_lt found
+                            simpa [objectEq,
+                              HeapObject.ownedValues] using oldMember
+                          have parentWellFormed :=
+                            wellFormed.setCell found
+                              replacementOwnedBelow setEq
+                          simp only at effect
+                          generalize foldEq :
+                            Array.foldlM
+                                (fun next field =>
+                                  Fir.LeanIR.Impure.releaseResetField
+                                    next field)
+                                parent
+                                (object.objectFields.extract 0 count) =
+                              foldResult at effect
+                          cases foldResult with
+                          | error fault =>
+                              simp at effect
+                          | ok finalRuntime =>
+                              have pairEq := Except.ok.inj effect
+                              have runtimeEq : finalRuntime = result :=
+                                congrArg Prod.fst pairEq
+                              subst result
+                              exact
+                                parentWellFormed.releaseResetFields foldEq
+                | closure fixed => simp at effect
+                | boxed type value => simp at effect
+                | string value => simp at effect
+                | natural value => simp at effect
+                | integer value => simp at effect
+                | byteArray value => simp at effect
+                | «opaque» value => simp at effect
+  | usize value => simp [Fir.LeanIR.Impure.reset] at effect
+  | scalar value => simp [Fir.LeanIR.Impure.reset] at effect
+  | erased => simp [Fir.LeanIR.Impure.reset] at effect
+  | reuseToken location? => simp [Fir.LeanIR.Impure.reset] at effect
 
 /-- A successful reset that returns a concrete reuse token returns the
 address of its heap-object operand. This is the operational link between an
@@ -9355,6 +9606,76 @@ theorem reuseSome_nextLocation_eq_of_ok
                 simp only at runtimeEq
                 subst result
                 exact setCell_nextLocation_eq_of_ok setEq
+        | closure fixed => simp at effect
+        | boxed type value => simp at effect
+        | string value => simp at effect
+        | natural value => simp at effect
+        | integer value => simp at effect
+        | byteArray value => simp at effect
+        | «opaque» value => simp at effect
+
+/-- Concrete-token reuse preserves the ownership bound when every heap
+argument installed in the reused constructor is already below the current
+frontier. This is the static premise supplied by compiler value typing. -/
+theorem HeapOwnershipBelowFrontier.reuseSome
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (argumentsBelow : ∀ {child},
+      Value.object (.heap child) ∈ arguments.toList →
+        child < runtime.nextLocation)
+    (effect :
+      Fir.LeanIR.Impure.reuse runtime
+          (.reuseToken (some location)) info updateHeader arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.reuse at effect
+  simp only [Bind.bind, Except.bind] at effect
+  split at effect
+  · simp at effect
+  · generalize readEq :
+      getLiveCell runtime location = read at effect
+    cases read with
+    | error fault =>
+        simp at effect
+    | ok cell =>
+        have found :
+            findCell? runtime.heap location = some cell :=
+          (getLiveCell_shape_of_ok readEq).1
+        simp only at effect
+        generalize objectEq : cell.object = object at effect
+        cases object with
+        | ctor old =>
+            simp only at effect
+            let replacement : HeapCell :=
+              { cell with
+                object := .ctor {
+                  tag := if updateHeader then info.cidx else old.tag
+                  objectFields := arguments
+                  usizeFields := Array.replicate info.usize 0
+                  scalarFields := []
+                } }
+            generalize setEq :
+              Fir.LeanIR.Impure.setCell
+                  runtime location replacement = updated at effect
+            cases updated with
+            | error fault =>
+                simp at effect
+            | ok nextRuntime =>
+                have replacementOwnedBelow : ∀ {child},
+                    Value.object (.heap child) ∈
+                        replacement.object.ownedValues.toList →
+                      child < runtime.nextLocation := by
+                  intro child member
+                  apply argumentsBelow
+                  simpa [replacement,
+                    HeapObject.ownedValues] using member
+                have nextWellFormed :=
+                  wellFormed.setCell found
+                    replacementOwnedBelow setEq
+                have pairEq := Except.ok.inj effect
+                have runtimeEq : nextRuntime = result :=
+                  congrArg Prod.fst pairEq
+                subst result
+                exact nextWellFormed
         | closure fixed => simp at effect
         | boxed type value => simp at effect
         | string value => simp at effect
