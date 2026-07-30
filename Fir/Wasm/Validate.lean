@@ -405,6 +405,58 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [.uint64] [operand])
         return remaining ++ [result]
       return { fallthrough := stack? }
+  | .i32ReinterpretF32 result => do
+      unless result.valueType == .i32 do
+        throw (.invalidConstant context.function.name result .i32)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.float32])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.float32])
+        unless operand.valueType == .f32 do
+          throw (.stackMismatch context.function.name [.float32] [operand])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .i64ReinterpretF64 result => do
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.float])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.float])
+        unless operand.valueType == .f64 do
+          throw (.stackMismatch context.function.name [.float] [operand])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .f32ReinterpretI32 result => do
+      unless result.valueType == .f32 do
+        throw (.invalidConstant context.function.name result .f32)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint32])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint32])
+        unless operand.valueType == .i32 do
+          throw (.stackMismatch context.function.name [.uint32] [operand])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .f64ReinterpretI64 result => do
+      unless result.valueType == .f64 do
+        throw (.invalidConstant context.function.name result .f64)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint64])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint64])
+        unless operand.valueType == .i64 do
+          throw (.stackMismatch context.function.name [.uint64] [operand])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
   | .block label body => do
       let nested := { context with labels := { fvarId := label, stack? } :: context.labels }
       let flow ← checkInstructions nested stack? body

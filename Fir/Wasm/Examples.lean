@@ -826,6 +826,34 @@ def inner : Lean.FVarId := ⟨`inner⟩
   | .error (.stackMismatch `fixture [.uint32] [.uint64]) => true
   | _ => false
 
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i32Const .uint32 0,
+    .f32ReinterpretI32 .float32,
+    .i32ReinterpretF32 .uint32,
+    .ret] #[.uint32]) with
+  | .ok _ => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i64Const .uint64 0,
+    .f64ReinterpretI64 .float,
+    .i64ReinterpretF64 .uint64,
+    .ret] #[.uint64]) with
+  | .ok _ => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i32Const .uint32 0,
+    .f32ReinterpretI32 .uint32]) with
+  | .error (.invalidConstant `fixture .uint32 .f32) => true
+  | _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i64Const .uint64 0,
+    .i64ReinterpretF64 .uint64]) with
+  | .error (.stackMismatch `fixture [.float] [.uint64]) => true
+  | _ => false
+
 #guard match validateModule (fixtureModule <|
     fixtureFunction [.i32Const .uint32 0, .ret] #[.uint64]) with
   | .error (.stackMismatch `fixture [.uint64] [.uint32]) => true

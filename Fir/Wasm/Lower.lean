@@ -45,6 +45,14 @@ inductive Instruction where
   | memoryGrow
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)
+  /-- Preserve the exact 32-bit payload while retagging an `f32` lane as `i32`. -/
+  | i32ReinterpretF32 (result : AbiKind)
+  /-- Preserve the exact 64-bit payload while retagging an `f64` lane as `i64`. -/
+  | i64ReinterpretF64 (result : AbiKind)
+  /-- Preserve the exact 32-bit payload while retagging an `i32` lane as `f32`. -/
+  | f32ReinterpretI32 (result : AbiKind)
+  /-- Preserve the exact 64-bit payload while retagging an `i64` lane as `f64`. -/
+  | f64ReinterpretI64 (result : AbiKind)
   | block (label : FVarId) (body : List Instruction)
   /-- Structured repetition; branching to `label` starts the next iteration. -/
   | loop (label : FVarId) (body : List Instruction)

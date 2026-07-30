@@ -159,6 +159,10 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .memorySize => return #[0x3f, 0x00]
   | .memoryGrow => return #[0x40, 0x00]
   | .i32WrapI64 _ => return #[0xa7]
+  | .i32ReinterpretF32 _ => return #[0xbc]
+  | .i64ReinterpretF64 _ => return #[0xbd]
+  | .f32ReinterpretI32 _ => return #[0xbe]
+  | .f64ReinterpretI64 _ => return #[0xbf]
   | .block label body => do
       let body ← encodeInstructions { context with labels := some label :: context.labels } body
       return #[0x02, 0x40] ++ body ++ #[0x0b]
