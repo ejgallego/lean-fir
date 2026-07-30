@@ -11,6 +11,8 @@ def scalarValueJson : ScalarValue → Json
   | .uint16 value => Json.mkObj [("kind", "uint16"), ("value", s!"{value}")]
   | .uint32 value => Json.mkObj [("kind", "uint32"), ("value", s!"{value}")]
   | .uint64 value => Json.mkObj [("kind", "uint64"), ("value", s!"{value}")]
+  | .float32Bits value => Json.mkObj [("kind", "float32"), ("value", s!"{value}")]
+  | .float64Bits value => Json.mkObj [("kind", "float"), ("value", s!"{value}")]
 
 def valueJson : Value → Json
   | .object (.tagged payload) =>
