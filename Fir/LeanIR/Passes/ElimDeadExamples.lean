@@ -4256,6 +4256,326 @@ theorem retainedObjectProjectionExactStepLedgerPreserved
         (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
         sourceState targetState programs frames joins env runtime step
 
+/-- One paired constructor exercises both root-free retained layout reads. -/
+def retainedRootFreeProjectionObject : ConstructorObject :=
+  { tag := 0
+    objectFields := #[]
+    usizeFields := #[7]
+    scalarFields := [{
+      width := 8
+      offset := 0
+      value := .uint8 9
+    }] }
+
+def retainedRootFreeProjectionRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) (.ctor retainedRootFreeProjectionObject)).1
+
+def retainedRootFreeProjectionEnv : Env :=
+  bind [] dead (.object (.heap 0))
+
+def retainedUSizeProjectionDecl : LCNF.LetDecl .impure :=
+  letDecl live usizeType (.uproj 0 dead)
+
+def retainedUSizeProjectionCode : LCNF.Code .impure :=
+  .let retainedUSizeProjectionDecl (.return live)
+
+def retainedScalarProjectionDecl : LCNF.LetDecl .impure :=
+  letDecl live u8Type (.sproj 8 0 dead)
+
+def retainedScalarProjectionCode : LCNF.Code .impure :=
+  .let retainedScalarProjectionDecl (.return live)
+
+theorem retainedUSizeProjectionShadowRun :
+    shadowCode? 2 {} retainedUSizeProjectionCode =
+      some (retainedUSizeProjectionCode, retainedObjectProjectionUsed) := by
+  simp [retainedUSizeProjectionCode, retainedUSizeProjectionDecl, letDecl,
+    retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, live, dead]
+
+theorem retainedScalarProjectionShadowRun :
+    shadowCode? 2 {} retainedScalarProjectionCode =
+      some (retainedScalarProjectionCode, retainedObjectProjectionUsed) := by
+  simp [retainedScalarProjectionCode, retainedScalarProjectionDecl, letDecl,
+    retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, live, dead]
+
+theorem retainedUSizeProjectionStepBinderReady :
+    ExactShadowCodeBinderReady retainedObjectProjectionUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedUSizeProjectionDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedUSizeProjectionDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.view.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    (binders := [])
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact .ret
+  · simp [BinderNamesUnique]
+  · intro forbidden member
+    simp at member
+
+theorem retainedScalarProjectionStepBinderReady :
+    ExactShadowCodeBinderReady retainedObjectProjectionUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedScalarProjectionDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedScalarProjectionDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.view.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    (binders := [])
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact .ret
+  · simp [BinderNamesUnique]
+  · intro forbidden member
+    simp at member
+
+def retainedUSizeProjectionState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedUSizeProjectionCode
+    env := retainedRootFreeProjectionEnv
+    runtime := retainedRootFreeProjectionRuntime }
+
+def retainedScalarProjectionState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedScalarProjectionCode
+    env := retainedRootFreeProjectionEnv
+    runtime := retainedRootFreeProjectionRuntime }
+
+/-- The paired projection fixture owns its sole heap cell and the matching
+environment reference below frontier one. -/
+theorem retainedRootFreeProjectionSourceOwnership
+    (code : LCNF.Code .impure) :
+    SourceMachineOwnershipBelowFrontier
+      { program := { decls := #[] }
+        control := .code code
+        env := retainedRootFreeProjectionEnv
+        runtime := retainedRootFreeProjectionRuntime } := by
+  have objectBelow :
+      HeapLocationsBelowFrontier retainedRootFreeProjectionRuntime
+        [.object (.heap 0)] := by
+    intro location member
+    simp at member
+    subst location
+    simp [retainedRootFreeProjectionRuntime, alloc]
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        change HeapOwnershipBelowFrontier
+          (alloc ({} : RuntimeState)
+            (.ctor retainedRootFreeProjectionObject) false).1
+        apply HeapOwnershipBelowFrontier.empty.alloc
+        simp [RootSubset, retainedRootFreeProjectionObject,
+          HeapObject.ownedValues]
+      env := by
+        change EnvironmentBelowFrontier
+          retainedRootFreeProjectionRuntime retainedRootFreeProjectionEnv
+        rw [retainedRootFreeProjectionEnv]
+        exact EnvironmentBelowFrontier.bind
+          (runtime := retainedRootFreeProjectionRuntime)
+          (env := ([] : Env))
+          (binder := dead) (value := .object (.heap 0))
+          EnvironmentBelowFrontier.empty objectBelow
+    }
+  · exact trivial
+
+def retainedRootFreeProjectionObjectRelated :
+    HeapObjectRel emptyAddressRenaming
+      (.ctor retainedRootFreeProjectionObject)
+      (.ctor retainedRootFreeProjectionObject) := by
+  apply HeapObjectRel.ctor
+  · rfl
+  · change ListRel (ValueRel emptyAddressRenaming) [] []
+    exact .nil
+  · rfl
+  · rfl
+
+noncomputable def retainedRootFreeProjectionPaired :=
+  LedgerShadowRuntimeRel.empty.allocBoth
+    retainedRootFreeProjectionObjectRelated
+    (by
+      simp [RootSubset, retainedRootFreeProjectionObject,
+        HeapObject.ownedValues])
+    (by
+      simp [RootSubset, retainedRootFreeProjectionObject,
+        HeapObject.ownedValues])
+    false
+
+theorem retainedRootFreeProjectionValues :
+    ValueRel retainedRootFreeProjectionPaired.larger
+      (.object (.heap 0)) (.object (.heap 0)) := by
+  simpa [retainedRootFreeProjectionPaired, alloc] using
+    retainedRootFreeProjectionPaired.values
+
+theorem retainedRootFreeProjectionEnvRelated :
+    EnvRelOn retainedRootFreeProjectionPaired.larger
+      retainedObjectProjectionUsed
+      retainedRootFreeProjectionEnv retainedRootFreeProjectionEnv := by
+  simpa [retainedRootFreeProjectionEnv] using
+    (EnvRelOn.empty retainedRootFreeProjectionPaired.larger
+      retainedObjectProjectionUsed).bindBoth
+        (binder := dead) retainedRootFreeProjectionValues
+
+theorem retainedRootFreeProjectionRuntimeRelated :
+    ShadowRuntimeRel retainedRootFreeProjectionPaired.larger
+      retainedRootFreeProjectionRuntime retainedRootFreeProjectionRuntime
+      (envRootsOn retainedObjectProjectionUsed
+        retainedRootFreeProjectionEnv ++ [])
+      (envRootsOn retainedObjectProjectionUsed
+        retainedRootFreeProjectionEnv ++ []) := by
+  have rootsSubset : RootSubset
+      (envRootsOn retainedObjectProjectionUsed
+        retainedRootFreeProjectionEnv)
+      [.object (.heap 0)] := by
+    intro root member
+    have rooted :
+        root ∈ .object (.heap 0) ::
+          envRootsOn retainedObjectProjectionUsed ([] : Env) :=
+      envRootsOn_bind_subset root
+        (by simpa [retainedRootFreeProjectionEnv] using member)
+    rcases List.mem_cons.mp rooted with rfl | empty
+    · simp
+    · have emptyRoots :
+          envRootsOn retainedObjectProjectionUsed ([] : Env) = [] := by
+        unfold envRootsOn
+        induction retainedObjectProjectionUsed.toList with
+        | nil => rfl
+        | cons head tail ih => simp [lookup]
+      rw [emptyRoots] at empty
+      simp at empty
+  simpa only [List.append_nil, retainedRootFreeProjectionRuntime] using
+    retainedRootFreeProjectionPaired.runtime.runtime.restrictExtra
+      (envRootsOn_related retainedRootFreeProjectionEnvRelated)
+      rootsSubset rootsSubset
+
+/-- Concrete exact-dispatch regression for a retained `USize` projection:
+the successful root-free read advances both machines and preserves complete
+source ownership. -/
+theorem retainedUSizeProjectionExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedUSizeProjectionState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedUSizeProjectionState targetAfter ∧
+      BinderReadyReachableMachineRelated 2
+        retainedRootFreeProjectionPaired.larger sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedUSizeProjectionState.program
+        retainedUSizeProjectionState.program := by
+    simpa [retainedUSizeProjectionState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2
+        retainedRootFreeProjectionPaired.larger
+        retainedUSizeProjectionState.frames
+        retainedUSizeProjectionState.frames [] [] := by
+    simpa [retainedUSizeProjectionState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2
+          retainedRootFreeProjectionPaired.larger [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedObjectProjectionUsed
+        retainedUSizeProjectionState.joins
+        retainedUSizeProjectionState.joins := by
+    simpa [retainedUSizeProjectionState] using
+      BinderReadyShadowJoinEnvRelated.empty 2
+        retainedObjectProjectionUsed
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.uproj 0 dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedUSizeProjectionState, retainedUSizeProjectionCode,
+    retainedUSizeProjectionDecl, letDecl] using
+    retainedUSizeProjectionStepBinderReady
+      |>.match_retainedUSizeProjectionLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        retainedUSizeProjectionState retainedUSizeProjectionState
+        programs frames joins
+        (by
+          simpa [retainedUSizeProjectionState] using
+            retainedRootFreeProjectionEnvRelated)
+        (by
+          simpa [retainedUSizeProjectionState] using
+            retainedRootFreeProjectionRuntimeRelated)
+        (by
+          simpa [retainedUSizeProjectionState] using
+            retainedRootFreeProjectionSourceOwnership
+              retainedUSizeProjectionCode)
+        step
+
+/-- Concrete exact-dispatch regression for a retained packed-scalar
+projection. Its scalar result contains no heap location, so the read preserves
+the same source ownership carrier. -/
+theorem retainedScalarProjectionExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedScalarProjectionState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedScalarProjectionState
+        targetAfter ∧
+      BinderReadyReachableMachineRelated 2
+        retainedRootFreeProjectionPaired.larger sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedScalarProjectionState.program
+        retainedScalarProjectionState.program := by
+    simpa [retainedScalarProjectionState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2
+        retainedRootFreeProjectionPaired.larger
+        retainedScalarProjectionState.frames
+        retainedScalarProjectionState.frames [] [] := by
+    simpa [retainedScalarProjectionState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2
+          retainedRootFreeProjectionPaired.larger [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedObjectProjectionUsed
+        retainedScalarProjectionState.joins
+        retainedScalarProjectionState.joins := by
+    simpa [retainedScalarProjectionState] using
+      BinderReadyShadowJoinEnvRelated.empty 2
+        retainedObjectProjectionUsed
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.sproj 8 0 dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedScalarProjectionState, retainedScalarProjectionCode,
+    retainedScalarProjectionDecl, letDecl] using
+    retainedScalarProjectionStepBinderReady
+      |>.match_retainedScalarProjectionLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        retainedScalarProjectionState retainedScalarProjectionState
+        programs frames joins
+        (by
+          simpa [retainedScalarProjectionState] using
+            retainedRootFreeProjectionEnvRelated)
+        (by
+          simpa [retainedScalarProjectionState] using
+            retainedRootFreeProjectionRuntimeRelated)
+        (by
+          simpa [retainedScalarProjectionState] using
+            retainedRootFreeProjectionSourceOwnership
+              retainedScalarProjectionCode)
+        step
+
 /-- The ordinary transparent traversal also retains the live nullary full
 application exactly; the checked-policy theorem above is a stricter
 conformance statement about the same branch. -/
