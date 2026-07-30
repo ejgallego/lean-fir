@@ -3602,25 +3602,6 @@ def nonemptyLedgerSourceState : MachineState :=
     env := nonemptyLedgerSourceEnv
     runtime := nonemptyLedgerSourceRuntime }
 
-def nonemptyLedgerObjectSetLocalReady :
-    DeletedObjectSetLocalReadyAt
-      nonemptyLedgerSourceState dead 0 .erased 1 := by
-  refine {
-    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
-    constructor := deletedWriteObject
-    fieldValue := .erased
-    objectRead := ?_
-    fieldRead := rfl
-    found := ?_
-    live := rfl
-    objectEq := rfl
-    indexBound := ?_
-  }
-  · simp [nonemptyLedgerSourceState, nonemptyLedgerSourceEnv,
-      lookupValue, Impure.bind, lookup, dead]
-  · rfl
-  · simp [deletedWriteObject]
-
 /-- A non-empty target exercises the allocation-ledger bridge end to end.
 Location `0` is a retained paired allocation; source location `1` is allocated
 after the ledger snapshot and is therefore unmapped and safe for the deleted
@@ -3658,10 +3639,18 @@ theorem nonemptyTargetAllocationLedger_objectSetReady :
       nonemptyLedgerPairedRuntime, alloc] using sourceOnlyRuntime.runtime
   refine ⟨paired.larger, sourceOnlyRuntime.ledger,
     related, sourceOnly, ?_⟩
-  exact
-    nonemptyLedgerObjectSetLocalReady
-      |>.deletedReadyAt_of_targetAllocationLedger
-        related sourceOnlyRuntime.ledger sourceOnly
+  have binding :
+      SourceOnlyHeapBinding sourceOnlyRuntime.ledger
+        nonemptyLedgerSourceState.env dead 1 := {
+    read := by
+      simp [nonemptyLedgerSourceState, nonemptyLedgerSourceEnv,
+        lookupValue, Impure.bind, lookup, dead]
+    sourceOnly
+  }
+  apply binding.deletedObjectSetReadyAt_of_effect
+      (related := related)
+  · rfl
+  · rfl
 
 /-- The retained target allocation is visible through `live`; the reset
 object is the source-only allocation at location `1`. -/
@@ -8669,25 +8658,6 @@ theorem closedWritesTargetReachable_runtimeShape
 The target's zero allocation frontier, together with the runtime relation,
 excludes the source object from every actual control/frame root
 decomposition. -/
-def closedWritesObjectSetLocalReady :
-    DeletedObjectSetLocalReadyAt
-      (closedWritesSourceObjectSetState arguments)
-      dead 0 .erased 0 := by
-  refine {
-    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
-    constructor := deletedWriteObject
-    fieldValue := .erased
-    objectRead := ?_
-    fieldRead := rfl
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    indexBound := ?_
-  }
-  · simp [closedWritesSourceObjectSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [deletedWriteObject]
-
 theorem closedWritesObjectSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
       ShadowRuntimeRel rho
@@ -8699,31 +8669,25 @@ theorem closedWritesObjectSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceObjectSetState arguments).runtime sourceRoots)
       dead 0 .erased := by
-  exact closedWritesObjectSetLocalReady
-    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
-
-def closedWritesUSizeSetLocalReady :
-    DeletedUSizeSetLocalReadyAt
-      (closedWritesSourceUSizeSetState arguments)
-      dead 1 usizeField 0 := by
-  refine {
-    cell := ({ object := .ctor deletedWriteObject } : HeapCell)
-    constructor := deletedWriteObject
-    fieldValue := 7
-    objectRead := ?_
-    fieldRead := ?_
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    objectFieldsBound := ?_
-    usizeFieldsBound := ?_
+  have ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation := by
+    rw [targetEmpty]
+    exact TargetAllocationLedger.empty rho
+  have binding :
+      SourceOnlyHeapBinding ledger
+        (closedWritesSourceObjectSetState arguments).env dead 0 := {
+    read := by
+      simp [closedWritesSourceObjectSetState, deletedWriteSourceEnv,
+        lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+    sourceOnly := by
+      intro rightLocation bounded
+      rw [targetEmpty] at bounded
+      exact (Nat.not_lt_zero rightLocation bounded).elim
   }
-  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [deletedWriteObject]
-  · simp [deletedWriteObject]
+  apply binding.deletedObjectSetReadyAt_of_effect
+      (related := runtime)
+  · rfl
+  · rfl
 
 theorem closedWritesUSizeSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
@@ -8736,34 +8700,29 @@ theorem closedWritesUSizeSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceUSizeSetState arguments).runtime sourceRoots)
       dead 1 usizeField := by
-  exact closedWritesUSizeSetLocalReady
-    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
+  have ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation := by
+    rw [targetEmpty]
+    exact TargetAllocationLedger.empty rho
+  have binding :
+      SourceOnlyHeapBinding ledger
+        (closedWritesSourceUSizeSetState arguments).env dead 0 := {
+    read := by
+      simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
+        lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+    sourceOnly := by
+      intro rightLocation bounded
+      rw [targetEmpty] at bounded
+      exact (Nat.not_lt_zero rightLocation bounded).elim
+  }
+  apply binding.deletedUSizeSetReadyAt_of_effect
+      (fieldValue := 7) (related := runtime)
+  · simp [closedWritesSourceUSizeSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
 
 def deletedWriteObjectAfterUSize : ConstructorObject :=
   { deletedWriteObject with usizeFields := #[7] }
-
-def closedWritesScalarSetLocalReady :
-    DeletedScalarSetLocalReadyAt
-      (closedWritesSourceScalarSetState arguments)
-      dead scalarField 0 := by
-  refine {
-    cell :=
-      ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
-    constructor := deletedWriteObjectAfterUSize
-    fieldValue := .uint8 9
-    objectRead := ?_
-    fieldRead := ?_
-    found := ?_
-    live := rfl
-    objectEq := rfl
-  }
-  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · change findCell? closedWritesAfterUSizeRuntime.heap 0 =
-      some ({ object := .ctor deletedWriteObjectAfterUSize } : HeapCell)
-    rfl
 
 theorem closedWritesScalarSetReady_of_shadowRuntime
     (target : MachineState) (runtime :
@@ -8776,8 +8735,27 @@ theorem closedWritesScalarSetReady_of_shadowRuntime
       (runtimeRoots
         (closedWritesSourceScalarSetState arguments).runtime sourceRoots)
       dead scalarField := by
-  exact closedWritesScalarSetLocalReady
-    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
+  have ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation := by
+    rw [targetEmpty]
+    exact TargetAllocationLedger.empty rho
+  have binding :
+      SourceOnlyHeapBinding ledger
+        (closedWritesSourceScalarSetState arguments).env dead 0 := {
+    read := by
+      simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+        lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+    sourceOnly := by
+      intro rightLocation bounded
+      rw [targetEmpty] at bounded
+      exact (Nat.not_lt_zero rightLocation bounded).elim
+  }
+  apply binding.deletedScalarSetReadyAt_of_effect
+      (fieldValue := .uint8 9)
+      (width := 8) (offset := 0) (related := runtime)
+  · simp [closedWritesSourceScalarSetState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
 
 /-- The exact structural pair determines the deleted object-write edge; the
 target runtime shape supplies its dynamic unreachability certificate. -/
@@ -8963,13 +8941,9 @@ theorem closedWritesObjectSetPairReady_ledger
           exact.view.runtimeDecision = .deletedObjectSet :=
         exact.view.runtimeDecision_eq_deletedObjectSet_of_target_not_oset
           targetHead.1
-      have sourceOnly :
-          SourceOnlyUnderTargetLedger ledger 0 :=
-        closedWritesSourceOnlyAtZero target ledger targetShape.1
       have writeReady :=
-        closedWritesObjectSetLocalReady
-          |>.deletedReadyAt_of_targetAllocationLedger
-            runtime ledger sourceOnly
+        closedWritesObjectSetReady_of_shadowRuntime
+          (arguments := arguments) target runtime targetShape.1
       refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
         ledger, programs, ?_, frames, runtime⟩
       simpa only [sourceControl, targetControl] using
@@ -9016,13 +8990,9 @@ theorem closedWritesUSizeSetPairReady_ledger
           exact.view.runtimeDecision = .deletedUSizeSet :=
         exact.view.runtimeDecision_eq_deletedUSizeSet_of_target_not_uset
           targetHead.2.1
-      have sourceOnly :
-          SourceOnlyUnderTargetLedger ledger 0 :=
-        closedWritesSourceOnlyAtZero target ledger targetShape.1
       have writeReady :=
-        closedWritesUSizeSetLocalReady
-          |>.deletedReadyAt_of_targetAllocationLedger
-            runtime ledger sourceOnly
+        closedWritesUSizeSetReady_of_shadowRuntime
+          (arguments := arguments) target runtime targetShape.1
       refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
         ledger, programs, ?_, frames, runtime⟩
       simpa only [sourceControl, targetControl] using
@@ -9068,13 +9038,9 @@ theorem closedWritesScalarSetPairReady_ledger
           exact.view.runtimeDecision = .deletedScalarSet :=
         exact.view.runtimeDecision_eq_deletedScalarSet_of_target_not_sset
           targetHead.2.2
-      have sourceOnly :
-          SourceOnlyUnderTargetLedger ledger 0 :=
-        closedWritesSourceOnlyAtZero target ledger targetShape.1
       have writeReady :=
-        closedWritesScalarSetLocalReady
-          |>.deletedReadyAt_of_targetAllocationLedger
-            runtime ledger sourceOnly
+        closedWritesScalarSetReady_of_shadowRuntime
+          (arguments := arguments) target runtime targetShape.1
       refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
         ledger, programs, ?_, frames, runtime⟩
       simpa only [sourceControl, targetControl] using

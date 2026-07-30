@@ -11261,6 +11261,79 @@ theorem
   shape.deletedReadyAt_of_forwardUnmapped related
     (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
 
+/-- Compiler-facing object-write bridge: an exact source-only environment
+binding plus successful operand evaluation and mutation supplies the complete
+deleted-write certificate. No client-visible heap layout witness remains. -/
+theorem SourceOnlyHeapBinding.deletedObjectSetReadyAt_of_effect
+    {ledger : TargetAllocationLedger rho target.nextLocation}
+    (binding :
+      SourceOnlyHeapBinding ledger state.env object location)
+    (fieldRead : evalArg state.env field = .ok fieldValue)
+    (effect :
+      setObjectField state.runtime (.object (.heap location))
+          index fieldValue = .ok nextRuntime)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra) :
+    DeletedObjectSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field := by
+  let selected :=
+    DeletedObjectSetLocalReadyAt.of_effect
+      binding.read fieldRead effect
+  rcases selected with ⟨selectedLocation, shape⟩
+  have selectedEq : selectedLocation = location := by
+    simpa using shape.objectRead.symm.trans binding.read
+  subst selectedLocation
+  exact shape.deletedReadyAt_of_targetAllocationLedger
+    related ledger binding.sourceOnly
+
+/-- Compiler-facing absolute-slot `USize` write bridge. -/
+theorem SourceOnlyHeapBinding.deletedUSizeSetReadyAt_of_effect
+    {ledger : TargetAllocationLedger rho target.nextLocation}
+    (binding :
+      SourceOnlyHeapBinding ledger state.env object location)
+    (fieldRead :
+      lookupValue state.env field = .ok (.usize fieldValue))
+    (effect :
+      setUSizeSlot state.runtime (.object (.heap location))
+          index (.usize fieldValue) = .ok nextRuntime)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra) :
+    DeletedUSizeSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object index field := by
+  let selected :=
+    DeletedUSizeSetLocalReadyAt.of_effect
+      binding.read fieldRead effect
+  rcases selected with ⟨selectedLocation, shape⟩
+  have selectedEq : selectedLocation = location := by
+    simpa using shape.objectRead.symm.trans binding.read
+  subst selectedLocation
+  exact shape.deletedReadyAt_of_targetAllocationLedger
+    related ledger binding.sourceOnly
+
+/-- Compiler-facing packed-scalar write bridge. -/
+theorem SourceOnlyHeapBinding.deletedScalarSetReadyAt_of_effect
+    {ledger : TargetAllocationLedger rho target.nextLocation}
+    (binding :
+      SourceOnlyHeapBinding ledger state.env object location)
+    (fieldRead :
+      lookupValue state.env field = .ok (.scalar fieldValue))
+    (effect :
+      setScalarField state.runtime (.object (.heap location))
+          width offset (.scalar fieldValue) = .ok nextRuntime)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra) :
+    DeletedScalarSetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) object field := by
+  let selected :=
+    DeletedScalarSetLocalReadyAt.of_effect
+      binding.read fieldRead effect
+  rcases selected with ⟨selectedLocation, shape⟩
+  have selectedEq : selectedLocation = location := by
+    simpa using shape.objectRead.symm.trans binding.read
+  subst selectedLocation
+  exact shape.deletedReadyAt_of_targetAllocationLedger
+    related ledger binding.sourceOnly
+
 /-- An empty related target frontier proves that every locally valid
 source object-write location is compiler-owned garbage. -/
 theorem DeletedObjectSetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
