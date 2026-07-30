@@ -17714,6 +17714,123 @@ theorem
     parameterCount
 
 /--
+Finite whole-export partial correctness for arbitrary nesting of normalized
+object-constructor case chains around every facts-indexed direct/reuse
+operation and the complete current ownership/tag/field-mutation family.
+
+The source evaluator selects the branch. Production compiler inversion and the
+existing recursive concrete `getTag` law reconstruct and execute the exact
+generated comparison chain while retaining the authoritative facts and budget.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipTagAllFieldMutationObjectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (ObjectConstructorCasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCaseEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    spec.caseRuntimeRefines_objectConstructorCases
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    parameterCount
+
+/--
+Finite whole-export partial correctness for arbitrary nesting of normalized
+scalar `UInt8` constructor case chains around every facts-indexed direct/reuse
+operation and the complete current ownership/tag/field-mutation family.
+
+The comparison chain is internal Wasm code. The existing scalar case law
+derives its discriminator local and selected branch directly from production
+compiler output and `StateRelated`, so no host import or branch certificate is
+added to the facts-indexed theorem.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipTagAllFieldMutationScalarUInt8Cases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (ScalarUInt8CasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCaseEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    spec.caseRuntimeRefines_scalarUInt8Cases
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    parameterCount
+
+/--
 Current mixed allocating structural fragment: local aliases, immediate
 integer/`USize` literals, representation-polymorphic natural literals,
 successful object/`USize`/packed-scalar projections, integer boxing, typed

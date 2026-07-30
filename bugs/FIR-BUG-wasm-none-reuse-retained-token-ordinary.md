@@ -105,8 +105,9 @@ specializations and now compose as well. This bug still blocks validator-wide
 admission of effects that can create persistent aliases or otherwise fail
 that transport. Selected default-only cases compose without an additional
 ordinary-persistence obligation because branch entry changes neither the
-runtime nor the authoritative facts; discriminating cases can use the same
-frame once their existing case-runtime laws are instantiated.
+runtime nor the authoritative facts. The existing object-constructor and
+scalar-`UInt8` case-runtime laws are now instantiated under the same
+facts-indexed frame.
 
 ## Classification and triage
 

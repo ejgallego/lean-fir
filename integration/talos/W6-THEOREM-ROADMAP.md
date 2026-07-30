@@ -708,8 +708,14 @@ acceptance tests pass.
    target evidence. The first whole-export instance,
    `correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases`,
    permits arbitrary nesting of compiler-erased default-only cases around the
-   strongest current direct/effect fragment. Object-constructor and scalar
-   discriminating cases are the next instances of the same case law.
+   strongest current direct/effect fragment.
+   `correctReuseBudgetedDirectOwnershipTagAllFieldMutationObjectConstructorCases`
+   and
+   `correctReuseBudgetedDirectOwnershipTagAllFieldMutationScalarUInt8Cases`
+   instantiate the same theorem for the two discriminating case families.
+   Production compiler inversion reconstructs either the recursive concrete
+   `getTag` chain or the import-free scalar comparison chain; both retain the
+   exact facts and budget along the source-selected branch.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

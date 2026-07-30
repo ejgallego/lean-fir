@@ -89,8 +89,11 @@ Cross-cutting W6.5 state:
   ordinary-persistence transport has been proved. The facts-indexed
   `ReuseCapacityCaseEffectCodeEvaluates` relation additionally retains the
   exact facts and budget through selected case nodes; the first endpoint
-  permits arbitrary nesting of default-only cases. Validator-wide admission
-  still waits on ordinary-token invalidation across unrelated effects
+  permits arbitrary nesting of default-only cases. The corresponding
+  object-constructor and scalar-`UInt8` endpoints now reconstruct and execute
+  their normalized production comparison chains under the same frame.
+  Validator-wide admission still waits on ordinary-token invalidation across
+  unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated
   provenance-sensitive result-kind fix
   (`FIR-BUG-wasm-none-reuse-retained-result-kind`).

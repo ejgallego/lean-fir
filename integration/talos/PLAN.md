@@ -4671,8 +4671,17 @@ existing `CaseRuntimeRefines` implementation law and reconstructs the target
 case chain from the production compiler. Its first instance,
 `correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases`, proves
 the strongest current facts-indexed direct/effect endpoint under arbitrary
-nesting of default-only cases. Object-constructor and scalar case chains are
-the next control-flow instances.
+nesting of default-only cases.
+
+W6.6gr instantiates the same theorem for both discriminating case families.
+`correctReuseBudgetedDirectOwnershipTagAllFieldMutationObjectConstructorCases`
+uses the recursive concrete `getTag` chain law for normalized object
+alternatives, with or without a trailing default.
+`correctReuseBudgetedDirectOwnershipTagAllFieldMutationScalarUInt8Cases` uses
+the import-free scalar comparison-chain law. Both endpoints retain the exact
+fact map and byte budget across every selected case branch while allowing the
+full current direct/reuse and ownership/tag/field-mutation families within the
+selected continuation.
 
 ## Parallel agent packages
 
