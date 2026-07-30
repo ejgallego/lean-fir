@@ -161,7 +161,11 @@ The subsequent cache-hit boundary is now explicit as well.
 Wasm flag/value globals and its checked physical-value refinement. Exact miss
 publication constructs this relation, and the compiler-anchored hit theorem
 consumes it to derive the destination write and post-binding state relation.
-This removes another opaque hit premise without weakening the runtime. The
-remaining program-level work is to thread the per-slot relation across the
-complete generated cache table alongside the source publication/disjointness
-obligation above.
+This removes another opaque hit premise without weakening the runtime.
+`LazyCacheGlobalsRel` now threads empty/populated state across the complete
+generated table, establishes the adapted empty initial state, transports
+through operations that preserve both global tables, and lets the generated
+hit theorem recover its populated physical lane from the table. The remaining
+program-level cache update is the exact miss publication: replace its one
+empty slot, preserve all other slots, and combine that update with the source
+publication/disjointness obligation above.

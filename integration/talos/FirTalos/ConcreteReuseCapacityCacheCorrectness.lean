@@ -600,6 +600,255 @@ theorem PopulatedLazyCacheSlotRel.ofPublication
     valueRelated }
 
 /--
+Checked generated layout for every lazy-cache declaration.
+
+Lowering assigns each initializer exactly two globals: an `i32` publication
+flag at `2 * index` and the declaration's singleton result lane at
+`2 * index + 1`. Keeping this fact explicit lets the cache-state relation be
+used independently of how validation or lowering established it.
+-/
+structure LazyCacheTableLayout (source : Fir.Wasm.Module) : Prop where
+  slot :
+    ∀ {index : Nat} {declaration : Name},
+      source.initializers[index]? = some declaration →
+        ∃ kind,
+          (source.callSignature? (.declaration declaration)).bind
+              (·.results[0]?) = some kind ∧
+            source.cacheGlobalKinds[2 * index]? = some .uint32 ∧
+            source.cacheGlobalKinds[2 * index + 1]? = some kind
+
+/--
+One generated lazy-cache slot is either unpublished on both sides or
+populated on both sides.
+
+The unpublished case intentionally does not relate the value global: Wasm
+initializes that lane to zero, but the generated code cannot observe it while
+the flag is zero. The populated case carries the full semantic/physical value
+relation needed by the hit theorem.
+-/
+inductive LazyCacheSlotRel
+    (witness : RefinementWitness)
+    (runtime : RuntimeState)
+    (store : Wasm.Store Host)
+    (declaration : Name)
+    (kind : AbiKind)
+    (flagIndex valueIndex : Nat) : Prop where
+  | empty
+      (semanticEmpty :
+        findGlobal? runtime.globals declaration = none)
+      (flagEmpty :
+        store.globals.globals[flagIndex]? = some (.i32 0))
+  | populated
+      {sourceValue : Value} {physical : Wasm.Value}
+      (related :
+        PopulatedLazyCacheSlotRel witness runtime store declaration kind
+          flagIndex valueIndex sourceValue physical)
+
+/--
+Whole generated lazy-cache table relation.
+
+Besides a pointwise empty/populated relation, `semanticCovered` rules out
+semantic cache entries for which lowering emitted no physical slot. This is
+the state invariant that can be threaded through the program proof rather
+than rediscovering one isolated populated slot at each cache hit.
+-/
+structure LazyCacheGlobalsRel
+    (witness : RefinementWitness)
+    (source : Fir.Wasm.Module)
+    (runtime : RuntimeState)
+    (store : Wasm.Store Host) : Prop where
+  layout : LazyCacheTableLayout source
+  semanticCovered :
+    ∀ {declaration : Name} {value : Value},
+      findGlobal? runtime.globals declaration = some value →
+        declaration ∈ source.initializers.toList
+  slots :
+    ∀ {index : Nat} {declaration : Name},
+      source.initializers[index]? = some declaration →
+        ∃ kind,
+          (source.callSignature? (.declaration declaration)).bind
+              (·.results[0]?) = some kind ∧
+            LazyCacheSlotRel witness runtime store declaration kind
+              (2 * index) (2 * index + 1)
+
+/-- The generated flag at a checked cache index is zero in Talos's initial
+store whenever the adapted target carries the canonical global declarations. -/
+theorem initialStore_cacheFlag_zero
+    {source : Fir.Wasm.Module}
+    {target : Wasm.Module}
+    {index : Nat}
+    (targetGlobals : target.globals = FirTalos.globalDecls source)
+    (flagKind :
+      source.cacheGlobalKinds[2 * index]? = some (.uint32 : AbiKind)) :
+    (initialStore source target).globals.globals[2 * index]? =
+      some (.i32 0) := by
+  have flagKindList :
+      source.cacheGlobalKinds.toList[2 * index]? =
+        some (.uint32 : AbiKind) := by
+    simpa using flagKind
+  change (target.globals.map (·.init))[2 * index]? = some (.i32 0)
+  rw [targetGlobals]
+  simp only [FirTalos.globalDecls, List.map_append, List.map_map]
+  rw [List.getElem?_append_left]
+  · simp [flagKindList, FirTalos.zeroValue, FirTalos.abiKind,
+      FirTalos.valueType, Fir.Wasm.AbiKind.valueType]
+  · simpa using (List.getElem?_eq_some_iff.mp flagKindList).1
+
+/-- Empty semantic globals and zero generated flags establish the complete
+table relation, independently of resident globals appended after the cache
+prefix. -/
+theorem LazyCacheGlobalsRel.empty
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    (layout : LazyCacheTableLayout source)
+    (runtimeEmpty : runtime.globals = [])
+    (flagsEmpty :
+      ∀ {index : Nat} {declaration : Name},
+        source.initializers[index]? = some declaration →
+          store.globals.globals[2 * index]? = some (.i32 0)) :
+    LazyCacheGlobalsRel witness source runtime store := by
+  refine {
+    layout
+    semanticCovered := ?_
+    slots := ?_ }
+  · intro declaration value found
+    rw [runtimeEmpty] at found
+    simp [findGlobal?] at found
+  · intro index declaration found
+    obtain ⟨kind, signature, _, _⟩ := layout.slot found
+    exact ⟨kind, signature, .empty (by simp [runtimeEmpty, findGlobal?])
+      (flagsEmpty found)⟩
+
+/--
+Whole-table empty relation for the actual adapter and Talos initial-store
+path. Resident-runtime globals may follow the cache prefix; they do not affect
+the cache indices.
+-/
+theorem LazyCacheGlobalsRel.adaptedInitial
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (layout : LazyCacheTableLayout source)
+    (adapted : FirTalos.adapt source = .ok target)
+    (witness : RefinementWitness)
+    (externals : Fir.Wasm.Concrete.ConcreteExternalImpl :=
+      rejectExternalImpl) :
+    LazyCacheGlobalsRel witness source ({} : RuntimeState)
+      (initialStore source target.wasmModule externals) := by
+  obtain ⟨functions, _, targetEq⟩ :=
+    FirTalos.Correctness.adapt_preserves_module_layout adapted
+  have targetGlobals :
+      target.wasmModule.globals = FirTalos.globalDecls source := by
+    rw [targetEq]
+  apply LazyCacheGlobalsRel.empty layout rfl
+  intro index declaration found
+  obtain ⟨kind, _, flagKind, _⟩ := layout.slot found
+  exact initialStore_cacheFlag_zero targetGlobals flagKind
+
+/-- Cache-slot relations transport through any transition that preserves the
+semantic and physical global tables and transports the representation
+witness. -/
+theorem LazyCacheSlotRel.transport
+    {beforeWitness afterWitness : RefinementWitness}
+    {beforeRuntime afterRuntime : RuntimeState}
+    {beforeStore afterStore : Wasm.Store Host}
+    {declaration : Name}
+    {kind : AbiKind}
+    {flagIndex valueIndex : Nat}
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (runtimeGlobals :
+      afterRuntime.globals = beforeRuntime.globals)
+    (storeGlobals :
+      afterStore.globals.globals = beforeStore.globals.globals)
+    (related :
+      LazyCacheSlotRel beforeWitness beforeRuntime beforeStore declaration
+        kind flagIndex valueIndex) :
+    LazyCacheSlotRel afterWitness afterRuntime afterStore declaration
+      kind flagIndex valueIndex := by
+  cases related with
+  | empty semanticEmpty flagEmpty =>
+      exact .empty (by simpa [runtimeGlobals] using semanticEmpty)
+        (by simpa [storeGlobals] using flagEmpty)
+  | populated related =>
+      exact .populated {
+        semanticFound := by
+          simpa [runtimeGlobals] using related.semanticFound
+        flagPublished := by
+          simpa [storeGlobals] using related.flagPublished
+        valuePublished := by
+          simpa [storeGlobals] using related.valuePublished
+        valueRelated :=
+          related.valueRelated.witnessTransport witnessTransport }
+
+/-- The complete cache table is an ordinary frame: operations that leave both
+global tables unchanged preserve it, even when allocation or reset/reuse
+changes the representation witness. -/
+theorem LazyCacheGlobalsRel.transport
+    {beforeWitness afterWitness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {beforeRuntime afterRuntime : RuntimeState}
+    {beforeStore afterStore : Wasm.Store Host}
+    (witnessTransport : WitnessTransport beforeWitness afterWitness)
+    (runtimeGlobals :
+      afterRuntime.globals = beforeRuntime.globals)
+    (storeGlobals :
+      afterStore.globals.globals = beforeStore.globals.globals)
+    (related :
+      LazyCacheGlobalsRel beforeWitness source beforeRuntime beforeStore) :
+    LazyCacheGlobalsRel afterWitness source afterRuntime afterStore := by
+  refine {
+    layout := related.layout
+    semanticCovered := ?_
+    slots := ?_ }
+  · intro declaration value found
+    apply related.semanticCovered
+    simpa [runtimeGlobals] using found
+  · intro index declaration found
+    obtain ⟨kind, signature, slot⟩ := related.slots found
+    exact ⟨kind, signature,
+      slot.transport witnessTransport runtimeGlobals storeGlobals⟩
+
+/-- A semantic cache hit forces the corresponding whole-table slot into its
+populated branch and recovers the exact physical lane required by generated
+hit code. -/
+theorem LazyCacheGlobalsRel.populatedSlot
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    {index : Nat}
+    {declaration : Name}
+    {kind : AbiKind}
+    {sourceValue : Value}
+    (related : LazyCacheGlobalsRel witness source runtime store)
+    (initializerFound :
+      source.initializers[index]? = some declaration)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (semanticFound :
+      findGlobal? runtime.globals declaration = some sourceValue) :
+    ∃ physical,
+      PopulatedLazyCacheSlotRel witness runtime store declaration kind
+        (2 * index) (2 * index + 1) sourceValue physical := by
+  obtain ⟨slotKind, slotSignature, slot⟩ :=
+    related.slots initializerFound
+  have kindEq : slotKind = kind := by
+    rw [signature] at slotSignature
+    exact Option.some.inj slotSignature.symm
+  subst slotKind
+  cases slot with
+  | empty semanticEmpty _ =>
+      rw [semanticFound] at semanticEmpty
+      contradiction
+  | populated slotRelated =>
+      have valueEq := slotRelated.semanticFound
+      rw [semanticFound] at valueEq
+      cases valueEq
+      exact ⟨_, slotRelated⟩
+
+/--
 One lazy-cache result with all transports needed by the facts-indexed
 resource frame.
 
@@ -909,6 +1158,129 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
     BudgetedCapacityPreservingLazyStep.hit_of_populatedSlot sourceStep
       initialRelated frameAligned resultFound resultKindAt slot
   exact ⟨nextLocals, compiled, adapted, hit⟩
+
+/--
+Compiler-anchored hit derived from the whole generated cache-table invariant.
+
+The caller supplies only the lowering index/signature equations and the
+semantic cache lookup. `LazyCacheGlobalsRel` rules out the empty branch,
+recovers the cached physical lane, and feeds the existing per-slot theorem.
+-/
+theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
+    {facts : ReuseCapacityFacts}
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (fvarId : FVarId) (type : Expr) (declaration : Name)
+    (target : LCNF.Decl .impure)
+    (resultKind : AbiKind)
+    (cacheIndex declarationId cacheSetId resultIndex : Nat)
+    (continuation : LCNF.Code .impure)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceValue : Value)
+    (initial : Wasm.Store Host)
+    (locals : Wasm.Locals)
+    (initialWitness : RefinementWitness)
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok resultKind)
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) =
+        some cacheIndex)
+    (declarationFound :
+      callIndex? sourceModule (.declaration declaration) = some declarationId)
+    (cacheSetFound :
+      callIndex? sourceModule
+        (.runtime (.cacheSet declaration resultKind)) = some cacheSetId)
+    (initializerFound :
+      sourceModule.initializers[cacheIndex]? = some declaration)
+    (signature :
+      (sourceModule.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some resultKind)
+    (semanticFound :
+      findGlobal? sourceRuntime.globals declaration = some sourceValue)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
+          fvarId
+          binderName := fvarId.name
+          type
+          value := .fap declaration #[] }
+        continuation sourceRuntime sourceValue)
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (cacheTable :
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial) :
+    let decl : LCNF.LetDecl .impure := {
+      fvarId
+      binderName := fvarId.name
+      type
+      value := .fap declaration #[] }
+    ∃ physical nextLocals,
+      Fir.Wasm.compileLetValue context decl = .ok [
+          .globalGet (2 * cacheIndex) .uint32,
+          .ifElse [] [
+            .call (.declaration declaration),
+            .call (.runtime (.cacheSet declaration resultKind)),
+            .globalSet (2 * cacheIndex + 1) resultKind,
+            .i32Const .uint32 1,
+            .globalSet (2 * cacheIndex) .uint32],
+          .globalGet (2 * cacheIndex + 1) resultKind] ∧
+        instructions sourceModule sourceFunction labels [
+          .globalGet (2 * cacheIndex) .uint32,
+          .ifElse [] [
+            .call (.declaration declaration),
+            .call (.runtime (.cacheSet declaration resultKind)),
+            .globalSet (2 * cacheIndex + 1) resultKind,
+            .i32Const .uint32 1,
+            .globalSet (2 * cacheIndex) .uint32],
+          .globalGet (2 * cacheIndex + 1) resultKind] = .ok [
+            .globalGet (2 * cacheIndex),
+            .iff 0 0 [] [
+              .call declarationId,
+              .call cacheSetId,
+              .globalSet (2 * cacheIndex + 1),
+              .const 1,
+              .globalSet (2 * cacheIndex)],
+            .globalGet (2 * cacheIndex + 1)] ∧
+          BudgetedCapacityPreservingLazyStep .hit facts context sourceFunction
+            module hostEnv sourceExternals decl continuation
+            [.globalGet (2 * cacheIndex),
+              .iff 0 0 [] [
+                .call declarationId,
+                .call cacheSetId,
+                .globalSet (2 * cacheIndex + 1),
+                .const 1,
+                .globalSet (2 * cacheIndex)],
+              .globalGet (2 * cacheIndex + 1)]
+            sourceRuntime sourceRuntime sourceEnv sourceValue initial initial
+            locals nextLocals resultIndex initialWitness initialWitness physical
+            0 := by
+  dsimp
+  obtain ⟨physical, slot⟩ :=
+    cacheTable.populatedSlot initializerFound signature semanticFound
+  obtain ⟨nextLocals, compiled, adapted, hit⟩ :=
+    BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
+      context sourceModule sourceFunction labels module hostEnv sourceExternals
+      fvarId type declaration target resultKind cacheIndex declarationId
+      cacheSetId resultIndex continuation sourceRuntime sourceEnv sourceValue
+      initial locals initialWitness physical kindEq targetEq paramsEq cacheEq
+      declarationFound cacheSetFound sourceStep initialRelated frameAligned
+      resultFound resultKindAt slot
+  exact ⟨physical, nextLocals, compiled, adapted, hit⟩
 
 /--
 Package a proved cache-miss execution with its proof-side resource

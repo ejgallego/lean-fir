@@ -4892,11 +4892,28 @@ destination write from `ConcreteLocalFrameAligned`.
 The uniform `LazyCacheImplementation` boundary consequently consumes the
 canonical `ConcreteReuseCapacityFrame`, not merely its semantic-state
 component: local-frame capacity is a real generated execution resource.
-The next generated-environment slice must lift the per-slot relation to all
-cache declarations, establish its empty initial state, and thread it across
-ordinary operations and miss publication. The miss side still separately
-owes the source publication equation and retained-token disjointness (or
-validator invalidation).
+
+W6.6gzf lifts that state to the complete generated cache table.
+`LazyCacheTableLayout` records the checked flag/value pair and singleton
+result kind for every initializer. `LazyCacheGlobalsRel` requires every
+semantic cache entry to have a generated slot and classifies each slot as
+either empty on both sides or populated by a `PopulatedLazyCacheSlotRel`.
+`adaptedInitial` establishes the empty relation for the production adapter and
+Talos initial store, including resident globals appended after the cache
+prefix. `transport` preserves the table through operations that preserve
+semantic and physical globals while permitting representation-witness
+changes. A semantic lookup forces the corresponding slot to be populated, so
+`hit_of_compiledCacheTable` now derives the physical cache lane and complete
+generated hit directly from the table invariant.
+
+The next generated-environment slice is the pointwise publication update:
+prove that the exact miss-side source `setGlobal` and two Wasm global writes
+replace one empty table slot with a populated slot while preserving every
+other slot and coverage. Then carry `LazyCacheGlobalsRel` in the canonical
+program invariant. The miss side still separately owes the source publication
+equation and retained-token disjointness (or validator invalidation), and the
+layout premise should ultimately be discharged from successful generated
+module validation rather than restated by callers.
 
 ## Parallel agent packages
 

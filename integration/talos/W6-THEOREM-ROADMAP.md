@@ -812,8 +812,16 @@ acceptance tests pass.
    compiler/adapter program and cache indices. The uniform implementation law
    now receives the full reuse-capacity frame, including the local-frame
    bounds required by that write.
-   Lift this per-slot relation to the complete generated cache table and
-   thread it through the canonical program invariant. Resolve the remaining
+   `LazyCacheGlobalsRel` now lifts this relation across the complete generated
+   cache table, rules out semantic entries without physical slots, and has an
+   empty-state constructor specialized to the production adapter/Talos
+   initial store. Its witness-aware transport theorem covers ordinary
+   operations that preserve both global tables. A semantic lookup eliminates
+   the empty branch, and `hit_of_compiledCacheTable` consumes the resulting
+   physical lane at the exact generated indices.
+   Prove the pointwise miss-publication update, derive
+   `LazyCacheTableLayout` from successful generated module validation, and
+   thread the table through the canonical program invariant. Resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the
