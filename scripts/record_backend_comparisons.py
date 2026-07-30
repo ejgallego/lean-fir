@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Attest directed backend comparisons from an already-verified matrix."""
+"""Attest directed backend comparisons from immutable verified evidence."""
 
 from __future__ import annotations
 
@@ -32,6 +32,8 @@ ATTESTATION_RECORD_FIELDS = {
     "version",
     "identity",
     *ATTESTATION_CONTRACT_FIELDS,
+    "sourceEvidenceSha256",
+    "sourceMatrixSha256",
     "comparisonArtifact",
     "comparisonArtifactBytes",
     "comparisonArtifactSha256",
@@ -267,6 +269,14 @@ def verify_attestation_record(value: object) -> dict:
         value["matrixRunSha256"],
         f"{record_id} matrix run",
     )
+    core.checked_sha256(
+        value["sourceEvidenceSha256"],
+        f"{record_id} source evidence",
+    )
+    core.checked_sha256(
+        value["sourceMatrixSha256"],
+        f"{record_id} source matrix",
+    )
     selected_cases = checked_selected_cases(
         value["selectedCases"], f"{record_id} selected cases"
     )
@@ -339,6 +349,8 @@ def record_from_verified_pair(
     pair: dict,
     comparison_content: bytes,
     result_artifacts: dict[tuple[str, str], tuple[str, dict]],
+    source_evidence_sha256: str,
+    source_matrix_sha256: str,
 ) -> dict:
     if not isinstance(pair, dict) or set(pair) != PAIR_FIELDS:
         raise core.ValidationError("verified matrix has a malformed pair")
@@ -365,6 +377,12 @@ def record_from_verified_pair(
     )
     run_sha256 = core.checked_sha256(
         identity["run"], "verified matrix run"
+    )
+    source_evidence_sha256 = core.checked_sha256(
+        source_evidence_sha256, "verified source evidence"
+    )
+    source_matrix_sha256 = core.checked_sha256(
+        source_matrix_sha256, "verified source matrix"
     )
     artifact_sha256 = core.checked_sha256(
         pair["sha256"], f"{reference}->{candidate} comparison artifact"
@@ -440,6 +458,8 @@ def record_from_verified_pair(
         "candidate": candidate,
         "matrixSelectionSha256": selection_sha256,
         "matrixRunSha256": run_sha256,
+        "sourceEvidenceSha256": source_evidence_sha256,
+        "sourceMatrixSha256": source_matrix_sha256,
         "selectedCases": selected_cases,
         "comparisonArtifact": artifact,
         "comparisonArtifactBytes": len(comparison_content),
@@ -458,8 +478,8 @@ def record_from_verified_pair(
     return verify_attestation_record(record)
 
 
-def result_artifacts_from_matrix(
-    path: Path,
+def result_artifacts_from_verified_matrix(
+    report_root: Path,
     matrix: dict,
 ) -> dict[tuple[str, str], tuple[str, dict]]:
     result_artifacts: dict[tuple[str, str], tuple[str, dict]] = {}
@@ -477,7 +497,7 @@ def result_artifacts_from_matrix(
                 "verified backend result artifact has no case"
             )
         content = core.verify_evidence_file(
-            path.parent,
+            report_root,
             artifact["artifact"],
             artifact["sha256"],
             f"backend comparison result witness {case_id}:{backend}",
@@ -510,15 +530,26 @@ def result_artifacts_from_matrix(
     return result_artifacts
 
 
-def records_from_matrix(path: Path) -> list[dict]:
-    matrix = core.verify_matrix_artifact(path)
-    result_artifacts = result_artifacts_from_matrix(path, matrix)
+def records_from_evidence(path: Path) -> list[dict]:
+    source = core.verify_evidence_snapshot(path)
+    matrix = source.matrix
+    source_evidence_sha256 = core.checked_sha256(
+        source.manifest["identity"]["evidence"],
+        "backend comparison source evidence",
+    )
+    source_matrix_sha256 = core.checked_sha256(
+        source.manifest["matrix"]["sha256"],
+        "backend comparison source matrix",
+    )
+    result_artifacts = result_artifacts_from_verified_matrix(
+        source.report_root, matrix
+    )
     records: list[dict] = []
     for pair in matrix["pairs"]:
         reference = pair["reference"]
         candidate = pair["candidate"]
         content = core.verify_evidence_file(
-            path.parent,
+            source.report_root,
             pair["artifact"],
             pair["sha256"],
             f"backend comparison attestation {reference}->{candidate}",
@@ -529,25 +560,42 @@ def records_from_matrix(path: Path) -> list[dict]:
                 pair,
                 content,
                 result_artifacts,
+                source_evidence_sha256,
+                source_matrix_sha256,
             )
         )
     return records
 
 
 def build_attestation_manifest(records: list[dict]) -> dict:
-    return attestation.build_envelope(
-        ATTESTATION_SPEC,
-        records,
-        verify_attestation_record,
+    return verify_attestation_manifest_value(
+        attestation.build_envelope(
+            ATTESTATION_SPEC,
+            records,
+            verify_attestation_record,
+        )
     )
 
 
 def verify_attestation_manifest_value(value: object) -> dict:
-    return attestation.verify_envelope_value(
+    manifest = attestation.verify_envelope_value(
         value,
         ATTESTATION_SPEC,
         verify_attestation_record,
     )
+    sources = {
+        (
+            record["sourceEvidenceSha256"],
+            record["sourceMatrixSha256"],
+        )
+        for record in manifest["records"]
+    }
+    if len(sources) != 1:
+        raise core.ValidationError(
+            "backend comparison attestations must share one immutable "
+            "source snapshot"
+        )
+    return manifest
 
 
 def verify_attestation_manifest(path: Path) -> dict:
@@ -649,17 +697,21 @@ def verify_oracle_policy(manifest: object, policy: object) -> dict:
     contract = (
         first["matrixSelectionSha256"],
         first["matrixRunSha256"],
+        first["sourceEvidenceSha256"],
+        first["sourceMatrixSha256"],
         first["selectedCases"],
     )
     for record in required[1:]:
         if (
             record["matrixSelectionSha256"],
             record["matrixRunSha256"],
+            record["sourceEvidenceSha256"],
+            record["sourceMatrixSha256"],
             record["selectedCases"],
         ) != contract:
             raise core.ValidationError(
                 "comparison oracle edges disagree on their matrix "
-                "selection, run, or ordered case set"
+                "selection, run, source evidence, or ordered case set"
             )
     selected_cases = first["selectedCases"]
     for record in required:
@@ -681,6 +733,8 @@ def verify_oracle_policy(manifest: object, policy: object) -> dict:
         "requiredCandidates": candidates,
         "matrixSelectionSha256": first["matrixSelectionSha256"],
         "matrixRunSha256": first["matrixRunSha256"],
+        "sourceEvidenceSha256": first["sourceEvidenceSha256"],
+        "sourceMatrixSha256": first["sourceMatrixSha256"],
         "selectedCaseCount": len(selected_cases),
         "comparisonCount": sum(
             record["comparedCases"] for record in required
@@ -689,8 +743,8 @@ def verify_oracle_policy(manifest: object, policy: object) -> dict:
     }
 
 
-def attest_matrix(path: Path, out_dir: Path) -> dict:
-    manifest = build_attestation_manifest(records_from_matrix(path))
+def attest_evidence(path: Path, out_dir: Path) -> dict:
+    manifest = build_attestation_manifest(records_from_evidence(path))
     attestation.write_retained_envelope(
         out_dir,
         "attestations.json",
@@ -703,14 +757,11 @@ def attest_matrix(path: Path, out_dir: Path) -> dict:
 
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
-    source = result.add_mutually_exclusive_group()
+    source = result.add_mutually_exclusive_group(required=True)
     source.add_argument(
-        "--matrix",
+        "--evidence",
         type=Path,
-        help=(
-            "already-produced matrix to verify and attest; defaults to "
-            "_build/validation-v8/matrix.json"
-        ),
+        help="immutable evidence manifest whose verified comparisons to attest",
     )
     source.add_argument(
         "--verify-attestations",
@@ -771,13 +822,15 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    matrix_path = args.matrix or Path("_build/validation-v8/matrix.json")
-    if not matrix_path.is_absolute():
-        matrix_path = root / matrix_path
+    evidence_path = args.evidence
+    if evidence_path is None:
+        raise core.ValidationError("missing backend comparison evidence")
+    if not evidence_path.is_absolute():
+        evidence_path = root / evidence_path
     out_dir = args.out_dir
     if not out_dir.is_absolute():
         out_dir = root / out_dir
-    manifest = attest_matrix(matrix_path, out_dir)
+    manifest = attest_evidence(evidence_path, out_dir)
     if policy is not None:
         print_oracle_acceptance(verify_oracle_policy(manifest, policy))
     failures = 0

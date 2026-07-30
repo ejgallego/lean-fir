@@ -389,20 +389,25 @@ verification, relocatable reads, and append-only retention. A producer supplies
 only its records and a semantic record validator. The native-LCNF recorder is
 the first adapter.
 
-`scripts/record_backend_comparisons.py` is the backend-neutral matrix adapter.
-It first applies the full matrix verifier, including the retained backend
-results and every directed comparison artifact, and then emits one attestation
-record per matrix edge:
+`scripts/record_backend_comparisons.py` is the backend-neutral immutable
+evidence adapter. It accepts only an append-only evidence manifest, verifies
+that manifest's complete retained matrix graph—including backend results and
+every directed comparison artifact—and then emits one attestation record per
+matrix edge:
 
 ```sh
 python3 scripts/record_backend_comparisons.py \
-  --matrix _build/validation-v8/matrix.json \
+  --evidence \
+  _build/validation-v8/evidence/runs/<run>/<evidence>.json \
   --policy validation-plans/native-oracle-attestations.json
 ```
 
 This command does not build or execute a backend. Each record's contract binds
 the matrix selection and run identities, ordered selected cases, and directed
-backend names. Its evidence retains the exact UTF-8 comparison artifact,
+backend names. Its evidence additionally binds the exact source evidence
+identity and retained matrix digest, so repeated executions of one semantic
+contract remain distinguishable without putting raw ASLR or telemetry drift
+into that contract. Its evidence retains the exact UTF-8 comparison artifact,
 recomputable source SHA-256 and byte count, findings, derived counts, and
 full-coverage match status. Every compared case additionally carries both
 normalized backend observations, their retained result-artifact digests, and
@@ -425,7 +430,10 @@ python3 scripts/record_backend_comparisons.py \
 Offline checking reconstructs every exact comparison artifact digest, validates
 its edge and ordered case set, compares the two witnessed observations instead
 of trusting the retained equality boolean, re-derives its summary and match
-result, and then checks the record, contract, and evidence identities. The
+result, checks the bound source evidence and matrix identities, and then checks
+the record, contract, and evidence identities. Every envelope must contain
+records from exactly one immutable source snapshot. Required oracle-policy
+edges additionally share the same run, selection, and ordered case set. The
 initial native/LCNF/V8 matrix is one producer of this format. Once the Wasm
 compiler lane supplies a real-engine matrix edge, native-to-V8 evidence uses the
 same adapter without compiler-side changes; a later Talos-to-real-Wasm validator

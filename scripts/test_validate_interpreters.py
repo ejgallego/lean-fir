@@ -8268,6 +8268,8 @@ class AttestationEnvelopeTests(unittest.TestCase):
 
 class BackendComparisonAttestationTests(unittest.TestCase):
     selected_cases = ["case-a", "case-b"]
+    source_evidence_sha256 = "4" * 64
+    source_matrix_sha256 = "5" * 64
 
     def matrix(self, run_sha256: str = "2" * 64) -> dict:
         return {
@@ -8366,6 +8368,8 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         equal: tuple[bool, bool] = (True, True),
         run_sha256: str = "2" * 64,
         candidate: str = "v8",
+        source_evidence_sha256: str | None = None,
+        source_matrix_sha256: str | None = None,
     ) -> dict:
         content = self.comparison_content(
             candidate=candidate,
@@ -8380,6 +8384,8 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             ),
             content,
             self.result_artifacts(equal, candidate),
+            source_evidence_sha256 or self.source_evidence_sha256,
+            source_matrix_sha256 or self.source_matrix_sha256,
         )
 
     @staticmethod
@@ -8395,7 +8401,7 @@ class BackendComparisonAttestationTests(unittest.TestCase):
             "minimumCases": minimum_cases,
         }
 
-    def test_matrix_adapter_retains_exact_edge_evidence_offline(self) -> None:
+    def test_evidence_adapter_retains_exact_edge_evidence_offline(self) -> None:
         content = self.comparison_content()
         matrix = self.matrix()
         pair = self.pair(content)
@@ -8427,31 +8433,59 @@ class BackendComparisonAttestationTests(unittest.TestCase):
 
         with tempfile.TemporaryDirectory() as directory:
             out_dir = Path(directory)
-            matrix_path = out_dir / "source" / "matrix.json"
+            source_root = out_dir / "source"
+            evidence_path = (
+                source_root
+                / "evidence"
+                / "runs"
+                / matrix["identity"]["run"]
+                / f"{self.source_evidence_sha256}.json"
+            )
+            source = core.VerifiedEvidence(
+                evidence_path,
+                source_root,
+                {
+                    "identity": {
+                        "evidence": self.source_evidence_sha256,
+                    },
+                    "matrix": {
+                        "sha256": self.source_matrix_sha256,
+                    },
+                },
+                matrix,
+            )
             with (
                 mock.patch.object(
                     comparison_attestations.core,
-                    "verify_matrix_artifact",
-                    return_value=matrix,
-                ) as verify_matrix,
+                    "verify_evidence_snapshot",
+                    return_value=source,
+                ) as verify_evidence,
                 mock.patch.object(
                     comparison_attestations.core,
                     "verify_evidence_file",
                     side_effect=evidence,
                 ) as verify_comparison,
             ):
-                manifest = comparison_attestations.attest_matrix(
-                    matrix_path, out_dir
+                manifest = comparison_attestations.attest_evidence(
+                    evidence_path, out_dir
                 )
-            verify_matrix.assert_called_once_with(matrix_path)
+            verify_evidence.assert_called_once_with(evidence_path)
             verify_comparison.assert_any_call(
-                matrix_path.parent,
+                source_root,
                 pair["artifact"],
                 pair["sha256"],
                 "backend comparison attestation native->v8",
             )
             self.assertEqual(verify_comparison.call_count, 5)
             record = manifest["records"][0]
+            self.assertEqual(
+                record["sourceEvidenceSha256"],
+                self.source_evidence_sha256,
+            )
+            self.assertEqual(
+                record["sourceMatrixSha256"],
+                self.source_matrix_sha256,
+            )
             self.assertEqual(record["comparisonArtifact"], content.decode())
             self.assertEqual(record["comparisonArtifactBytes"], len(content))
             self.assertTrue(record["matches"])
@@ -8516,6 +8550,18 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         )
         self.assertFalse(evidence_drift["records"][0]["matches"])
 
+        source_drift = comparison_attestations.build_attestation_manifest(
+            [self.record(source_evidence_sha256="6" * 64)]
+        )
+        self.assertEqual(
+            original["identity"]["contract"],
+            source_drift["identity"]["contract"],
+        )
+        self.assertNotEqual(
+            original["identity"]["evidence"],
+            source_drift["identity"]["evidence"],
+        )
+
         contract_drift = comparison_attestations.build_attestation_manifest(
             [self.record(run_sha256="3" * 64)]
         )
@@ -8556,6 +8602,15 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         ):
             comparison_attestations.verify_attestation_record(malformed)
 
+        malformed = dict(record)
+        malformed.pop("identity")
+        malformed["sourceEvidenceSha256"] = "not-a-digest"
+        malformed = attestation.with_record_identity(malformed)
+        with self.assertRaisesRegex(
+            core.ValidationError, "source evidence: malformed SHA-256"
+        ):
+            comparison_attestations.verify_attestation_record(malformed)
+
     def test_native_oracle_policy_requires_complete_matching_edges(self) -> None:
         manifest = comparison_attestations.build_attestation_manifest(
             [
@@ -8572,6 +8627,14 @@ class BackendComparisonAttestationTests(unittest.TestCase):
         self.assertEqual(summary["selectedCaseCount"], 2)
         self.assertEqual(summary["comparisonCount"], 4)
         self.assertEqual(summary["witnessCount"], 4)
+        self.assertEqual(
+            summary["sourceEvidenceSha256"],
+            self.source_evidence_sha256,
+        )
+        self.assertEqual(
+            summary["sourceMatrixSha256"],
+            self.source_matrix_sha256,
+        )
 
         with self.assertRaisesRegex(
             core.ValidationError, "missing required edge native->v8"
@@ -8609,6 +8672,22 @@ class BackendComparisonAttestationTests(unittest.TestCase):
                         self.record(
                             candidate="v8",
                             run_sha256="3" * 64,
+                        ),
+                    ]
+                ),
+                self.policy(),
+            )
+
+        with self.assertRaisesRegex(
+            core.ValidationError, "share one immutable source snapshot"
+        ):
+            comparison_attestations.verify_oracle_policy(
+                comparison_attestations.build_attestation_manifest(
+                    [
+                        self.record(candidate="lcnf"),
+                        self.record(
+                            candidate="v8",
+                            source_evidence_sha256="6" * 64,
                         ),
                     ]
                 ),
