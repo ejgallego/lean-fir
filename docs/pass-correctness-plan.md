@@ -1320,10 +1320,22 @@ not duplicated in this carrier: the exact `ShadowRuntimeRel` already publishes
 them as runtime roots. Strengthened hereditary yielded-bind and yielded-apply
 theorems now preserve both the exact compiler relation and this ownership
 carrier. The failed-token fixture retains its source-only allocation while
-restoring a saved environment containing target-dead locals. Remaining work is
-to preserve the carrier through cache-frame persistence and lift the three
-yielded-frame cases into the checked dispatcher before combining it with the
-source-only closure certificate.
+restoring a saved environment containing target-dead locals.
+
+The yielded-dispatch ownership bridge lands at `ba52212b`.
+`HeapOwnershipBelowFrontier` now survives recursive persistence and global
+installation by transporting across the existing metadata-only ownership
+frame. Cache restoration consequently preserves the current environment, heap,
+and every suspended bind environment. A source-only failed-reuse fixture checks
+that exact cache restoration retains compiler-only garbage across persistence.
+The source-side yielded dispatcher derives the yielded value's address bound
+from the exact runtime roots, selects the appropriate bind/apply/cache carrier
+law, and pairs that result with the existing hereditary target matcher. Its
+client-facing theorem returns the target stuttering path, the exact machine
+relation, and source ownership together. Remaining work is to preserve this
+carrier through checked active-code and invocation transitions, then combine
+it with the compositional source-only closure certificate in the general
+dispatcher.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1421,6 +1433,9 @@ post-reuse retained-continuation state.
 `15092e7c` extends that local carrier to complete environments suspended in
 bind frames, preserves it through exact hereditary bind/apply restoration, and
 checks the source-only failed-reuse heap across an exact yielded-bind step.
+`ba52212b` preserves heap ownership through persistence/global installation,
+completes exact cache restoration, and assembles bind/apply/cache ownership
+under the hereditary yielded dispatcher.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1488,10 +1503,13 @@ the existing nullary-`.fap` semantic discrepancy.
    monotone result frontier, so the carrier also survives their following
    source `let` bindings. The machine carrier now covers the current
    environment, heap, and every complete environment suspended in bind frames;
-   exact hereditary yielded-bind and yielded-apply restoration preserve it.
-   Next prove cache-frame persistence preserves heap ownership, assemble the
-   three yielded-frame arms under the checked dispatcher, and then carry the
-   compositional closure certificate through the general dispatcher.
+   exact hereditary yielded bind, apply, and cache restoration preserve it.
+   Recursive persistence/global insertion retains the ownership graph, and a
+   checked yielded dispatcher now returns the target path, exact machine
+   relation, and source carrier together. Next lift the existing local
+   operation carrier laws through checked active-code transitions, preserve the
+   carrier across invocation/control changes and pushed frames, and then carry
+   the compositional closure certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
