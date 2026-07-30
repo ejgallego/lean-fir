@@ -1270,10 +1270,24 @@ sentinels before applying the recursive-release fold. Concrete reuse exposes
 the one remaining static premise directly: every heap argument installed in
 the replacement constructor lies below the current frontier. The lifecycle
 reset regression now reuses its allocation-derived ownership bound and the
-successful reset effect, without reducing the result heap again. Remaining
-work is to derive the argument/address premise from checked environment
-typing, add direct wrappers for the object-field-write and failed-token
-allocation branches, and thread the bound through general checked execution.
+successful reset effect, without reducing the result heap again.
+
+The checked installed-value bridge lands at `67183055`.
+`HeapLocationsBelowFrontier` packages the address bound for evaluated values.
+Every heap-valued root of a `ShadowRuntimeRel` lies below its runtime frontier:
+reachable-heap correspondence supplies its cell, while runtime freshness
+excludes addresses at or above `nextLocation`. `ArgCovered` and `ArgsCovered`
+then lift that fact through successful `evalArg` and `evalArgs`, deriving the
+previously external address premise from the compiler's live input set.
+
+Constructor allocation, object-field replacement, and both concrete and
+missing-token reuse now preserve `HeapOwnershipBelowFrontier` directly.
+Compiler-facing wrappers compose successful operand evaluation with these
+operation laws. The failed-token source-only allocation and deleted
+object-write fixtures exercise the wrappers, and their results inherit the
+ownership invariant without inspecting the result heap. Remaining work is to
+thread this invariant through general checked machine execution and combine it
+with the compositional source-only closure certificate.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1357,7 +1371,10 @@ write-readiness contract. The corresponding failed- and concrete-token reuse
 effect bridges land at `8c6ea3e6`; recursive release/reset closure framing and
 the hereditary target-ledger bridge land at `475b642b`, and its
 environment/heap/ledger/allocation lifecycle lands at `cd09942c`. Static
-fresh-frontier exclusion from heap ownership bounds lands at `f29b5a90`.
+fresh-frontier exclusion from heap ownership bounds lands at `f29b5a90`;
+`7ebfb53c` preserves the bound through release/reset and concrete reuse, and
+`67183055` derives installed-value bounds from checked evaluation and covers
+constructor allocation, object writes, and both reuse-token branches.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1415,12 +1432,14 @@ the existing nullary-`.fap` semantic discrepancy.
    `HeapOwnershipBelowFrontier` now derives fresh-frontier exclusion for
    arbitrary owned paths and is initialized and preserved by allocation,
    generic cell replacement, recursive release, complete reset, and
-   concrete-token reuse. Next derive the installed-value address premise from
-   checked environment typing, cover object-field writes and failed-token
-   allocation directly, then carry the bound and compositional closure
-   certificate through checked executions. Arbitrary checked entries must
-   still derive and preserve these compiler typing/ownership facts without
-   finite execution-graph enumeration.
+   concrete-token reuse. `HeapLocationsBelowFrontier` and the shadow-runtime
+   root laws now derive the installed-value address premise from covered
+   `evalArg`/`evalArgs`; constructor allocation, object-field writes, and both
+   reuse-token branches consume it directly. Next carry the ownership bound
+   and compositional closure certificate through checked machine executions.
+   Arbitrary checked entries must still initialize and preserve these
+   compiler typing/ownership facts without finite execution-graph
+   enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
