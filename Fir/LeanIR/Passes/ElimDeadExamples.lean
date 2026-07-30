@@ -5419,51 +5419,101 @@ theorem retainedReuseSomeExactStepLedgerPreserved
         retainedReuseSomeDecl, letDecl] using path,
     related⟩
 
+/-- The three deleted-write fixtures obtain their local heap shapes by
+inverting the successful runtime operations, rather than by restating cell
+layout and bounds manually. -/
+theorem deletedObjectSetLocalReadyFromEffect :
+    Nonempty
+      (Σ location,
+        DeletedObjectSetLocalReadyAt deletedObjectSetSourceState
+          dead 0 .erased location) := by
+  apply DeletedObjectSetLocalReadyAt.of_effect_nonempty
+      (objectValue := .object (.heap 0))
+      (fieldValue := .erased)
+  · simp [deletedObjectSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+  · rfl
+
+theorem deletedUSizeSetLocalReadyFromEffect :
+    Nonempty
+      (Σ location,
+        DeletedUSizeSetLocalReadyAt deletedUSizeSetSourceState
+          dead 1 usizeField location) := by
+  apply DeletedUSizeSetLocalReadyAt.of_effect_nonempty
+      (objectValue := .object (.heap 0))
+      (fieldValue := .usize 7)
+  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+
+theorem deletedScalarSetLocalReadyFromEffect :
+    Nonempty
+      (Σ location,
+        DeletedScalarSetLocalReadyAt deletedScalarSetSourceState
+          dead scalarField location) := by
+  apply DeletedScalarSetLocalReadyAt.of_effect_nonempty
+      (width := 8) (offset := 0)
+      (objectValue := .object (.heap 0))
+      (fieldValue := .scalar (.uint8 9))
+  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
+      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
+  · rfl
+
 theorem deletedObjectSetReady :
     DeletedObjectSetReadyAt deletedObjectSetSourceState
       (runtimeRoots deletedObjectSetSourceState.runtime
         (envRootsOn neutralUsed deletedObjectSetSourceState.env))
       dead 0 .erased := by
-  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, .erased, ?_, rfl, ?_, rfl, rfl, ?_, ?_⟩
-  · simp [deletedObjectSetSourceState, deletedWriteSourceEnv,
+  let selected :=
+    Classical.choice deletedObjectSetLocalReadyFromEffect
+  rcases selected with ⟨location, shape⟩
+  have locationEq : location = 0 := by
+    simpa [deletedObjectSetSourceState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · rfl
-  · simp [deletedWriteObject]
-  · simpa [deletedObjectSetSourceState] using
-      deletedWriteDestinationUnreachable
+      using shape.objectRead.symm
+  subst location
+  exact shape.deletedReadyAt
+    (by simpa [deletedObjectSetSourceState] using
+      deletedWriteDestinationUnreachable)
 
 theorem deletedUSizeSetReady :
     DeletedUSizeSetReadyAt deletedUSizeSetSourceState
       (runtimeRoots deletedUSizeSetSourceState.runtime
         (envRootsOn neutralUsed deletedUSizeSetSourceState.env))
       dead 1 usizeField := by
-  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, 7, ?_, ?_, ?_, rfl, rfl, ?_, ?_, ?_⟩
-  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
+  let selected :=
+    Classical.choice deletedUSizeSetLocalReadyFromEffect
+  rcases selected with ⟨location, shape⟩
+  have locationEq : location = 0 := by
+    simpa [deletedUSizeSetSourceState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [deletedUSizeSetSourceState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · rfl
-  · simp [deletedWriteObject]
-  · simp [deletedWriteObject]
-  · simpa [deletedUSizeSetSourceState] using
-      deletedWriteDestinationUnreachable
+      using shape.objectRead.symm
+  subst location
+  exact shape.deletedReadyAt
+    (by simpa [deletedUSizeSetSourceState] using
+      deletedWriteDestinationUnreachable)
 
 theorem deletedScalarSetReady :
     DeletedScalarSetReadyAt deletedScalarSetSourceState
       (runtimeRoots deletedScalarSetSourceState.runtime
         (envRootsOn neutralUsed deletedScalarSetSourceState.env))
       dead scalarField := by
-  refine ⟨0, ({ object := .ctor deletedWriteObject } : HeapCell),
-    deletedWriteObject, .uint8 9, ?_, ?_, ?_, rfl, rfl, ?_⟩
-  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
+  let selected :=
+    Classical.choice deletedScalarSetLocalReadyFromEffect
+  rcases selected with ⟨location, shape⟩
+  have locationEq : location = 0 := by
+    simpa [deletedScalarSetSourceState, deletedWriteSourceEnv,
       lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · simp [deletedScalarSetSourceState, deletedWriteSourceEnv,
-      lookupValue, Impure.bind, lookup, dead, usizeField, scalarField]
-  · rfl
-  · simpa [deletedScalarSetSourceState] using
-      deletedWriteDestinationUnreachable
+      using shape.objectRead.symm
+  subst location
+  exact shape.deletedReadyAt
+    (by simpa [deletedScalarSetSourceState] using
+      deletedWriteDestinationUnreachable)
 
 /-- The source scope used by the three concrete deleted-write fixtures. -/
 def deletedWriteScopeIndex :

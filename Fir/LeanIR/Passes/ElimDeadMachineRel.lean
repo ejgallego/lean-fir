@@ -7814,6 +7814,67 @@ theorem TargetAllocationLedger.sourceOnly_iff_forward_eq_none
   · exact ledger.forward_eq_none_of_sourceOnly related
   · exact ledger.sourceOnly_of_forwardUnmapped
 
+/-- A successful live-cell lookup exposes both the underlying heap lookup and
+the liveness bit checked by the runtime operation. -/
+theorem getLiveCell_shape_of_ok
+    (effect : getLiveCell runtime location = .ok cell) :
+    findCell? runtime.heap location = some cell ∧ cell.live = true := by
+  unfold getLiveCell at effect
+  generalize foundEq :
+    findCell? runtime.heap location = found at effect
+  cases found with
+  | none => simp at effect
+  | some foundCell =>
+      simp only at effect
+      by_cases live : foundCell.live
+      · rw [if_pos live] at effect
+        have cellEq := Except.ok.inj effect
+        subst cell
+        exact ⟨rfl, live⟩
+      · rw [if_neg live] at effect
+        simp at effect
+
+/-- A successful constructor lookup exposes the exact heap address, live
+cell, and constructor payload hidden by the runtime helper. -/
+theorem getConstructor_shape_of_ok
+    (effect :
+      getConstructor runtime value = .ok (location, cell, constructor)) :
+    value = .object (.heap location) ∧
+      findCell? runtime.heap location = some cell ∧
+      cell.live = true ∧ cell.object = .ctor constructor := by
+  unfold getConstructor at effect
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload => simp at effect
+      | heap actualLocation =>
+          simp only [Bind.bind, Except.bind] at effect
+          generalize liveEq :
+            getLiveCell runtime actualLocation = liveResult at effect
+          cases liveResult with
+          | error fault => simp at effect
+          | ok actualCell =>
+              simp only at effect
+              cases objectEq : actualCell.object with
+              | ctor actualConstructor =>
+                  simp only [objectEq, Pure.pure, Except.pure] at effect
+                  have tripleEq := Except.ok.inj effect
+                  rcases tripleEq with ⟨rfl, rfl, rfl⟩
+                  have liveShape :=
+                    getLiveCell_shape_of_ok liveEq
+                  exact ⟨rfl, liveShape.1, liveShape.2, objectEq⟩
+              | closure name arity fixed => simp [objectEq] at effect
+              | boxed type value => simp [objectEq] at effect
+              | string value => simp [objectEq] at effect
+              | natural value => simp [objectEq] at effect
+              | integer value => simp [objectEq] at effect
+              | byteArray value => simp [objectEq] at effect
+              | «opaque» value => simp [objectEq] at effect
+  | usize value => simp at effect
+  | scalar value => simp at effect
+  | erased => simp at effect
+  | reuseToken location? => simp at effect
+
 /-- A successful cell replacement preserves the allocation frontier. -/
 theorem setCell_nextLocation_eq_of_ok
     (effect : setCell runtime location replacement = .ok result) :
@@ -10904,6 +10965,191 @@ structure DeletedScalarSetLocalReadyAt (state : MachineState)
   found : findCell? state.runtime.heap location = some cell
   live : cell.live = true
   objectEq : cell.object = .ctor constructor
+
+/-- Successful object-write evaluation contains the full local heap shape
+needed by the deleted-write simulation. Compiler clients need only supply the
+operand evaluations and the operation result they already preserve. -/
+theorem DeletedObjectSetLocalReadyAt.of_effect_nonempty
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : evalArg state.env field = .ok fieldValue)
+    (effect :
+      setObjectField state.runtime objectValue index fieldValue =
+        .ok nextRuntime) :
+    Nonempty
+      (Σ location,
+        DeletedObjectSetLocalReadyAt state object index field location) := by
+  unfold setObjectField modifyConstructor at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize constructorEq :
+    getConstructor state.runtime objectValue = constructorResult at effect
+  cases constructorResult with
+  | error fault => simp at effect
+  | ok result =>
+      rcases result with ⟨location, cell, constructor⟩
+      simp only at effect
+      by_cases indexBound : index < constructor.objectFields.size
+      · have shape :=
+          getConstructor_shape_of_ok constructorEq
+        exact ⟨⟨location, {
+          cell
+          constructor
+          fieldValue
+          objectRead := by simpa [shape.1] using objectRead
+          fieldRead
+          found := shape.2.1
+          live := shape.2.2.1
+          objectEq := shape.2.2.2
+          indexBound
+        }⟩⟩
+      · simp [indexBound] at effect
+
+/-- Select the proof-relevant object-write shape exposed by successful
+evaluation. -/
+noncomputable def DeletedObjectSetLocalReadyAt.of_effect
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : evalArg state.env field = .ok fieldValue)
+    (effect :
+      setObjectField state.runtime objectValue index fieldValue =
+        .ok nextRuntime) :
+    Σ location,
+      DeletedObjectSetLocalReadyAt state object index field location :=
+  Classical.choice
+    (DeletedObjectSetLocalReadyAt.of_effect_nonempty
+      objectRead fieldRead effect)
+
+/-- Successful absolute-slot `USize` evaluation exposes the concrete word,
+constructor layout, and both interval bounds checked by the runtime. -/
+theorem DeletedUSizeSetLocalReadyAt.of_effect_nonempty
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : lookupValue state.env field = .ok fieldValue)
+    (effect :
+      setUSizeSlot state.runtime objectValue index fieldValue =
+        .ok nextRuntime) :
+    Nonempty
+      (Σ location,
+        DeletedUSizeSetLocalReadyAt state object index field location) := by
+  unfold setUSizeSlot at effect
+  cases fieldValue with
+  | usize fieldValue =>
+      unfold modifyConstructor at effect
+      simp only [Bind.bind, Except.bind] at effect
+      generalize constructorEq :
+        getConstructor state.runtime objectValue = constructorResult at effect
+      cases constructorResult with
+      | error fault => simp at effect
+      | ok result =>
+          rcases result with ⟨location, cell, constructor⟩
+          simp only at effect
+          by_cases objectFieldsBound :
+              constructor.objectFields.size ≤ index
+          · simp only [objectFieldsBound, ↓reduceIte] at effect
+            by_cases usizeFieldsBound :
+                index - constructor.objectFields.size <
+                  constructor.usizeFields.size
+            · have shape :=
+                getConstructor_shape_of_ok constructorEq
+              exact ⟨⟨location, {
+                cell
+                constructor
+                fieldValue
+                objectRead := by simpa [shape.1] using objectRead
+                fieldRead
+                found := shape.2.1
+                live := shape.2.2.1
+                objectEq := shape.2.2.2
+                objectFieldsBound
+                usizeFieldsBound
+              }⟩⟩
+            · simp [usizeFieldsBound] at effect
+          · simp [objectFieldsBound] at effect
+  | object reference => simp at effect
+  | scalar value => simp at effect
+  | erased => simp at effect
+  | reuseToken location? => simp at effect
+
+/-- Select the proof-relevant absolute-slot write shape. -/
+noncomputable def DeletedUSizeSetLocalReadyAt.of_effect
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : lookupValue state.env field = .ok fieldValue)
+    (effect :
+      setUSizeSlot state.runtime objectValue index fieldValue =
+        .ok nextRuntime) :
+    Σ location,
+      DeletedUSizeSetLocalReadyAt state object index field location :=
+  Classical.choice
+    (DeletedUSizeSetLocalReadyAt.of_effect_nonempty
+      objectRead fieldRead effect)
+
+/-- Successful packed-scalar evaluation exposes the scalar payload and live
+constructor cell consumed by the runtime operation. -/
+theorem DeletedScalarSetLocalReadyAt.of_effect_nonempty
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : lookupValue state.env field = .ok fieldValue)
+    (effect :
+      setScalarField state.runtime objectValue width offset fieldValue =
+        .ok nextRuntime) :
+    Nonempty
+      (Σ location,
+        DeletedScalarSetLocalReadyAt state object field location) := by
+  unfold setScalarField at effect
+  cases fieldValue with
+  | scalar fieldValue =>
+      unfold modifyConstructor at effect
+      simp only [Bind.bind, Except.bind] at effect
+      generalize constructorEq :
+        getConstructor state.runtime objectValue = constructorResult at effect
+      cases constructorResult with
+      | error fault => simp at effect
+      | ok result =>
+          rcases result with ⟨location, cell, constructor⟩
+          simp only at effect
+          have shape :=
+            getConstructor_shape_of_ok constructorEq
+          exact ⟨⟨location, {
+            cell
+            constructor
+            fieldValue
+            objectRead := by simpa [shape.1] using objectRead
+            fieldRead
+            found := shape.2.1
+            live := shape.2.2.1
+            objectEq := shape.2.2.2
+          }⟩⟩
+  | object reference => simp at effect
+  | usize value => simp at effect
+  | erased => simp at effect
+  | reuseToken location? => simp at effect
+
+/-- Select the proof-relevant packed-scalar write shape. -/
+noncomputable def DeletedScalarSetLocalReadyAt.of_effect
+    {objectValue fieldValue : Value}
+    {nextRuntime : RuntimeState}
+    (objectRead :
+      lookupValue state.env object = .ok objectValue)
+    (fieldRead : lookupValue state.env field = .ok fieldValue)
+    (effect :
+      setScalarField state.runtime objectValue width offset fieldValue =
+        .ok nextRuntime) :
+    Σ location,
+      DeletedScalarSetLocalReadyAt state object field location :=
+  Classical.choice
+    (DeletedScalarSetLocalReadyAt.of_effect_nonempty
+      objectRead fieldRead effect)
 
 /-- Add the dynamic root-exclusion fact to a local object-write certificate. -/
 theorem DeletedObjectSetLocalReadyAt.deletedReadyAt
