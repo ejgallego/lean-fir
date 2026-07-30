@@ -1471,6 +1471,21 @@ the global deleted-object-write dispatcher. This completes the active-code
 ownership boundary. The next distinct boundary is whole-machine ownership
 across named/value invocation and external request/response resumption.
 
+Internal named-invocation ownership lands at `88c85852`, with concrete branch
+regressions at `991c36ee`. Complete declaration parameter binding now starts
+from the empty environment and preserves the frontier bound for every
+installed argument; under-application allocates a closure only from bounded
+published call arguments. The source dispatcher covers all internal
+`.invokeName` successors: under-application, full body entry with extra/cache
+frame preparation, and nullary global-cache hits. The hereditary exact
+machine relation supplies the call-argument bound from its published control
+roots, so its state-level matcher returns the paired successor relation and
+source ownership together. Concrete machine steps exercise all three
+successful branches, including an exact related full call. Next close
+internal `.invokeValue`, where captured closure fields must be recovered from
+heap ownership, then specify the separate foreign-response ownership
+contract required when an external implementation replaces the source heap.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1607,6 +1622,10 @@ in-place overwrite.
 ownership dispatchers for every executable impure active-code constructor;
 `fff91175` checks jump binding, reference-count increment/decrement, erased
 deletion, and global deleted-write dispatch with concrete machine steps.
+`88c85852` preserves source ownership through every internal named-call
+successor and composes it with the hereditary exact matcher; `991c36ee`
+checks under-application, full declaration entry, cache hit, and an exact
+state-level full call.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1705,9 +1724,11 @@ the existing nullary-`.fap` semantic discrepancy.
    executable impure code constructor, including jump parameter binding,
    reference-count operations, deletion, cases, return, and direct writes.
    Exact-shadow and reachable state-level dispatchers expose that result
-   together with the existing non-lockstep relation. Next carry ownership
-   across the distinct whole-machine invocation and external-response
-   boundary.
+   together with the existing non-lockstep relation. Internal named
+   invocation now preserves the carrier through closure allocation, complete
+   parameter binding and body entry, and cache hits. Next carry the same
+   result through closure/value invocation, then make the source-side
+   external-response ownership obligation explicit.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
