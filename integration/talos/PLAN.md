@@ -4711,6 +4711,15 @@ endpoint: arbitrary finite interleavings of the complete direct/reuse family,
 all proved pure external families, and default-only case wrappers execute the
 production Wasm with the exact residual budget.
 
+W6.6gu applies the same mixed frame to the two discriminating case families.
+`correctReuseBudgetedDirectPureExternalObjectConstructorCases` reconstructs
+the normalized recursive `getTag` comparison chain, while
+`correctReuseBudgetedDirectPureExternalScalarUInt8Cases` reconstructs the
+import-free scalar chain. Either selected branch may contain further
+direct/reuse operations and response-producing pure externals; case dispatch
+retains the exact fact map and byte budget. Ownership and mutation effects
+will use the descriptor-strengthened version of this composite frame.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

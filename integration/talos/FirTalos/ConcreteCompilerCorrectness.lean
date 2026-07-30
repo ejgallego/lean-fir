@@ -19128,6 +19128,114 @@ theorem
     parameterCount
 
 /--
+Facts-indexed whole-export correctness for normalized object-constructor case
+chains containing the complete direct/reuse and mixed pure-external families.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalObjectConstructorCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (ObjectConstructorCasesSupported context) NoEffectsSupported
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+        requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    spec.caseRuntimeRefines_objectConstructorCases
+    (fun _ => effectRuntimeRefines_noEffects) parameterCount
+
+/--
+Facts-indexed whole-export correctness for normalized scalar-`UInt8` case
+chains containing the complete direct/reuse and mixed pure-external families.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalScalarUInt8Cases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        (ScalarUInt8CasesSupported context) NoEffectsSupported
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+        requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    spec.caseRuntimeRefines_scalarUInt8Cases
+    (fun _ => effectRuntimeRefines_noEffects) parameterCount
+
+/--
 All current direct helpers preserve the ownership descriptor agreement in
 addition to the complete pure-external frame.
 -/

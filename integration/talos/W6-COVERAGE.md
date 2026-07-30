@@ -101,7 +101,9 @@ Cross-cutting W6.5 state:
   `correctReuseBudgetedDirectPureExternalDefaultCases` now admit arbitrary
   finite mixtures of those response-producing calls, the complete
   direct/reuse family, and default-only cases while retaining exact facts and
-  the response-sized allocation budget.
+  the response-sized allocation budget. The corresponding object-constructor
+  and scalar-`UInt8` endpoints now admit the same mixed fragment under their
+  production comparison chains.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated

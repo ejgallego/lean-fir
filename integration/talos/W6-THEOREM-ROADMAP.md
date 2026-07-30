@@ -729,6 +729,11 @@ acceptance tests pass.
    `correctReuseBudgetedDirectPureExternalDefaultCases` closes the first
    facts-indexed whole-export endpoint containing actual response-producing
    external calls.
+   `correctReuseBudgetedDirectPureExternalObjectConstructorCases` and
+   `correctReuseBudgetedDirectPureExternalScalarUInt8Cases` extend that mixed
+   endpoint through both discriminating case families with unchanged facts
+   and budget on branch entry. The next composition boundary is the
+   descriptor-strengthened mixed frame for ownership and mutation effects.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
