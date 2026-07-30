@@ -11020,6 +11020,160 @@ theorem SourceMachineOwnershipBelowFrontier.ofStepNext
       rw [transition] at actual
       contradiction
 
+/-- A runtime-neutral let action needs an address bound only when it returns
+a value to be bound. Invocation actions save the already bounded environment
+in a bind frame instead. -/
+def LetActionOwnershipBelowFrontier
+    (runtime : RuntimeState) : LetAction → Prop
+  | .value value => HeapLocationsBelowFrontier runtime [value]
+  | .invokeName _ _ | .invokeValue _ _ => True
+
+/-- One generic ownership rule covers all runtime-neutral let successors.
+Value actions bind their bounded result; invocation actions push the complete
+current environment before changing control. -/
+theorem SourceMachineOwnershipBelowFrontier.runtimeNeutralLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (evaluated :
+      evalLetValue state declaration =
+        .ok (state.runtime, action))
+    (actionBound :
+      LetActionOwnershipBelowFrontier state.runtime action)
+    (step : Step externals
+      { state with
+        control := .code (.let declaration continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  let current :=
+    { state with control := .code (.let declaration continuation) }
+  have currentEvaluated :
+      evalLetValue current declaration =
+        .ok (state.runtime, action) := by
+    simpa [current, evalLetValue] using evaluated
+  have currentBounded :
+      SourceMachineOwnershipBelowFrontier current := by
+    simpa [current] using
+      bounded.withControlAndJoins
+        (.code (.let declaration continuation)) state.joins
+  cases action with
+  | value value =>
+      have afterBounded :=
+        (bounded.bindValue
+          (binder := declaration.fvarId) actionBound)
+          |>.withControlAndJoins
+            (.code continuation) state.joins
+      apply afterBounded.ofStepNext _ step
+      simp [current, coreStep, currentEvaluated]
+  | invokeName name arguments =>
+      have afterBounded :=
+        currentBounded.pushBindFrame
+            (declaration := declaration)
+            (continuation := continuation)
+          |>.withControlAndJoins
+            (.invokeName name arguments) state.joins
+      apply afterBounded.ofStepNext _ step
+      simp [current, coreStep, currentEvaluated,
+        Fir.LeanIR.Impure.pushBindFrame]
+  | invokeValue function arguments =>
+      have afterBounded :=
+        currentBounded.pushBindFrame
+            (declaration := declaration)
+            (continuation := continuation)
+          |>.withControlAndJoins
+            (.invokeValue function arguments) state.joins
+      apply afterBounded.ofStepNext _ step
+      simp [current, coreStep, currentEvaluated,
+        Fir.LeanIR.Impure.pushBindFrame]
+
+/-- A retained foreign application is runtime-neutral before invocation. Its
+successful let edge therefore pushes the complete current environment without
+changing heap ownership. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedFapLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fap name arguments
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize argumentsRead :
+    evalArgs state.env arguments = argumentsResult
+  cases argumentsResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok argumentValues =>
+      apply bounded.runtimeNeutralLetStep
+        (declaration := {
+          fvarId, binderName, type, value := .fap name arguments })
+        (action := .invokeName name argumentValues)
+      · simp [evalLetValue, argumentsRead, Bind.bind, Except.bind,
+          Pure.pure, Except.pure]
+      · trivial
+      · exact step
+
+/-- A retained local application either aliases a bounded environment value
+when no arguments are supplied or pushes a bind frame before invoking that
+value. Both successor shapes preserve complete source-machine ownership. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedFVarLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize functionRead :
+    lookupValue state.env function = functionResult
+  cases functionResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, functionRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, functionRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok functionValue =>
+      generalize argumentsRead :
+        evalArgs state.env arguments = argumentsResult
+      cases argumentsResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, functionRead, argumentsRead,
+                fail, Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, functionRead, argumentsRead,
+                fail, Bind.bind, Except.bind] at transition
+      | ok argumentValues =>
+          by_cases empty : argumentValues.isEmpty
+          · apply bounded.runtimeNeutralLetStep
+              (declaration := {
+                fvarId, binderName, type,
+                value := .fvar function arguments })
+              (action := .value functionValue)
+            · simp [evalLetValue, functionRead, argumentsRead, empty,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+            · exact (@bounded.env)
+                (lookupValue_eq_ok_iff.mp functionRead)
+            · exact step
+          · apply bounded.runtimeNeutralLetStep
+              (declaration := {
+                fvarId, binderName, type,
+                value := .fvar function arguments })
+              (action := .invokeValue functionValue argumentValues)
+            · simp [evalLetValue, functionRead, argumentsRead, empty,
+                Bind.bind, Except.bind, Pure.pure, Except.pure]
+            · trivial
+            · exact step
+
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
 garbage. Unlike a ledger reconstructed from a final relation witness, this
@@ -25809,6 +25963,49 @@ theorem match_retainedFapLetStep_binderReady
               targetTransition afterRelated
               (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained full application. The exact
+target matcher is unchanged; the source successor additionally carries the
+complete environment/heap/frame invariant across the bind-frame push. -/
+theorem match_retainedFapLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :=
+    ownership.retainedFapLetStep step
+  rcases match_retainedFapLetStep_binderReady
+      sourceState targetState programs frames continuation joins env covered
+      runtime step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
+
 /-- Ledger-carrying hereditary retained full-application matcher. Entering a
 named invocation changes only control and frames, so the target allocation
 frontier and its carried owner ledger are unchanged. -/
@@ -25992,6 +26189,71 @@ theorem ExactShadowCodeBinderReady.match_retainedFapLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env covered runtime step
+
+/-- Ownership-strengthened exact retained full-application matcher. -/
+theorem ExactShadowCodeBinderReady.match_retainedFapLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName name : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.fap name arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .fap name arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.fap name arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.fap name arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.fap name arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedFapLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime ownership step
 
 /-- Exact retained full-application provenance consumed through the
 ledger-carrying named-invocation matcher. -/
@@ -26531,6 +26793,50 @@ theorem match_retainedFVarLetStep_binderReady
                         targetTransition afterRelated
                         (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained local application. Both the
+nullary alias branch and the non-nullary bind-frame branch retain complete
+source-machine ownership. -/
+theorem match_retainedFVarLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (functionMember : used.contains function = true)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .fvar function arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :=
+    ownership.retainedFVarLetStep step
+  rcases match_retainedFVarLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      functionMember covered runtime step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
+
 /-- Ledger-carrying hereditary retained local-application matcher. The
 nullary copy branch binds related values and the non-nullary branch pushes
 paired bind frames and enters related `invokeValue` controls; neither branch
@@ -26905,6 +27211,77 @@ theorem ExactShadowCodeBinderReady.match_retainedFVarLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env covered.1 covered.2 runtime step
+
+/-- Ownership-strengthened exact retained local-application matcher. -/
+theorem ExactShadowCodeBinderReady.match_retainedFVarLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId function : FVarId} {binderName : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type,
+            value := .fvar function arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .fvar function arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .fvar function arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have covered :
+      ambient.contains function = true ∧ ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.fvar function arguments :
+            LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.fvar function arguments :
+          LCNF.LetValue .impure)).mono usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedFVarLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered.1 covered.2 runtime ownership step
 
 /-- Exact retained local-application provenance consumed through the
 ledger-carrying copy/invocation matcher. -/
