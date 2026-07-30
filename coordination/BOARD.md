@@ -15,16 +15,18 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Current landing gate
 
-This section is authoritative after the lane-4 rebase; older candidate hashes
-in the lane and contract tables remain historical provenance until the stack
-lands and must not be used as the current feature-branch identity.
+This section is authoritative for the current integration boundary; older
+candidate hashes in the lane and contract tables remain historical provenance
+until their stacks land and must not be used as current feature-branch
+identities.
 
 - Validation's validated pre-record coordination head is `3ae6c37d`, with
-  functional head `96eec154` on semantic base `fff91175`. Current `main` is the
-  later validation checkpoint `15b8727e`, so the long validation branch is nine
-  commits behind and one hundred twelve commits ahead. Its older
-  patch-equivalent commit `a2907a66` has landed independently as `15b8727e`;
-  the next long-branch rebase must skip that duplicate.
+  functional head `96eec154` on semantic base `fff91175` and coordination head
+  `cfa17d81`. Current `main` is the later validation checkpoint `e08784b3`, so
+  the long validation branch is sixteen commits behind and one hundred twelve
+  commits ahead. Its older patch-equivalent commits `a2907a66` and `7c87e6ec`
+  have landed independently as `15b8727e` and `e08784b3`; the next long-branch
+  rebase must skip both duplicates.
 - Rebased native/LCNF run
   `92b727e4a1d82ccfb3a9f419e28f9afd880ccd43ca1b1f0b985dcaa0874e19cb`
   passes 1,008/1,008. Immutable evidence
@@ -47,20 +49,23 @@ lands and must not be used as the current feature-branch identity.
   All three edges are equal, all 1,162 compiler-product reads are confirmed by
   `strace`, and the 581 native-to-V8 cases exceed the 413-case global oracle
   floor. The retained 67-case protocol-v4 float/mixed triangle is an additive
-  frontier, not the total real-engine baseline. Current `main` at `15b8727e`
+  frontier, not the total real-engine baseline. Current `main` at `e08784b3`
   passes the complete `make check`, including the same 581-case triangle and
-  its 590-case composed coverage index. It also supplies enforceable
-  `portable` and `exact` equivalence gates for two independently verified
-  evidence graphs. The current protocol-v4 attestor correctly rejects the
-  protocol-v3 baseline evidence as an unsupported version, so it is strong
-  runtime evidence but not a current global oracle attestation; that v4 claim
-  still waits for W7.
-- The first rebased lane-4 commit, `7053d748`, passes the full Lean build,
-  examples, harness tests, native/LCNF baseline, and direct tier in isolation.
-  Its only `make check` stop is the W7-owned exhaustive match at
-  `Fir/Wasm/Emit/Manifest.lean:149,255,280`, before V8 executes. Therefore no
-  nonempty lane-4 prefix is currently landable by itself; the first integration
-  slice is the float scalar contract plus W7's manifest handoff.
+  its 590-case composed coverage index. The index now rederives exact
+  tag-to-case attribution from retained corpus evidence and enforces 30
+  per-tier semantic floors: all 2,809 required case-attributions are present.
+  It also supplies enforceable `portable` and `exact` equivalence gates for two
+  independently verified evidence graphs. The current protocol-v4 attestor
+  correctly rejects the protocol-v3 baseline evidence as an unsupported
+  version, so it is strong runtime evidence but not a current global oracle
+  attestation; that v4 claim still waits for W7.
+- The first shared-contract commit in the long lane-4 stack, `7053d748`,
+  passes the full Lean build, examples, harness tests, native/LCNF baseline,
+  and direct tier in isolation. Its only `make check` stop is the W7-owned
+  exhaustive match at `Fir/Wasm/Emit/Manifest.lean:149,255,280`, before V8
+  executes. Independent validation-infrastructure commits may continue to be
+  extracted and landed early, but the first remaining shared integration slice
+  is still the float scalar contract plus W7's manifest handoff.
 - The whole lane-4 stack is not landable on green `main` until the proof lane
   checks the successive shared-contract boundaries. The last pre-rebase probe
   stopped exactly at
@@ -73,12 +78,14 @@ lands and must not be used as the current feature-branch identity.
   carrier, and the ownership-strengthened internal dispatcher covers code,
   yielded, named, and value controls. The next proof boundary is an explicit
   source ownership contract for foreign-response resumption.
-- W6 is active at committed head `4f1646e5`, one hundred twenty-eight commits
-  ahead and five behind current `main`, with uncommitted changes in four owned
-  concrete-correctness modules and no formal handoff yet. W7 is clean at
-  `6a899a03`, nineteen commits ahead and eleven behind `main`; it contains the
-  generation-owned float manifest arms needed by the full V8 plan and must
-  rebase and hand them off before lane 4 reruns the whole-corpus triangle.
+- No new formal lane handoff is recorded at this checkpoint. The proof lane is
+  at committed head `186402fe`, one commit ahead and one behind `main`, with
+  active owned edits. W6 is at `7439be79`, one hundred twenty-nine commits
+  ahead and four behind, with active owned edits and an untracked W6 bug card.
+  W7 is at `a5962649`, twenty commits ahead and one behind, with active
+  generation-consumer migration edits. Integration must not absorb any of
+  those working trees; each lane rebases, runs its required checks, cleans, and
+  sends the prescribed handoff before landing.
 - Current `main` at `8ad80ad3` releases the fail-closed
   `bitExactFloatTransport` consumer contract independently of the queued Lean
   float stack. It selects an integer-lane Wasm facade, preserves all raw f32/f64
@@ -99,7 +106,7 @@ moving global snapshot hash.
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Clean committed head `62872f62`, three main commits behind at this checkpoint, continues the independent cache/refinement proof stack | Publish the standalone Float32/Float boxed-kind codes, packed storage/projection/mutation support, resolver support, and `HeapRefinement` cases consumed by W7; also complete the closure-application audit. W6 owns implementation-to-concrete-host theorems, not validation adapters or the W7 compiler |
 | W7 generation | generation owner | `wasm/generation` | active | Clean checkpoint `3a1610cd` generates and validates canonical integer-lane f32/f64 facades and emits the versioned `bitExactFloatTransport` manifest capability. Earlier slices exhaustively emit and consume `float32Bits`/`float64Bits`, accept raw-bit command arguments, and execute exact Float32/Float values through the semantic and concrete hosts. The styled `prettyM` package owns/exports memory, has zero imports, and preserves `PrettyTrace` styling. | Rebase onto released consumer contract `8ad80ad3`, then migrate all semantic, concrete, module, browser-worker, and validation-case manifest consumers and extend the real-engine corpus to signaling NaNs. The queued Lean float/closure stack still needs proof-owned `AlphaEqvCode` adaptation and W6 concrete refinement before the final artifact becomes `linked/accepted`. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
-| Validation | validation owner | `validation/float-corpus` | ready | Clean head `1762979a`, based directly on semantic main boundary `968ef169` and one coordination-only checkpoint behind, captures genuine native Lean stdout/stderr and compares four exact ordered-output fixtures after exhaustively normalizing Lean IO errors. Run `3eca941cc887bfc6193d453ec8d09370a0547902cb7284602392fd95e1d481b0` passes 699/699 native/LCNF cases; evidence `732aa9c60c6d4ec33e146b2fde0058029838c7fc5a7bca39591ebe1a24159013` verifies offline. The direct tier passes 9/9 at run `4a5b6433d3be535ca72402c044881061ce2a8adbeb8b367be3fdee8e5b33bc99`, evidence `2f4fd85f93c82269b84e454fdacb273f6ee13b1c4e14f9727a6f0668a862a1f9` | Shared contracts are isolated at `15a003f9`/`522ccf73`, `4a3f9eaf`, `181a098f`, `6fef4802`/`6f0487ee`/`9e00c614`/`8618f1f1`, `b3f4f5d9`, `dff585cc`, `939b8144`, and `57f3a7c5`; dependent coverage ends at `1762979a`. Harness tests are 128/128. The combined index pins 708 unique cases, 1,289 tier cases, 1,870/1,870 comparisons, 6,118 interpreter steps, 59 semantic-tag floors, and zero findings. `make check` still stops only at `AlphaEqvCode.lean:2209,2358-2360`; the fresh V8 attempt stops in W7-owned `Manifest.lean:149,255,280` before executing cases |
+| Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81`, with validated functional head `96eec154` on semantic base `fff91175`, is sixteen commits behind and one hundred twelve ahead of current `main`. Its 1,008-case native/LCNF run and 9-case direct-machine run verify offline with zero findings; the composed long-stack index retains 1,017 comparisons, 9,939 interpreter steps, 193 semantic-tag floors, and 152 semantic domains. Current-main extraction `e08784b3` independently lands retained-corpus tag attribution and 30 semantic floors over the green 590-case native/LCNF/direct/V8 checkpoint. | The next long-branch rebase skips patch-equivalent commits `a2907a66` and `7c87e6ec`, already landed as `15b8727e` and `e08784b3`. Shared float, closure, alias, termination, IO, and stream-capture contracts remain isolated in the long stack and require the recorded proof/W6/W7 handoffs before integration; independently landable validation-only infrastructure should continue to be extracted early. |
 
 ## Resident-helper bridge
 
