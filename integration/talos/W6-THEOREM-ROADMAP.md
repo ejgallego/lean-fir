@@ -674,8 +674,12 @@ acceptance tests pass.
    is ownership/effect composition.
    `ReuseCapacityEffectCodeEvaluates` and
    `correctReuseBudgetedDirectPersistentCode` now add source/target-identity
-   persistent ownership effects. Ordinary ownership updates must next supply
-   the same ordinary-persistence condition already named for direct steps.
+   persistent ownership effects.
+   `correctReuseBudgetedDirectPersistentIncrementCode` adds successful
+   ordinary increments: `incValue_ordinaryPersistenceTransport` establishes
+   the source condition, while the existing concrete increment theorem
+   supplies exact executable and mapped-header transport. Recursive decrement
+   is the next ownership obligation.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

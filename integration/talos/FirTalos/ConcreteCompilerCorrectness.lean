@@ -15845,6 +15845,67 @@ theorem ConcreteSupportedExport.correctReuseBudgetedDirectCode
     parameterCount
 
 /--
+Ordinary reference-count increment preserves the complete facts-indexed reuse
+frame. The existing executable effect theorem supplies ordinary state
+refinement and mapped-header capacity transport; the source increment theorem
+supplies the independent ordinary-token transport.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement_reuseCapacity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+      (ConcreteReuseCapacityFrame sourceFunction facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      fits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.inc_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.incrementCall callFound
+      obtain ⟨heap, step, cursor, capacity⟩ :=
+        effectStepSimulates_inc_with_capacity objectLookup updated stateRelated
+          objectCompiled objectFound kindAt objectRefines callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results fits
+      rcases invariant with
+        ⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩
+      have nextCapacity :
+          ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+            (replaceHeap targetStore heap) targetLocals witness :=
+        capacityRelated.ofReplaceHeapEffectStep step capacity
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
+        ordinaryTokens.transport
+          (incValue_ordinaryPersistenceTransport updated)
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextCapacity, nextOrdinary, frameAligned,
+        by
+          change heap.AddressSpaceBudget remainingBytes
+          exact nextBudget⟩
+
+/--
 The complete facts-indexed direct family may interleave with compiler-erased
 persistent ownership operations. These effects are source and target
 identities, so every fact-map instance of the reuse frame is preserved.
@@ -15893,6 +15954,63 @@ theorem
   spec.correctReuseCapacityEffectCode evaluation invariant
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
     (fun _ => effectRuntimeRefines_persistentOwnership) parameterCount
+
+/--
+The facts-indexed direct/reuse fragment may additionally interleave successful
+ordinary reference-count increments. This is the first non-identity effect
+instance of the certificate-free structural theorem.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPersistentIncrementCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (EffectSupportedOr PersistentOwnershipEffectSupported
+          (OrdinaryIncrementEffectSupported context))
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityEffectCode evaluation invariant
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
+    (fun facts =>
+      EffectRuntimeRefines.or
+        (Invariant := ConcreteReuseCapacityFrame sourceFunction facts)
+        effectRuntimeRefines_persistentOwnership
+        (spec.effectRuntimeRefines_ordinaryIncrement_reuseCapacity
+          (facts := facts)))
+    parameterCount
 
 /--
 Current mixed allocating structural fragment: local aliases, immediate

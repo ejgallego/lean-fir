@@ -877,6 +877,18 @@ theorem OrdinaryPersistenceTransport.trans
   intro middleCell middleFound
   exact left location middleCell middleFound firstOrdinary
 
+/-- Retain every ordinary-token fact across a source-runtime transport. -/
+theorem ReuseTokenOrdinaryRel.transport
+    {facts : ReuseCapacityFacts} {before after : RuntimeState}
+    {sourceEnv : Env}
+    (ordinary : ReuseTokenOrdinaryRel facts before sourceEnv)
+    (transport : OrdinaryPersistenceTransport before after) :
+    ReuseTokenOrdinaryRel facts after sourceEnv := by
+  intro tokenId available location cell tracked tokenLookup found
+  exact transport location cell found fun beforeCell beforeFound =>
+    ordinary tokenId available location beforeCell tracked tokenLookup
+      beforeFound
+
 /--
 Bind an ordinary result and erase its shadowed capacity fact while retaining
 every differently named ordinary-token fact across the exact source-runtime
@@ -1172,6 +1184,79 @@ private theorem setCell_preserves_persistent_false
     have afterCellEq := Option.some.inj afterFound
     subst afterCell
     exact beforeOrdinary
+
+/-- Updating one cell without changing its persistence bit preserves
+ordinaryness at every source heap location. -/
+theorem setCell_ordinaryPersistenceTransport
+    {before after : RuntimeState} {target : Location}
+    {targetCell replacement : HeapCell}
+    (targetFound : findCell? before.heap target = some targetCell)
+    (replacementPersistent :
+      replacement.persistent = targetCell.persistent)
+    (operation :
+      setCell before target replacement = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  intro location afterCell afterFound beforeOrdinary
+  cases beforeFound : findCell? before.heap location with
+  | some beforeCell =>
+      exact setCell_preserves_persistent_false targetFound
+        replacementPersistent operation beforeFound
+        (beforeOrdinary beforeCell beforeFound) afterFound
+  | none =>
+      obtain ⟨expected, expectedOperation, _targetAfter, frame, _, _, _, _, _⟩ :=
+        Fir.LeanIR.Impure.setCell_spec_of_find before target targetCell
+          replacement targetFound
+      rw [operation] at expectedOperation
+      have stateEq := Except.ok.inj expectedOperation
+      subst expected
+      by_cases same : location = target
+      · subst location
+        rw [targetFound] at beforeFound
+        contradiction
+      · rw [frame location same] at afterFound
+        rw [beforeFound] at afterFound
+        contradiction
+
+/-- A successful semantic reference-count increment never changes a cell's
+persistence bit and never allocates a new cell. -/
+theorem incValue_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    {amount : Nat} {check : Bool}
+    (operation : incValue before value amount check = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged tag =>
+          unfold incValue at operation
+          cases check <;> simp at operation
+          subst after
+          exact OrdinaryPersistenceTransport.refl before
+      | heap target =>
+          unfold incValue incLocation at operation
+          simp only [Bind.bind, Except.bind] at operation
+          cases targetFound : findCell? before.heap target with
+          | none =>
+              simp [getLiveCell, targetFound] at operation
+          | some targetCell =>
+              by_cases live : targetCell.live = true
+              · simp only [getLiveCell, targetFound, live, ↓reduceIte]
+                  at operation
+                by_cases persistent : targetCell.persistent = true
+                · rw [if_pos persistent] at operation
+                  have stateEq := Except.ok.inj operation
+                  subst after
+                  exact OrdinaryPersistenceTransport.refl before
+                · rw [if_neg persistent] at operation
+                  exact setCell_ordinaryPersistenceTransport targetFound
+                    (by rfl) operation
+              · have dead : targetCell.live = false :=
+                  Bool.eq_false_of_not_eq_true live
+                simp [getLiveCell, targetFound, dead] at operation
+  | scalar scalar => simp [incValue] at operation
+  | usize value => simp [incValue] at operation
+  | erased => simp [incValue] at operation
+  | reuseToken token => simp [incValue] at operation
 
 private theorem except_bind_pure_pair_eq_ok
     {ε α β : Type} {action : Except ε α}

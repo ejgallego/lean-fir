@@ -4574,6 +4574,18 @@ are both identities. Ordinary ownership updates are the next effect instances;
 they must establish nontrivial source ordinary-persistence in addition to
 their existing witness/header transport.
 
+W6.6gj adds the first non-identity effect instance. The source theorem
+`incValue_ordinaryPersistenceTransport` proves that successful ordinary
+reference-count increment neither allocates nor changes a cell's persistence
+bit. `effectRuntimeRefines_ordinaryIncrement_reuseCapacity` combines that
+fact with the existing compiler inversion, executable increment simulation,
+and mapped-header capacity transport. Consequently,
+`correctReuseBudgetedDirectPersistentIncrementCode` covers arbitrary finite
+interleavings of the complete direct/reuse fragment, compiler-erased
+persistent ownership effects, and successful ordinary increments. Recursive
+decrement is next; unlike increment, it may release an owned graph and needs a
+whole-transition ordinary-persistence theorem.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

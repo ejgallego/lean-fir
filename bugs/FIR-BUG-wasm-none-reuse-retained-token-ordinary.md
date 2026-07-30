@@ -87,9 +87,11 @@ Fresh ordinary allocation, `allocCtor`, and all integer-boxing representation
 branches satisfy it too. The generic literal theorem additionally covers
 immediate, Natural, and String results, yielding a whole-export theorem for
 the complete current direct family plus reuse. Compiler-erased persistent
-ownership effects also compose because they are runtime identities. This bug
-still blocks validator-wide admission of effects that can create persistent
-aliases or otherwise fail that transport.
+ownership effects also compose because they are runtime identities. Successful
+ordinary increments compose through `incValue_ordinaryPersistenceTransport`,
+which proves the update preserves every cell's persistence bit. This bug still
+blocks validator-wide admission of effects that can create persistent aliases
+or otherwise fail that transport.
 
 ## Classification and triage
 
