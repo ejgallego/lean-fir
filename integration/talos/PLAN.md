@@ -4375,6 +4375,26 @@ unboxing deliberately ignores its stored type annotation; without it, a
 program can box one scalar width and request another. No FIR semantic
 contract, concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6fw adds successful integer boxing to that certificate-free direct family.
+`BoxSupported` records only the source box annotation and the compiler-local
+operand/result kind equations for one of the five supported integer/`USize`
+kinds. The scalar value, physical lane, numeric local/import indices,
+allocation result, and target step are all reconstructed internally.
+
+`boxScalarAllocationBytes` is a fixed aligned header-plus-slot reservation.
+Both allocating representations—promoted source tags and ordinary heap
+boxes—use exactly that extent; wasm32 immediates allocate nothing and use the
+general `AddressSpaceBudget.weaken` rule to establish the conservative
+residual proof index. `boxScalar_eq_ok_of_budget` makes all three branches
+constructive. Production compiler/adaptor inversion, `StateRelated`,
+`ConcreteSupportedExport.boxCall`, and the existing generated box-step theorem
+then prove `directLetRuntimeRefinesWithCost_box`. Source-step determinism
+identifies the constructed semantic result with the interpreter result.
+Extending `BudgetedDirectSupported` makes boxing available in every existing
+mixed whole-export theorem without a per-program certificate. This changes
+no FIR semantic contract, concrete layout, executable ABI, or W7 helper
+signature.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

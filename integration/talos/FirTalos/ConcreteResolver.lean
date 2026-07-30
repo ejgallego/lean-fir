@@ -76,6 +76,14 @@ classification table. -/
     hostFn? (.unbox kind.abiKind) = some (unboxFn kind) := by
   cases kind <;> rfl
 
+/-- Every concrete boxed-scalar kind resolves to its matching boxing host.
+The result kind remains an explicit part of the generated runtime identity. -/
+@[simp] theorem hostFn?_box_abiKind
+    (kind : Fir.Wasm.Concrete.BoxedScalarKind) (resultKind : AbiKind) :
+    hostFn? (.box kind.abiKind resultKind) =
+      some (boxFn kind resultKind) := by
+  cases kind <;> rfl
+
 /-- The concrete resolver implements exactly the four packed-integer scalar
 setter kinds used by the W6 scalar-mutation refinement theorem. This public
 boundary keeps the resolver's classification function private. -/

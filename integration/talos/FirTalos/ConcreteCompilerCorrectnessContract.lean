@@ -198,6 +198,67 @@ example
   spec.directLetRuntimeRefines_scalarProjection
 
 /--
+Integer-box admission is entirely source/compiler-facing. In particular it
+does not contain a physical lane, allocation result, target index, or
+execution witness.
+-/
+example
+    {context : Fir.Wasm.Context} {decl : LCNF.LetDecl .impure}
+    (scalarId : FVarId) (kind : BoxedScalarKind)
+    (valueEq : decl.value = .box kind.semanticType scalarId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+    (scalarCompiled :
+      Fir.Wasm.getLocal context scalarId =
+        .ok (.localGet scalarId, kind.abiKind))
+    (annotationKind :
+      Fir.Wasm.checkedAbiKind kind.semanticType = .ok kind.abiKind)
+    (resultCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .tobject)) :
+    BoxSupported context decl :=
+  .intro scalarId kind valueEq valueKind scalarCompiled annotationKind
+    resultCompiled
+
+/--
+The fixed one-slot reservation constructs any concrete boxing branch and
+returns the uniformly indexed residual address-space budget.
+-/
+example
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (scalar : BoxedScalar) {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : boxScalarAllocationBytes ≤ remainingBytes) :
+    ∃ result word,
+      boxScalar state scalar = .ok (result, word) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - boxScalarAllocationBytes) :=
+  valid.boxScalar_eq_ok_of_budget scalar budget fits
+
+/--
+Successful integer boxing satisfies the indexed direct runtime law without a
+concrete scalar, physical lane, allocation result, target index, or operation
+witness.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (BoxSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedLocalFrame sourceFunction) :=
+  spec.directLetRuntimeRefinesWithCost_box
+
+/--
 The typed-unbox compatibility boundary is source-only. Tagged operands are
 polymorphic; heap operands expose the live semantic cell and stored scalar
 kind, never a concrete address or descriptor lookup.

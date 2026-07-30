@@ -240,14 +240,18 @@ physical arguments and every concrete allocation internally.
 `BudgetedDirectSupported` now permits arbitrary interleavings of these two
 allocating families with cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar
-projections, compatible typed unboxing, and `isShared` observations under one
-source path budget. The read-only laws expose exact heap preservation across
-their generated helpers, so the complete residual budget reaches the
-continuation. `UnboxSupported` contains the source declaration/compiler-local
-typing plus a source-state scalar-kind judgment; production adaptation,
-resolver alignment, and `StateRelated` reconstruct the numeric call, physical
-object representation, frozen heap descriptor, and checked concrete read.
-`IsSharedSupported` needs only source/compiler local typing.
+projections, integer boxing, compatible typed unboxing, and `isShared`
+observations under one source path budget. Read-only laws expose exact heap
+preservation. `BoxSupported` needs only source/compiler typing; a fixed
+header-plus-slot reservation constructively covers promoted tags and heap
+boxes, while immediates conservatively weaken the residual proof budget.
+Production adaptation, resolver alignment, and `StateRelated` reconstruct the
+scalar lane, call, allocation, result word, and witness growth.
+`UnboxSupported` contains the source declaration/compiler-local typing plus a
+source-state scalar-kind judgment; the same machinery reconstructs the
+numeric call, physical object representation, frozen heap descriptor, and
+checked concrete read. `IsSharedSupported` needs only source/compiler local
+typing.
 Natural literals now join the same indexed fragment across their three
 wasm32 representations. `naturalAllocationBytes` assigns zero bytes to
 immediates, an aligned one-slot object to promoted source tags, and the exact

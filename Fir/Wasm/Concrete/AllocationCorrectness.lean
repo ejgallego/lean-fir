@@ -109,6 +109,21 @@ structure MemoryState.AddressSpaceBudget (state : MemoryState)
   endWithinAddressSpace :
     state.heapCursor + remainingBytes ≤ wordModulus
 
+/--
+Reserving fewer bytes preserves an address-space budget. This is the
+resource-logic weakening rule used when a declaration reserves a uniform
+upper bound but its concrete representation takes a nonallocating branch.
+-/
+theorem MemoryState.AddressSpaceBudget.weaken
+    {state : MemoryState} {largerBytes smallerBytes : Nat}
+    (budget : state.AddressSpaceBudget largerBytes)
+    (smaller : smallerBytes ≤ largerBytes) :
+    state.AddressSpaceBudget smallerBytes := {
+  cursorPositive := budget.cursorPositive
+  endWithinAddressSpace :=
+    Nat.le_trans (Nat.add_le_add_left smaller state.heapCursor)
+      budget.endWithinAddressSpace }
+
 /-- One allocation's exact view of the reusable address-space budget. -/
 abbrev MemoryState.AllocationCapacity (state : MemoryState)
     (requestedBytes : Nat) : Prop :=

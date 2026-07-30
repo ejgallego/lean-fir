@@ -130,11 +130,14 @@ compiler-selected continuation. The indexed
 that composition for arbitrary finite String-literal spines from one
 source-computed `DirectValuePathCost`. The nonempty-constructor runtime
 instance now derives mixed arguments and exact residual layout cost, so
-arbitrary finite constructor spines use the same theorem. Mixed read-only
+arbitrary finite constructor spines use the same theorem. Mixed direct-value
 composition now includes cost-zero local aliases and immediate integer/`USize`
 literals plus successful object, `USize`, and packed-integer scalar projections
-plus compatible typed unboxing and `isShared` observations through
-`BudgetedDirectSupported`. These read-only instances preserve the concrete
+plus integer boxing, compatible typed unboxing, and `isShared` observations
+through `BudgetedDirectSupported`. Boxing reserves one aligned
+header-plus-slot upper bound and constructively covers immediate, promoted,
+and heap representations; the immediate branch uses budget weakening because
+it consumes no physical bytes. The read-only instances preserve the concrete
 heap exactly and return the full residual address-space budget. Typed-unbox
 admission exposes only a source-state scalar-kind compatibility judgment;
 production output and `StateRelated` recover the concrete word, descriptor,

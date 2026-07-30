@@ -1,8 +1,19 @@
 import Fir.Wasm.Concrete.PromotedTagCorrectness
+import Fir.Wasm.Concrete.NaturalAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
 
 open Fir.LeanIR.Impure
+
+/--
+Uniform address-space reservation for integer boxing.
+
+An immediate result allocates nothing. A promoted tagged result and an
+ordinary heap box both occupy exactly one common header plus one semantic
+slot, so this fixed extent is a sound declaration-local upper bound.
+-/
+def boxScalarAllocationBytes : Nat :=
+  align8 (headerBytes + target.semanticSlotBytes)
 
 /-- A successful heap-backed box is exactly one checked object allocation
 followed by one canonical 64-bit payload write. -/
@@ -51,6 +62,93 @@ theorem allocateBoxedScalar_decompose
           subst result
           subst address
           exact ⟨middle, rfl, payloadWrite, rfl⟩
+
+/--
+One uniform source reservation makes concrete boxing constructive.
+
+The source-tagged branch reuses the natural allocator's immediate/promoted
+split. The source-heap branch constructs the canonical boxed object directly.
+An immediate result spends no physical bytes, but the residual proof budget
+is weakened to the declaration's uniform reservation.
+-/
+theorem MemoryState.FrontierInvariant.boxScalar_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (scalar : BoxedScalar) {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : boxScalarAllocationBytes ≤ remainingBytes) :
+    ∃ result word,
+      boxScalar state scalar = .ok (result, word) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - boxScalarAllocationBytes) := by
+  by_cases tagged : scalar.payload.toNat ≤ maxTaggedPayload
+  · have naturalCost :
+        naturalAllocationBytes scalar.payload.toNat ≤
+          boxScalarAllocationBytes := by
+      simp [naturalAllocationBytes, tagged, boxScalarAllocationBytes]
+      split <;> omega
+    have naturalFits :
+        naturalAllocationBytes scalar.payload.toNat ≤ remainingBytes :=
+      Nat.le_trans naturalCost fits
+    obtain ⟨result, word, allocated, resultBudget⟩ :=
+      valid.allocateNatural_eq_ok_of_budget scalar.payload.toNat budget
+        naturalFits
+    have encoded :
+        encodeTagged state scalar.payload = .ok (result, word) := by
+      simpa [allocateNatural, tagged, UInt64.ofNat_toNat] using allocated
+    have boxed : boxScalar state scalar = .ok (result, word) := by
+      rw [boxScalar_of_tagged state scalar tagged]
+      exact encoded
+    refine ⟨result, word, boxed, resultBudget.weaken ?_⟩
+    exact Nat.sub_le_sub_left naturalCost remainingBytes
+  · have heap : maxTaggedPayload < scalar.payload.toNat :=
+      Nat.lt_of_not_ge tagged
+    obtain ⟨middle, address, objectAllocation⟩ :=
+      state.allocateObject_eq_ok_of_capacity .boxed
+        target.semanticSlotBytes false scalar.kind.code
+        (UInt32.ofNat scalar.kind.payloadBytes) 0 0 valid.cursorAligned
+        (budget.allocationCapacity (by
+          simpa only [boxScalarAllocationBytes, align8_align8] using fits))
+    have middleValid := valid.allocateObject objectAllocation
+    have middleExtent := MemoryState.allocateObject_extent objectAllocation
+    have payloadInBounds :
+        address.value + headerBytes + 7 < middle.memory.size := by
+      have cursorInBounds := middleValid.cursorInBounds
+      rw [middleExtent] at cursorInBounds
+      simp [target, headerBytes, align8] at cursorInBounds ⊢
+      omega
+    obtain ⟨low, lowWrite, lowSize, _, _, _, _, _⟩ :=
+      LinearMemory.writeUInt32_spec middle.memory
+        (address.value + headerBytes) scalar.payload.toUInt32 (by omega)
+    obtain ⟨memory, highWrite, _, _, _, _, _, _⟩ :=
+      LinearMemory.writeUInt32_spec low
+        (address.value + headerBytes + 4)
+        (scalar.payload >>> (32 : UInt64)).toUInt32 (by
+          simpa [lowSize] using payloadInBounds)
+    have payloadWrite :
+        middle.memory.writeUInt64 (address.value + headerBytes)
+            scalar.payload =
+          .ok memory := by
+      unfold LinearMemory.writeUInt64
+      rw [lowWrite]
+      exact highWrite
+    let result : MemoryState := { middle with memory }
+    have allocated :
+        allocateBoxedScalar state scalar = .ok (result, address) := by
+      unfold allocateBoxedScalar
+      dsimp only
+      rw [objectAllocation]
+      simp only [liftMemory, Bind.bind, Except.bind]
+      rw [payloadWrite]
+      rfl
+    have boxed : boxScalar state scalar = .ok (result, address) := by
+      rw [boxScalar_of_heap state scalar heap]
+      exact allocated
+    have middleBudget :=
+      budget.allocateObject valid.cursorAligned (by
+        simpa only [boxScalarAllocationBytes] using fits) objectAllocation
+    exact ⟨result, address, boxed, {
+      cursorPositive := middleBudget.cursorPositive
+      endWithinAddressSpace := middleBudget.endWithinAddressSpace }⟩
 
 /-- Writing a boxed payload immediately after the common header preserves the
 complete checked header decoder. -/
