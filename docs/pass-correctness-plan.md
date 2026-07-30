@@ -1213,6 +1213,30 @@ children. The remaining static work is to construct and preserve this
 certificate for arbitrary compiler-owned allocation graphs, rather than only
 the checked leaf clients.
 
+The closure-certificate lifecycle lands at `cd09942c`.
+`SourceOnlyHeapClosureBinding` now transports across unrelated environment
+bindings, one-sided heap-reachability frames, exact ownership-graph frames,
+same-frontier renaming extensions, and paired target-ledger growth. The heap
+and ledger transports are also packaged as single transition laws for finite
+execution induction. For allocation specifically,
+`reachable_before_alloc_of_frontier_unreachable` proves that adding the fresh
+cell cannot reveal a new path from an old closure when that closure did not
+already reach the allocation frontier.
+`LedgerAllocBothResult.heapClosureBinding_of_frontierUnreachable` combines
+that heap fact with the paired-ledger extension: the same frontier exclusion
+both keeps the newly paired source owner out of the closure and prevents the
+new cell from exposing a latent path. The deleted-constructor lifecycle
+regression now carries its hereditary certificate through a later retained
+paired allocation using this generic rule.
+
+This isolates the next compiler/static premise more precisely than a generic
+“source-only allocation” condition. The source heap invariant must rule out
+owned paths to its fresh frontier for every compiler-owned closure that may
+survive across a later allocation. Once extracted, this premise supplies the
+allocation case of hereditary reset-certificate preservation; nonallocating
+ownership-graph frames and unrelated environment bindings are already
+covered.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1293,7 +1317,8 @@ deleted-write effects are converted into all three local heap shapes at
 provenance and the target allocation ledger into the complete compiler-facing
 write-readiness contract. The corresponding failed- and concrete-token reuse
 effect bridges land at `8c6ea3e6`; recursive release/reset closure framing and
-the hereditary target-ledger bridge land at `475b642b`.
+the hereditary target-ledger bridge land at `475b642b`, and its
+environment/heap/ledger/allocation lifecycle lands at `cd09942c`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1348,10 +1373,11 @@ the existing nullary-`.fap` semantic discrepancy.
    provenance directly. Recursive release and reset now preserve every lookup
    outside their original owned closures, and the target-ledger reset bridge
    consumes an explicit hereditary source-only closure certificate. Next
-   construct and preserve that certificate for arbitrary compiler-owned
-   allocation graphs and checked executions. Arbitrary checked entries must
-   still derive and preserve these compiler typing/ownership facts without
-   finite execution-graph enumeration.
+   derive the fresh-frontier exclusion law for arbitrary compiler-owned
+   allocation graphs, then carry the now-compositional certificate through
+   checked executions. Arbitrary checked entries must still derive and
+   preserve these compiler typing/ownership facts without finite
+   execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
