@@ -13090,6 +13090,408 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
       simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
 
 /--
+Facts-indexed resource invariant for structural reuse proofs.
+
+The static fact map and its concrete meaning advance together. The separate
+ordinary-token relation records the source ownership protocol, while local
+frame alignment and the wasm32 address-space budget provide the two
+constructive resources needed by the production step.
+-/
+def ConcreteReuseCapacityFrame
+    (sourceFunction : Fir.Wasm.Function)
+    (facts : ReuseCapacityFacts) (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness ∧
+    ReuseTokenOrdinaryRel facts sourceRuntime sourceEnv ∧
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness ∧
+        targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes
+
+/--
+Uniform facts-indexed direct-`let` law for successful reuse.
+
+Unlike the older program-specific reuse simulation, this interface contains
+no translated program, target index, concrete token word, branch witness, or
+execution certificate. It universally quantifies the executable compiler and
+adapter outputs, computes the authoritative successor fact map, and threads
+the complete indexed resource invariant to that successor.
+-/
+def ReuseCapacityDirectLetRuntimeRefinesWithCost
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (letCost : LCNF.LetDecl .impure → Nat)
+    (Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes : Nat}
+      {witness : RefinementWitness},
+    Supported facts decl →
+      letCost decl ≤ remainingBytes →
+      Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness nextFacts,
+        LetStepSimulates context sourceFunction module hostEnv decl targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue targetStore nextStore
+          targetLocals nextLocals resultIndex witness nextWitness ∧
+        nextStore.host.externals = targetStore.host.externals ∧
+          nextStore.host.closureDescriptors =
+              targetStore.host.closureDescriptors ∧
+            nextWitness.closureDescriptors = witness.closureDescriptors ∧
+              reuseCapacityLetFacts? facts decl = some nextFacts ∧
+                Invariant nextFacts (remainingBytes - letCost decl) nextRuntime
+                  (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+                  nextWitness
+
+/--
+The production compiler, adapter, resolver, concrete runtime, and source reuse
+semantics instantiate the uniform facts-indexed law.
+-/
+theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨related, ordinaryTokens, localFrame, budget⟩ := invariant
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
+      transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩ :=
+    spec.reuseLetStep_of_capacity supported allocationFits related
+      ordinaryTokens budget localFrame sourceStep valueCompiled valueAdapted
+      resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩
+
+/--
+Finite successful source evaluation indexed by the authoritative reuse fact
+map and exact source allocation reservation.
+
+This is a source semantics relation, not a translation certificate: each
+constructor contains only source admission, the executable source step, and
+the validator's own fact-transfer equation.
+-/
+inductive ReuseCapacityCodeEvaluates (context : Fir.Wasm.Context)
+    (Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (letCost : LCNF.LetDecl .impure → Nat) :
+    ReuseCapacityFacts → RuntimeState → Env → LCNF.Code .impure →
+      ReuseCapacityFacts → RuntimeState → Env → Value → Nat → Prop where
+  | ret
+      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      ReuseCapacityCodeEvaluates context Supported letCost facts sourceRuntime
+        sourceEnv (.return result) facts sourceRuntime sourceEnv sourceValue 0
+  | letValue
+      (supported : Supported facts decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (transfer :
+        reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityCodeEvaluates context Supported letCost nextFacts
+          nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+          resultFacts resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityCodeEvaluates context Supported letCost facts sourceRuntime
+        sourceEnv (.let decl continuation) resultFacts resultRuntime resultEnv
+        resultValue (letCost decl + continuationCost)
+
+/-- The fact-indexed finite relation denotes an exact interpreter run. -/
+theorem ReuseCapacityCodeEvaluates.execEvaluates
+    {context : Fir.Wasm.Context}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context Supported letCost facts sourceRuntime
+        sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) := by
+  induction evaluation with
+  | ret sourceLookup =>
+      exact (CodeEvaluates.ret sourceLookup).execEvaluates externals
+  | letValue _ sourceStep _ _ ih =>
+      exact sourceLetResult_thenExecEvaluates sourceStep ih
+
+/--
+Certificate-free structural partial correctness for arbitrary finite
+successful reuse-only spines.
+
+The theorem follows the source-selected finite evaluation, inverts the actual
+production compiler/adapter output at each declaration, and threads the exact
+fact map, ordinary-token relation, local frame, and address-space budget to
+the return. Nontermination is outside this first finite theorem and will use
+the same step law in the later trace/simulation layer.
+-/
+theorem ConcreteSupportedExport.codeWP_of_reuseCapacityCodeEvaluates_exactReturn
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context (ReuseSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial locals witness) :
+    ∃ resultStore resultLocals resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness [] (ExactReturnControlPost resultStore physical) ∧
+        ConcreteReuseCapacityFrame sourceFunction resultFacts 0 resultRuntime
+          resultEnv resultStore resultLocals resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing targetCode initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      have stateRelated := invariant.1.stateRelated
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst targetCode
+      exact ⟨initial, locals, witness, kind, physical,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
+        invariant, stateRelated.2.1, valueRelated⟩
+  | @letValue facts decl letSourceRuntime letSourceEnv letNextRuntime
+      letSourceValue nextFacts continuation resultFacts resultRuntime resultEnv
+      resultValue continuationCost supported sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          directLetAllocationCost decl ≤
+            directLetAllocationCost decl + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        spec.reuseCapacityDirectLetRuntimeRefinesWithCost supported stepFits
+          invariant sourceStep valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          ConcreteReuseCapacityFrame sourceFunction nextFacts continuationCost
+            letNextRuntime (bind letSourceEnv decl.fvarId letSourceValue)
+            nextStore nextLocals nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+
+/-- Public function-body form of the facts-indexed reuse structural theorem. -/
+theorem ConcreteSupportedExport.codeWP_of_reuseCapacityCodeEvaluates
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes : Nat}
+    {parameters callerTail : List Wasm.Value}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context (ReuseSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial locals witness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ∃ resultStore resultLocals resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness []
+          (ConcreteFunctionBodyPost spec.targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteReuseCapacityFrame sourceFunction resultFacts 0 resultRuntime
+          resultEnv resultStore resultLocals resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      exactWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityCodeEvaluates_exactReturn evaluation adapted
+      localsAligned invariant
+  refine ⟨resultStore, resultLocals, resultWitness, resultKind, physical, ?_,
+    resultInvariant, failureClear, valueRelated⟩
+  apply exactWP.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
+    ← parameterCount]
+
+/--
+Whole-export finite partial correctness for the certificate-free,
+facts-indexed reuse fragment.
+
+The source evaluation fixes only the successful finite path and its validator
+facts. The generated target body, runtime calls, concrete branches, and local
+indices are all recovered from the production compiler and resolver.
+-/
+theorem ConcreteSupportedExport.correctReuseCapacityCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context (ReuseSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      bodyWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityCodeEvaluates
+      (parameters := parameters) (callerTail := callerTail)
+      evaluation spec.bodyAdapted spec.localsAligned invariant parameterCount
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    resultInvariant.1.stateRelated.1, failureClear, valueRelated, rfl⟩
+
+/--
 Current mixed allocating structural fragment: local aliases, immediate
 integer/`USize` literals, representation-polymorphic natural literals,
 successful object/`USize`/packed-scalar projections, integer boxing, typed

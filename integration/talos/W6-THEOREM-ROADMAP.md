@@ -641,6 +641,13 @@ acceptance tests pass.
    existing ordinary cell's persistence bit, introduces only ordinary fresh
    cells, and returns an object, so authoritative result-fact insertion
    preserves `ReuseTokenOrdinaryRel`.
+   `ReuseCapacityCodeEvaluates` and
+   `ReuseCapacityDirectLetRuntimeRefinesWithCost` now lift this step through
+   arbitrary finite successful reuse-only spines. The strongest endpoint,
+   `correctReuseCapacityCode`, proves the source returned observation and
+   termination of the actual generated export with a refined return; its
+   premises contain source evaluation and authoritative facts but no target
+   code or translation certificate.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

@@ -4477,6 +4477,22 @@ transfer fails to invalidate a retained token; successful reuse itself no
 longer loses the invariant. The provenance-sensitive `.tobject` gate remains
 the other coordinated validator obligation.
 
+W6.6gb packages that step as a certificate-free facts-indexed structural
+proof. `ReuseCapacityDirectLetRuntimeRefinesWithCost` universally quantifies
+production compiler and adapter outputs and advances
+`ConcreteReuseCapacityFrame`; `ReuseCapacityCodeEvaluates` records only source
+steps, source admission, exact path cost, and the authoritative validator fact
+equation. Structural induction yields
+`codeWP_of_reuseCapacityCodeEvaluates_exactReturn`, its function-body form, and
+`correctReuseCapacityCode`: for any finite successful reuse-only source spine,
+the source reaches its returned observation and the actual generated export
+terminates with a refined return. No target program, numeric index, concrete
+word, allocation/branch witness, or per-program translation derivation is a
+premise. This is the first pragmatic finite theorem for the facts-indexed
+reuse path; the same uniform step law is retained for the later trace-based
+simulation/bisimulation layer. Mixed effects still require the two shared
+validator fixes above.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -77,8 +77,10 @@ implies it.
 ## Semantic impact
 
 The accepted compiler fragment can contain a successful source reuse whose
-concrete result disagrees on ownership metadata. This blocks a sound
-certificate-free whole-export reuse theorem.
+concrete result disagrees on ownership metadata after an invalidating
+intervening effect. The facts-indexed reuse-only whole-export theorem is
+available when its threaded ordinary-token invariant holds; this bug blocks
+mixing reuse with every effect family under the current shared validator.
 
 ## Classification and triage
 
