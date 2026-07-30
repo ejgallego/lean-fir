@@ -408,6 +408,107 @@ theorem ReuseCapacityCallLetStepSimulates.ofDirectDeclaration
         (callee.successful.terminatesWithExact tail) targetSet continued
 
 /--
+Reconstruct the exact canonical caller frame from any already-proved
+interprocedural result step and its hereditary callee package.
+
+Direct named calls and saturated closure dispatch differ only in how they
+establish `capacityStep`. Once that executable step is known, the
+ordinary-token, local-capacity, address-space, external-table, and descriptor
+arguments are identical. Factoring them here prevents the closure path from
+duplicating or weakening the direct-call frame theorem.
+-/
+theorem
+    ConcreteReuseCapacityPureExternalOwnershipFrame.ofBudgetedCallStepExact
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv calleeEnv : Env}
+    {calleeCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex remainingBytes stepCost : Nat}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultKind : AbiKind} {physical : Wasm.Value}
+    (invariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (stepFits : stepCost ≤ remainingBytes)
+    (capacityStep :
+      ReuseCapacityCallLetStepSimulates facts
+        (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+        hostEnv sourceExternals decl continuation targetValue sourceRuntime
+        nextRuntime sourceEnv sourceValue initial afterCall locals updated
+        resultIndex initialWitness resultWitness)
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+        calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
+        calleeEnv calleeCode targetFunction functionIndex initial afterCall
+        initialWitness resultWitness parameters resultKind sourceValue physical
+        stepCost)
+    (targetSet :
+      locals.set? resultIndex physical = some updated)
+    (transfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId)) :
+    CallLetStepSimulates context callerFunction module hostEnv sourceExternals
+          decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+          sourceValue initial afterCall locals updated resultIndex
+          initialWitness resultWitness ∧
+      afterCall.host.externals = initial.host.externals ∧
+        afterCall.host.closureDescriptors =
+            initial.host.closureDescriptors ∧
+          resultWitness.closureDescriptors =
+              initialWitness.closureDescriptors ∧
+            reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) ∧
+              ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+                sourceExternals (eraseReuseCapacityFact facts decl.fvarId)
+                (remainingBytes - stepCost) nextRuntime
+                (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+                resultWitness := by
+  rcases invariant with
+    ⟨⟨⟨initialRelated, ordinaryTokens, frameAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa using ordinaryTokens.eraseBind callee.ordinaryTransport
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+  have nextFrameAligned :
+      ConcreteLocalFrameAligned callerFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+        resultWitness :=
+    ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+  have nextBudget :
+      afterCall.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - stepCost) :=
+    callee.residualBudget stepFits budget
+  have nextDescriptorAgreement :
+      afterCall.host.closureDescriptors =
+        resultWitness.closureDescriptors :=
+    callee.hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans callee.witnessDescriptorsPreserved.symm)
+  exact ⟨capacityStep.ordinary, callee.externalsPreserved,
+    callee.hostDescriptorsPreserved, callee.witnessDescriptorsPreserved,
+    transfer,
+    ⟨⟨⟨capacityStep.nextRelated, nextOrdinary, nextFrameAligned, nextBudget⟩,
+      by rw [callee.externalsPreserved]; exact integerImplementation,
+      by rw [callee.externalsPreserved]; exact naturalImplementation,
+      by rw [callee.externalsPreserved]; exact scalarImplementation⟩,
+      nextDescriptorAgreement⟩⟩
+
+/--
 One direct declaration call reconstructs the canonical caller frame at its
 exact callee post-store and representation witness.
 

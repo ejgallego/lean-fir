@@ -213,6 +213,23 @@ theorem ClosureArgumentAssembly.nil
   intro rest Q tail continued
   simpa using continued
 
+/--
+The ordinary `compileArgs` readiness theorem is exactly the argument-assembly
+law needed by generated calls.
+
+Naming this conversion keeps direct declaration-call construction on the
+production compiler path: no second argument compiler or target execution
+certificate is introduced.
+-/
+theorem ClosureArgumentAssembly.ofConstructorArgsReady
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {code : Wasm.Program} {physicalArgs : List Wasm.Value}
+    (ready : ConstructorArgsReady locals code physicalArgs) :
+    ClosureArgumentAssembly module hostEnv code physicalArgs initial locals := by
+  intro rest Q tail continued
+  exact ready.wp continued
+
 /-- Prepending one compiler-resolved local argument extends an already-proved
 argument assembly. -/
 theorem ClosureArgumentAssembly.localGet

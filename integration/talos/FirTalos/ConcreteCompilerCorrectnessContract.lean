@@ -3825,6 +3825,61 @@ example
   implementation.runtimeRefinesEntryRelative
 
 /--
+Production named-call selection constructs the cache-aware implementation from
+source-only call sites and one module-wide hereditary declaration theorem.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (declarations :
+      DirectInternalCallDeclarationInduction context sourceModule targetModule
+        hosts sourceExternals) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      callerFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (DirectInternalCallSupported context) :=
+  DirectDeclarationCallImplementationWithCache.ofInternalCompiler spec
+    declarations
+
+/--
+The saturated closure path derives the adapted dispatch from the exact
+compiler candidate enumeration returned by its module-wide selection
+induction, then exposes the same cache-aware implementation boundary.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (selection :
+      SaturatedClosureDispatchSelectionInduction context sourceModule
+        callerFunction labels targetModule hosts sourceExternals) :
+    SaturatedClosureCallImplementationWithCache context sourceModule
+      callerFunction labels targetModule.wasmModule hosts.env hosts.spec
+      sourceExternals (SaturatedClosureCallSupported context) :=
+  SaturatedClosureCallImplementationWithCache.ofInternalCompiler spec
+    selection
+
+/--
 The production compiler-generated non-heap lazy family is available over the
 fixed-entry cache frame. Misses thread the recursively evolved table and use
 heap-neutral publication to preserve the hereditary ordinaryness transport.

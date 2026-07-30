@@ -5379,15 +5379,40 @@ the implementation, never an unchanged-global premise. The production
 `internalNonHeapLazyRuntimeRefines_entryRelativeCache` theorem and contract
 guard close the current lazy premise.
 
-The remaining interprocedural task is to derive the cache-aware direct-call
-implementation uniformly from production declaration selection, including
-the admitted saturated closure-dispatch family. Then the syntax-directed body
-proof can instantiate all entry-relative operation premises and construct
+W6.6hb moves production call selection onto that evolved-cache boundary.
+`DirectInternalCallSite` and `SaturatedClosureCallSite` retain only source
+lookup/evaluation facts and the actual compiler equations; neither contains a
+numeric target, concrete address, physical result, target body, or target
+execution. `DirectDeclarationCallImplementationWithCache.ofInternalCompiler`
+inverts the generated argument-plus-declaration call, derives physical
+arguments from `compileArgs`, obtains both local indices from
+`LocalLayoutAligned`, constructs the checked destination write from the
+canonical cache frame, and delegates only the hereditary callee theorem to
+`DirectInternalCallDeclarationInduction`.
+
+The closure sibling factors the common resource proof through
+`ofBudgetedCallStepExact` and
+`ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact`.
+`SaturatedClosureDispatchSelectionInduction` must return an exact equality
+between the production candidate fold and its resolved first-match cases.
+`SaturatedClosureCallImplementationWithCache.ofInternalCompiler` feeds that
+equality to `instructions_compileClosureDispatch`, so the adapted target
+program is derived rather than supplied by the induction. Its entry-relative
+runtime theorem threads the selected callee's evolved `LazyCacheGlobalsRel`
+just like a named call.
+
+The remaining call work is constructive discharge of
+`SaturatedClosureDispatchSelectionInduction` from the concrete closure
+representation, resolver contracts, fixed-capture projections, and the
+hereditary declaration family. Once that and the corresponding uniform named
+declaration induction are built, the call branch can be installed in the
+syntax-directed body theorem and construct
 `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
-generated declaration environment. Heap-valued cache publication remains a
-separate extension because it cannot satisfy the current all-location
-`OrdinaryPersistenceTransport`; it will require a deliberately weaker
-entry invariant or coordinated alias/fact invalidation, not an unsound
+generated declaration environment. Underapplication remains the separate
+allocating closure branch. Heap-valued cache publication remains a separate
+extension because it cannot satisfy the current all-location
+`OrdinaryPersistenceTransport`; it will require a deliberately weaker entry
+invariant or coordinated alias/fact invalidation, not an unsound
 unchanged-heap adapter.
 
 ## Parallel agent packages

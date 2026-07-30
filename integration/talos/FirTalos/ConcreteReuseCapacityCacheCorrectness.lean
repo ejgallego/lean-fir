@@ -3926,15 +3926,15 @@ def DirectDeclarationCallImplementationWithCache
       {targetValue : Wasm.Program}
       {initial : Wasm.Store Host}
       {locals : Wasm.Locals}
-      {resultIndex stepCost : Nat}
+      {resultIndex remainingBytes stepCost : Nat}
       {initialWitness : RefinementWitness},
     CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
         sourceValue stepCost →
       SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue →
-      ReuseCapacityStateRelated facts callerFunction sourceRuntime sourceEnv
-        initial locals initialWitness →
-      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial →
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness →
       Fir.Wasm.compileLetValue context decl = .ok valueCode →
       instructions sourceModule callerFunction labels valueCode =
         .ok targetValue →
@@ -3993,19 +3993,18 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
     valueCode targetValue initial locals resultIndex remainingBytes stepCost
     initialWitness supported stepFits invariant sourceStep valueCompiled
     valueAdapted resultFound
-  rcases invariant with
-    ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+  rcases invariant with ⟨cacheInvariant, entryTransports⟩
   obtain ⟨calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
       argumentTarget, afterCall, updated, resultWitness, physicalArgs,
       resultKind, physical, targetEq, resultKindAt, assembled, callee,
       targetSet, transfer⟩ :=
-    implementation supported sourceStep baseInvariant.1.1.1 cacheTable
-      valueCompiled valueAdapted resultFound
+    implementation supported sourceStep cacheInvariant valueCompiled
+      valueAdapted resultFound
   subst targetValue
   obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, nextTransfer, nextBaseInvariant⟩ :=
-    baseInvariant.ofDirectDeclarationCallExact stepFits sourceStep resultFound
-      resultKindAt assembled callee.declaration targetSet transfer
+    cacheInvariant.1.ofDirectDeclarationCallExact stepFits sourceStep
+      resultFound resultKindAt assembled callee.declaration targetSet transfer
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         afterCall entryWitness resultWitness :=
@@ -4020,6 +4019,698 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
     eraseReuseCapacityFact facts decl.fvarId, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
     nextTransfer, ⟨⟨nextBaseInvariant, callee.cacheTable⟩, nextEntry⟩⟩
+
+/--
+Source/static admission for one saturated internal named call.
+
+The relation retains the actual `compileArgs` and `evalArgs` equations because
+they identify the source parameters, but contains no numeric target index,
+physical argument, store, witness, target execution, or translation
+certificate. The successful `bindParams` equation rules out both
+underapplication and overapplication; `nonCached` separates ordinary calls
+from the nullary lazy-cache family.
+-/
+structure DirectInternalCallSite
+    (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure)
+    (sourceEnv : Env) where
+  declaration : Name
+  sourceDeclaration : LCNF.Decl .impure
+  calleeCode : LCNF.Code .impure
+  calleeEnv : Env
+  resultKind : AbiKind
+  args : Array (LCNF.Arg .impure)
+  argumentCode : List Fir.Wasm.Instruction
+  argumentKinds : Array AbiKind
+  semanticArgs : Array Value
+  valueEq : decl.value = .fap declaration args
+  kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind
+  declarationFound :
+    context.program.findDecl? declaration = some sourceDeclaration
+  nonCached :
+    (args.isEmpty && sourceDeclaration.params.isEmpty) = false
+  bodyEq : sourceDeclaration.value = .code calleeCode
+  argumentsCompiled :
+    Fir.Wasm.compileArgs context args =
+      .ok (argumentCode, argumentKinds)
+  argumentsEvaluated :
+    evalArgs sourceEnv args = .ok semanticArgs
+  parametersBound :
+    bindParams sourceDeclaration.params semanticArgs = .ok calleeEnv
+  resultCompiled :
+    Fir.Wasm.getLocal context decl.fvarId =
+      .ok (.localGet decl.fvarId, resultKind)
+
+/--
+Source-facing family of saturated internal named calls.
+
+Runtime endpoints and cost are indices because they are selected by the
+actual source execution and hereditary declaration theorem, not stored as
+proof artifacts in the call-site admission.
+-/
+inductive DirectInternalCallSupported (context : Fir.Wasm.Context) :
+    RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+      RuntimeState → Value → Nat → Prop where
+  | intro
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      (site :
+        DirectInternalCallSite context decl sourceEnv) :
+      DirectInternalCallSupported context sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue stepCost
+
+/--
+Module-level hereditary theorem required by saturated internal named calls.
+
+Production compilation supplies the numeric declaration index and the
+physical arguments related to the admitted source arguments. Declaration
+induction must return correctness for that exact function entry together with
+the evolved whole-cache table. This is quantified over all executions and
+compiler outputs; it is not a per-call target certificate.
+-/
+def DirectInternalCallDeclarationInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {callerFunction : Fir.Wasm.Function}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost remainingBytes : Nat}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {initialWitness : RefinementWitness}
+      (site : DirectInternalCallSite context decl sourceEnv)
+      {functionIndex : Nat}
+      {physicalArgs : List Wasm.Value},
+    SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue →
+        ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+            sourceExternals facts remainingBytes sourceRuntime sourceEnv
+            initial locals initialWitness →
+          callIndex? sourceModule (.declaration site.declaration) =
+              some functionIndex →
+            ConstructorArgumentsRelated initialWitness
+                site.argumentKinds.toList physicalArgs
+                site.semanticArgs.toList →
+              ∃ calleeFunction targetFunction afterCall resultWitness physical,
+                BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                  context sourceModule calleeFunction targetModule.wasmModule
+                  hosts.env sourceExternals sourceRuntime nextRuntime
+                  site.calleeEnv site.calleeCode targetFunction functionIndex
+                  initial afterCall initialWitness resultWitness
+                  physicalArgs.reverse site.resultKind sourceValue physical
+                  stepCost
+
+/--
+Production compiler construction of the cache-aware direct-call law.
+
+Argument code, numeric declaration selection, physical operands, result-local
+layout, and the checked destination write are all recovered from
+`compileLetValue`, the Talos adapter, and the canonical caller frame. The only
+recursive premise is the module-wide declaration induction above.
+-/
+theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (declarations :
+      DirectInternalCallDeclarationInduction context sourceModule targetModule
+        hosts sourceExternals) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      callerFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (DirectInternalCallSupported context) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported sourceStep invariant valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | intro site =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (site.argumentCode ++
+              [.call (.declaration site.declaration)]) := by
+        simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+          site.kindEq, site.argumentsCompiled, site.declarationFound,
+          site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
+      have valueCodeEq :
+          valueCode =
+            site.argumentCode ++ [.call (.declaration site.declaration)] := by
+        rw [expectedCompiled] at valueCompiled
+        exact (Except.ok.inj valueCompiled).symm
+      subst valueCode
+      obtain ⟨targetArguments, functionIndex, argumentsAdapted, callFound,
+          targetValueEq⟩ :=
+        instructions_append_declaration_call_eq valueAdapted
+      subst targetValue
+      obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
+        constructorArgsReady_of_compileArgs spec.localsAligned
+          site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+          invariant.1.1.1.1.stateRelated
+      have assembled :
+          ClosureArgumentAssembly targetModule.wasmModule hosts.env
+            targetArguments physicalArgs initial locals :=
+        ClosureArgumentAssembly.ofConstructorArgsReady argumentsReady
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned site.resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨calleeFunction, targetFunction, afterCall, resultWitness,
+          physical, callee⟩ :=
+        declarations site sourceStep invariant callFound argumentsRelated
+      obtain ⟨updated, targetSet, _⟩ :=
+        invariant.1.1.1.2.2.1.set?
+          (nextRuntime := nextRuntime)
+          (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+          (nextStore := afterCall)
+          (nextWitness := resultWitness)
+          (physical := physical) resultFound
+      refine
+        ⟨calleeFunction, site.calleeEnv, site.calleeCode, targetFunction,
+          functionIndex, targetArguments, afterCall, updated, resultWitness,
+          physicalArgs, site.resultKind, physical, rfl, resultKindAt,
+          assembled, callee, targetSet, ?_⟩
+      simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
+
+/--
+A selected saturated closure candidate reconstructs the cache-augmented
+canonical caller frame at the hereditary callee's exact endpoint.
+
+The dispatch matcher chain itself is read-only. The selected declaration
+therefore contributes the same witness, capacity, ordinaryness, immutable
+table, and evolved-cache transports as a direct named call; only the
+compiler-generated control prefix differs.
+-/
+theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv calleeEnv : Env}
+    {calleeCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex closureIndex remainingBytes stepCost : Nat}
+    {closureId : FVarId} {address : Word32}
+    {initialWitness resultWitness : RefinementWitness}
+    {argumentTarget : Wasm.Program}
+    {physicalArgs : List Wasm.Value}
+    {resultKind : AbiKind} {physical : Wasm.Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (stepFits : stepCost ≤ remainingBytes)
+    (before : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (selected :
+      ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address)
+    (suffix : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (sourceStep :
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hClosure :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (hSat : hostEnv.Satisfies module spec)
+    (beforeNonmatching :
+      ∀ candidate, candidate ∈ before →
+        candidate.matched = (0 : UInt32))
+    (selectedMatches : (selected.matched != 0) = true)
+    (assembled :
+      ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+        initial locals)
+    (selectedBodyEq :
+      selected.targetBody =
+        argumentTarget ++ [.call functionIndex, .localSet resultIndex])
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule calleeFunction module hostEnv sourceExternals
+        sourceRuntime nextRuntime calleeEnv calleeCode targetFunction
+        functionIndex initial afterCall initialWitness resultWitness
+        physicalArgs.reverse resultKind sourceValue physical stepCost)
+    (targetSet :
+      locals.set? resultIndex physical = some updated)
+    (transfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId)) :
+    CallLetStepSimulates context callerFunction module hostEnv sourceExternals
+          decl continuation
+          (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+            [.localGet resultIndex])
+          sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall
+          locals updated resultIndex initialWitness resultWitness ∧
+      afterCall.host.externals = initial.host.externals ∧
+        afterCall.host.closureDescriptors =
+            initial.host.closureDescriptors ∧
+          resultWitness.closureDescriptors =
+              initialWitness.closureDescriptors ∧
+            reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) ∧
+              ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+                sourceExternals (eraseReuseCapacityFact facts decl.fvarId)
+                (remainingBytes - stepCost) nextRuntime
+                (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+                resultWitness := by
+  have capacityStep :
+      ReuseCapacityCallLetStepSimulates facts
+        (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+        hostEnv sourceExternals decl continuation
+        (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+          [.localGet resultIndex])
+        sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall locals
+        updated resultIndex initialWitness resultWitness :=
+    ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration before
+      selected suffix sourceStep invariant.1.1.1.1 resultFound resultKindAt
+      hClosure hSat beforeNonmatching selectedMatches assembled selectedBodyEq
+      callee.declaration.capacityPreserving targetSet
+  obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, nextTransfer, nextBaseInvariant⟩ :=
+    invariant.1.ofBudgetedCallStepExact stepFits capacityStep
+      callee.declaration targetSet transfer
+  exact ⟨step, externalsPreserved, hostDescriptorsPreserved,
+    witnessDescriptorsPreserved, nextTransfer,
+    ⟨nextBaseInvariant, callee.cacheTable⟩⟩
+
+/--
+Uniform cache-aware implementation condition for saturated generated closure
+dispatch.
+
+The implementation must recover the exact compiler candidate list and first
+matching candidate, prove the generated capture/argument assembly, and select
+the hereditary declaration theorem for that candidate. Returning those facts
+from a module-wide implementation keeps target selection out of the
+source-facing call admission.
+-/
+def SaturatedClosureCallImplementationWithCache
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (spec : Wasm.HostSpec Host)
+    (sourceExternals : ExternalImpl)
+    (CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {resultIndex remainingBytes stepCost : Nat}
+      {initialWitness : RefinementWitness},
+    CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule callerFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex →
+      ∃ (closureId : FVarId) (closureIndex : Nat) (address : Word32)
+          (before : List
+            (ClosureCandidateCase sourceModule callerFunction labels module
+              spec initial closureId closureIndex address))
+          (selected :
+            ClosureCandidateCase sourceModule callerFunction labels module spec
+              initial closureId closureIndex address)
+          (suffix : List
+            (ClosureCandidateCase sourceModule callerFunction labels module
+              spec initial closureId closureIndex address))
+          (calleeFunction : Fir.Wasm.Function) (calleeEnv : Env)
+          (calleeCode : LCNF.Code .impure)
+          (targetFunction : Wasm.Function) (functionIndex : Nat)
+          (argumentTarget : Wasm.Program) (afterCall : Wasm.Store Host)
+          (updated : Wasm.Locals) (resultWitness : RefinementWitness)
+          (physicalArgs : List Wasm.Value) (resultKind : AbiKind)
+          (physical : Wasm.Value),
+        targetValue =
+            resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+              [.localGet resultIndex] ∧
+          (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+              some resultKind ∧
+            locals.get closureIndex =
+                some (.i32 (UInt32.ofNat address.value)) ∧
+              hostEnv.Satisfies module spec ∧
+                (∀ candidate, candidate ∈ before →
+                  candidate.matched = (0 : UInt32)) ∧
+                  (selected.matched != 0) = true ∧
+                    ClosureArgumentAssembly module hostEnv argumentTarget
+                        physicalArgs initial locals ∧
+                      selected.targetBody =
+                          argumentTarget ++
+                            [.call functionIndex, .localSet resultIndex] ∧
+                        BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                            context sourceModule calleeFunction module hostEnv
+                            sourceExternals sourceRuntime nextRuntime calleeEnv
+                            calleeCode targetFunction functionIndex initial
+                            afterCall initialWitness resultWitness
+                            physicalArgs.reverse resultKind sourceValue physical
+                            stepCost ∧
+                          locals.set? resultIndex physical = some updated ∧
+                            reuseCapacityLetFacts? facts decl =
+                              some
+                                (eraseReuseCapacityFact facts decl.fvarId)
+
+/--
+A uniform saturated-dispatch implementation supplies the same fixed-entry
+call law as direct declaration calls.
+
+The exact cache table returned by the selected hereditary callee becomes the
+successor table. Matcher and capture-projection prefixes do not need an
+unchanged-cache assumption.
+-/
+theorem
+    SaturatedClosureCallImplementationWithCache.runtimeRefinesEntryRelative
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    (implementation :
+      SaturatedClosureCallImplementationWithCache context sourceModule
+        callerFunction labels module hostEnv spec sourceExternals
+        CallSupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels module hostEnv sourceExternals CallSupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  rcases invariant with ⟨cacheInvariant, entryTransports⟩
+  obtain ⟨closureId, closureIndex, address, before, selected, suffix,
+      calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
+      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
+      resultKind, physical, targetEq, resultKindAt, hClosure, hSat,
+      beforeNonmatching, selectedMatches, assembled, selectedBodyEq, callee,
+      targetSet, transfer⟩ :=
+    implementation supported sourceStep cacheInvariant valueCompiled
+      valueAdapted resultFound
+  subst targetValue
+  obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, nextTransfer, nextCacheInvariant⟩ :=
+    cacheInvariant.ofSaturatedClosureDeclarationExact stepFits before selected
+      suffix sourceStep resultFound resultKindAt hClosure hSat
+      beforeNonmatching selectedMatches assembled selectedBodyEq callee
+      targetSet transfer
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        afterCall entryWitness resultWitness :=
+    entryTransports.step
+      callee.declaration.capacityPreserving.witnessTransport
+      callee.declaration.capacityPreserving.capacityTransport
+      callee.declaration.ordinaryTransport
+      callee.declaration.externalsPreserved
+      callee.declaration.hostDescriptorsPreserved
+      callee.declaration.witnessDescriptorsPreserved
+  exact ⟨afterCall, updated, resultWitness,
+    eraseReuseCapacityFact facts decl.fvarId, step, externalsPreserved,
+    hostDescriptorsPreserved, witnessDescriptorsPreserved, nextTransfer,
+    ⟨nextCacheInvariant, nextEntry⟩⟩
+
+/--
+Source/static admission for one nonempty closure application.
+
+The site records the source closure lookup and the executable
+compile/evaluation equations for the new arguments. It contains no candidate
+list, numeric target index, concrete address, physical value, target body, or
+target execution.
+-/
+structure SaturatedClosureCallSite
+    (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure)
+    (sourceEnv : Env) where
+  closureId : FVarId
+  closureKind : AbiKind
+  sourceClosure : Value
+  args : Array (LCNF.Arg .impure)
+  argumentCode : List Fir.Wasm.Instruction
+  argumentKinds : Array AbiKind
+  semanticArgs : Array Value
+  resultKind : AbiKind
+  valueEq : decl.value = .fvar closureId args
+  kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind
+  closureCompiled :
+    Fir.Wasm.getLocal context closureId =
+      .ok (.localGet closureId, closureKind)
+  argumentsCompiled :
+    Fir.Wasm.compileArgs context args =
+      .ok (argumentCode, argumentKinds)
+  argumentsEvaluated :
+    evalArgs sourceEnv args = .ok semanticArgs
+  nonempty : args.isEmpty = false
+  sourceLookup : lookup sourceEnv closureId = some sourceClosure
+  resultCompiled :
+    Fir.Wasm.getLocal context decl.fvarId =
+      .ok (.localGet decl.fvarId, resultKind)
+
+/-- Source-facing family of admitted saturated closure applications. -/
+inductive SaturatedClosureCallSupported (context : Fir.Wasm.Context) :
+    RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+      RuntimeState → Value → Nat → Prop where
+  | intro
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      (site : SaturatedClosureCallSite context decl sourceEnv) :
+      SaturatedClosureCallSupported context sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue stepCost
+
+/--
+Module-level first-match and hereditary-declaration induction for generated
+closure dispatch.
+
+The conclusion must enumerate exactly the candidates produced by
+`compileClosureDispatch`; the adapter equation is derived later from that
+equality. Dynamic representation reasoning supplies the concrete closure
+address and first matching candidate, while recursive declaration induction
+supplies that candidate's cache-aware callee theorem. Thus neither the source
+admission nor the compiler constructor accepts a target execution certificate.
+-/
+def SaturatedClosureDispatchSelectionInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost remainingBytes : Nat}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {initialWitness : RefinementWitness}
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      {closureIndex resultIndex : Nat},
+    SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue →
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+          sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+          locals initialWitness →
+        findFVar? (functionBindings callerFunction) site.closureId =
+            some closureIndex →
+          findFVar? (functionBindings callerFunction) decl.fvarId =
+              some resultIndex →
+            ∃ (address : Word32)
+                (before : List
+                  (ClosureCandidateCase sourceModule callerFunction labels
+                    targetModule.wasmModule hosts.spec initial site.closureId
+                    closureIndex address))
+                (selected :
+                  ClosureCandidateCase sourceModule callerFunction labels
+                    targetModule.wasmModule hosts.spec initial site.closureId
+                    closureIndex address)
+                (suffix : List
+                  (ClosureCandidateCase sourceModule callerFunction labels
+                    targetModule.wasmModule hosts.spec initial site.closureId
+                    closureIndex address))
+                (calleeFunction : Fir.Wasm.Function) (calleeEnv : Env)
+                (calleeCode : LCNF.Code .impure)
+                (targetFunction : Wasm.Function) (functionIndex : Nat)
+                (argumentTarget : Wasm.Program)
+                (afterCall : Wasm.Store Host) (updated : Wasm.Locals)
+                (resultWitness : RefinementWitness)
+                (physicalArgs : List Wasm.Value) (physical : Wasm.Value),
+              context.program.decls.toList.flatMap (fun target =>
+                  compileClosureCandidatesForTarget decl.fvarId site.closureId
+                    site.resultKind site.argumentCode site.argumentKinds
+                    target) =
+                  (before ++ selected :: suffix).map (·.source) ∧
+                locals.get closureIndex =
+                    some (.i32 (UInt32.ofNat address.value)) ∧
+                  (∀ candidate, candidate ∈ before →
+                    candidate.matched = (0 : UInt32)) ∧
+                    (selected.matched != 0) = true ∧
+                      ClosureArgumentAssembly targetModule.wasmModule hosts.env
+                          argumentTarget physicalArgs initial locals ∧
+                        selected.targetBody =
+                            argumentTarget ++
+                              [.call functionIndex, .localSet resultIndex] ∧
+                          BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                              context sourceModule calleeFunction
+                              targetModule.wasmModule hosts.env sourceExternals
+                              sourceRuntime nextRuntime calleeEnv calleeCode
+                              targetFunction functionIndex initial afterCall
+                              initialWitness resultWitness physicalArgs.reverse
+                              site.resultKind sourceValue physical stepCost ∧
+                            locals.set? resultIndex physical = some updated
+
+/--
+Production compiler construction of the saturated closure-dispatch call law.
+
+The source site fixes the real nonempty `compileClosureDispatch` expression.
+The module induction returns an exact compiler candidate enumeration; the
+existing adapter theorem then determines `targetValue` rather than accepting
+it from the induction. Local indices come from the generated local layout and
+the selected callee returns the evolved cache table.
+-/
+theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (selection :
+      SaturatedClosureDispatchSelectionInduction context sourceModule
+        callerFunction labels targetModule hosts sourceExternals) :
+    SaturatedClosureCallImplementationWithCache context sourceModule
+      callerFunction labels targetModule.wasmModule hosts.env hosts.spec
+      sourceExternals (SaturatedClosureCallSupported context) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported sourceStep invariant valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | intro site =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (compileClosureDispatch context decl.fvarId site.closureId
+              site.resultKind site.argumentCode site.argumentKinds) := by
+        simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+          site.kindEq, site.closureCompiled, site.argumentsCompiled,
+          site.nonempty, Bind.bind, Except.bind, pure, Except.pure]
+      have valueCodeEq :
+          valueCode =
+            compileClosureDispatch context decl.fvarId site.closureId
+              site.resultKind site.argumentCode site.argumentKinds := by
+        rw [expectedCompiled] at valueCompiled
+        exact (Except.ok.inj valueCompiled).symm
+      subst valueCode
+      obtain ⟨closureIndex, closureFound, _⟩ :=
+        spec.localsAligned site.closureCompiled
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned site.resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨address, before, selected, suffix, calleeFunction, calleeEnv,
+          calleeCode, targetFunction, functionIndex, argumentTarget, afterCall,
+          updated, resultWitness, physicalArgs, physical, candidatesEq,
+          hClosure, beforeNonmatching, selectedMatches, assembled,
+          selectedBodyEq, callee, targetSet⟩ :=
+        selection site sourceStep invariant closureFound resultFound
+      have dispatchAdapted :
+          instructions sourceModule callerFunction labels
+              (compileClosureDispatch context decl.fvarId site.closureId
+                site.resultKind site.argumentCode site.argumentKinds) =
+            .ok
+              (resolvedClosureCandidateChain
+                  (before ++ selected :: suffix) ++
+                [.localGet resultIndex]) :=
+        instructions_compileClosureDispatch (before ++ selected :: suffix)
+          candidatesEq closureFound resultFound
+      have targetEq :
+          targetValue =
+            resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+              [.localGet resultIndex] := by
+        rw [dispatchAdapted] at valueAdapted
+        exact (Except.ok.inj valueAdapted).symm
+      refine
+        ⟨site.closureId, closureIndex, address, before, selected, suffix,
+          calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
+          argumentTarget, afterCall, updated, resultWitness, physicalArgs,
+          site.resultKind, physical, targetEq, resultKindAt, hClosure,
+          spec.hostsSatisfy, beforeNonmatching, selectedMatches, assembled,
+          selectedBodyEq, callee, targetSet, ?_⟩
+      simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 /-- Lift an existing canonical entry frame to the cache-augmented invariant
 for the production adapter/Talos initial store. -/
