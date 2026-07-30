@@ -165,7 +165,11 @@ This removes another opaque hit premise without weakening the runtime.
 `LazyCacheGlobalsRel` now threads empty/populated state across the complete
 generated table, establishes the adapted empty initial state, transports
 through operations that preserve both global tables, and lets the generated
-hit theorem recover its populated physical lane from the table. The remaining
-program-level cache update is the exact miss publication: replace its one
-empty slot, preserve all other slots, and combine that update with the source
-publication/disjointness obligation above.
+hit theorem recover its populated physical lane from the table. Semantic
+absence selects the empty slot and its zero flag; exact source/Wasm
+publication replaces it with the populated relation, while initializer
+uniqueness and paired-index arithmetic preserve all other slots. The updated
+table and budgeted miss are packaged at the same post-state. The remaining
+bug-specific obligation is unchanged: generated source execution must supply
+the publication equation and prove retained-token reachability disjointness,
+or shared validation must invalidate the affected facts.

@@ -819,9 +819,15 @@ acceptance tests pass.
    operations that preserve both global tables. A semantic lookup eliminates
    the empty branch, and `hit_of_compiledCacheTable` consumes the resulting
    physical lane at the exact generated indices.
-   Prove the pointwise miss-publication update, derive
-   `LazyCacheTableLayout` from successful generated module validation, and
-   thread the table through the canonical program invariant. Resolve the remaining
+   `LazyCacheGlobalsRel.publish` now proves the pointwise miss-publication
+   update. Semantic absence yields the old zero flag; initializer uniqueness
+   and the even/odd physical layout preserve every other source/target slot.
+   `withPublishedCacheTable` packages the updated table with the exact
+   budgeted miss result.
+   Derive `LazyCacheTableLayout` and initializer uniqueness from successful
+   generated module validation, extract the semantic empty/publication facts
+   from source miss execution, and thread the table through an augmented
+   canonical program invariant. Resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the

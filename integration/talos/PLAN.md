@@ -4906,14 +4906,26 @@ changes. A semantic lookup forces the corresponding slot to be populated, so
 `hit_of_compiledCacheTable` now derives the physical cache lane and complete
 generated hit directly from the table invariant.
 
-The next generated-environment slice is the pointwise publication update:
-prove that the exact miss-side source `setGlobal` and two Wasm global writes
-replace one empty table slot with a populated slot while preserving every
-other slot and coverage. Then carry `LazyCacheGlobalsRel` in the canonical
-program invariant. The miss side still separately owes the source publication
-equation and retained-token disjointness (or validator invalidation), and the
-layout premise should ultimately be discharged from successful generated
-module validation rather than restated by callers.
+W6.6gzg closes the pointwise publication update.
+`LazyCacheGlobalsRel.emptySlot` turns semantic cache absence into the exact
+zero physical flag; the value write preserves that flag.
+`LazyCacheGlobalsRel.publish` then combines the source `setGlobal` with the
+two physical writes, replaces the selected slot by
+`PopulatedLazyCacheSlotRel`, and preserves every other slot. Initializer
+uniqueness proves distinct source names, while the even/odd pair layout proves
+the four required physical-index inequalities. The theorem also preserves
+`semanticCovered`, so publication cannot introduce an ungenerated semantic
+entry. `withPublishedCacheTable` packages this update with the existing exact
+budgeted generated miss at one shared post-state, witness, and final store.
+
+The next generated-environment slice must carry `LazyCacheGlobalsRel` in an
+augmented canonical program frame and preserve it through declaration bodies
+that may themselves populate other cache slots. The miss side still
+separately owes extraction of semantic cache absence, the source publication
+equation, and retained-token disjointness (or validator invalidation) from the
+generated source execution. `LazyCacheTableLayout` and initializer uniqueness
+should ultimately be discharged from successful generated-module validation
+rather than restated by callers.
 
 ## Parallel agent packages
 
