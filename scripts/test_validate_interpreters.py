@@ -1210,11 +1210,42 @@ class HarnessTests(unittest.TestCase):
         manifest = [
             descriptor("a-case", tags=["quick"]),
             descriptor("b-case", tags=["extended"]),
+            descriptor(
+                "c-case", tags=["quick", "wasm-generation-pending"]
+            ),
         ]
-        self.assertEqual(harness.select_cases(manifest, None, "quick"), ["a-case"])
+        self.assertEqual(
+            harness.select_cases(manifest, None, "quick"),
+            ["a-case", "c-case"],
+        )
         self.assertEqual(harness.select_cases(manifest, ["b-case"], "quick"), ["b-case"])
+        self.assertEqual(
+            harness.select_cases(
+                manifest, None, None, ("wasm-generation-pending",)
+            ),
+            ["a-case", "b-case"],
+        )
+        self.assertEqual(
+            harness.select_cases(
+                manifest, None, "quick", ("wasm-generation-pending",)
+            ),
+            ["a-case"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "excluded by plan tag"
+        ):
+            harness.select_cases(
+                manifest,
+                ["c-case"],
+                None,
+                ("wasm-generation-pending",),
+            )
         with self.assertRaisesRegex(harness.ValidationError, "selected no cases"):
             harness.select_cases(manifest, None, "missing")
+        with self.assertRaisesRegex(harness.ValidationError, "selected no cases"):
+            harness.select_cases(
+                [manifest[2]], None, None, ("wasm-generation-pending",)
+            )
 
     def test_corpus_artifact_is_deterministic(self) -> None:
         manifest = [descriptor("a-case", tags=["quick", "data"])]
@@ -4273,6 +4304,7 @@ class HarnessTests(unittest.TestCase):
                             "../adapters/v8.json",
                             "../adapters/talos.json",
                         ],
+                        "excludeTags": ["wasm-generation-pending"],
                         "pairs": [
                             {"reference": "native", "candidate": "lcnf"},
                             {"reference": "native", "candidate": "v8"},
@@ -4299,6 +4331,9 @@ class HarnessTests(unittest.TestCase):
             )
             self.assertEqual(declaration.corpus_backend, "direct-native")
             self.assertEqual(
+                declaration.exclude_tags, ("wasm-generation-pending",)
+            )
+            self.assertEqual(
                 declaration.pairs,
                 (
                     ("native", "lcnf"),
@@ -4315,6 +4350,7 @@ class HarnessTests(unittest.TestCase):
                 ),
             )
             self.assertEqual(plan.corpus_backend, "direct-native")
+            self.assertEqual(plan.exclude_tags, ("wasm-generation-pending",))
             self.assertEqual(
                 plan.pairs,
                 (
@@ -4331,6 +4367,57 @@ class HarnessTests(unittest.TestCase):
                 harness.ValidationError, "duplicate comparison pairs"
             ):
                 harness.validation_plan_from_config(path)
+
+            value["pairs"].pop()
+            value["excludeTags"] = ["duplicate", "duplicate"]
+            path.write_text(json.dumps(value), encoding="utf-8")
+            with self.assertRaisesRegex(
+                harness.ValidationError, "excludeTags must be sorted and unique"
+            ):
+                harness.validation_plan_from_config(path)
+
+    def test_retained_plan_rejects_selected_excluded_case(self) -> None:
+        plan = config_input(
+            "validation-plan",
+            "native-v8.json",
+            {
+                "version": 3,
+                "adapterConfigs": [],
+                "excludeTags": ["wasm-generation-pending"],
+                "pairs": [
+                    {"reference": "native", "candidate": "lcnf"}
+                ],
+            },
+        )
+        descriptors = [
+            descriptor("accepted", tags=["quick"]),
+            descriptor(
+                "pending", tags=["quick", "wasm-generation-pending"]
+            ),
+        ]
+        core.validate_control_plane_inputs(
+            [plan],
+            ["native", "lcnf"],
+            [("native", "lcnf")],
+            [],
+            [],
+            [],
+            descriptors,
+            ["accepted"],
+        )
+        with self.assertRaisesRegex(
+            harness.ValidationError, "selected excluded case"
+        ):
+            core.validate_control_plane_inputs(
+                [plan],
+                ["native", "lcnf"],
+                [("native", "lcnf")],
+                [],
+                [],
+                [],
+                descriptors,
+                ["pending"],
+            )
 
     def test_control_plane_allows_unused_adapter_without_a_plan(self) -> None:
         inputs = [
@@ -4378,6 +4465,9 @@ class HarnessTests(unittest.TestCase):
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
         self.assertEqual(plan.provider_configs, (provider_path.resolve(),))
         self.assertEqual(plan.pairs, (("native", "v8"),))
+        self.assertEqual(
+            plan.exclude_tags, ("wasm-generation-pending",)
+        )
         adapter = harness.external_adapter_from_config(adapter_path)
         self.assertEqual(adapter.name, "v8")
         self.assertEqual(adapter.build_command, [])
@@ -4500,6 +4590,9 @@ class HarnessTests(unittest.TestCase):
         )
         self.assertEqual(plan.adapter_configs, (adapter_path.resolve(),))
         self.assertEqual(plan.provider_configs, (provider_path.resolve(),))
+        self.assertEqual(
+            plan.exclude_tags, ("wasm-generation-pending",)
+        )
         self.assertEqual(
             plan.pairs,
             (

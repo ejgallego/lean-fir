@@ -442,6 +442,7 @@ def main() -> int:
         corpus_backend_name = plan.corpus_backend
         adapter_config_paths = list(plan.adapter_configs)
         provider_config_paths = list(plan.provider_configs)
+        exclude_tags = plan.exclude_tags
     else:
         corpus_backend_name = args.corpus_backend or "native"
         pair_names = (
@@ -455,6 +456,7 @@ def main() -> int:
         )
         adapter_config_paths = args.adapter_config
         provider_config_paths = args.provider_config
+        exclude_tags = ()
     if len(set(pair_names)) != len(pair_names):
         raise ValidationError("comparison pair selected more than once")
     provider_inputs = [
@@ -534,7 +536,7 @@ def main() -> int:
     descriptors = corpus_manifest(corpus_adapter)
     for adapter in participating_adapters.values():
         descriptors = adapter.prepare_manifest(descriptors)
-    selected = select_cases(descriptors, args.cases, args.tag)
+    selected = select_cases(descriptors, args.cases, args.tag, exclude_tags)
     write_corpus_manifest(args.out_dir, descriptors)
     base_context = RunContext(
         ROOT,

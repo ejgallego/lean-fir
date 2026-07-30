@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 581,
-        "minimumComparisons": 581,
+        "minimumCases": 583,
+        "minimumComparisons": 583,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 590,
-      "minimumTierCases": 1171,
-      "minimumComparisons": 1752
+      "minimumUniqueCases": 592,
+      "minimumTierCases": 1173,
+      "minimumComparisons": 1754
     },
     "machine": {
-      "minimumCases": 590,
-      "minimumInterpreterSteps": 4790,
+      "minimumCases": 592,
+      "minimumInterpreterSteps": 4840,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -452,12 +452,12 @@
       {
         "tier": "source-lcnf",
         "tag": "boundary",
-        "minimumCases": 419
+        "minimumCases": 421
       },
       {
         "tier": "source-lcnf",
         "tag": "closure",
-        "minimumCases": 2
+        "minimumCases": 4
       },
       {
         "tier": "source-lcnf",
@@ -502,7 +502,12 @@
       {
         "tier": "source-lcnf",
         "tag": "scalar",
-        "minimumCases": 357
+        "minimumCases": 359
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "wasm-generation-pending",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -592,6 +597,18 @@
       },
       {
         "tier": "source-lcnf",
+        "name": "bool-scalar-entry-closure",
+        "allTags": [
+          "bool",
+          "closure",
+          "partial-application",
+          "scalar",
+          "wasm-generation-pending"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "name": "bytearray-copy-on-write",
         "allTags": ["bytearray", "copy-on-write"],
         "minimumCases": 5
@@ -624,7 +641,7 @@
         "tier": "source-lcnf",
         "name": "closure-partial-application",
         "allTags": ["closure", "partial-application"],
-        "minimumCases": 1
+        "minimumCases": 3
       },
       {
         "tier": "source-lcnf",

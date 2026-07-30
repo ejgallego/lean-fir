@@ -309,6 +309,7 @@ Talos without changing this comparison model:
   "corpusBackend": "native",
   "providerConfigs": ["../validation-providers/lean-wasm-semantic.json"],
   "adapterConfigs": ["../validation-adapters/v8.json", "../validation-adapters/talos.json"],
+  "excludeTags": ["wasm-generation-pending"],
   "pairs": [
     {"reference": "native", "candidate": "lcnf"},
     {"reference": "native", "candidate": "v8"},
@@ -321,8 +322,16 @@ Talos without changing this comparison model:
 Adapter-config paths are resolved relative to the plan file, not the invoking
 shell. `corpusBackend` selects the registered backend whose executable owns
 manifest discovery and defaults to `native`; the direct plan selects
-`direct-native`. Unknown fields, protocol-version drift, duplicate paths or pairs,
-self-comparisons, malformed backend names, and an empty graph are rejected.
+`direct-native`. `excludeTags` is a sorted-selection fence for backend
+capability boundaries: any case carrying one of those tags is absent from the
+entire plan, and an explicit `--case` request for an excluded case fails rather
+than silently weakening the request. The exact plan bytes and resulting
+ordered case selection remain independently bound into the run identity.
+This lets the source-oracle/native-LCNF plan grow ahead of a compiler backend
+while the coverage index still composes both tiers. Unknown fields,
+protocol-version drift, duplicate paths, pairs, or exclusion tags,
+self-comparisons, malformed backend names, a fully excluded corpus, and an
+empty graph are rejected.
 `--plan` is exclusive with the pair/adapter flags; `--case`, `--tag`,
 `--out-dir`, and `--no-build` remain valid runtime controls.
 
@@ -1605,6 +1614,12 @@ before and after each successful external call, so heap effects are decoded at
 event time rather than through potentially mutated or dead final-heap
 references. The V8 adapter materializes the same schema-directed datums at the
 Wasm import boundary and retains its own private event-time heap views.
+Runner-supplied `Bool` arguments use Lean's unboxed final-LCNF entry ABI,
+`.scalar (.uint8 0|1)`, rather than the tagged-object representation used by
+nullary constructors. Two native-oracle cases capture both Boolean values in a
+partial application and pin the exact compiler-generated
+`box`/`pap`/`unbox`/branch trace. This distinguishes correct entry encoding from
+direct Boolean branches that can otherwise tolerate the wrong representation.
 
 The validation backend's external implementation is reject-by-default.
 `Nat.add`, `Nat.div`, `Nat.mod`, `Nat.mul`, `Nat.sub`, `Nat.decEq`,
@@ -1706,7 +1721,12 @@ and a packed constructor initialized through `uset`/`sset`, projected through
 captured helpers internally while exporting only the selected entry.
 Compiler-generated direct calls, captured and underapplied closures, recursive
 empty and traversal paths, and an exact `Nat.add` external now run in V8 as
-well.  A heap-backed Unicode `String → String` round trip retains the
+well. The Boolean-capture regression currently carries
+`wasm-generation-pending`: the public compiler surface returns the typed
+`unsupportedCode` validation error before product emission, so the V8 plans
+exclude only that explicit tag while native/LCNF keeps both cases. Removing the
+tag is a later compiler-admission handoff, not a lane-4 lowering workaround.
+A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and
 negative immediates, both exact 32-bit boundaries, and the first positive and

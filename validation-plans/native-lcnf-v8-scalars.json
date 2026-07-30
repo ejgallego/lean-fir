@@ -6,6 +6,9 @@
   "adapterConfigs": [
     "../validation-adapters/v8-scalars.json"
   ],
+  "excludeTags": [
+    "wasm-generation-pending"
+  ],
   "pairs": [
     {
       "reference": "native",

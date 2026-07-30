@@ -80,6 +80,13 @@ def capturedPartial (captured x : Nat) : Nat :=
   applyNat (firstNat captured) x
 
 @[noinline]
+def selectCapturedBool (captured : Bool) (_x : Nat) : Nat :=
+  if captured then 1 else 0
+
+def capturedBoolPartial (captured : Bool) (x : Nat) : Nat :=
+  applyNat (selectCapturedBool captured) x
+
+@[noinline]
 def lastOr (fallback : Nat) : List Nat → Nat
   | [] => fallback
   | x :: xs => lastOr x xs
@@ -2069,6 +2076,25 @@ private def assocExpected : Source.Assoc :=
 private def branchFormTrace : Array String :=
   #["cases", "lit", "return"]
 
+private def capturedBoolPartialFormTrace : Array String :=
+  #["box", "pap", "fap", "fvar", "unbox", "fap", "fap", "cases", "lit",
+    "return", "return", "dec", "return", "return", "return"]
+
+private def capturedBoolPartialFormCounts : Array ExecutedFormCountRequirement :=
+  #[{ form := "box", minimum := 1, maximum := some 1 },
+    { form := "cases", minimum := 1, maximum := some 1 },
+    { form := "dec", minimum := 1, maximum := some 1 },
+    { form := "fap", minimum := 3, maximum := some 3 },
+    { form := "fvar", minimum := 1, maximum := some 1 },
+    { form := "lit", minimum := 1, maximum := some 1 },
+    { form := "pap", minimum := 1, maximum := some 1 },
+    { form := "return", minimum := 5, maximum := some 5 },
+    { form := "unbox", minimum := 1, maximum := some 1 }]
+
+private def capturedBoolPartialAdministrativeKinds : Array String :=
+  #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+    "admin:yield-done"]
+
 private def recursiveListFormTrace : Array String :=
   #["lit", "fap", "cases", "oproj", "oproj",
     "fap", "cases", "oproj", "oproj",
@@ -2591,6 +2617,44 @@ private def preConversionCases : Array Case := #[
     requiredLcnfForms := #["pap", "fap", "return"]
     requiredExecutedLcnfForms := #["pap", "fap", "return"]
     requiredAdministrativeStepKinds := #["admin:invoke-value"] },
+  { id := "captured-bool-partial-true"
+    entry := ``Source.capturedBoolPartial
+    dependencies := #[``Source.selectCapturedBool, ``Source.applyNat]
+    args := #[.bool true, .nat 2]
+    argSchemas := #[.bool, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.capturedBoolPartial true 2)
+    tags := #[
+      "quick", "bool", "closure", "partial-application", "scalar", "boundary",
+      "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
+    requiredExecutedLcnfFormCounts := capturedBoolPartialFormCounts
+    requiredExecutedLcnfFormTrace := some capturedBoolPartialFormTrace
+    requiredAdministrativeStepKinds := capturedBoolPartialAdministrativeKinds
+    provenance := firProvenance
+      "Capture runner-supplied Bool true through the scalar entry ABI" },
+  { id := "captured-bool-partial-false"
+    entry := ``Source.capturedBoolPartial
+    dependencies := #[``Source.selectCapturedBool, ``Source.applyNat]
+    args := #[.bool false, .nat 2]
+    argSchemas := #[.bool, .nat]
+    resultSchema := .nat
+    native := fun _ => .nat (Source.capturedBoolPartial false 2)
+    tags := #[
+      "quick", "bool", "closure", "partial-application", "scalar", "boundary",
+      "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
+    requiredExecutedLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
+    requiredExecutedLcnfFormCounts := capturedBoolPartialFormCounts
+    requiredExecutedLcnfFormTrace := some capturedBoolPartialFormTrace
+    requiredAdministrativeStepKinds := capturedBoolPartialAdministrativeKinds
+    provenance := firProvenance
+      "Capture runner-supplied Bool false through the scalar entry ABI" },
   { id := "recursive-traversal"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]

@@ -1849,10 +1849,18 @@ def manifest_from_output(output: str, command: list[str]) -> list[dict]:
 
 
 def select_cases(
-    descriptors: list[dict], requested: list[str] | None, tag: str | None
+    descriptors: list[dict],
+    requested: list[str] | None,
+    tag: str | None,
+    exclude_tags: tuple[str, ...] = (),
 ) -> list[str]:
     all_cases = [descriptor["id"] for descriptor in descriptors]
     known = set(all_cases)
+    excluded = {
+        descriptor["id"]
+        for descriptor in descriptors
+        if any(exclude_tag in descriptor["tags"] for exclude_tag in exclude_tags)
+    }
     if requested:
         duplicates = sorted({case_id for case_id in requested if requested.count(case_id) > 1})
         if duplicates:
@@ -1862,13 +1870,26 @@ def select_cases(
         unknown = sorted(set(requested) - known)
         if unknown:
             raise ValidationError(f"unknown validation case(s): {', '.join(unknown)}")
+        explicitly_excluded = sorted(set(requested) & excluded)
+        if explicitly_excluded:
+            raise ValidationError(
+                "validation case(s) excluded by plan tag: "
+                + ", ".join(explicitly_excluded)
+            )
         return requested
     if tag:
-        selected = [descriptor["id"] for descriptor in descriptors if tag in descriptor["tags"]]
+        selected = [
+            descriptor["id"]
+            for descriptor in descriptors
+            if tag in descriptor["tags"] and descriptor["id"] not in excluded
+        ]
         if not selected:
             raise ValidationError(f"corpus tag selected no cases: {tag}")
         return selected
-    return all_cases
+    selected = [case_id for case_id in all_cases if case_id not in excluded]
+    if not selected:
+        raise ValidationError("validation plan exclusion tags selected no cases")
+    return selected
 
 
 def corpus_artifact_bytes(descriptors: list[dict]) -> bytes:
@@ -5643,6 +5664,7 @@ class ValidationPlan:
     pairs: tuple[tuple[str, str], ...]
     provider_configs: tuple[Path, ...] = ()
     corpus_backend: str = "native"
+    exclude_tags: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -5651,6 +5673,7 @@ class ValidationPlanDeclaration:
     pairs: tuple[tuple[str, str], ...]
     provider_configs: tuple[str, ...] = ()
     corpus_backend: str = "native"
+    exclude_tags: tuple[str, ...] = ()
 
 
 def validation_plan_declaration_from_config(
@@ -5665,7 +5688,7 @@ def validation_plan_declaration_from_config(
     if not isinstance(value, dict):
         raise ValidationError(f"validation plan {path}: expected a JSON object")
     required = {"version", "adapterConfigs", "pairs"}
-    optional = {"providerConfigs", "corpusBackend"}
+    optional = {"providerConfigs", "corpusBackend", "excludeTags"}
     missing = sorted(required - value.keys())
     unknown = sorted(value.keys() - required - optional)
     if missing:
@@ -5716,6 +5739,18 @@ def validation_plan_declaration_from_config(
         f"validation plan {path} corpusBackend",
     )
 
+    raw_exclude_tags = value.get("excludeTags", [])
+    if not isinstance(raw_exclude_tags, list) or not all(
+        isinstance(tag, str) and tag for tag in raw_exclude_tags
+    ):
+        raise ValidationError(
+            f"validation plan {path}: excludeTags must be a string array"
+        )
+    if raw_exclude_tags != sorted(set(raw_exclude_tags)):
+        raise ValidationError(
+            f"validation plan {path}: excludeTags must be sorted and unique"
+        )
+
     raw_pairs = value["pairs"]
     if not isinstance(raw_pairs, list) or not raw_pairs:
         raise ValidationError(
@@ -5744,6 +5779,7 @@ def validation_plan_declaration_from_config(
         tuple(pairs),
         tuple(raw_provider_configs),
         corpus_backend,
+        tuple(raw_exclude_tags),
     )
 
 
@@ -5778,6 +5814,7 @@ def validation_plan_from_config(
         declaration.pairs,
         provider_configs,
         declaration.corpus_backend,
+        declaration.exclude_tags,
     )
 
 
@@ -5788,6 +5825,8 @@ def validate_control_plane_inputs(
     products: list[ValidationProduct],
     bundles: list[ProductBundle],
     consumers: list[ProductConsumer],
+    descriptors: list[dict] | None = None,
+    selected_cases: list[str] | None = None,
 ) -> dict[str, ExternalCommandAdapter]:
     """Close retained configs over the matrix claims they authorized."""
     plan_inputs = [
@@ -5941,6 +5980,27 @@ def validate_control_plane_inputs(
             raise ValidationError(
                 "retained validation plan config paths disagree with inputs"
             )
+        if plan.exclude_tags:
+            if descriptors is None or selected_cases is None:
+                raise ValidationError(
+                    "retained validation plan exclusions have no corpus selection"
+                )
+            descriptors_by_id = {
+                descriptor["id"]: descriptor for descriptor in descriptors
+            }
+            excluded_selected = sorted(
+                case_id
+                for case_id in selected_cases
+                if any(
+                    tag in descriptors_by_id[case_id]["tags"]
+                    for tag in plan.exclude_tags
+                )
+            )
+            if excluded_selected:
+                raise ValidationError(
+                    "retained validation plan selected excluded case(s): "
+                    + ", ".join(excluded_selected)
+                )
     return adapter_configs
 
 
@@ -6478,6 +6538,8 @@ def write_matrix_artifact(
         sorted_products,
         bundles,
         sorted_consumers,
+        context.descriptors,
+        list(context.selected),
     )
     retained_inputs = retain_validation_inputs(context, inputs)
     retained_products = retain_validation_products(context, sorted_products)
@@ -8845,6 +8907,8 @@ def verify_matrix_artifact(
         products,
         bundles,
         product_consumers,
+        list(corpus_cases.values()),
+        selected_cases,
     )
     expected_execution_input_backends = {
         backend

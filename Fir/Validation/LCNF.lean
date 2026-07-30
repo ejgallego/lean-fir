@@ -3084,7 +3084,8 @@ private partial def encodeDatum (runtime : RuntimeState) (schema : ValidationSch
   if !schema.accepts datum then mismatch schema datum
   match schema, datum with
   | .unit, .unit => return (runtime, .object (.tagged 0))
-  | .bool, .bool value => return (runtime, .object (.tagged (if value then 1 else 0)))
+  | .bool, .bool value =>
+      return (runtime, .scalar (.uint8 (if value then 1 else 0)))
   | .nat, .nat value => return literal runtime (.nat value)
   | .int, .int value => return encodeIntValue runtime value
   | .usize, .usize value => return (runtime, .usize value)
@@ -3121,6 +3122,16 @@ def encodeArgs (schemas : Array ValidationSchema) (data : Array ValidationDatum)
   schemas.zip data |>.foldlM (init := ({}, #[])) fun (runtime, values) (schema, datum) => do
     let (runtime, value) ← encodeDatum runtime schema datum
     return (runtime, values.push value)
+
+private def encodedBoolArgumentsUseScalarAbiGuard : Bool :=
+  match encodeArgs #[.bool, .bool] #[.bool false, .bool true] with
+  | .ok (runtime, values) =>
+      runtime.heap.isEmpty &&
+        values[0]? == some (.scalar (.uint8 0)) &&
+        values[1]? == some (.scalar (.uint8 1))
+  | .error _ => false
+
+#guard encodedBoolArgumentsUseScalarAbiGuard
 
 private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSchema)
     (value : Value) : Except String ValidationDatum := do
