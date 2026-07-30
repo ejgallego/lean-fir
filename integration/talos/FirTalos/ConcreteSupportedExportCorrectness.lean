@@ -203,6 +203,60 @@ theorem ConcreteSupportedExport.externalCall
         imp.results.length = 1 :=
   spec.externalCallsAligned found external callFound
 
+/--
+Resolver/adaptor alignment specializes to the exact value-preserving cache
+publication contract selected by the compiler-derived declaration and kind.
+
+Successful host resolution rules out the two unrepresented floating-point
+kinds hidden behind the resolver's private classification; callers therefore
+need no separate `cacheSet` support certificate.
+-/
+theorem ConcreteSupportedExport.cacheSetCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {declaration : Lean.Name} {kind : AbiKind} {id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime (.cacheSet declaration kind)) =
+        some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (cacheSetContract declaration kind) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  obtain ⟨_, actualContract, _, actualContractFound, _⟩ :=
+    spec.hostsSatisfy id inBounds
+  have resolvedSome :
+      resolvedContract? (.cacheSet declaration kind) = some actualContract :=
+    contracted.symm.trans actualContractFound
+  simp only [resolvedContract?, hostFn?] at resolvedSome contracted
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = cacheSetStep declaration kind initial args)
+    split at resolvedSome
+    · rename_i supported
+      simpa only [supported, if_true, Option.map_some, cacheSetFn]
+        using contracted
+    · simp at resolvedSome
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- Resolver/adaptor alignment specializes to the exact concrete natural
 literal contract expected by the allocation refinement theorem. -/
 theorem ConcreteSupportedExport.naturalLiteralCall

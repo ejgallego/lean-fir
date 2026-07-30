@@ -3844,6 +3844,200 @@ theorem
   exact ⟨nextStore, nextLocals, step, nextCache⟩
 
 /--
+Source/static admission shared by generated lazy-cache hits and misses.
+
+The relation names only the source nullary call, its declaration/result ABI,
+and the destination local. Cache indices, numeric call targets, symbolic
+code, executable code, physical values, and target executions are deliberately
+absent and are recovered from the production compiler pipeline.
+-/
+inductive LazyCacheCallSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Name → LCNF.Decl .impure → AbiKind → Prop where
+  | intro
+      {decl : LCNF.LetDecl .impure}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      (valueEq : decl.value = .fap declaration #[])
+      (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
+      (targetEq :
+        context.program.findDecl? declaration = some sourceDeclaration)
+      (paramsEq : sourceDeclaration.params.isEmpty = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, resultKind)) :
+      LazyCacheCallSupported context decl declaration sourceDeclaration
+        resultKind
+
+/--
+The internal-declaration specialization of lazy-cache admission.
+
+External nullary declarations require their own hereditary external-result
+branch; this relation records exactly the generated source body needed by the
+ordinary declaration induction used for an internal miss.
+-/
+inductive LazyCacheInternalMissSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Name → LCNF.Decl .impure → AbiKind →
+      LCNF.Code .impure → Prop where
+  | intro
+      {decl : LCNF.LetDecl .impure}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure}
+      (call :
+        LazyCacheCallSupported context decl declaration sourceDeclaration
+          resultKind)
+      (bodyEq : sourceDeclaration.value = .code calleeCode) :
+      LazyCacheInternalMissSupported context decl declaration
+        sourceDeclaration resultKind calleeCode
+
+/--
+Exact recursive induction result consumed by one internal lazy-cache miss.
+
+The production adapter chooses the declaration index. At that index the
+recursive program proof returns the cache-aware hereditary callee theorem and
+the source fact-analysis result needed to publish the value. Quantification
+over the compiler-selected index keeps this a structural induction boundary,
+not a caller-chosen target execution certificate.
+-/
+def LazyCacheInternalMissInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (facts : ReuseCapacityFacts)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (resultId : FVarId)
+    (declaration : Name)
+    (calleeCode : LCNF.Code .impure)
+    (resultKind : AbiKind)
+    (initial : Wasm.Store Host)
+    (initialWitness : RefinementWitness)
+    (sourceValue : Value)
+    (stepCost : Nat) : Prop :=
+  ∀ {declarationId : Nat},
+    callIndex? sourceModule (.declaration declaration) = some declarationId →
+      ∃ calleeFunction targetFunction callRuntime afterCall callWitness
+          physical,
+        BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+            sourceModule calleeFunction module hostEnv sourceExternals
+            sourceRuntime callRuntime [] calleeCode targetFunction
+            declarationId initial afterCall initialWitness callWitness []
+            resultKind sourceValue physical stepCost ∧
+          ReuseTokenOrdinaryBindTransport facts resultId callRuntime
+            (callRuntime.setGlobal declaration sourceValue) sourceEnv
+            sourceValue
+
+/--
+Structural compiler-derived internal lazy-cache miss.
+
+The source support relation supplies only the nullary declaration and its
+body. Production lowering/adaptation chooses the cache, declaration, and
+publication-call indices. `ConcreteSupportedExport` then supplies the exact
+resolved publication contract and destination layout, while the recursive
+program induction supplies the hereditary callee result at the selected
+declaration index. No target execution or numeric-index certificate is a
+premise.
+-/
+theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
+    {facts : ReuseCapacityFacts}
+    {program : Fir.LeanIR.ImpureProgram}
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (exportName : String)
+    {callerCode : LCNF.Code .impure}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (sourceExternals : ExternalImpl)
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {calleeCode : LCNF.Code .impure}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {resultIndex remainingBytes stepCost : Nat}
+    {initialWitness : RefinementWitness}
+    (supported :
+      LazyCacheInternalMissSupported context decl declaration
+        sourceDeclaration resultKind calleeCode)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule callerFunction labels valueCode =
+        .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (induction :
+      LazyCacheInternalMissInduction context sourceModule
+        targetModule.wasmModule hosts.env sourceExternals facts sourceRuntime
+        sourceEnv decl.fvarId declaration calleeCode resultKind initial
+        initialWitness sourceValue stepCost) :
+    ∃ nextStore nextLocals nextWitness physical,
+      BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
+          targetModule.wasmModule hosts.env sourceExternals decl continuation
+          targetValue sourceRuntime nextRuntime sourceEnv sourceValue initial
+          nextStore locals nextLocals resultIndex initialWitness nextWitness
+          physical stepCost ∧
+        reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) ∧
+          LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
+  rcases supported with
+    ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
+  obtain ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationCall,
+      cacheSetCall, _, targetValueEq⟩ :=
+    compileCachedLetValue_adapted_inv context sourceModule callerFunction
+      labels decl declaration sourceDeclaration resultKind valueCode
+      targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
+  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+      physical, callee, publicationOrdinary⟩ :=
+    induction declarationCall
+  obtain ⟨imp, importFound, importInBounds, contractFound, parameterCount,
+      resultCount⟩ :=
+    spec.cacheSetCall cacheSetCall
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  have declarationParams : sourceDeclaration.params = #[] :=
+    Array.isEmpty_iff.mp paramsEq
+  obtain ⟨nextStore, nextLocals, step, nextCache⟩ :=
+    BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
+      sourceStep valueEq invariant generated kindEq cacheEq targetEq
+      declarationParams bodyEq callee importFound spec.hostsSatisfy
+      importInBounds contractFound parameterCount resultCount resultFound
+      resultKindAt publicationOrdinary rfl
+  refine
+    ⟨nextStore, nextLocals, callWitness, physical, ?_, ?_, nextCache⟩
+  · rw [targetValueEq]
+    exact step
+  · simp [Fir.Wasm.reuseCapacityLetFacts?, valueEq]
+
+/--
 Structural compiler-derived cache hit.
 
 The source-only facts identify a nullary declaration and its result lane.
@@ -3875,13 +4069,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
     {locals : Wasm.Locals}
     {resultIndex remainingBytes stepCost : Nat}
     {initialWitness : RefinementWitness}
-    (valueEq : decl.value = .fap declaration #[])
-    (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
-    (targetEq : context.program.findDecl? declaration = some target)
-    (paramsEq : target.params.isEmpty = true)
-    (resultCompiled :
-      Fir.Wasm.getLocal context decl.fvarId =
-        .ok (.localGet decl.fvarId, resultKind))
+    (supported :
+      LazyCacheCallSupported context decl declaration target resultKind)
     (localsAligned : LocalLayoutAligned context sourceFunction)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
     (sourceStep :
@@ -3908,6 +4097,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
         reuseCapacityLetFacts? facts decl =
             some (eraseReuseCapacityFact facts decl.fvarId) ∧
           LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
+  rcases supported with
+    ⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
       sourceStep

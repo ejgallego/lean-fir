@@ -5161,6 +5161,40 @@ validator accessor, and the shared lowering bug
 result-kind alignment for every source program currently admitted by
 `lowerSupported`.
 
+W6.6gzt closes the compiler-derived internal miss composition.
+`LazyCacheCallSupported` is the common source/static admission relation for
+hits and misses: it records only a source nullary call, declaration/result ABI,
+and compiled destination local. `LazyCacheInternalMissSupported` adds only the
+selected internal declaration body. Neither relation contains cache indices,
+numeric calls, target code, physical values, or target executions.
+
+`ConcreteSupportedExport.cacheSetCall` specializes production
+resolver/adaptor alignment to the exact value-preserving cache-publication
+contract, parameter count, and result count selected by the compiler-derived
+runtime call. Successful host resolution also rules out the unrepresented
+floating-point kinds, so no separate cache-operation support certificate is
+needed.
+
+`LazyCacheInternalMissInduction` states the exact recursive
+declaration-environment result at the declaration index selected by production
+adaptation: the hereditary cache-aware callee theorem together with
+facts-aware ordinary-token transport across publication.
+`BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler` composes
+that induction result with compiler/adaptor inversion, supported-export import
+and local selection, the canonical cache frame, concrete host publication, and
+the successor whole-cache relation. Thus the internal miss call site supplies
+no target execution, numeric index, host-contract, physical-value, or local
+layout certificate.
+
+The remaining construction work is now sharply separated. The recursive
+program proof must establish `LazyCacheInternalMissInduction`, whose unresolved
+semantic component is the existing
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication transport.
+External nullary cache misses require a distinct hereditary external-result
+branch rather than pretending that every cached declaration has an internal
+code body. The universal validator accessor and exact lazy result-kind
+alignment remain the independent shared-contract obligations described above.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

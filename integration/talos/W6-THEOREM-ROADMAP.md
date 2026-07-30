@@ -919,6 +919,22 @@ acceptance tests pass.
    write, reuse-fact erasure, and successor cache relation. Thus the uniform
    hit branch is structural and target-certificate-free; the remaining cache
    induction work is the hereditary miss/publication branch.
+   The common `LazyCacheCallSupported` relation now names only source nullary
+   admission and destination ABI facts; its internal-miss specialization adds
+   only the selected source body. `ConcreteSupportedExport.cacheSetCall`
+   recovers the exact resolved publication import contract and arities from
+   the compiler-selected runtime call. The recursive
+   `LazyCacheInternalMissInduction` is indexed by the declaration call chosen
+   by production adaptation and returns the hereditary cache-aware callee
+   theorem plus facts-aware publication transport.
+   `miss_of_supportedExportCompiler` composes those facts into the exact
+   budgeted miss and successor cache relation without accepting a target
+   execution, numeric call index, concrete value, import contract, or local
+   layout certificate. Internal miss composition is therefore closed; the
+   remaining global construction obligation is the existing
+   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication transport,
+   while external nullary misses deliberately remain a separate hereditary
+   external-result branch.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source
