@@ -3663,6 +3663,417 @@ theorem nonemptyTargetAllocationLedger_objectSetReady :
       |>.deletedReadyAt_of_targetAllocationLedger
         related sourceOnlyRuntime.ledger sourceOnly
 
+/-- The retained target allocation is visible through `live`; the reset
+object is the source-only allocation at location `1`. -/
+def nonemptyLedgerRetainedEnv : Env :=
+  bind [] live (.object (.heap 0))
+
+def nonemptyLedgerResetEnv : Env :=
+  bind nonemptyLedgerRetainedEnv resetObjectVar (.object (.heap 1))
+
+def nonemptyLedgerResetState : MachineState :=
+  { program := deletedResetBeforeProgram
+    control := .code deletedResetBefore
+    env := nonemptyLedgerResetEnv
+    runtime := nonemptyLedgerSourceRuntime }
+
+def nonemptyLedgerClearedObject : ConstructorObject :=
+  { deletedWriteObject with
+    objectFields := #[.object (.tagged 0)] }
+
+def nonemptyLedgerClearedCell : HeapCell :=
+  { object := .ctor nonemptyLedgerClearedObject }
+
+/-- Reset rewrites only source location `1`; retained source owner `0`
+remains byte-for-byte unchanged. -/
+def nonemptyLedgerResetRuntime : RuntimeState :=
+  { nonemptyLedgerSourceRuntime with
+    heap :=
+      [(1, nonemptyLedgerClearedCell),
+        (0, { object := .natural 7 })] }
+
+def nonemptyLedgerReuseEnv : Env :=
+  bind
+    (bind nonemptyLedgerResetEnv reuseTokenVar
+      (.reuseToken (some 1)))
+    reuseArgVar .erased
+
+def nonemptyLedgerReuseState : MachineState :=
+  { program := deletedReuseBeforeProgram
+    control := .code deletedReuseBefore
+    env := nonemptyLedgerReuseEnv
+    runtime := nonemptyLedgerResetRuntime }
+
+theorem nonemptyLedgerResetEffect :
+    reset nonemptyLedgerSourceRuntime 1 (.object (.heap 1)) =
+      .ok (nonemptyLedgerResetRuntime, .reuseToken (some 1)) := by
+  rfl
+
+def nonemptyLedgerResetLocalReady :
+    DeletedResetLocalReadyAt
+      nonemptyLedgerResetState 1 resetObjectVar := by
+  refine {
+    objectValue := .object (.heap 1)
+    token := .reuseToken (some 1)
+    nextRuntime := nonemptyLedgerResetRuntime
+    objectRead := ?_
+    effect := ?_
+  }
+  · simp [nonemptyLedgerResetState, nonemptyLedgerResetEnv,
+      nonemptyLedgerRetainedEnv, lookupValue, Impure.bind, lookup,
+      resetObjectVar, live]
+  · simpa [nonemptyLedgerResetState] using nonemptyLedgerResetEffect
+
+def nonemptyLedgerReuseLocalReady :
+    DeletedReuseSomeLocalReadyAt nonemptyLedgerReuseState
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
+  refine {
+    cell := nonemptyLedgerClearedCell
+    oldObject := nonemptyLedgerClearedObject
+    values := #[.erased]
+    tokenRead := ?_
+    argumentsRead := ?_
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    arity := rfl
+  }
+  · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, live]
+  · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, live]
+    rfl
+
+/-- Nonempty-ledger reset/reuse ownership regression. The ledger records
+target owner `0`; reset and concrete reuse operate on source-only location
+`1`. Reset preserves the recorded owner, after which the same ledger proves
+that overwriting location `1` is unreachable from every published root. -/
+theorem nonemptyTargetAllocationLedger_resetReuseReady :
+    ∃ rho : AddressRenaming,
+      ∃ ledger : TargetAllocationLedger rho
+          nonemptyLedgerTargetRuntime.nextLocation,
+      ShadowRuntimeRel rho
+          nonemptyLedgerSourceRuntime nonemptyLedgerTargetRuntime
+          [.object (.heap 0)] [.object (.heap 0)] ∧
+        SourceOnlyUnderTargetLedger ledger 1 ∧
+        DeletedResetReadyAt nonemptyLedgerResetState
+          (runtimeRoots nonemptyLedgerSourceRuntime
+            [.object (.heap 0)])
+          1 resetObjectVar ∧
+        ShadowRuntimeRel rho
+          nonemptyLedgerResetRuntime nonemptyLedgerTargetRuntime
+          [.object (.heap 0)] [.object (.heap 0)] ∧
+        DeletedReuseReadyAt nonemptyLedgerReuseState
+          (runtimeRoots nonemptyLedgerResetRuntime
+            [.object (.heap 0)])
+          reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
+  let paired := LedgerShadowRuntimeRel.empty.allocBoth
+      (HeapObjectRel.natural 7)
+      (by simp [RootSubset, HeapObject.ownedValues])
+      (by simp [RootSubset, HeapObject.ownedValues])
+      false
+  let sourceOnlyRuntime :=
+    paired.runtime.allocLeftGarbage (.ctor deletedWriteObject) false
+  have mapping : paired.larger.forward 0 = some 0 := by
+    have values := paired.values
+    simp [alloc] at values
+    cases values with
+    | heap mapped => exact mapped
+  have fresh : paired.larger.forward 1 = none := by
+    apply paired.runtime.runtime.leftMappingFresh
+    simp [alloc]
+  have sourceOnly :
+      SourceOnlyUnderTargetLedger sourceOnlyRuntime.ledger 1 :=
+    sourceOnlyRuntime.ledger.sourceOnly_of_forwardUnmapped fresh
+  have related :
+      ShadowRuntimeRel paired.larger
+        nonemptyLedgerSourceRuntime nonemptyLedgerTargetRuntime
+        [.object (.heap 0)] [.object (.heap 0)] := by
+    simpa [nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+      nonemptyLedgerPairedRuntime, alloc] using sourceOnlyRuntime.runtime
+  have ownerZero : sourceOnlyRuntime.ledger.owner 0 = 0 := by
+    have ledgerMapped :=
+      sourceOnlyRuntime.ledger.reverseMapped 0 (by
+        simp [nonemptyLedgerTargetRuntime,
+          nonemptyLedgerPairedRuntime, alloc])
+    have inverse := paired.larger.leftInverse mapping
+    rw [inverse] at ledgerMapped
+    exact (Option.some.inj ledgerMapped).symm
+  have ownerFrame : ∀ rightLocation,
+      rightLocation < nonemptyLedgerTargetRuntime.nextLocation →
+      findCell? nonemptyLedgerResetRuntime.heap
+          (sourceOnlyRuntime.ledger.owner rightLocation) =
+        findCell? nonemptyLedgerSourceRuntime.heap
+          (sourceOnlyRuntime.ledger.owner rightLocation) := by
+    intro rightLocation bounded
+    have rightZero : rightLocation = 0 := by
+      change rightLocation < 1 at bounded
+      exact Nat.le_antisymm
+        (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
+    subst rightLocation
+    rw [ownerZero]
+    rfl
+  have afterFresh : ∀ location,
+      nonemptyLedgerResetRuntime.nextLocation ≤ location →
+        findCell? nonemptyLedgerResetRuntime.heap location = none := by
+    intro location bounded
+    change 2 ≤ location at bounded
+    have oneLt : 1 < location :=
+      Nat.lt_of_lt_of_le (by decide) bounded
+    have zeroLt : 0 < location :=
+      Nat.lt_trans (by decide) oneLt
+    have notOne : (1 : Nat) ≠ location := Nat.ne_of_lt oneLt
+    have notZero : (0 : Nat) ≠ location := Nat.ne_of_lt zeroLt
+    simp [nonemptyLedgerResetRuntime, findCell?, notOne, notZero]
+  have frame :
+      RuntimeReachableFrame nonemptyLedgerSourceRuntime
+        nonemptyLedgerResetRuntime
+        (runtimeRoots nonemptyLedgerSourceRuntime
+          [.object (.heap 0)]) :=
+    related.leftRuntimeReachableFrame_of_targetAllocationLedger
+      sourceOnlyRuntime.ledger rfl rfl rfl rfl ownerFrame afterFresh
+  have resetReady :
+      DeletedResetReadyAt nonemptyLedgerResetState
+        (runtimeRoots nonemptyLedgerSourceRuntime
+          [.object (.heap 0)])
+        1 resetObjectVar :=
+    nonemptyLedgerResetLocalReady.deletedReadyAt frame
+  have relatedAfter :
+      ShadowRuntimeRel paired.larger
+        nonemptyLedgerResetRuntime nonemptyLedgerTargetRuntime
+        [.object (.heap 0)] [.object (.heap 0)] :=
+    related.frameLeft frame
+  have reuseReady :
+      DeletedReuseReadyAt nonemptyLedgerReuseState
+        (runtimeRoots nonemptyLedgerResetRuntime
+          [.object (.heap 0)])
+        reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] :=
+    nonemptyLedgerReuseLocalReady
+      |>.deletedReadyAt_of_targetAllocationLedger
+        relatedAfter sourceOnlyRuntime.ledger sourceOnly
+  exact ⟨paired.larger, sourceOnlyRuntime.ledger, related, sourceOnly,
+    resetReady, relatedAfter, reuseReady⟩
+
+def nonemptyLedgerResetTargetState : MachineState :=
+  { program := deletedResetAfterProgram
+    control := .code deletedResetAfter
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime }
+
+def nonemptyLedgerReuseTargetState : MachineState :=
+  { program := deletedReuseAfterProgram
+    control := .code deletedReuseAfter
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime }
+
+theorem neutralUsed_toList :
+    neutralUsed.toList = [live] := by
+  apply List.Perm.eq_singleton
+  simpa [neutralUsed] using
+    (Std.HashSet.toList_insert_perm
+      (m := ({} : UsedLocals)) (k := live))
+
+theorem nonemptyLedgerResetEnvRoots :
+    envRootsOn neutralUsed nonemptyLedgerResetState.env =
+      [.object (.heap 0)] := by
+  simp [envRootsOn, neutralUsed_toList,
+    nonemptyLedgerResetState, nonemptyLedgerResetEnv,
+    nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+    resetObjectVar, live]
+
+theorem nonemptyLedgerReuseEnvRoots :
+    envRootsOn neutralUsed nonemptyLedgerReuseState.env =
+      [.object (.heap 0)] := by
+  simp [envRootsOn, neutralUsed_toList,
+    nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
+    nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+    Impure.bind, lookup, reuseTokenVar, reuseArgVar,
+    resetObjectVar, live]
+
+theorem nonemptyLedgerResetTargetEnvRoots :
+    envRootsOn neutralUsed nonemptyLedgerResetTargetState.env =
+      [.object (.heap 0)] := by
+  simp [envRootsOn, neutralUsed_toList,
+    nonemptyLedgerResetTargetState, nonemptyLedgerRetainedEnv,
+    Impure.bind, lookup, live]
+
+theorem nonemptyLedgerReuseTargetEnvRoots :
+    envRootsOn neutralUsed nonemptyLedgerReuseTargetState.env =
+      [.object (.heap 0)] := by
+  simp [envRootsOn, neutralUsed_toList,
+    nonemptyLedgerReuseTargetState, nonemptyLedgerRetainedEnv,
+    Impure.bind, lookup, live]
+
+theorem nonemptyLedgerResetEnvRelated
+    (mapping : rho.forward 0 = some 0) :
+    EnvRelOn rho neutralUsed
+      nonemptyLedgerResetState.env
+      nonemptyLedgerResetTargetState.env := by
+  intro fvarId member
+  have same : live = fvarId := by
+    simpa [neutralUsed] using member
+  subst fvarId
+  exact .some (.heap mapping)
+
+theorem nonemptyLedgerReuseEnvRelated
+    (mapping : rho.forward 0 = some 0) :
+    EnvRelOn rho neutralUsed
+      nonemptyLedgerReuseState.env
+      nonemptyLedgerReuseTargetState.env := by
+  intro fvarId member
+  have same : live = fvarId := by
+    simpa [neutralUsed] using member
+  subst fvarId
+  exact .some (.heap mapping)
+
+theorem nonemptyLedgerResetExactCodeReadyAt
+    (ready :
+      DeletedResetReadyAt nonemptyLedgerResetState
+        (runtimeRoots nonemptyLedgerSourceRuntime
+          [.object (.heap 0)])
+        1 resetObjectVar) :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      nonemptyLedgerResetState
+      (runtimeRoots nonemptyLedgerResetState.runtime
+        (envRootsOn neutralUsed nonemptyLedgerResetState.env ++ []))
+      deletedResetBefore deletedResetAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedResetExactGraph, UsedSubset.refl neutralUsed,
+    deletedResetExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt nonemptyLedgerResetState
+        (runtimeRoots nonemptyLedgerResetState.runtime
+          (envRootsOn neutralUsed nonemptyLedgerResetState.env ++ []))
+        deadResetDecl := by
+    unfold deadResetDecl letDecl
+    exact .reset dead dead.name objType 1 resetObjectVar
+      (by
+        rw [nonemptyLedgerResetEnvRoots]
+        simpa [nonemptyLedgerResetState] using ready)
+  have kept :
+      RetainedLetReadyAt nonemptyLedgerResetState
+        (runtimeRoots nonemptyLedgerResetState.runtime
+          (envRootsOn neutralUsed nonemptyLedgerResetState.env ++ []))
+        deadResetDecl.value := by
+    trivial
+  exact ExactShadowCodeRuntimeReadyAt.let_of_ready removed kept
+
+theorem nonemptyLedgerReuseExactCodeReadyAt
+    (ready :
+      DeletedReuseReadyAt nonemptyLedgerReuseState
+        (runtimeRoots nonemptyLedgerResetRuntime
+          [.object (.heap 0)])
+        reuseTokenVar oneFieldInfo #[.fvar reuseArgVar]) :
+    BinderReadyShadowCodeReadyAt 2 neutralUsed
+      nonemptyLedgerReuseState
+      (runtimeRoots nonemptyLedgerReuseState.runtime
+        (envRootsOn neutralUsed nonemptyLedgerReuseState.env ++ []))
+      deletedReuseBefore deletedReuseAfter := by
+  refine ⟨2, neutralUsed, Nat.le_refl 2,
+    deletedReuseSomeExactGraph, UsedSubset.refl neutralUsed,
+    deletedReuseSomeExactBinderReady, ?_⟩
+  have removed :
+      DeletedLetReadyAt nonemptyLedgerReuseState
+        (runtimeRoots nonemptyLedgerReuseState.runtime
+          (envRootsOn neutralUsed nonemptyLedgerReuseState.env ++ []))
+        deadReuseDecl := by
+    unfold deadReuseDecl letDecl
+    exact .reuse dead dead.name objType reuseTokenVar oneFieldInfo true
+      #[.fvar reuseArgVar]
+      (by
+        rw [nonemptyLedgerReuseEnvRoots]
+        simpa [nonemptyLedgerReuseState] using ready)
+  have decision :
+      deletedReuseSomeExactGraph.view.runtimeDecision = .deletedLet :=
+    ExactShadowCodeView.runtimeDecision_eq_deletedLet_of_target_not_let
+      deletedReuseSomeExactGraph.view
+        (by
+          intro targetDeclaration targetContinuation
+          simp [deletedReuseAfter])
+  exact ExactShadowCodeRuntimeReadyAt.letDeleted decision removed
+
+/-- The nonempty-ledger runtime witnesses lift to exact machine readiness for
+both source-only operations. These are the two active-code obligations that
+the retained-prefix whole-program invariant will dispatch at reset and reuse
+residuals. -/
+theorem nonemptyTargetAllocationLedger_resetReuseMachineReady :
+    LedgerBinderReadyReachableMachineReadyAt 2
+        nonemptyLedgerResetState nonemptyLedgerResetTargetState ∧
+      LedgerBinderReadyReachableMachineReadyAt 2
+        nonemptyLedgerReuseState nonemptyLedgerReuseTargetState := by
+  rcases nonemptyTargetAllocationLedger_resetReuseReady with
+    ⟨rho, ledger, related, sourceOnly, resetReady,
+      relatedAfter, reuseReady⟩
+  have mapping : rho.forward 0 = some 0 := by
+    have roots := related.extra
+    cases roots with
+    | cons values tail =>
+      cases values with
+      | heap mapped => exact mapped
+  constructor
+  · refine ⟨rho,
+      envRootsOn neutralUsed nonemptyLedgerResetState.env,
+      envRootsOn neutralUsed nonemptyLedgerResetTargetState.env,
+      [], [], ledger, ?_, ?_, .nil, ?_⟩
+    · simpa [nonemptyLedgerResetState,
+        nonemptyLedgerResetTargetState] using
+        deletedResetProgramBinderReadyRelated
+    · exact .code
+        (nonemptyLedgerResetExactCodeReadyAt resetReady)
+        (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+        (nonemptyLedgerResetEnvRelated mapping)
+    · rw [nonemptyLedgerResetEnvRoots,
+        nonemptyLedgerResetTargetEnvRoots]
+      simpa [nonemptyLedgerResetState,
+        nonemptyLedgerResetTargetState] using related
+  · refine ⟨rho,
+      envRootsOn neutralUsed nonemptyLedgerReuseState.env,
+      envRootsOn neutralUsed nonemptyLedgerReuseTargetState.env,
+      [], [], ledger, ?_, ?_, .nil, ?_⟩
+    · simpa [nonemptyLedgerReuseState,
+        nonemptyLedgerReuseTargetState] using
+        deletedReuseSomeProgramBinderReadyRelated
+    · exact .code
+        (nonemptyLedgerReuseExactCodeReadyAt reuseReady)
+        (BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed)
+        (nonemptyLedgerReuseEnvRelated mapping)
+    · rw [nonemptyLedgerReuseEnvRoots,
+        nonemptyLedgerReuseTargetEnvRoots]
+      simpa [nonemptyLedgerReuseState,
+        nonemptyLedgerReuseTargetState] using relatedAfter
+
+/-- Unified ledger-dispatch regression for the deleted reset edge with one
+retained target allocation. -/
+theorem nonemptyLedgerResetExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals nonemptyLedgerResetState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+          nonemptyLedgerResetTargetState targetAfter ∧
+        SomeLedgerBinderReadyReachableMachineRelated 2
+          sourceAfter targetAfter :=
+  nonemptyTargetAllocationLedger_resetReuseMachineReady.1.related
+    |>.matchCodeStep_of_ready
+      nonemptyTargetAllocationLedger_resetReuseMachineReady.1 rfl step
+
+/-- Unified ledger-dispatch regression for the concrete reuse edge under the
+same nonempty owner table. -/
+theorem nonemptyLedgerReuseExactStepPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals nonemptyLedgerReuseState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+          nonemptyLedgerReuseTargetState targetAfter ∧
+        SomeLedgerBinderReadyReachableMachineRelated 2
+          sourceAfter targetAfter :=
+  nonemptyTargetAllocationLedger_resetReuseMachineReady.2.related
+    |>.matchCodeStep_of_ready
+      nonemptyTargetAllocationLedger_resetReuseMachineReady.2 rfl step
+
 /-- A retained large natural forces the paired-allocation branch of the
 ledger-aware literal matcher. -/
 def retainedLargeNatDecl : LCNF.LetDecl .impure :=
