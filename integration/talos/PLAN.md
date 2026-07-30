@@ -5300,6 +5300,31 @@ that cache globals are unchanged. Production internal-function selection and
 the source-structural completeness step still follow those family lifts
 before `LazyCacheInternalHereditaryDeclarationInduction` can be constructed.
 
+W6.6gzz closes the complete current direct-operation family over that
+entry-relative cache frame. `DirectLetStepTransports` is the common
+current-to-successor package: witness extension, retained-header capacity,
+ordinary-source persistence, semantic-global preservation, physical-Wasm-
+global preservation, and concrete host-layout preservation. The facts-indexed
+direct law now returns this package as an execution property. Local aliases,
+immediates, projections, unboxing, and sharing use reflexive/reader
+transports; boxing, `Nat`/String literals, constructors, and reuse use their
+allocation or rewrite transports. The constructor helper now exposes its
+previously implicit Wasm-global and host-layout equalities.
+
+`ReuseCapacityDirectLetRuntimeRefinesWithCost.reuseCapacityEntryRelativeCache`
+uses the package to preserve `LazyCacheGlobalsRel`, rebuild the complete
+reuse-capacity/pure-external/ownership frame, and extend the six accumulated
+entry transports.
+`reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache`
+instantiates that adapter with the production compiler/runtime theorem; its
+contract guard fixes the target-certificate-free surface.
+
+The remaining operation-family lifts are interprocedural call, lazy-cache,
+and no-result effect. Call and lazy execution must consume their hereditary
+callee's evolved cache table, while cache-neutral effects can use an explicit
+unchanged-global transport package. Production internal-function selection
+and source-structural completeness still follow those lifts.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

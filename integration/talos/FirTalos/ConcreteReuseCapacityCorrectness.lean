@@ -1009,6 +1009,16 @@ theorem alloc_ordinaryPersistenceTransport
         rfl
       · simp [findCell?, same, beforeFound] at afterFound
 
+/-- Semantic allocation changes only the heap and location frontier. -/
+theorem alloc_preserves_globals
+    {before after : RuntimeState} {object : HeapObject}
+    {persistent : Bool} {reference : ObjectRef}
+    (operation : alloc before object persistent = (after, reference)) :
+    after.globals = before.globals := by
+  symm
+  simpa [alloc] using
+    congrArg (fun result => result.1.globals) operation
+
 /-- Semantic scalar boxing either leaves the source heap unchanged for a
 tagged result or appends one fresh ordinary boxed cell. -/
 theorem box_ordinaryPersistenceTransport
@@ -1066,6 +1076,62 @@ theorem box_ordinaryPersistenceTransport
   | erased => simp at operation
   | reuseToken token => simp at operation
 
+/-- Successful semantic scalar boxing never changes the lazy-global table. -/
+theorem box_preserves_globals
+    {before after : RuntimeState} {type : Expr} {value result : Value}
+    (operation : box before type value = .ok (after, result)) :
+    after.globals = before.globals := by
+  unfold box at operation
+  simp only [Bind.bind, Except.bind] at operation
+  cases value with
+  | scalar scalar =>
+      simp only at operation
+      by_cases tagged : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · rw [if_pos tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq : before = after := congrArg Prod.fst pairEq
+        subst after
+        rfl
+      · rw [if_neg tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq :
+            (alloc before (.boxed type (.scalar scalar))).1 = after :=
+          congrArg Prod.fst pairEq
+        subst after
+        exact alloc_preserves_globals
+          (before := before)
+          (after := (alloc before (.boxed type (.scalar scalar))).1)
+          (object := .boxed type (.scalar scalar))
+          (reference := (alloc before (.boxed type (.scalar scalar))).2)
+          (operation := rfl)
+  | usize value =>
+      simp only at operation
+      by_cases tagged : value.toNat ≤ maxTaggedPayload
+      · rw [if_pos tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq : before = after := congrArg Prod.fst pairEq
+        subst after
+        rfl
+      · rw [if_neg tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq :
+            (alloc before (.boxed type (.usize value))).1 = after :=
+          congrArg Prod.fst pairEq
+        subst after
+        exact alloc_preserves_globals
+          (before := before)
+          (after := (alloc before (.boxed type (.usize value))).1)
+          (object := .boxed type (.usize value))
+          (reference := (alloc before (.boxed type (.usize value))).2)
+          (operation := rfl)
+  | object reference => simp at operation
+  | erased => simp at operation
+  | reuseToken token => simp at operation
+
 /-- Every semantic literal transition preserves ordinary persistence.
 Immediate literals leave the heap unchanged; large naturals and strings append
 one fresh ordinary cell. -/
@@ -1097,6 +1163,18 @@ theorem literal_ordinaryPersistenceTransport
   | uint32 value => exact OrdinaryPersistenceTransport.refl before
   | uint64 value => exact OrdinaryPersistenceTransport.refl before
   | usize value => exact OrdinaryPersistenceTransport.refl before
+
+/-- Semantic literal construction never changes the lazy-global table. -/
+theorem literal_preserves_globals
+    (runtime : RuntimeState) (lit : LCNF.LitValue) :
+    (literal runtime lit).1.globals = runtime.globals := by
+  cases lit with
+  | nat value =>
+      by_cases tagged : value ≤ maxTaggedPayload <;>
+        simp [literal, tagged, alloc]
+  | str value => simp [literal, alloc]
+  | uint8 value | uint16 value | uint32 value | uint64 value | usize value =>
+      rfl
 
 /-- A pure heap-integer response appends one fresh ordinary source cell.
 Recording the external event changes no heap ownership property. -/
@@ -1216,6 +1294,43 @@ theorem allocCtor_ordinaryPersistenceTransport
         (object := .ctor object) (reference := (alloc before (.ctor object)).2)
         (operation := rfl)
 
+/-- Successful constructor allocation never changes the lazy-global table. -/
+theorem allocCtor_preserves_globals
+    {before after : RuntimeState} {info : LCNF.CtorInfo}
+    {args : Array Value} {result : Value}
+    (operation : allocCtor before info args = .ok (after, result)) :
+    after.globals = before.globals := by
+  unfold allocCtor at operation
+  simp only [Bind.bind, Except.bind] at operation
+  by_cases wrongArity : args.size != info.size
+  · rw [if_pos wrongArity] at operation
+    contradiction
+  · rw [if_neg wrongArity] at operation
+    by_cases empty :
+        info.size == 0 && info.usize == 0 && info.ssize == 0
+    · rw [if_pos empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have runtimeEq : before = after := congrArg Prod.fst pairEq
+      subst after
+      rfl
+    · rw [if_neg empty] at operation
+      let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := args
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := [] }
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : (alloc before (.ctor object)).1 = after :=
+        congrArg Prod.fst pairEq
+      subst after
+      exact alloc_preserves_globals
+        (before := before) (after := (alloc before (.ctor object)).1)
+        (object := .ctor object)
+        (reference := (alloc before (.ctor object)).2)
+        (operation := rfl)
+
 private theorem setCell_preserves_persistent_false
     {before after : RuntimeState} {target location : Location}
     {targetCell replacement beforeCell afterCell : HeapCell}
@@ -1281,6 +1396,86 @@ theorem setCell_ordinaryPersistenceTransport
       · rw [frame location same] at afterFound
         rw [beforeFound] at afterFound
         contradiction
+
+/--
+Successful semantic reuse preserves both ordinary persistence and the
+lazy-global table. A missing token delegates to ordinary constructor
+allocation; a retained token rewrites one constructor cell without changing
+its persistence bit or any non-heap runtime component.
+-/
+theorem reuse_sourceTransports
+    {before after : RuntimeState} {token : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {args : Array Value} {result : Value}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result)) :
+    after.globals = before.globals ∧
+      OrdinaryPersistenceTransport before after := by
+  cases token with
+  | reuseToken location? =>
+      cases location? with
+      | none =>
+          simp only [reuse] at operation
+          exact ⟨allocCtor_preserves_globals operation,
+            allocCtor_ordinaryPersistenceTransport operation⟩
+      | some location =>
+          simp only [reuse, Bind.bind, Except.bind] at operation
+          by_cases wrongArity : args.size != info.size
+          · rw [if_pos wrongArity] at operation
+            contradiction
+          · rw [if_neg wrongArity] at operation
+            cases read : getLiveCell before location with
+            | error failure =>
+                simp only [read] at operation
+                contradiction
+            | ok cell =>
+                simp only [read] at operation
+                cases objectEq : cell.object
+                case ctor old =>
+                    simp only [objectEq] at operation
+                    let tag := if updateHeader then info.cidx else old.tag
+                    let object : ConstructorObject := {
+                      tag
+                      objectFields := args
+                      usizeFields := Array.replicate info.usize 0
+                      scalarFields := [] }
+                    change
+                      (do
+                        let next ← setCell before location
+                          { cell with object := .ctor object }
+                        pure (next, Value.object (.heap location))) =
+                        .ok (after, result) at operation
+                    have targetFound :
+                        findCell? before.heap location = some cell :=
+                      (Fir.LeanIR.Passes.ElimDead.getLiveCell_spec read).1
+                    cases setOperation :
+                        setCell before location
+                          { cell with object := .ctor object } with
+                    | error failure =>
+                        simp [setOperation] at operation
+                    | ok actual =>
+                        simp only [setOperation, pure, Except.pure]
+                          at operation
+                        have pairEq := Except.ok.inj operation
+                        have runtimeEq : actual = after :=
+                          congrArg Prod.fst pairEq
+                        subst actual
+                        obtain ⟨expected, expectedOperation, _, _, _, _,
+                            globals, _, _⟩ :=
+                          Fir.LeanIR.Impure.setCell_spec_of_find before location
+                            cell { cell with object := .ctor object }
+                            targetFound
+                        rw [setOperation] at expectedOperation
+                        have expectedEq := Except.ok.inj expectedOperation
+                        subst expected
+                        exact ⟨globals,
+                          setCell_ordinaryPersistenceTransport targetFound
+                            (by rfl) setOperation⟩
+                all_goals simp [objectEq] at operation
+  | object reference => simp [reuse] at operation
+  | usize value => simp [reuse] at operation
+  | scalar value => simp [reuse] at operation
+  | erased => simp [reuse] at operation
 
 /--
 Every successful constructor-payload rewrite preserves ordinaryness.

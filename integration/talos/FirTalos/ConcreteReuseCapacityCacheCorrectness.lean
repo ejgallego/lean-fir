@@ -3561,6 +3561,98 @@ def ConcreteReuseCapacityCacheFrame
     LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore
 
 /--
+Lift a transport-strengthened direct-operation family through both the
+whole-cache invariant and one fixed execution entry.
+
+Direct readers and allocators do not publish lazy globals. Their concrete
+proofs expose the witness, header-capacity, ordinaryness, source-global,
+physical-global, and host-layout transports needed to preserve the complete
+cache table and extend the hereditary entry relation.
+-/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.reuseCapacityEntryRelativeCache
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv Supported letCost
+        (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+          externals)) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  rcases invariant with ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, factsTransfer,
+      nextBaseInvariant⟩ :=
+    runtimeRefines supported stepFits baseInvariant sourceStep valueCompiled
+      valueAdapted resultFound
+  have nextCache :
+      LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
+    cacheTable.transport transports.witnessTransport transports.sourceGlobals
+      transports.wasmGlobals transports.hostStaticLayout
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness :=
+    entryTransports.step transports.witnessTransport transports.capacity
+      transports.ordinary externalsPreserved hostDescriptorsPreserved
+      witnessDescriptorsPreserved
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, factsTransfer, ⟨⟨nextBaseInvariant, nextCache⟩, nextEntry⟩⟩
+
+/--
+The production direct fragment instantiates the entry-relative whole-cache
+law. This is the direct-operation premise used by hereditary generated
+declaration proofs; target execution and cache transports are derived from
+the compiler/runtime theorem.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) :=
+  ReuseCapacityDirectLetRuntimeRefinesWithCost.reuseCapacityEntryRelativeCache
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+      externals)
+
+/--
 Lift the transport-strengthened pure-external family through both the
 whole-cache invariant and one fixed execution entry.
 

@@ -1004,11 +1004,24 @@ acceptance tests pass.
    `reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache`
    theorem closes the pure `Nat`/`Int`/scalar external family for hereditary
    cached bodies without adding target evidence.
-   Next lift each admitted direct, call, lazy, and effect runtime family over
-   the entry-relative cache frame, using the operation packages' existing
-   current-to-successor transports and the common `step` theorem. Calls and
-   lazy misses consume an evolved cache relation from their recursive callee;
-   they must not use the unchanged-global adapter.
+   `DirectLetStepTransports` now packages the witness, header-capacity,
+   ordinary-persistence, semantic-global, physical-Wasm-global, and concrete
+   host-layout facts produced by every successful direct operation.
+   The facts-indexed direct law retains that package through disjunction,
+   external-table, descriptor-agreement, budget-shift, and structural-code
+   adapters. Every production direct producer constructs it: readers use
+   reflexive or failure-clearing transports, while boxing, literals,
+   constructors, and reuse use their allocation/rewrite transports.
+   `ReuseCapacityDirectLetRuntimeRefinesWithCost.reuseCapacityEntryRelativeCache`
+   transports `LazyCacheGlobalsRel`, reconstructs the complete cache frame,
+   and composes the entry relation. Its production
+   `reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache` theorem and
+   contract guard close the complete current direct family without target
+   evidence.
+   Next lift each admitted call, lazy, and effect runtime family over the
+   entry-relative cache frame. Calls and lazy misses consume an evolved cache
+   relation from their recursive callee; they must not use the
+   unchanged-global adapter.
    Then derive production internal-function selection and construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment. Do not reintroduce a
@@ -1021,12 +1034,12 @@ acceptance tests pass.
    Integration must still expose the universal validator accessor needed to
    discharge `LazyCacheValidationFacts` for every successfully validated
    module.
-   Before reuse joins the structural direct family, coordinate two shared
-   validator fixes: stable ordinary-token provenance across unrelated effects
+   Before unrestricted mixed programs can retain reuse facts across unrelated
+   effects, coordinate stable ordinary-token provenance
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
    provenance-sensitive `.tobject` result-kind condition
-   (`FIR-BUG-wasm-none-reuse-retained-result-kind`). Reuse the
-   existing W6 operation lemmas for later effect families, but do not expose
+   (`FIR-BUG-wasm-none-reuse-retained-result-kind`). Reuse the existing W6
+   operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
 5. Lift from the current source evaluation view to canonical
    `ExecEvaluates`, then package the complete generated export as T3.

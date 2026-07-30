@@ -4215,6 +4215,9 @@ theorem constructorNonemptyStep_of_budget
           nextStore.host.closureDescriptors =
               initial.host.closureDescriptors ∧
             nextWitness.closureDescriptors = witness.closureDescriptors ∧
+              nextStore.globals.globals = initial.globals.globals ∧
+              nextStore.host.runtime.globals.staticLayout =
+                  initial.host.runtime.globals.staticLayout ∧
               witness.Extends nextWitness ∧
               ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime ∧
               nextStore.host.failure? = none ∧
@@ -4265,8 +4268,10 @@ theorem constructorNonemptyStep_of_budget
   subst nextRuntime
   subst sourceValue
   refine ⟨replaceHeap initial heap, address, nextWitness, operation, ?_, ?_,
-    extension.closureDescriptors, extension, nextRuntimeRelated, ?_,
+    extension.closureDescriptors, ?_, ?_, extension, nextRuntimeRelated, ?_,
     physicalRelated, capacityRelated, ?_, ?_⟩
+  · simp [replaceHeap, clearFailure]
+  · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
@@ -12386,9 +12391,9 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
   injection alignedResultFound with resultIndexEq
   subst alignedResultIndex
   obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
-      hostDescriptorsPreserved, witnessDescriptorsPreserved, extension,
-      nextRuntimeRelated, failureClear, valueRelated, _capacityValue,
-      _capacityTransport, remainingBudget⟩ :=
+      hostDescriptorsPreserved, witnessDescriptorsPreserved, _wasmGlobals,
+      _hostStaticLayout, extension, nextRuntimeRelated, failureClear,
+      valueRelated, _capacityValue, _capacityTransport, remainingBudget⟩ :=
     constructorNonemptyStep_of_budget stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -13357,6 +13362,77 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_reset
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Current-to-successor representation transports for one direct `let`.
+
+These are properties of the concrete helper execution, not a target execution
+certificate. They expose exactly the monotone representation and cache-state
+facts needed to compose a direct operation inside a hereditary generated
+declaration proof.
+-/
+structure DirectLetStepTransports
+    (sourceRuntime nextRuntime : RuntimeState)
+    (targetStore nextStore : Wasm.Store Host)
+    (witness nextWitness : RefinementWitness) : Prop where
+  witnessTransport : WitnessTransport witness nextWitness
+  capacity :
+    HeaderCapacityTransport targetStore.host.runtime.heap
+      nextStore.host.runtime.heap witness
+  ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime
+  sourceGlobals : nextRuntime.globals = sourceRuntime.globals
+  wasmGlobals :
+    nextStore.globals.globals = targetStore.globals.globals
+  hostStaticLayout :
+    nextStore.host.runtime.globals.staticLayout =
+      targetStore.host.runtime.globals.staticLayout
+
+/-- A direct local-only step has reflexive representation transports. -/
+theorem DirectLetStepTransports.refl
+    (runtime : RuntimeState) (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    DirectLetStepTransports runtime runtime store store witness witness := {
+  witnessTransport := WitnessTransport.refl witness
+  capacity :=
+    HeaderCapacityTransport.refl store.host.runtime.heap witness
+  ordinary := OrdinaryPersistenceTransport.refl runtime
+  sourceGlobals := rfl
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/-- Clearing structured failure metadata preserves every cache and
+representation component used by a direct reader. -/
+theorem DirectLetStepTransports.clearFailure
+    (runtime : RuntimeState) (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    DirectLetStepTransports runtime runtime store (clearFailure store)
+      witness witness := {
+  witnessTransport := WitnessTransport.refl witness
+  capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
+  ordinary := OrdinaryPersistenceTransport.refl runtime
+  sourceGlobals := rfl
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/-- Heap replacement transports the cache state whenever the semantic
+operation and representation proof supply their monotone source/heap facts. -/
+theorem DirectLetStepTransports.replaceHeap
+    {sourceRuntime nextRuntime : RuntimeState}
+    {store : Wasm.Store Host} {heap : MemoryState}
+    {witness nextWitness : RefinementWitness}
+    (witnessTransport : WitnessTransport witness nextWitness)
+    (capacity :
+      HeaderCapacityTransport store.host.runtime.heap heap witness)
+    (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (sourceGlobals : nextRuntime.globals = sourceRuntime.globals) :
+    DirectLetStepTransports sourceRuntime nextRuntime store
+      (replaceHeap store heap) witness nextWitness := {
+  witnessTransport
+  capacity
+  ordinary
+  sourceGlobals
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/--
 Certificate-free compiler composition for one successful capacity-validated
 reuse declaration.
 
@@ -13425,6 +13501,8 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
       nextStore.host.closureDescriptors =
         targetStore.host.closureDescriptors ∧
       nextWitness.closureDescriptors = witness.closureDescriptors ∧
+      DirectLetStepTransports sourceRuntime nextRuntime targetStore nextStore
+        witness nextWitness ∧
       reuseCapacityLetFacts? facts decl = some nextFacts ∧
       ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
@@ -13620,9 +13698,12 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
     simpa [nextFacts] using
       ordinaryTokens.bindReuse
         (nextEvidence := evidence.afterReuse info) semanticReuse
+  have sourceTransports := reuse_sourceTransports semanticReuse
   exact ⟨replaceHeap targetStore heap, updated, nextWitness, nextFacts, step,
     by simp [replaceHeap, clearFailure],
     by simp [replaceHeap, clearFailure], witnessDescriptorsPreserved,
+    DirectLetStepTransports.replaceHeap transport capacityTransport
+      sourceTransports.2 sourceTransports.1,
     transfer, nextCapacity, nextOrdinary, nextFrameAligned, by
       change heap.AddressSpaceBudget
         (remainingBytes - directLetAllocationCost decl)
@@ -13769,8 +13850,10 @@ Uniform facts-indexed direct-`let` law for successful reuse.
 Unlike the older program-specific reuse simulation, this interface contains
 no translated program, target index, concrete token word, branch witness, or
 execution certificate. It universally quantifies the executable compiler and
-adapter outputs, computes the authoritative successor fact map, and threads
-the complete indexed resource invariant to that successor.
+adapter outputs, computes the authoritative successor fact map, threads the
+complete indexed resource invariant to that successor, and retains the
+current-to-successor representation transports used by recursive cached
+declarations.
 -/
 def ReuseCapacityDirectLetRuntimeRefinesWithCost
     (context : Fir.Wasm.Context)
@@ -13814,10 +13897,12 @@ def ReuseCapacityDirectLetRuntimeRefinesWithCost
           nextStore.host.closureDescriptors =
               targetStore.host.closureDescriptors ∧
             nextWitness.closureDescriptors = witness.closureDescriptors ∧
-              reuseCapacityLetFacts? facts decl = some nextFacts ∧
-                Invariant nextFacts (remainingBytes - letCost decl) nextRuntime
-                  (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
-                  nextWitness
+              DirectLetStepTransports sourceRuntime nextRuntime targetStore
+                  nextStore witness nextWitness ∧
+                reuseCapacityLetFacts? facts decl = some nextFacts ∧
+                  Invariant nextFacts (remainingBytes - letCost decl)
+                    nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+                    nextStore nextLocals nextWitness
 
 /--
 Facts-indexed runtime laws compose by source-admission disjunction when they
@@ -13890,12 +13975,12 @@ theorem
     resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       externalsPreserved, hostDescriptorsPreserved,
-      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant.1 sourceStep valueCompiled
       valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
-    transfer, nextInvariant,
+    transports, transfer, nextInvariant,
     by simpa [externalsPreserved] using invariant.2⟩
 
 /--
@@ -13933,12 +14018,12 @@ theorem
     resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       externalsPreserved, hostDescriptorsPreserved,
-      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant.1 sourceStep valueCompiled
       valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, hostDescriptorsPreserved,
-    witnessDescriptorsPreserved, transfer, nextInvariant,
+    witnessDescriptorsPreserved, transports, transfer, nextInvariant,
     hostDescriptorsPreserved.trans
       (invariant.2.trans witnessDescriptorsPreserved.symm)⟩
 
@@ -13970,13 +14055,13 @@ theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost
   obtain ⟨related, ordinaryTokens, localFrame, budget⟩ := invariant
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
-      transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩ :=
+      transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩ :=
     spec.reuseLetStep_of_capacity supported allocationFits related
       ordinaryTokens budget localFrame sourceStep valueCompiled valueAdapted
       resultFound
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, descriptorsPreserved, witnessDescriptorsPreserved,
-    transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩
+    transports, transfer, nextRelated, nextOrdinary, nextFrame, nextBudget⟩
 
 /--
 Cost-zero local aliases preserve the facts-indexed reuse frame.
@@ -14113,7 +14198,8 @@ theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_loc
   have costZero : directLetAllocationCost decl = 0 := by
     simp [directLetAllocationCost, valueEq]
   exact ⟨targetStore, updated, witness,
-    eraseReuseCapacityFact facts decl.fvarId, step, rfl, rfl, rfl, transfer,
+    eraseReuseCapacityFact facts decl.fvarId, step, rfl, rfl, rfl,
+    DirectLetStepTransports.refl nextRuntime targetStore witness, transfer,
     nextRelated, nextOrdinary, nextFrameAligned,
     by simpa [costZero] using budget⟩
 
@@ -14200,7 +14286,8 @@ theorem
   have costZero : directLetAllocationCost decl = 0 := by
     cases shape <;> simp [directLetAllocationCost, valueEq]
   exact ⟨targetStore, updated, witness,
-    eraseReuseCapacityFact facts decl.fvarId, step, rfl, rfl, rfl, transfer,
+    eraseReuseCapacityFact facts decl.fvarId, step, rfl, rfl, rfl,
+    DirectLetStepTransports.refl nextRuntime targetStore witness, transfer,
     nextRelated, nextOrdinary, nextFrameAligned,
     by simpa [costZero] using budget⟩
 
@@ -14304,7 +14391,9 @@ theorem
             simp [directLetAllocationCost, valueEq]
           exact ⟨clearFailure targetStore, updated, witness,
             eraseReuseCapacityFact facts decl.fvarId, step,
-            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            DirectLetStepTransports.clearFailure nextRuntime targetStore witness,
+            transfer,
             nextRelated, nextOrdinary, nextFrameAligned,
             by simpa [costZero, clearFailure] using budget⟩
       | word64 valueRelated => cases valueRelated
@@ -14418,7 +14507,9 @@ theorem
             simp [directLetAllocationCost, valueEq]
           exact ⟨clearFailure targetStore, updated, witness,
             eraseReuseCapacityFact facts decl.fvarId, step,
-            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            DirectLetStepTransports.clearFailure nextRuntime targetStore witness,
+            transfer,
             nextRelated, nextOrdinary, nextFrameAligned,
             by simpa [costZero, clearFailure] using budget⟩
       | word64 valueRelated => cases valueRelated
@@ -14527,7 +14618,9 @@ theorem
             simp [directLetAllocationCost, valueEq]
           exact ⟨clearFailure targetStore, updated, witness,
             eraseReuseCapacityFact facts decl.fvarId, step,
-            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            DirectLetStepTransports.clearFailure nextRuntime targetStore witness,
+            transfer,
             nextRelated, nextOrdinary, nextFrameAligned,
             by simpa [costZero, clearFailure] using budget⟩
       | word64 valueRelated => cases valueRelated
@@ -14655,6 +14748,10 @@ theorem
         eraseReuseCapacityFact facts decl.fvarId, step,
         by simp [replaceHeap, clearFailure],
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        DirectLetStepTransports.replaceHeap
+          (WitnessTransport.ofExtension extension) capacityTransport
+          (box_ordinaryPersistenceTransport semanticBox)
+          (box_preserves_globals semanticBox),
         transfer, nextRelated, nextOrdinary, nextFrame, by
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
@@ -14779,6 +14876,10 @@ theorem
         eraseReuseCapacityFact facts decl.fvarId, step,
         by simp [replaceHeap, clearFailure],
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        DirectLetStepTransports.replaceHeap
+          (WitnessTransport.ofExtension extension) capacityTransport
+          (literal_ordinaryPersistenceTransport sourceRuntime (.nat value))
+          (literal_preserves_globals sourceRuntime (.nat value)),
         transfer, nextRelated, nextOrdinary, nextFrame, by
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
@@ -14905,6 +15006,10 @@ theorem
         eraseReuseCapacityFact facts decl.fvarId, step,
         by simp [replaceHeap, clearFailure],
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        DirectLetStepTransports.replaceHeap
+          (WitnessTransport.ofExtension extension) capacityTransport
+          (literal_ordinaryPersistenceTransport sourceRuntime (.str value))
+          (literal_preserves_globals sourceRuntime (.str value)),
         transfer, nextRelated, nextOrdinary, nextFrame, by
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
@@ -15012,7 +15117,9 @@ theorem
             simp [directLetAllocationCost, valueEq]
           exact ⟨clearFailure targetStore, updated, witness,
             eraseReuseCapacityFact facts decl.fvarId, step,
-            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            DirectLetStepTransports.clearFailure nextRuntime targetStore witness,
+            transfer,
             nextRelated, nextOrdinary, nextFrameAligned,
             by simpa [costZero, clearFailure] using budget⟩
       | word64 valueRelated => cases valueRelated
@@ -15116,7 +15223,9 @@ theorem
             simp [directLetAllocationCost, valueEq]
           exact ⟨clearFailure targetStore, updated, witness,
             eraseReuseCapacityFact facts decl.fvarId, step,
-            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            by simp [clearFailure], by simp [clearFailure], rfl,
+            DirectLetStepTransports.clearFailure nextRuntime targetStore witness,
+            transfer,
             nextRelated, nextOrdinary, nextFrameAligned,
             by simpa [costZero, clearFailure] using budget⟩
       | word64 valueRelated => cases valueRelated
@@ -15190,9 +15299,9 @@ theorem
   injection alignedResultFound with resultIndexEq
   subst alignedResultIndex
   obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
-      hostDescriptorsPreserved, witnessDescriptorsPreserved, extension,
-      nextRuntimeRelated, failureClear, valueRelated, capacityValue,
-      capacityTransport, remainingBudget⟩ :=
+      hostDescriptorsPreserved, witnessDescriptorsPreserved, wasmGlobals,
+      hostStaticLayout, extension, nextRuntimeRelated, failureClear,
+      valueRelated, capacityValue, capacityTransport, remainingBudget⟩ :=
     constructorNonemptyStep_of_budget related.stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -15240,7 +15349,14 @@ theorem
     insertReuseCapacityFact facts decl.fvarId
       (constructorReuseCapacityEvidence info),
     step, externalsPreserved, hostDescriptorsPreserved,
-    witnessDescriptorsPreserved, transfer, nextRelated, nextOrdinary,
+    witnessDescriptorsPreserved, {
+      witnessTransport := WitnessTransport.ofExtension extension
+      capacity := capacityTransport
+      ordinary := allocCtor_ordinaryPersistenceTransport semanticStep
+      sourceGlobals := allocCtor_preserves_globals semanticStep
+      wasmGlobals
+      hostStaticLayout },
+    transfer, nextRelated, nextOrdinary,
     nextFrame, by
       simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
 
@@ -16452,7 +16568,8 @@ theorem
         Nat.le_add_right _ _
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
-          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+          _witnessDescriptorsPreserved, _directTransports, producedTransfer,
+          nextInvariant⟩ :=
         runtimeRefines supported stepFits invariant sourceStep valueCompiled
           valueAdapted resultFound
       rw [transfer] at producedTransfer
@@ -16572,7 +16689,8 @@ theorem
         Nat.le_add_right _ _
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
-          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+          _witnessDescriptorsPreserved, _directTransports, producedTransfer,
+          nextInvariant⟩ :=
         directRuntimeRefines supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer
@@ -16733,7 +16851,8 @@ theorem
         Nat.le_add_right _ _
       obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
           _externalsPreserved, _hostDescriptorsPreserved,
-          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+          _witnessDescriptorsPreserved, _directTransports, producedTransfer,
+          nextInvariant⟩ :=
         directRuntimeRefines supported stepFits invariant sourceStep
           valueCompiled valueAdapted resultFound
       rw [transfer] at producedTransfer

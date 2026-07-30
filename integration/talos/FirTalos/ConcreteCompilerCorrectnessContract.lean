@@ -3698,6 +3698,39 @@ example
   ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration disjoint
 
 /--
+The complete production direct family is available over the canonical
+whole-cache frame with transports accumulated from a fixed declaration
+entry. Direct readers, allocations, boxing, literals, constructors, and reuse
+therefore compose inside hereditary cached bodies without a caller-supplied
+target execution.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) :=
+  spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+    externals
+
+/--
 The production pure-external family is directly available over the canonical
 whole-cache frame with transports accumulated from a fixed declaration
 entry. This is the exact structural premise used by hereditary body proofs;
