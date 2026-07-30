@@ -954,6 +954,18 @@ assumed internal transition.
 that classification at `f5efc97e`. Thus all invocation `CoreResult.next`
 paths are ledger-aware.
 
+The source ownership carrier now follows that value-call classification as
+well. Heap ownership bounds every fixed argument stored in the live closure;
+the value-call theorem appends those bounds to the dynamic control arguments
+and delegates full application, re-partial application, and cache entry to the
+generic declaration-invocation carrier. The hereditary exact wrapper exposes
+the post-step relation and source ownership together. The global internal-step
+dispatcher now covers code, yielded restoration, named invocation, and
+value/closure invocation without a constructor-specific gap. This carrier
+slice is integrated at `7c0bb6c3`; `28aa7930` checks full application,
+re-partial application with fresh closure allocation, an exact related call,
+and the global dispatcher.
+
 External invocation suspension now preserves the same exact ledger as well.
 Runtime-equality lemmas show that declaration request construction, named
 dispatch, and live-closure dispatch do not mutate the runtime before yielding
@@ -1626,6 +1638,11 @@ deletion, and global deleted-write dispatch with concrete machine steps.
 successor and composes it with the hereditary exact matcher; `991c36ee`
 checks under-application, full declaration entry, cache hit, and an exact
 state-level full call.
+`7c0bb6c3` derives closure-owned fixed-argument bounds and preserves source
+ownership through full and partial internal value invocation, then assembles
+the ownership-strengthened dispatcher for every internal control;
+`28aa7930` checks full body entry, re-partial allocation, an exact related
+closure call, and the global dispatcher.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1726,9 +1743,12 @@ the existing nullary-`.fap` semantic discrepancy.
    Exact-shadow and reachable state-level dispatchers expose that result
    together with the existing non-lockstep relation. Internal named
    invocation now preserves the carrier through closure allocation, complete
-   parameter binding and body entry, and cache hits. Next carry the same
-   result through closure/value invocation, then make the source-side
-   external-response ownership obligation explicit.
+   parameter binding and body entry, and cache hits. Internal value/closure
+   invocation now recovers captured fixed arguments from heap ownership and
+   preserves the carrier through full body entry and re-partial allocation.
+   The unified internal dispatcher therefore has no remaining control-form
+   gap. Next make the source-side external-response ownership obligation
+   explicit and carry it through waiting/resumption.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
