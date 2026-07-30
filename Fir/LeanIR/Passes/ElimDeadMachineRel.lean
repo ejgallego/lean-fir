@@ -7551,6 +7551,141 @@ theorem HeapLocationsBelowFrontier.mono
   intro location member
   exact bounded (subset _ member)
 
+/-- Value bounds survive any runtime transition that only advances the fresh
+allocation frontier. -/
+theorem HeapLocationsBelowFrontier.monoFrontier
+    (bounded : HeapLocationsBelowFrontier before values)
+    (frontier : before.nextLocation ≤ after.nextLocation) :
+    HeapLocationsBelowFrontier after values := by
+  intro location member
+  exact Nat.lt_of_lt_of_le (bounded member) frontier
+
+/-- Every value obtainable from the source environment carries no heap
+address at or above the runtime's fresh allocation frontier. Unlike liveness
+roots, this compiler-state invariant deliberately covers dead locals whose
+values are still evaluated by a deleted source operation. -/
+def EnvironmentBelowFrontier
+    (runtime : RuntimeState) (env : Env) : Prop :=
+  ∀ {fvarId value},
+    lookup env fvarId = some value →
+      HeapLocationsBelowFrontier runtime [value]
+
+/-- The empty environment satisfies the value-address bound. -/
+theorem EnvironmentBelowFrontier.empty :
+    EnvironmentBelowFrontier runtime [] := by
+  intro fvarId value found
+  simp [lookup] at found
+
+/-- Binding a bounded value preserves the complete environment bound. -/
+theorem EnvironmentBelowFrontier.bind
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (valueBound : HeapLocationsBelowFrontier runtime [value]) :
+    EnvironmentBelowFrontier runtime (bind env binder value) := by
+  intro fvarId foundValue found
+  unfold Fir.LeanIR.Impure.bind at found
+  simp only [lookup] at found
+  split at found
+  · have sameValue := Option.some.inj found
+    subst foundValue
+    exact @valueBound
+  · exact bounded found
+
+/-- Existing environment values remain bounded as allocation advances. -/
+theorem EnvironmentBelowFrontier.monoFrontier
+    (bounded : EnvironmentBelowFrontier before env)
+    (frontier : before.nextLocation ≤ after.nextLocation) :
+    EnvironmentBelowFrontier after env := by
+  intro fvarId value found
+  have valueBound :
+      HeapLocationsBelowFrontier before [value] :=
+    bounded found
+  intro location member
+  exact Nat.lt_of_lt_of_le (valueBound member) frontier
+
+/-- Evaluation of an arbitrary source argument is bounded by the complete
+environment invariant, without requiring the argument to be live in the
+compiler continuation. -/
+theorem EnvironmentBelowFrontier.of_evalArg
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (evaluated :
+      Fir.LeanIR.Impure.evalArg env argument = .ok value) :
+    HeapLocationsBelowFrontier runtime [value] := by
+  cases argument with
+  | erased =>
+      simp [Fir.LeanIR.Impure.evalArg] at evaluated
+      subst value
+      intro location member
+      simp only [List.mem_singleton] at member
+      cases member
+  | fvar fvarId =>
+      apply bounded
+      exact lookupValue_eq_ok_iff.mp evaluated
+  | type type impossible =>
+      nomatch impossible
+
+/-- List evaluation preserves the complete-environment bound pointwise. -/
+theorem EnvironmentBelowFrontier.of_evalArgList
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (arguments : List (LCNF.Arg .impure))
+    (values : List Value)
+    (evaluated :
+      arguments.mapM (Fir.LeanIR.Impure.evalArg env) =
+        Except.ok values) :
+    HeapLocationsBelowFrontier runtime values := by
+  induction arguments generalizing values with
+  | nil =>
+      simp [Pure.pure, Except.pure] at evaluated
+      subst values
+      intro location member
+      simp at member
+  | cons head tail ih =>
+      rw [List.mapM_cons] at evaluated
+      cases headResult : Fir.LeanIR.Impure.evalArg env head with
+      | error fault =>
+          simp [headResult, Bind.bind, Except.bind] at evaluated
+      | ok headValue =>
+          cases tailResult : tail.mapM (evalArg env) with
+          | error fault =>
+              simp [headResult, tailResult, Bind.bind, Except.bind]
+                at evaluated
+          | ok tailValues =>
+              simp [headResult, tailResult, Bind.bind, Except.bind,
+                Pure.pure, Except.pure] at evaluated
+              subst values
+              intro location member
+              simp only [List.mem_cons] at member
+              rcases member with same | tailMember
+              · apply bounded.of_evalArg headResult
+                simpa using same
+              · exact ih tailValues tailResult tailMember
+
+/-- Array evaluation preserves the complete-environment bound pointwise. -/
+theorem EnvironmentBelowFrontier.of_evalArgs
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (arguments : Array (LCNF.Arg .impure))
+    (values : Array Value)
+    (evaluated :
+      Fir.LeanIR.Impure.evalArgs env arguments = .ok values) :
+    HeapLocationsBelowFrontier runtime values.toList := by
+  unfold Fir.LeanIR.Impure.evalArgs at evaluated
+  rw [Array.mapM_eq_mapM_toList] at evaluated
+  generalize listResultEq :
+    arguments.toList.mapM (Fir.LeanIR.Impure.evalArg env) =
+      listResult at evaluated
+  cases listResult with
+  | error fault =>
+      simp [Functor.map, Except.map] at evaluated
+  | ok listValues =>
+      simp [Functor.map, Except.map] at evaluated
+      subst values
+      have listBound :
+          HeapLocationsBelowFrontier runtime listValues :=
+        bounded.of_evalArgList
+          arguments.toList listValues listResultEq
+      intro location member
+      apply @listBound location
+      simpa using member
+
 /-- Every source runtime root in a shadow relation names an allocated address
 strictly below the source frontier. Reachable heap correspondence supplies
 the cell, and freshness excludes every address at or above the frontier. -/
@@ -9948,6 +10083,112 @@ theorem ShadowRuntimeRel.leftReusePreservesHeapOwnershipBelowFrontier
       exact wellFormed.reuseNone argumentsBelow effect
   | some location =>
       exact wellFormed.reuseSome argumentsBelow effect
+
+/-- Source heap ownership paired with the complete environment-value bound.
+This is the local compiler-state carrier needed at deleted operations, whose
+source operands need not occur in the target continuation's live root set. -/
+structure SourceEnvironmentOwnershipBelowFrontier
+    (state : MachineState) : Prop where
+  heap : HeapOwnershipBelowFrontier state.runtime
+  env : EnvironmentBelowFrontier state.runtime state.env
+
+/-- Replacing only the runtime at an unchanged allocation frontier preserves
+the complete source-environment half of the carrier. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.withRuntimeSameFrontier
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (heap : HeapOwnershipBelowFrontier result)
+    (frontier : result.nextLocation = state.runtime.nextLocation) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } := by
+  constructor
+  · exact heap
+  · intro fvarId value found
+    have valueBound :
+        HeapLocationsBelowFrontier state.runtime [value] :=
+      @bounded.env fvarId value found
+    intro location member
+    rw [frontier]
+    exact @valueBound location member
+
+/-- Complete source-environment ownership discharges constructor allocation
+without requiring the evaluated arguments to be live after the operation. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.allocCtorHeap
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.allocCtor state.runtime info arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result :=
+  bounded.heap.allocCtor
+    (EnvironmentBelowFrontier.of_evalArgs
+      (@bounded.env) argumentExprs arguments evaluated)
+    effect
+
+/-- The same complete-environment premise supplies a deleted object write's
+new ownership edge even when its field argument is dead in the continuation. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.setObjectFieldHeap
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArg state.env fieldArgument = .ok field)
+    (effect :
+      Fir.LeanIR.Impure.setObjectField state.runtime object index field =
+        .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  bounded.heap.setObjectField
+    (EnvironmentBelowFrontier.of_evalArg
+      (@bounded.env) evaluated)
+    effect
+
+/-- A successful object-field write preserves the full source environment
+carrier because it leaves the allocation frontier unchanged. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.setObjectFieldState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArg state.env fieldArgument = .ok field)
+    (effect :
+      Fir.LeanIR.Impure.setObjectField state.runtime object index field =
+        .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.setObjectFieldHeap evaluated effect)
+    (setObjectField_nextLocation_eq_of_ok effect)
+
+/-- Reset also preserves the full source environment carrier: recursive
+release maintains heap ownership and every successful branch keeps the
+allocation frontier fixed. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.resetState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.reset state.runtime count object =
+        .ok (result, token)) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.reset effect)
+    (reset_nextLocation_eq_of_ok effect)
+
+/-- Complete source-environment ownership handles both concrete reuse and
+the missing-token allocation fallback independently of target liveness. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.reuseHeap
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.reuse state.runtime
+          (.reuseToken tokenLocation) info updateHeader arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  have argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList :=
+    EnvironmentBelowFrontier.of_evalArgs
+      (@bounded.env) argumentExprs arguments evaluated
+  cases tokenLocation with
+  | none =>
+      exact bounded.heap.reuseNone argumentsBelow effect
+  | some location =>
+      exact bounded.heap.reuseSome argumentsBelow effect
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler

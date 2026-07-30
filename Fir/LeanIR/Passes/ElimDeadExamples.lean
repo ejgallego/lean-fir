@@ -4975,43 +4975,71 @@ noncomputable def deletedReuseNoneLedgerResult :
   }
   related.reuseNoneLeftGarbage oneFieldInfo #[.erased] (by rfl) true
 
-/-- The failed-token fixture exercises the checked-operand bridge: although
-reuse allocates only on the source, its evaluated argument is covered by the
-operation's input live set, so the result retains the ownership bound. -/
+/-- The failed-token fixture exercises the complete-environment bridge. Its
+erased argument is intentionally dead in the target continuation, but is
+still bounded as a source environment value when failed reuse allocates. -/
 theorem deletedReuseNoneOwnershipBelowFrontier :
     HeapOwnershipBelowFrontier
       deletedReuseNoneLedgerResult.nextRuntime := by
-  let operationUsed : UsedLocals :=
-    neutralUsed.insert reuseArgVar
-  have runtime : ShadowRuntimeRel emptyAddressRenaming
-      deletedReuseNoneSourceState.runtime
-      deletedReuseTargetState.runtime
-      (envRootsOn operationUsed deletedReuseNoneSourceState.env ++ [])
-      (envRootsOn operationUsed deletedReuseNoneSourceState.env) := by
-    have env : EnvRelOn emptyAddressRenaming operationUsed
-        deletedReuseNoneSourceState.env
+  have erasedBelow :
+      HeapLocationsBelowFrontier ({} : RuntimeState) [.erased] := by
+    intro location member
+    simp at member
+  have tokenBelow :
+      HeapLocationsBelowFrontier ({} : RuntimeState)
+        [.reuseToken none] := by
+    intro location member
+    simp at member
+  have emptyEnv :
+      EnvironmentBelowFrontier ({} : RuntimeState) [] :=
+    EnvironmentBelowFrontier.empty
+  have liveEnvBound :
+      EnvironmentBelowFrontier ({} : RuntimeState) liveEnv := by
+    have extended :
+        EnvironmentBelowFrontier ({} : RuntimeState)
+          (bind [] live .erased) :=
+      EnvironmentBelowFrontier.bind
+        (binder := live) (value := .erased)
+        emptyEnv erasedBelow
+    intro fvarId value found
+    apply @extended fvarId value
+    simpa [liveEnv] using found
+  have tokenEnvBound :
+      EnvironmentBelowFrontier ({} : RuntimeState)
+        (bind liveEnv reuseTokenVar (.reuseToken none)) :=
+    EnvironmentBelowFrontier.bind
+      (binder := reuseTokenVar) (value := .reuseToken none)
+      liveEnvBound tokenBelow
+  have sourceEnvBound :
+      EnvironmentBelowFrontier
+        deletedReuseNoneSourceState.runtime
         deletedReuseNoneSourceState.env := by
-      simpa [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
-        liveEnv] using
-        (((EnvRelOn.empty emptyAddressRenaming operationUsed).bindBoth
-          (binder := live) ValueRel.erased).bindBoth
-          (binder := reuseTokenVar) ValueRel.reuseNone).bindBoth
-          (binder := reuseArgVar) ValueRel.erased
-    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
-      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
-  apply runtime.leftReusePreservesHeapOwnershipBelowFrontier
+    have extended :
+        EnvironmentBelowFrontier ({} : RuntimeState)
+          (bind
+            (bind liveEnv reuseTokenVar (.reuseToken none))
+            reuseArgVar .erased) :=
+      EnvironmentBelowFrontier.bind
+        (binder := reuseArgVar) (value := .erased)
+        tokenEnvBound erasedBelow
+    intro fvarId value found
+    apply @extended fvarId value
+    simpa [deletedReuseNoneSourceState,
+      deletedReuseNoneSourceEnv] using found
+  let bounded :
+      SourceEnvironmentOwnershipBelowFrontier
+        deletedReuseNoneSourceState := {
+    heap := by
+      simpa [deletedReuseNoneSourceState] using
+        HeapOwnershipBelowFrontier.empty
+    env := sourceEnvBound
+  }
+  apply bounded.reuseHeap
       (argumentExprs := #[.fvar reuseArgVar])
       (arguments := #[.erased])
       (tokenLocation := none)
       (info := oneFieldInfo)
       (updateHeader := true)
-      (wellFormed := by
-        simpa [deletedReuseNoneSourceState] using
-          HeapOwnershipBelowFrontier.empty)
-  · intro argument member
-    simp at member
-    subst argument
-    simp [ArgCovered, operationUsed]
   · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
       evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
     rfl
@@ -5027,27 +5055,90 @@ theorem deletedWriteSourceOwnershipBelowFrontier :
   intro child member
   simp [deletedWriteObject, HeapObject.ownedValues] at member
 
-/-- The deleted object write exercises the checked single-argument bridge;
-the erased field introduces no future address and the existing cell update
-therefore retains the ownership invariant. -/
+/-- The deleted object write exercises the complete-environment single
+argument bridge; the erased field introduces no future address and the
+existing cell update therefore retains the ownership invariant. -/
 theorem deletedObjectWritePreservesOwnershipBelowFrontier
     (effect :
       setObjectField deletedWriteSourceRuntime
           (.object (.heap 0)) 0 .erased =
         .ok result) :
     HeapOwnershipBelowFrontier result := by
-  have runtime : ShadowRuntimeRel emptyAddressRenaming
-      deletedWriteSourceRuntime deletedWritesTargetState.runtime
-      (envRootsOn neutralUsed deletedWriteSourceEnv ++ [])
-      (envRootsOn neutralUsed deletedWritesTargetState.env) := by
-    simpa [deletedWritesTargetState] using
-      deletedWriteRuntimeRelated
-  apply runtime.leftSetObjectFieldPreservesHeapOwnershipBelowFrontier
-      (fieldArgument := .erased)
-      (wellFormed := deletedWriteSourceOwnershipBelowFrontier)
-      (effect := effect)
-  · trivial
-  · rfl
+  have erasedBelow :
+      HeapLocationsBelowFrontier
+        deletedWriteSourceRuntime [.erased] := by
+    intro location member
+    simp at member
+  have objectBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.object (.heap 0)] := by
+    intro location member
+    simp at member
+    subst location
+    simp [deletedWriteSourceRuntime, alloc]
+  have usizeBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.usize 7] := by
+    intro location member
+    simp at member
+  have scalarBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.scalar (.uint8 9)] := by
+    intro location member
+    simp at member
+  have emptyEnv :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime [] :=
+    EnvironmentBelowFrontier.empty
+  have liveBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind [] live .erased) :=
+    EnvironmentBelowFrontier.bind
+      (binder := live) (value := .erased)
+      emptyEnv erasedBelow
+  have objectBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind (bind [] live .erased) dead (.object (.heap 0))) :=
+    EnvironmentBelowFrontier.bind
+      (binder := dead) (value := .object (.heap 0))
+      liveBound objectBelow
+  have usizeBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind
+          (bind (bind [] live .erased) dead (.object (.heap 0)))
+          usizeField (.usize 7)) :=
+    EnvironmentBelowFrontier.bind
+      (binder := usizeField) (value := .usize 7)
+      objectBound usizeBelow
+  have extended :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind
+          (bind
+            (bind (bind [] live .erased) dead (.object (.heap 0)))
+            usizeField (.usize 7))
+          scalarField (.scalar (.uint8 9))) :=
+    EnvironmentBelowFrontier.bind
+      (binder := scalarField) (value := .scalar (.uint8 9))
+      usizeBound scalarBelow
+  have envBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        deletedWriteSourceEnv := by
+    intro fvarId value found
+    apply @extended fvarId value
+    simpa [deletedWriteSourceEnv, liveEnv] using found
+  let bounded :
+      SourceEnvironmentOwnershipBelowFrontier
+        deletedObjectSetSourceState := {
+    heap := by
+      simpa [deletedObjectSetSourceState] using
+        deletedWriteSourceOwnershipBelowFrontier
+    env := by
+      intro fvarId value found
+      apply @envBound fvarId value
+      simpa [deletedObjectSetSourceState] using found
+  }
+  exact
+    (bounded.setObjectFieldState
+      (fieldArgument := .erased) rfl effect).heap
 
 theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
     deletedReuseNoneLedgerResult.runtime.ledger.owner = fun _ => 0 := by
