@@ -13663,17 +13663,11 @@ theorem closedConcreteReuseResetReady_of_sourceOwnership
         (closedConcreteReuseSourceResetState arguments).runtime
         sourceRoots)
       1 resetObjectVar := by
-  apply
-    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
-      closedConcreteReuseResetLocalReady runtime targetEmpty
-      rfl rfl rfl rfl
-  have afterOwnership :
-      HeapOwnershipBelowFrontier closedConcreteReuseResetRuntime := by
-    exact ownership.heap.reset
-      (closedConcreteReuseResetLocalReady
-        (arguments := arguments)).effect
-  intro location bounded
-  exact afterOwnership.findCell?_eq_none_of_frontier_le bounded
+  exact
+    (closedConcreteReuseResetLocalReady
+      (arguments := arguments))
+      |>.deletedReadyAt_of_rightNextLocation_zero_withOwnership
+        runtime targetEmpty ownership rfl rfl rfl
 
 /-- The exact pair supplies both the deleted reset certificate and the saved
 frame roots selected by the compiler residual. -/

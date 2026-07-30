@@ -17484,6 +17484,21 @@ theorem DeletedResetLocalReadyAt.deletedReadyAt
   .mk shape.objectValue shape.token shape.nextRuntime
     shape.objectRead shape.effect frame
 
+/-- A locally successful reset inherits post-state heap freshness directly
+from the maintained source-machine ownership carrier. This is the generic
+bridge from static ownership preservation to the extensional freshness field
+of `RuntimeReachableFrame`. -/
+theorem DeletedResetLocalReadyAt.afterFresh_of_sourceOwnership
+    (shape : DeletedResetLocalReadyAt state count object)
+    (ownership : SourceMachineOwnershipBelowFrontier state) :
+    ∀ location, shape.nextRuntime.nextLocation ≤ location →
+      findCell? shape.nextRuntime.heap location = none := by
+  have afterOwnership :
+      HeapOwnershipBelowFrontier shape.nextRuntime :=
+    ownership.heap.reset shape.effect
+  intro location bounded
+  exact afterOwnership.findCell?_eq_none_of_frontier_le bounded
+
 /-- A hereditary source-only reset binding discharges the target-ledger owner
 frame directly from the successful interpreter effect. -/
 theorem
@@ -17605,6 +17620,28 @@ theorem
     (shape.ownerFrame_of_sourceOnlyHeapClosureBinding ledger closure)
     afterFresh
 
+/-- Source-owned target-ledger reset bridge. The client supplies local reset
+success, source-only closure provenance, and the non-heap frame equations;
+the maintained machine carrier discharges post-reset heap freshness. -/
+theorem
+    DeletedResetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure_withOwnership
+    (shape : DeletedResetLocalReadyAt state count object)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (closure :
+      SourceOnlyHeapClosureBinding ledger state.env object
+        objectLocation state.runtime.heap)
+    (ownership : SourceMachineOwnershipBelowFrontier state)
+    (globalsEq : shape.nextRuntime.globals = state.runtime.globals)
+    (worldEq : shape.nextRuntime.world = state.runtime.world)
+    (traceEq : shape.nextRuntime.trace = state.runtime.trace) :
+    DeletedResetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) count object :=
+  shape.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure
+    related ledger closure globalsEq worldEq traceEq
+    (shape.afterFresh_of_sourceOwnership ownership)
+
 /-- If a related target has never allocated, no source heap cell can occur in
 the active roots.  Any reset outcome that preserves non-heap observables and
 the allocation frontier is therefore a reachable-runtime frame; its garbage
@@ -17653,6 +17690,26 @@ theorem
   shape.deletedReadyAt
     (related.leftRuntimeReachableFrame_of_rightNextLocation_zero
       rightEmpty nextLocationEq globalsEq worldEq traceEq afterFresh)
+
+/-- Source-owned empty-target reset bridge. Reset's generic frontier theorem
+and the maintained machine carrier discharge both allocation-frontier and
+post-state heap freshness obligations. -/
+theorem
+    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero_withOwnership
+    (shape : DeletedResetLocalReadyAt state count object)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (rightEmpty : target.nextLocation = 0)
+    (ownership : SourceMachineOwnershipBelowFrontier state)
+    (globalsEq : shape.nextRuntime.globals = state.runtime.globals)
+    (worldEq : shape.nextRuntime.world = state.runtime.world)
+    (traceEq : shape.nextRuntime.trace = state.runtime.trace) :
+    DeletedResetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) count object :=
+  shape.deletedReadyAt_of_rightNextLocation_zero
+    related rightEmpty (reset_nextLocation_eq_of_ok shape.effect)
+    globalsEq worldEq traceEq
+    (shape.afterFresh_of_sourceOwnership ownership)
 
 /-- Machine-level deleted-`reset` rule under the explicit ownership frame. -/
 theorem coreStep_deletedReset_of_ready
