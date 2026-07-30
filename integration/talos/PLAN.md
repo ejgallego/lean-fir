@@ -5250,16 +5250,32 @@ certificate-free syntax induction and returns the exact source result, target
 `CodeWP`, final base frame, and all six entry-to-exit transports. No target
 execution is added to source admission.
 
+W6.6gzx makes that structural boundary parametric in caller-owned
+address-space slack. `ReuseCapacityBudgetShiftedFrame` presents any
+resource-indexed frame at `remainingBytes + slack`. The direct, external,
+call, lazy, and effect runtime-law `shiftBudget` theorems prove that every
+operation consumes only its source-selected cost and preserves the same
+slack; case selection is cost-neutral and needs no adapter.
+
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack` consequently starts
+from a frame at `requiredBytes + slack` and returns the final frame at exactly
+`slack`.
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack` combines
+that result with the fixed-entry transport invariant, returning the exact
+source result, target `CodeWP`, residual caller frame, and all six
+entry-to-exit transports. This is the uniform residual-budget theorem required
+by `BudgetedCapacityPreservingSuccessfulDeclaration`; it is derived from
+operation-family laws rather than target determinism or an execution
+certificate.
+
 The remaining construction work is explicit. Each admitted operation family
 must rebuild the entry-relative cache frame from its existing
 current-to-successor transport package. Production lowering/adaptation must
 then select each internal initializer body uniformly, and the resulting
 structural proof must supply the cache-aware hereditary declaration package.
-That package additionally asks for a residual address-space theorem uniform
-in caller slack; the current exact-cost structural index ends at budget zero,
-so this requires either a slack-general structural theorem or a derivation
-from operation residuals and target determinism. These are module-level
-compiler/runtime obligations, not call-site execution certificates.
+The residual address-space field is now supplied by W6.6gzx. The remaining
+items are module-level compiler/runtime obligations, not call-site execution
+certificates.
 
 ## Parallel agent packages
 

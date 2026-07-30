@@ -984,17 +984,25 @@ acceptance tests pass.
    the certificate-free structural proof to that frame. Its conclusion now
    returns the exact source result, target `CodeWP`, final base frame, and all
    six entry-to-exit transports.
+   `ReuseCapacityBudgetShiftedFrame` now makes every indexed frame parametric
+   in fixed caller-owned budget slack. The `shiftBudget` adapters for direct,
+   external, call, lazy, and effect runtime laws preserve that slack across
+   every costed or cost-neutral operation family.
+   `codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack` therefore starts
+   at `requiredBytes + slack` and returns the final frame at `slack`, while
+   `codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack`
+   returns that residual frame together with the exact source result, target
+   `CodeWP`, and all six entry transports. This discharges the hereditary
+   declaration contract's residual-budget uniformity requirement without
+   target determinism or target-execution certificates.
    Next lift each admitted direct, external, call, lazy, and effect runtime
    family over the entry-relative cache frame, using the operation packages'
    existing current-to-successor transports and the common `step` theorem.
    Then derive production internal-function selection and construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
-   generated declaration environment. The hereditary declaration package
-   also requires a residual-budget theorem uniform in caller slack; either
-   generalize the structural budget index from exact cost to arbitrary
-   remaining capacity or derive that field from the operation packages plus
-   target determinism. Do not reintroduce a `ConcreteCodeSimulation`,
-   `ReuseCapacityCodeSimulation`, or call-site target execution premise.
+   generated declaration environment. Do not reintroduce a
+   `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site
+   target execution premise.
    Heap-valued `.object`/`.tobject` results then add
    `ReuseTokenPublicationDisjoint` from source alias information or a
    coordinated alias-invalidating validator transfer. External nullary

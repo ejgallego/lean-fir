@@ -15741,6 +15741,31 @@ def ReuseCapacityEntryRelativeFrame
       currentStore entryWitness currentWitness
 
 /--
+View a resource-indexed frame with a fixed amount of caller-owned budget
+slack.
+
+The structural source cost continues to index `remainingBytes`; the concrete
+frame receives that cost plus `slack`. Operation laws can therefore consume
+their exact source-selected cost while preserving the same slack to the
+return. This is the budget-parametric boundary required by hereditary
+declaration correctness.
+-/
+def ReuseCapacityBudgetShiftedFrame
+    (Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop)
+    (slack : Nat)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  Frame facts (remainingBytes + slack) sourceRuntime sourceEnv targetStore
+    targetLocals witness
+
+/--
 Uniform facts-indexed external-result runtime law.
 
 The source admission determines the response-dependent step cost. The
@@ -15966,6 +15991,208 @@ theorem reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
     sourceValue valueCode targetValue targetStore targetLocals resultIndex
     remainingBytes stepCost witness supported
   exact False.elim supported
+
+/--
+Every cost-indexed direct operation law is parametric in a fixed amount of
+caller budget slack.
+
+The operation still consumes `letCost decl`; subtraction commutes with the
+preserved slack because source admission proves that the step fits in the
+source-selected remaining cost.
+-/
+theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.shiftBudget
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Frame)
+    (slack : Nat) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (ReuseCapacityBudgetShiftedFrame Frame slack) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  have liftedFits : letCost decl ≤ remainingBytes + slack :=
+    Nat.le_trans stepFits (Nat.le_add_right _ _)
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported liftedFits invariant sourceStep valueCompiled
+      valueAdapted resultFound
+  refine ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, ?_⟩
+  have budgetEq :
+      remainingBytes + slack - letCost decl =
+        (remainingBytes - letCost decl) + slack := by
+    omega
+  simpa [ReuseCapacityBudgetShiftedFrame, budgetEq] using nextInvariant
+
+/-- External-result operation laws preserve arbitrary caller budget slack. -/
+theorem ReuseCapacityExternalLetRuntimeRefinesWithCost.shiftBudget
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported Frame)
+    (slack : Nat) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals ExternalSupported
+      (ReuseCapacityBudgetShiftedFrame Frame slack) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  have liftedFits : stepCost ≤ remainingBytes + slack :=
+    Nat.le_trans stepFits (Nat.le_add_right _ _)
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported liftedFits invariant sourceStep valueCompiled
+      valueAdapted resultFound
+  refine ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, ?_⟩
+  have budgetEq :
+      remainingBytes + slack - stepCost =
+        (remainingBytes - stepCost) + slack := by
+    omega
+  simpa [ReuseCapacityBudgetShiftedFrame, budgetEq] using nextInvariant
+
+/-- Interprocedural-call operation laws preserve arbitrary caller slack. -/
+theorem ReuseCapacityCallLetRuntimeRefinesWithCost.shiftBudget
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals CallSupported Frame)
+    (slack : Nat) :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals CallSupported
+      (ReuseCapacityBudgetShiftedFrame Frame slack) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  have liftedFits : stepCost ≤ remainingBytes + slack :=
+    Nat.le_trans stepFits (Nat.le_add_right _ _)
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported liftedFits invariant sourceStep valueCompiled
+      valueAdapted resultFound
+  refine ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, ?_⟩
+  have budgetEq :
+      remainingBytes + slack - stepCost =
+        (remainingBytes - stepCost) + slack := by
+    omega
+  simpa [ReuseCapacityBudgetShiftedFrame, budgetEq] using nextInvariant
+
+/-- Lazy-cache hit/miss laws preserve arbitrary caller budget slack. -/
+theorem ReuseCapacityLazyLetRuntimeRefinesWithCost.shiftBudget
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals LazySupported Frame)
+    (slack : Nat) :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals LazySupported
+      (ReuseCapacityBudgetShiftedFrame Frame slack) := by
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue targetStore targetLocals resultIndex
+    remainingBytes stepCost witness supported stepFits invariant sourceStep
+    valueCompiled valueAdapted resultFound
+  have liftedFits : stepCost ≤ remainingBytes + slack :=
+    Nat.le_trans stepFits (Nat.le_add_right _ _)
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported liftedFits invariant sourceStep valueCompiled
+      valueAdapted resultFound
+  refine ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, ?_⟩
+  have budgetEq :
+      remainingBytes + slack - stepCost =
+        (remainingBytes - stepCost) + slack := by
+    omega
+  simpa [ReuseCapacityBudgetShiftedFrame, budgetEq] using nextInvariant
+
+/-- No-result effects leave both structural cost and caller slack unchanged. -/
+theorem EffectRuntimeRefines.shiftBudget
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts : ReuseCapacityFacts}
+    (runtimeRefines :
+      EffectRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv EffectSupported (Frame facts))
+    (slack : Nat) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv EffectSupported
+      (ReuseCapacityBudgetShiftedFrame Frame slack facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated invariant adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved, nextInvariant⟩
 
 /--
 A facts-indexed external-result law lifts through closure-descriptor
@@ -16633,6 +16860,135 @@ theorem
         valueRelated⟩
 
 /--
+The mixed structural theorem is uniform in arbitrary caller budget slack.
+
+The source evaluation continues to determine the exact path cost
+`requiredBytes`. The initial frame may own `requiredBytes + slack`; every
+costed operation consumes only its source-selected prefix, effects preserve
+the index, and the return therefore retains exactly `slack`.
+-/
+theorem
+    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes slack : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CallSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost facts sourceRuntime sourceEnv
+        code resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts (requiredBytes + slack) sourceRuntime sourceEnv initial locals
+        witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost Frame)
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        ExternalSupported Frame)
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        CallSupported Frame)
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        LazySupported Frame)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env EffectSupported (Frame facts)) :
+    ∃ resultStore resultLocals resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness [] (ExactReturnControlPost resultStore physical) ∧
+        Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
+          resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  have shiftedInvariant :
+      ReuseCapacityBudgetShiftedFrame Frame slack facts requiredBytes
+        sourceRuntime sourceEnv initial locals witness := by
+    simpa [ReuseCapacityBudgetShiftedFrame] using invariant
+  have shiftedFrameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        ReuseCapacityBudgetShiftedFrame Frame slack frameFacts frameBytes
+            frameRuntime frameEnv frameStore frameLocals frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness := by
+    intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+      frameWitness related
+    exact frameRelated related
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      targetWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+      adapted localsAligned shiftedInvariant shiftedFrameRelated
+      (directRuntimeRefines.shiftBudget slack)
+      (externalRuntimeRefines.shiftBudget slack)
+      (callRuntimeRefines.shiftBudget slack)
+      (lazyRuntimeRefines.shiftBudget slack) caseRuntimeRefines
+      (fun facts =>
+        EffectRuntimeRefines.shiftBudget (effectRuntimeRefines facts) slack)
+  have resultFrame :
+      Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
+        resultWitness := by
+    simpa [ReuseCapacityBudgetShiftedFrame] using resultInvariant
+  exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+    targetWP, resultFrame, failureClear, valueRelated⟩
+
+/--
 Certificate-free structural partial correctness with exact entry-to-exit
 runtime transports.
 
@@ -16760,6 +17116,139 @@ theorem
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       targetWP, resultInvariant, failureClear, valueRelated⟩ :=
     spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+      adapted localsAligned entryInvariant entryFrameRelated
+      directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+      lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+  exact ⟨evaluation.sourceResult, resultStore, resultLocals, resultWitness,
+    resultKind, physical, targetWP, resultInvariant.1, resultInvariant.2,
+    failureClear, valueRelated⟩
+
+/--
+Entry-relative structural correctness is also uniform in caller budget slack.
+
+This is the complete structural boundary consumed by hereditary declaration
+proofs: exact source and target results, all entry-to-exit representation
+transports, and the caller's residual address-space budget survive together.
+-/
+theorem
+    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes slack : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CallSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost facts sourceRuntime sourceEnv
+        code resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts (requiredBytes + slack) sourceRuntime sourceEnv initial locals
+        witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        ExternalSupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        CallSupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        LazySupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env EffectSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
+            facts)) :
+    SourceCodeResult context externals sourceRuntime sourceEnv code resultRuntime
+        resultValue ∧
+      ∃ resultStore resultLocals resultWitness resultKind physical,
+        CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv code targetCode initial locals
+            witness [] (ExactReturnControlPost resultStore physical) ∧
+          Frame resultFacts slack resultRuntime resultEnv resultStore
+            resultLocals resultWitness ∧
+          ReuseCapacityCodeEntryTransports sourceRuntime resultRuntime initial
+            resultStore witness resultWitness ∧
+          resultStore.host.failure? = none ∧
+          PhysicalValueRel resultWitness resultKind physical resultValue := by
+  have entryInvariant :
+      ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness facts
+        (requiredBytes + slack) sourceRuntime sourceEnv initial locals witness :=
+    ⟨invariant,
+      ReuseCapacityCodeEntryTransports.refl sourceRuntime initial witness⟩
+  have entryFrameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
+            frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness := by
+    intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+      frameWitness related
+    exact frameRelated related.1
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      targetWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack evaluation
       adapted localsAligned entryInvariant entryFrameRelated
       directRuntimeRefines externalRuntimeRefines callRuntimeRefines
       lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
