@@ -1115,6 +1115,22 @@ remaining gap is the genuinely static one: carry compiler allocation and
 ownership facts through arbitrary executions so those successful evaluations
 and source-only selections do not depend on enumerated fixture states.
 
+The allocation-lifecycle entry and transport layer lands at `3744edf1`.
+Every incoming source frontier is outside the target owner ledger, and the
+proof-relevant deleted constructor, failed-reuse, PAP, literal, and box
+results expose that fact for any heap value they allocate. Source-only
+provenance now survives arbitrary same-frontier renaming extensions, retained
+reset, concrete-token reuse, and a later paired allocation; the latter uses
+an old heap-cell witness to prove that the selected address precedes the new
+source frontier. A focused regression allocates a deleted constructor first,
+then adds an unrelated retained source/target pair, and proves that the
+earlier address remains outside the enlarged target ledger. This removes the
+allocation-order reconstruction from future clients. The remaining static
+work is to preserve which environment bindings and reset tokens name those
+certified addresses, and to derive write/reset/reuse local shapes from the
+compiler's typing and ownership invariants along arbitrary checked
+executions.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1229,10 +1245,13 @@ the existing nullary-`.fap` semantic discrepancy.
 ## Immediate proof queue
 
 1. Derive reusable compiler typing/heap-shape and reachable-state laws for
-   write/reset/reuse. Environment and ledger transport, finite-path invariant
-   induction, and successful reset/reuse operational shapes are extracted;
-   arbitrary checked entries must still derive the operation's allocation and
-   ownership lifecycle without finite execution-graph enumeration.
+   write/reset/reuse. Environment/ledger transport, finite-path invariant
+   induction, successful reset/reuse operational shapes, source-only
+   allocation entry certificates, and lifecycle transport across
+   same-frontier operations and paired allocations are extracted. Arbitrary
+   checked entries must still preserve the environment binding/reset-token
+   provenance selecting those addresses and derive the local operation shapes
+   without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
