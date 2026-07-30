@@ -1278,6 +1278,16 @@ theorem setUSizeSlot_ordinaryPersistenceTransport
   unfold setUSizeSlot at operation
   exact modifyConstructor_ordinaryPersistenceTransport operation
 
+/-- A typed packed-scalar write is a constructor-payload rewrite. -/
+theorem setScalarField_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    {width offset : Nat} {field : ScalarValue}
+    (operation :
+      setScalarField before value width offset (.scalar field) = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  unfold setScalarField at operation
+  exact modifyConstructor_ordinaryPersistenceTransport operation
+
 /-- A successful semantic reference-count increment never changes a cell's
 persistence bit and never allocates a new cell. -/
 theorem incValue_ordinaryPersistenceTransport

@@ -697,7 +697,11 @@ acceptance tests pass.
    `setUSizeSlot_ordinaryPersistenceTransport` and
    `correctReuseBudgetedDirectOwnershipTagAndFieldMutationCode` add the
    absolute-slot `USize` setter through the same source/target boundaries.
-   Packed-scalar mutation is the next effect obligation.
+   `setScalarField_ordinaryPersistenceTransport` and
+   `correctReuseBudgetedDirectOwnershipTagAndAllFieldMutationCode` complete
+   the current constructor-field family for packed
+   `UInt8`/`UInt16`/`UInt32`/`UInt64` writes. Float setters remain outside the
+   concrete runtime fragment.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

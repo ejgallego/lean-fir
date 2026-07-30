@@ -4649,6 +4649,18 @@ the complete direct/reuse and ownership/tag fragment plus both object-field
 forms and `USize` fields. Packed-scalar mutation is the remaining current
 constructor-field family.
 
+W6.6gp completes that current constructor-field family.
+`setScalarField_ordinaryPersistenceTransport` specializes the common
+constructor-payload theorem to typed scalar writes. The facts-indexed
+operation law retains the existing descriptor-derived packed-coordinate and
+non-overlap proof, selects the installed `UInt8`/`UInt16`/`UInt32`/`UInt64`
+setter internally, and crosses the common effect-frame transport.
+`correctReuseBudgetedDirectOwnershipTagAndAllFieldMutationCode` now proves
+finite whole-export partial correctness for arbitrary interleavings of every
+facts-indexed direct/reuse operation with the complete current ownership, tag,
+object, `USize`, and packed-integer mutation families. Float setters remain
+outside the concrete runtime fragment.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
