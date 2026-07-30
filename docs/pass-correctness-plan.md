@@ -1188,6 +1188,31 @@ binding. The remaining reset-specific invariant must cover the reset
 operand's recursively released owned subgraph; a source-only parent binding
 alone cannot prove that paired target owners remain unchanged.
 
+The hereditary reset-closure bridge lands at `475b642b`.
+`decLocationFuel_frame_of_ok`, `decLocation_frame_of_ok`, and the
+`releaseResetField_frame_of_ok`/`releaseResetFields_frame_of_ok` fold laws
+prove that recursive
+reference-count release preserves every cell outside the original union of
+released ownership closures while preserving the ownership graph used by
+later fold iterations. `reset_findCell_eq_of_unreachable_of_ok` lifts this
+through all heap-object reset branches: shared reset uses the recursive
+release frame, while unique-constructor reset proves that prefix clearing only
+removes ownership edges and that releasing the extracted fields remains
+inside the operand's original closure.
+
+`SourceOnlyHeapClosureBinding` is the proof-visible compiler invariant: an
+exact source heap binding together with disjointness between its complete
+owned closure and every source owner recorded by the target ledger. A
+successful reset plus this certificate now derives the ledger owner frame and
+the full deleted-reset readiness contract; frontier preservation comes from
+the effect itself. The nonempty-ledger reset/reuse regression and the
+retained-prefix whole-program client consume this bridge, replacing their
+hand-written owner-frame proofs. Leaf objects obtain the hereditary
+certificate from ordinary source-only provenance and the absence of heap
+children. The remaining static work is to construct and preserve this
+certificate for arbitrary compiler-owned allocation graphs, rather than only
+the checked leaf clients.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1267,7 +1292,8 @@ deleted-write effects are converted into all three local heap shapes at
 `7ecdc33b`; `44b1c2ff` composes those shapes with source-only binding
 provenance and the target allocation ledger into the complete compiler-facing
 write-readiness contract. The corresponding failed- and concrete-token reuse
-effect bridges land at `8c6ea3e6`.
+effect bridges land at `8c6ea3e6`; recursive release/reset closure framing and
+the hereditary target-ledger bridge land at `475b642b`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1319,10 +1345,13 @@ the existing nullary-`.fap` semantic discrepancy.
    source-only binding/effect bridge to the complete root-aware readiness
    contract; both reuse-token branches now derive their operational facts
    from successful effects, and concrete reuse consumes reset-token
-   provenance directly. Next isolate and preserve the source-only owned
-   subgraph condition required by reset. Arbitrary checked entries must still
-   derive and preserve these compiler typing/ownership facts without finite
-   execution-graph enumeration.
+   provenance directly. Recursive release and reset now preserve every lookup
+   outside their original owned closures, and the target-ledger reset bridge
+   consumes an explicit hereditary source-only closure certificate. Next
+   construct and preserve that certificate for arbitrary compiler-owned
+   allocation graphs and checked executions. Arbitrary checked entries must
+   still derive and preserve these compiler typing/ownership facts without
+   finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
