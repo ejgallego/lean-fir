@@ -1429,6 +1429,19 @@ an actual heap-backed large-`Nat` literal and a one-field constructor
 allocation. Next cover retained partial applications and boxing, followed by
 retained reset/reuse, before strengthening the global exact dispatcher.
 
+The retained partial-application/box allocation bridge lands at `6f708f42`,
+with exact semantic regressions at `588146ac`. Primitive allocation now has a
+reusable result-frontier law. Closure allocation derives every owned fixed
+argument's bound from `EnvironmentBelowFrontier.of_evalArgs`; boxing proves
+the successful input is scalar or `USize` and covers both the tagged and
+fresh-leaf representations. Their source-step lifts transport the current
+environment and all saved bind environments across the new frontier.
+Hereditary and exact matchers return the enlarged paired-allocation renaming,
+non-lockstep execution, related post-state, and source ownership together.
+The regressions exercise a concrete underapplied-function closure and a
+heap-backed maximum-`UInt64` box. Next cover retained reset/reuse, then
+strengthen the global exact active-code dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1553,6 +1566,10 @@ proves the sharedness result heap-free, and carries retained `.oproj`,
 literal and constructor allocations through source, hereditary, and exact
 ownership matchers; `0a5aa2f5` checks heap-backed large-`Nat` and one-field
 constructor allocation successors.
+`6f708f42` proves primitive-allocation, closure, and box ownership laws and
+carries retained partial applications and boxes through source, hereditary,
+and exact ownership matchers; `588146ac` checks concrete paired closure and
+heap-box allocation successors.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1641,10 +1658,12 @@ the existing nullary-`.fap` semantic discrepancy.
    preserve the carrier, including heap-valued owned children and boxed
    payloads. Retained literal and constructor allocations now advance the
    frontier and address renaming while preserving the complete source carrier,
-   with exact heap-backed allocation regressions. Next cover retained partial
-   applications and boxing, then reset/reuse; after that strengthen the global
-   exact active-code dispatcher and carry the compositional closure certificate
-   through the general dispatcher.
+   with exact heap-backed allocation regressions. Retained partial-application
+   closures and boxes now have the same ownership-preserving allocation path,
+   including complete-environment bounds for captured fixed arguments and
+   concrete exact regressions. Next cover retained reset/reuse; after that
+   strengthen the global exact active-code dispatcher and carry the
+   compositional closure certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
