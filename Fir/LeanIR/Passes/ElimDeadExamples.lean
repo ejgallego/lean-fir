@@ -6419,6 +6419,376 @@ theorem deletedScalarSetExactStepPreserved
   deletedScalarSetExactMachineReadyAt.related.matchCodeStep_of_ready
     deletedScalarSetExactMachineReadyAt rfl step
 
+/-- The allocating constructor fixture starts from a complete, trivially
+owned source machine: its runtime is empty and its only environment value is
+erased. -/
+theorem allocatingSourceInnerMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier
+      allocatingSourceInnerState := by
+  have erasedBelow :
+      HeapLocationsBelowFrontier ({} : RuntimeState) [.erased] := by
+    intro location member
+    simp at member
+  have envBound :
+      EnvironmentBelowFrontier ({} : RuntimeState) liveEnv :=
+    EnvironmentBelowFrontier.bind
+      (binder := live) (value := .erased)
+      EnvironmentBelowFrontier.empty erasedBelow
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        simpa [allocatingSourceInnerState] using
+          HeapOwnershipBelowFrontier.empty
+      env := by
+        intro fvarId value found
+        apply @envBound fvarId value
+        simpa [allocatingSourceInnerState, liveEnv] using found
+    }
+  · trivial
+
+/-- Every value in the deleted-write source environment is below the single
+allocated cell's frontier, including the target-dead object operand. -/
+theorem deletedWriteSourceEnvironmentBelowFrontier :
+    EnvironmentBelowFrontier
+      deletedWriteSourceRuntime deletedWriteSourceEnv := by
+  have erasedBelow :
+      HeapLocationsBelowFrontier
+        deletedWriteSourceRuntime [.erased] := by
+    intro location member
+    simp at member
+  have objectBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.object (.heap 0)] := by
+    intro location member
+    simp at member
+    subst location
+    simp [deletedWriteSourceRuntime, alloc]
+  have usizeBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.usize 7] := by
+    intro location member
+    simp at member
+  have scalarBelow :
+      HeapLocationsBelowFrontier deletedWriteSourceRuntime
+        [.scalar (.uint8 9)] := by
+    intro location member
+    simp at member
+  have liveBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime liveEnv := by
+    have extended :
+        EnvironmentBelowFrontier deletedWriteSourceRuntime
+          (bind [] live .erased) :=
+      EnvironmentBelowFrontier.bind
+        (runtime := deletedWriteSourceRuntime)
+        (binder := live) (value := .erased)
+        EnvironmentBelowFrontier.empty erasedBelow
+    intro fvarId value found
+    apply @extended fvarId value
+    simpa [liveEnv] using found
+  have objectBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind liveEnv dead (.object (.heap 0))) :=
+    EnvironmentBelowFrontier.bind
+      (binder := dead) (value := .object (.heap 0))
+      liveBound objectBelow
+  have usizeBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind (bind liveEnv dead (.object (.heap 0)))
+          usizeField (.usize 7)) :=
+    EnvironmentBelowFrontier.bind
+      (binder := usizeField) (value := .usize 7)
+      objectBound usizeBelow
+  have scalarBound :
+      EnvironmentBelowFrontier deletedWriteSourceRuntime
+        (bind
+          (bind (bind liveEnv dead (.object (.heap 0)))
+            usizeField (.usize 7))
+          scalarField (.scalar (.uint8 9))) :=
+    EnvironmentBelowFrontier.bind
+      (binder := scalarField) (value := .scalar (.uint8 9))
+      usizeBound scalarBelow
+  intro fvarId value found
+  apply @scalarBound fvarId value
+  simpa [deletedWriteSourceEnv] using found
+
+/-- The object-write fixture lifts its concrete heap and environment bounds
+to the full source machine. -/
+theorem deletedObjectSetSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier
+      deletedObjectSetSourceState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        simpa [deletedObjectSetSourceState] using
+          deletedWriteSourceOwnershipBelowFrontier
+      env := by
+        intro fvarId value found
+        apply @deletedWriteSourceEnvironmentBelowFrontier fvarId value
+        simpa [deletedObjectSetSourceState] using found
+    }
+  · trivial
+
+/-- The reset fixture's source object and complete environment lie below the
+same single-cell frontier before recursive release begins. -/
+theorem deletedResetSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier
+      deletedResetSourceState := by
+  have erasedBelow :
+      HeapLocationsBelowFrontier
+        deletedResetSourceRuntime [.erased] := by
+    intro location member
+    simp at member
+  have objectBelow :
+      HeapLocationsBelowFrontier deletedResetSourceRuntime
+        [.object (.heap 0)] := by
+    intro location member
+    simp at member
+    subst location
+    simp [deletedResetSourceRuntime, alloc]
+  have liveBound :
+      EnvironmentBelowFrontier deletedResetSourceRuntime liveEnv := by
+    have extended :
+        EnvironmentBelowFrontier deletedResetSourceRuntime
+          (bind [] live .erased) :=
+      EnvironmentBelowFrontier.bind
+        (runtime := deletedResetSourceRuntime)
+        (binder := live) (value := .erased)
+        EnvironmentBelowFrontier.empty erasedBelow
+    intro fvarId value found
+    apply @extended fvarId value
+    simpa [liveEnv] using found
+  have sourceEnvBound :
+      EnvironmentBelowFrontier deletedResetSourceRuntime
+        (bind liveEnv resetObjectVar (.object (.heap 0))) :=
+    EnvironmentBelowFrontier.bind
+      (binder := resetObjectVar) (value := .object (.heap 0))
+      liveBound objectBelow
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        change HeapOwnershipBelowFrontier
+          (alloc ({} : RuntimeState) (.ctor deletedResetObject) false).1
+        apply HeapOwnershipBelowFrontier.empty.alloc
+        intro child member
+        simp [deletedResetObject, HeapObject.ownedValues] at member
+      env := by
+        intro fvarId value found
+        apply @sourceEnvBound fvarId value
+        simpa [deletedResetSourceState, deletedResetSourceEnv] using found
+    }
+  · trivial
+
+/-- The ownership-strengthened constructor matcher checks the actual
+allocating semantic step: the target stutters while the source binds its
+fresh, target-dead heap value. -/
+theorem deletedCtorExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals allocatingSourceInnerState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        allocatingTargetInnerState targetAfter ∧
+      BinderReadyReachableMachineRelated 3 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 3)
+        allocatingSourceInnerState.program
+        allocatingTargetInnerState.program := by
+    simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      allocatingProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 3 emptyAddressRenaming
+        allocatingSourceInnerState.frames
+        allocatingTargetInnerState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 3 neutralUsed
+        (.return live) (.return live) := by
+    apply retainedLargeNatContinuationRun.toBinderReadyShadowCodeGraphAt
+    · omega
+    · exact UsedSubset.refl neutralUsed
+    · apply
+        retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+        (index :=
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+      · simp [codeBinderIds, BinderNamesUnique]
+  have joins :
+      BinderReadyShadowJoinEnvRelated 3 neutralUsed
+        allocatingSourceInnerState.joins
+        allocatingTargetInnerState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 3 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        allocatingSourceInnerState.env
+        allocatingTargetInnerState.env := by
+    simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      liveEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        allocatingSourceInnerState.runtime
+        allocatingTargetInnerState.runtime
+        (envRootsOn neutralUsed allocatingSourceInnerState.env ++ [])
+        (envRootsOn neutralUsed allocatingTargetInnerState.env ++ []) := by
+    simpa [allocatingSourceInnerState, allocatingTargetInnerState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related liveEnvReachableRelated)
+  simpa [allocatingSourceInnerState, allocatingTargetInnerState,
+    deadCtorDecl, letDecl] using
+    (match_deletedCtorStep_binderReady_withOwnership
+      (sourceState := allocatingSourceInnerState)
+      (targetState := allocatingTargetInnerState)
+      (sourceContinuation := .return live)
+      (targetContinuation := .return live)
+      (fvarId := dead)
+      (binderName := dead.name)
+      (type := objType)
+      (info := oneFieldInfo)
+      (arguments := #[.fvar live])
+      programs frames continuation joins env (by native_decide)
+      runtime deletedCtorReady
+      allocatingSourceInnerMachineOwnershipBelowFrontier step)
+
+/-- The ownership-strengthened object-write matcher checks the first
+mutation of the deleted-write chain, retaining the entire source environment
+and heap while the target remains at its final return. -/
+theorem deletedObjectSetExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedObjectSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        deletedWritesTargetState targetAfter ∧
+      BinderReadyReachableMachineRelated 4 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 4)
+        deletedObjectSetSourceState.program
+        deletedWritesTargetState.program := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 4 emptyAddressRenaming
+        deletedObjectSetSourceState.frames
+        deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 4 neutralUsed
+        (.uset dead 1 usizeField <|
+          .sset dead 8 0 scalarField u8Type <| .return live)
+        (.return live) := by
+    simpa [deletedWritesAfter] using
+      (show BinderReadyShadowCodeGraph 4 neutralUsed
+          (.uset dead 1 usizeField <|
+            .sset dead 8 0 scalarField u8Type <| .return live)
+          deletedWritesAfter from
+        ⟨3, neutralUsed, by omega, deletedUSizeScalarExactGraph,
+          UsedSubset.refl neutralUsed,
+          deletedUSizeScalarExactBinderReady⟩)
+  have joins :
+      BinderReadyShadowJoinEnvRelated 4 neutralUsed
+        deletedObjectSetSourceState.joins
+        deletedWritesTargetState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedObjectSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedObjectSetSourceState.runtime
+        deletedWritesTargetState.runtime
+        (envRootsOn neutralUsed deletedObjectSetSourceState.env ++ [])
+        (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedObjectSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  simpa [deletedObjectSetSourceState, deletedWritesTargetState,
+    deletedWritesBefore, deletedWritesAfter, withCodeControl] using
+    (match_deletedObjectSetStep_of_ready_binderReady_withOwnership
+      (sourceState := deletedObjectSetSourceState)
+      (targetState := deletedWritesTargetState)
+      (sourceContinuation := .uset dead 1 usizeField <|
+        .sset dead 8 0 scalarField u8Type <| .return live)
+      (targetContinuation := .return live)
+      (object := dead)
+      (index := 0)
+      (field := .erased)
+      programs frames continuation joins env runtime
+      (by simpa using deletedObjectSetReady)
+      deletedObjectSetSourceMachineOwnershipBelowFrontier step)
+
+/-- The concrete reset semantic step likewise retains the complete source
+carrier across recursive release and dead reuse-token binding. -/
+theorem deletedResetExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedResetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        deletedResetTargetState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        deletedResetSourceState.program
+        deletedResetTargetState.program := by
+    simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        deletedResetSourceState.frames
+        deletedResetTargetState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 2 neutralUsed
+        (.return live) (.return live) := by
+    apply retainedLargeNatContinuationRun.toBinderReadyShadowCodeGraphAt
+    · omega
+    · exact UsedSubset.refl neutralUsed
+    · apply
+        retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+        (index :=
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+      · simp [codeBinderIds, BinderNamesUnique]
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        deletedResetSourceState.joins
+        deletedResetTargetState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedResetSourceState.env deletedResetTargetState.env := by
+    simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedResetSourceState.runtime deletedResetTargetState.runtime
+        (envRootsOn neutralUsed deletedResetSourceState.env ++ [])
+        (envRootsOn neutralUsed deletedResetTargetState.env ++ []) := by
+    simpa [deletedResetSourceState, deletedResetTargetState] using
+      deletedResetRuntimeRelated
+  simpa [deletedResetSourceState, deletedResetTargetState,
+    deletedResetBefore, deletedResetAfter, deadResetDecl, letDecl] using
+    (match_deletedResetStep_binderReady_withOwnership
+      (sourceState := deletedResetSourceState)
+      (targetState := deletedResetTargetState)
+      (sourceContinuation := .return live)
+      (targetContinuation := .return live)
+      (fvarId := dead)
+      (binderName := dead.name)
+      (type := objType)
+      (count := 1)
+      (object := resetObjectVar)
+      programs frames continuation joins env (by native_decide)
+      runtime (by simpa using deletedResetReady)
+      deletedResetSourceMachineOwnershipBelowFrontier step)
+
 /-- The first mutation in the closed regression takes one source step while
 the transformed target stutters at the live return. -/
 theorem deletedObjectSetSourceOnlyMachineStep :
