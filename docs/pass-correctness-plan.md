@@ -1442,6 +1442,19 @@ The regressions exercise a concrete underapplied-function closure and a
 heap-backed maximum-`UInt64` box. Next cover retained reset/reuse, then
 strengthen the global exact active-code dispatcher.
 
+The retained reset/reuse ownership bridge lands at `0d333649`, with exact
+semantic regressions at `997a8928`. Reset reuses the fixed-frontier
+recursive-release law and proves that its reuse-token result adds no ordinary
+heap root. Reuse lifts the complete environment and saved-frame carrier
+through both runtime branches: a missing token performs a paired constructor
+allocation, while a concrete token overwrites its reachable live cell in
+place. The hereditary and exact matchers return non-lockstep execution,
+related post-state, any enlarged address renaming, and post-step source
+ownership together. Concrete regressions exercise a heap-backed one-field
+reset, missing-token allocation, and concrete-token overwrite. All fourteen
+executable impure `let` families now expose ownership-strengthened exact
+matchers; next strengthen the global exact active-code dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1570,6 +1583,10 @@ constructor allocation successors.
 carries retained partial applications and boxes through source, hereditary,
 and exact ownership matchers; `588146ac` checks concrete paired closure and
 heap-box allocation successors.
+`0d333649` carries retained reset and both reuse-token branches through the
+source, hereditary, and exact ownership matchers; `997a8928` checks a
+heap-backed reset, paired missing-token allocation, and concrete-token
+in-place overwrite.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1661,9 +1678,11 @@ the existing nullary-`.fap` semantic discrepancy.
    with exact heap-backed allocation regressions. Retained partial-application
    closures and boxes now have the same ownership-preserving allocation path,
    including complete-environment bounds for captured fixed arguments and
-   concrete exact regressions. Next cover retained reset/reuse; after that
-   strengthen the global exact active-code dispatcher and carry the
-   compositional closure certificate through the general dispatcher.
+   concrete exact regressions. Retained reset and both reuse modes now
+   preserve the same carrier, completing ownership-strengthened exact
+   matchers for all fourteen executable impure `let` families. Next strengthen
+   the global exact active-code dispatcher and carry the compositional closure
+   certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
