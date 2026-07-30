@@ -3880,6 +3880,34 @@ example
     selection
 
 /--
+The preferred saturated-dispatch constructor needs only implementations for
+compiler candidates carrying the resolved source identity. Static enumeration,
+concrete address recovery, and first-match selection are internal theorems.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction targetModule hosts exportName)
+    (induction :
+      SaturatedClosureCandidateResolutionInduction context sourceModule
+        callerFunction labels targetModule hosts sourceExternals) :
+    SaturatedClosureCallImplementationWithCache context sourceModule
+      callerFunction labels targetModule.wasmModule hosts.env hosts.spec
+      sourceExternals (SaturatedClosureCallSupported context) :=
+  SaturatedClosureCallImplementationWithCache.ofInternalCompilerResolved spec
+    induction
+
+/--
 The constructive saturated-dispatch boundary resolves the concrete closure
 address and exact matcher result from the ordinary state relation plus both
 immutable closure-table equations. No physical address or matcher execution

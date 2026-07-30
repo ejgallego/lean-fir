@@ -1065,11 +1065,21 @@ acceptance tests pass.
    directly, fixing
    `FIR-BUG-wasm-none-closure-dispatch-frame-agreement`; no call site supplies
    table equations or matcher bits separately.
-   Next prove semantic candidate coverage directly from
-   `compileClosureCandidatesForTarget` and resolver/declaration facts, then
-   construct
+   Exact saturated-call resolution now proves semantic candidate membership
+   directly in `compileClosureCandidatesForTarget`, transports it through the
+   adapted candidate enumeration, and uses the canonical cache frame to
+   derive the actual address and first executable match.
+   `SaturatedClosureCandidateResolutionInduction` therefore asks only for the
+   implementation of a compiler candidate carrying that proved source
+   identity; `ofInternalCompilerResolved` exposes the resulting production
+   call law. This fixes
+   `FIR-BUG-wasm-none-saturated-closure-site-shape` without a target execution
+   certificate and keeps underapplication in its distinct allocation family.
+   Next construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
-   generated declaration environment. Do not reintroduce a
+   generated declaration environment, including the recursive candidate
+   implementation and closure-flow derivation of source resolution. Do not
+   reintroduce a
    `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site
    target execution premise.
    Heap-valued `.object`/`.tobject` publication cannot preserve the current

@@ -5468,6 +5468,27 @@ resolution, then feed it to this canonical accessor. After that, construct
 `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
 generated declaration environment.
 
+W6.6he closes that static candidate-coverage slice.
+`SaturatedClosureCallResolution` separates an exactly saturated source call
+from the existing underapplication family: it records the live semantic
+closure, resolved declaration and ABI, exact capture-plus-argument arity,
+argument refinement, result kind, code body, and source parameter binding.
+From those facts, `candidateSource_exists` proves membership in the real
+`compileClosureCandidatesForTarget` enumeration, and
+`containsCandidateIdentity` transfers that membership to any exact adapted
+candidate family. The canonical cache frame then recovers the concrete
+address and executable first match without a target certificate.
+
+`SaturatedClosureCandidateResolutionInduction` is the new production-facing
+hereditary boundary: it supplies an implementation only for a compiler
+candidate whose source identity is already proved. Its `toSelection` theorem
+discharges enumeration, address recovery, and selection, and
+`ofInternalCompilerResolved` builds the complete saturated-call law.
+`FIR-BUG-wasm-none-saturated-closure-site-shape` is fixed. The next call slice
+must construct this induction recursively from the generated declaration
+environment (and ultimately derive source resolution from closure-flow
+well-formedness); it must not reintroduce target execution evidence.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
