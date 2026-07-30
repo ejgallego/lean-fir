@@ -530,8 +530,9 @@ def result_artifacts_from_verified_matrix(
     return result_artifacts
 
 
-def records_from_evidence(path: Path) -> list[dict]:
-    source = core.verify_evidence_snapshot(path)
+def records_from_verified_evidence(
+    source: core.VerifiedEvidence,
+) -> list[dict]:
     matrix = source.matrix
     source_evidence_sha256 = core.checked_sha256(
         source.manifest["identity"]["evidence"],
@@ -565,6 +566,18 @@ def records_from_evidence(path: Path) -> list[dict]:
             )
         )
     return records
+
+
+def records_from_evidence(path: Path) -> list[dict]:
+    return records_from_verified_evidence(
+        core.verify_evidence_snapshot(path)
+    )
+
+
+def records_from_evidence_receipt(path: Path) -> list[dict]:
+    return records_from_verified_evidence(
+        core.verify_evidence_receipt(path)
+    )
 
 
 def build_attestation_manifest(records: list[dict]) -> dict:
@@ -755,6 +768,20 @@ def attest_evidence(path: Path, out_dir: Path) -> dict:
     return manifest
 
 
+def attest_evidence_receipt(path: Path, out_dir: Path) -> dict:
+    manifest = build_attestation_manifest(
+        records_from_evidence_receipt(path)
+    )
+    attestation.write_retained_envelope(
+        out_dir,
+        "attestations.json",
+        manifest,
+        ATTESTATION_SPEC,
+        verify_attestation_record,
+    )
+    return manifest
+
+
 def parser() -> argparse.ArgumentParser:
     result = argparse.ArgumentParser(description=__doc__)
     source = result.add_mutually_exclusive_group(required=True)
@@ -762,6 +789,13 @@ def parser() -> argparse.ArgumentParser:
         "--evidence",
         type=Path,
         help="immutable evidence manifest whose verified comparisons to attest",
+    )
+    source.add_argument(
+        "--evidence-receipt",
+        type=Path,
+        help=(
+            "verified handoff naming the immutable evidence manifest to attest"
+        ),
     )
     source.add_argument(
         "--verify-attestations",
@@ -822,15 +856,18 @@ def main(argv: list[str] | None = None) -> int:
         )
         return 0
 
-    evidence_path = args.evidence
-    if evidence_path is None:
+    source_path = args.evidence or args.evidence_receipt
+    if source_path is None:
         raise core.ValidationError("missing backend comparison evidence")
-    if not evidence_path.is_absolute():
-        evidence_path = root / evidence_path
+    if not source_path.is_absolute():
+        source_path = root / source_path
     out_dir = args.out_dir
     if not out_dir.is_absolute():
         out_dir = root / out_dir
-    manifest = attest_evidence(evidence_path, out_dir)
+    if args.evidence is not None:
+        manifest = attest_evidence(source_path, out_dir)
+    else:
+        manifest = attest_evidence_receipt(source_path, out_dir)
     if policy is not None:
         print_oracle_acceptance(verify_oracle_policy(manifest, policy))
     failures = 0

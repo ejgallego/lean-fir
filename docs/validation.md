@@ -390,17 +390,26 @@ only its records and a semantic record validator. The native-LCNF recorder is
 the first adapter.
 
 `scripts/record_backend_comparisons.py` is the backend-neutral immutable
-evidence adapter. It accepts only an append-only evidence manifest, verifies
-that manifest's complete retained matrix graph—including backend results and
-every directed comparison artifact—and then emits one attestation record per
-matrix edge:
+evidence adapter. It accepts an exact append-only evidence manifest or the
+validated receipt published by a completed harness run, verifies the
+manifest's complete retained matrix graph—including backend results and every
+directed comparison artifact—and then emits one attestation record per matrix
+edge:
 
 ```sh
 python3 scripts/record_backend_comparisons.py \
-  --evidence \
-  _build/validation-v8/evidence/runs/<run>/<evidence>.json \
+  --evidence-receipt _build/validation-v8/evidence-receipt.json \
   --policy validation-plans/native-oracle-attestations.json
 ```
+
+`evidence-receipt.json` is a stable handoff, not evidence by itself. It carries
+a self-hash, the exact run/evidence/matrix identities, and the canonical
+relative path of the immutable manifest. Receipt verification rejects
+symlinks, path escape, malformed or changed fields, and any disagreement with
+the fully verified append-only snapshot. The resulting attestation binds the
+immutable identities rather than the mutable receipt. An exact manifest can
+still be supplied directly with
+`--evidence _build/validation-v8/evidence/runs/<run>/<evidence>.json`.
 
 This command does not build or execute a backend. Each record's contract binds
 the matrix selection and run identities, ordered selected cases, and directed
@@ -441,13 +450,18 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over at least 192 cases. Required oracle edges must share one matrix
+edges over all 581 currently accepted real-engine cases. Required oracle edges
+must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
 remain available as triangulation, but do not contribute to oracle acceptance.
 Consequently `lcnf -> v8` can never substitute for a missing or incomplete
 native comparison. Policy checking works in both recording and offline modes
 and prints its own canonical SHA-256 alongside the accepted counts.
+`make validate-native-oracle-attestations` executes the V8 validation,
+consumes its verified receipt, records the content-addressed aggregate, and
+then rechecks the aggregate without reading the source matrix or running any
+backend. The target is part of `make check`.
 
 Each native-IR attestation also executes the direct native oracle and the
 explicit LCNF machine program. Its `directPath` evidence requires equal semantic

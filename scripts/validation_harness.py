@@ -355,6 +355,10 @@ class VerifiedEvidence:
     matrix: dict
 
 
+VALIDATION_EVIDENCE_RECEIPT_KIND = "fir-validation-evidence-receipt"
+VALIDATION_EVIDENCE_RECEIPT_NAME = "evidence-receipt.json"
+
+
 def sha256_bytes(content: bytes) -> str:
     return hashlib.sha256(content).hexdigest()
 
@@ -873,6 +877,43 @@ def validation_evidence_manifest_path(
         / run_digest
         / f"{evidence_digest}.json"
     )
+
+
+def validation_evidence_receipt_value(source: VerifiedEvidence) -> dict:
+    report_root = source.report_root.resolve()
+    try:
+        manifest = source.manifest_path.resolve().relative_to(report_root)
+    except ValueError as error:
+        raise ValidationError(
+            "validation evidence receipt manifest escapes its report root"
+        ) from error
+    identity = source.manifest["identity"]
+    matrix = source.manifest["matrix"]
+    provisional = {
+        "version": PROTOCOL_VERSION,
+        "kind": VALIDATION_EVIDENCE_RECEIPT_KIND,
+        "source": {
+            "runSha256": checked_sha256(
+                identity["run"], "validation evidence receipt run"
+            ),
+            "evidenceSha256": checked_sha256(
+                identity["evidence"], "validation evidence receipt evidence"
+            ),
+            "matrixSha256": checked_sha256(
+                matrix["sha256"], "validation evidence receipt matrix"
+            ),
+        },
+        "manifest": checked_relative_posix_path(
+            manifest.as_posix(), "validation evidence receipt manifest"
+        ),
+    }
+    return {
+        **provisional,
+        "identity": {
+            "algorithm": "sha256",
+            "receipt": canonical_json_sha256(provisional),
+        },
+    }
 
 
 def validation_input_from_file(
@@ -9058,6 +9099,136 @@ def verify_evidence_snapshot(path: Path) -> VerifiedEvidence:
 def verify_evidence_manifest(path: Path) -> dict:
     """Verify one append-only evidence manifest and its retained matrix."""
     return verify_evidence_snapshot(path).manifest
+
+
+def verify_evidence_receipt(path: Path) -> VerifiedEvidence:
+    """Resolve a mutable handoff only after verifying its immutable snapshot."""
+    absolute = Path(os.path.abspath(path))
+    if absolute.is_symlink():
+        raise ValidationError(
+            "validation evidence receipt must not be a symlink"
+        )
+    if not absolute.is_file():
+        raise ValidationError(
+            f"validation evidence receipt is not a regular file: {path}"
+        )
+    try:
+        value = json.loads(absolute.read_text(encoding="utf-8"))
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError) as error:
+        raise ValidationError(
+            f"cannot read validation evidence receipt {path}: {error}"
+        ) from error
+    if (
+        not isinstance(value, dict)
+        or set(value)
+        != {"version", "identity", "kind", "source", "manifest"}
+        or value["version"] != PROTOCOL_VERSION
+        or value["kind"] != VALIDATION_EVIDENCE_RECEIPT_KIND
+    ):
+        raise ValidationError(
+            "validation evidence receipt has an unsupported schema"
+        )
+    identity = value["identity"]
+    if (
+        not isinstance(identity, dict)
+        or set(identity) != {"algorithm", "receipt"}
+        or identity["algorithm"] != "sha256"
+    ):
+        raise ValidationError(
+            "validation evidence receipt identity is malformed"
+        )
+    receipt_sha256 = checked_sha256(
+        identity["receipt"], "validation evidence receipt identity"
+    )
+    provisional = dict(value)
+    provisional.pop("identity")
+    if receipt_sha256 != canonical_json_sha256(provisional):
+        raise ValidationError(
+            "validation evidence receipt identity does not match its content"
+        )
+    source_identity = value["source"]
+    if (
+        not isinstance(source_identity, dict)
+        or set(source_identity)
+        != {"runSha256", "evidenceSha256", "matrixSha256"}
+    ):
+        raise ValidationError(
+            "validation evidence receipt source is malformed"
+        )
+    checked_sha256(
+        source_identity["runSha256"], "validation evidence receipt run"
+    )
+    checked_sha256(
+        source_identity["evidenceSha256"],
+        "validation evidence receipt evidence",
+    )
+    checked_sha256(
+        source_identity["matrixSha256"],
+        "validation evidence receipt matrix",
+    )
+    manifest = checked_relative_posix_path(
+        value["manifest"], "validation evidence receipt manifest"
+    )
+    source = verify_evidence_snapshot(absolute.parent / manifest)
+    if source.report_root.resolve() != absolute.parent.resolve():
+        raise ValidationError(
+            "validation evidence receipt resolves outside its report root"
+        )
+    expected = validation_evidence_receipt_value(source)
+    if value != expected:
+        raise ValidationError(
+            "validation evidence receipt disagrees with its immutable source"
+        )
+    return source
+
+
+def write_evidence_receipt(out_dir: Path, evidence_path: Path) -> Path:
+    """Atomically publish the verified immutable evidence used by this run."""
+    source = verify_evidence_snapshot(evidence_path)
+    root = out_dir.resolve()
+    if source.report_root.resolve() != root:
+        raise ValidationError(
+            "validation evidence receipt source is outside the output directory"
+        )
+    value = validation_evidence_receipt_value(source)
+    content = (
+        json.dumps(value, indent=2, sort_keys=True) + "\n"
+    ).encode("utf-8")
+    destination = out_dir / VALIDATION_EVIDENCE_RECEIPT_NAME
+    if destination.is_symlink() or (
+        destination.exists() and not destination.is_file()
+    ):
+        raise ValidationError(
+            f"validation evidence receipt is not a regular file: {destination}"
+        )
+    temporary_path: Path | None = None
+    try:
+        with tempfile.NamedTemporaryFile(
+            dir=out_dir,
+            prefix=".validation-evidence-receipt-",
+            delete=False,
+        ) as temporary:
+            temporary.write(content)
+            temporary.flush()
+            os.fsync(temporary.fileno())
+            temporary_path = Path(temporary.name)
+        os.replace(temporary_path, destination)
+        temporary_path = None
+    except OSError as error:
+        raise ValidationError(
+            f"cannot write validation evidence receipt {destination}: {error}"
+        ) from error
+    finally:
+        if temporary_path is not None:
+            try:
+                temporary_path.unlink(missing_ok=True)
+            except OSError as error:
+                raise ValidationError(
+                    "cannot remove temporary validation evidence receipt "
+                    f"{temporary_path}: {error}"
+                ) from error
+    verify_evidence_receipt(destination)
+    return destination
 
 
 def ordered_evidence_delta(before: list, after: list) -> dict:

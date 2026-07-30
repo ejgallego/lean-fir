@@ -80,6 +80,7 @@ from validation_harness import (
     write_comparison_artifact,
     write_corpus_manifest,
     write_evidence_manifest,
+    write_evidence_receipt,
     write_artifact,
     write_matrix_artifact,
     write_process_artifacts,
@@ -577,8 +578,9 @@ def main() -> int:
         matrix["identity"]["run"],
         sha256_bytes(matrix_content),
     )
-    verify_evidence_manifest(evidence_path)
+    receipt_path = write_evidence_receipt(args.out_dir, evidence_path)
     print(f"retained validation evidence {evidence_path}")
+    print(f"published validation evidence receipt {receipt_path}")
     for pair_result in pair_results:
         for comparison in pair_result.comparisons:
             if comparison["equal"]:

@@ -5645,6 +5645,62 @@ class HarnessTests(unittest.TestCase):
                 harness.sha256_bytes(original_matrix_bytes),
             )
             evidence = harness.verify_evidence_manifest(evidence_path)
+            receipt_path = (
+                out_dir / core.VALIDATION_EVIDENCE_RECEIPT_NAME
+            )
+            receipt = json.loads(receipt_path.read_bytes())
+            self.assertEqual(
+                receipt["source"],
+                {
+                    "runSha256": matrix["identity"]["run"],
+                    "evidenceSha256": evidence["identity"]["evidence"],
+                    "matrixSha256": harness.sha256_bytes(
+                        original_matrix_bytes
+                    ),
+                },
+            )
+            self.assertEqual(
+                receipt["manifest"],
+                evidence_path.relative_to(out_dir).as_posix(),
+            )
+            self.assertEqual(
+                core.verify_evidence_receipt(receipt_path).manifest_path,
+                evidence_path.resolve(),
+            )
+            tampered = json.loads(json.dumps(receipt))
+            tampered["source"]["matrixSha256"] = "f" * 64
+            provisional = dict(tampered)
+            provisional.pop("identity")
+            tampered["identity"]["receipt"] = (
+                harness.canonical_json_sha256(provisional)
+            )
+            receipt_path.write_bytes(json_bytes(tampered))
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "disagrees with its immutable source",
+            ):
+                core.verify_evidence_receipt(receipt_path)
+            core.write_evidence_receipt(out_dir, evidence_path)
+            escaping = json.loads(receipt_path.read_bytes())
+            escaping["manifest"] = "../outside.json"
+            provisional = dict(escaping)
+            provisional.pop("identity")
+            escaping["identity"]["receipt"] = (
+                harness.canonical_json_sha256(provisional)
+            )
+            receipt_path.write_bytes(json_bytes(escaping))
+            with self.assertRaisesRegex(
+                harness.ValidationError,
+                "normalized relative POSIX path",
+            ):
+                core.verify_evidence_receipt(receipt_path)
+            core.write_evidence_receipt(out_dir, evidence_path)
+            receipt_link = out_dir / "receipt-link.json"
+            receipt_link.symlink_to(receipt_path.name)
+            with self.assertRaisesRegex(
+                harness.ValidationError, "must not be a symlink"
+            ):
+                core.verify_evidence_receipt(receipt_link)
             self.assertEqual(
                 (out_dir / evidence["matrix"]["artifact"]).read_bytes(),
                 original_matrix_bytes,
@@ -5655,6 +5711,11 @@ class HarnessTests(unittest.TestCase):
             self.assertEqual(
                 harness.verify_evidence_manifest(moved_evidence)["identity"],
                 evidence["identity"],
+            )
+            moved_receipt = moved_report / receipt_path.relative_to(out_dir)
+            self.assertEqual(
+                core.verify_evidence_receipt(moved_receipt).manifest_path,
+                moved_evidence.resolve(),
             )
             same_comparison = core.compare_verified_evidence(
                 core.verify_evidence_snapshot(evidence_path),
@@ -8532,6 +8593,34 @@ class BackendComparisonAttestationTests(unittest.TestCase):
                 "accepted native comparison oracle for v8",
                 stdout.getvalue(),
             )
+
+    def test_receipt_adapter_uses_only_its_verified_snapshot(self) -> None:
+        receipt_path = Path("evidence-receipt.json")
+        source = core.VerifiedEvidence(
+            Path("evidence/runs/run/evidence.json"),
+            Path("."),
+            {},
+            {},
+        )
+        expected = [self.record()]
+        with (
+            mock.patch.object(
+                comparison_attestations.core,
+                "verify_evidence_receipt",
+                return_value=source,
+            ) as verify_receipt,
+            mock.patch.object(
+                comparison_attestations,
+                "records_from_verified_evidence",
+                return_value=expected,
+            ) as records_from_source,
+        ):
+            records = comparison_attestations.records_from_evidence_receipt(
+                receipt_path
+            )
+        self.assertEqual(records, expected)
+        verify_receipt.assert_called_once_with(receipt_path)
+        records_from_source.assert_called_once_with(source)
 
     def test_comparison_contract_is_separate_from_observed_evidence(self) -> None:
         original = comparison_attestations.build_attestation_manifest(

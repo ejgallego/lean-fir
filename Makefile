@@ -1,4 +1,4 @@
-.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-coverage-index bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
+.PHONY: build examples inspect validate validate-direct-lcnf validate-v8 validate-native-oracle-attestations validate-coverage-index bug-cards trusted-assumptions no-placeholders check beam talos-setup talos-check clean
 
 build:
 	lake build
@@ -32,7 +32,16 @@ validate-v8:
 	python3 scripts/validate_interpreters.py \
 		--verify-matrix _build/validation-v8/matrix.json
 
-validate-coverage-index: validate validate-direct-lcnf validate-v8
+validate-native-oracle-attestations: validate-v8
+	python3 scripts/record_backend_comparisons.py \
+		--evidence-receipt _build/validation-v8/evidence-receipt.json \
+		--policy validation-plans/native-oracle-attestations.json
+	python3 scripts/record_backend_comparisons.py \
+		--verify-attestations \
+		_build/validation-comparison-attestations/attestations.json \
+		--policy validation-plans/native-oracle-attestations.json
+
+validate-coverage-index: validate validate-direct-lcnf validate-native-oracle-attestations
 	python3 scripts/validation_coverage_index.py \
 		--plan validation-plans/coverage-index.json \
 		--out _build/validation-coverage/index.json
