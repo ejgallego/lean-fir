@@ -22749,8 +22749,8 @@ theorem ConcreteSupportedExport.correctReturn
             sourceRuntime sourceEnv (.return result) spec.targetFunction
             spec.targetFunctionIndex initial initial initialWitness
             initialWitness parameters kind resultValue physical := {
-        sourceEvaluates :=
-          (CodeEvaluates.ret sourceLookup).execEvaluates sourceExternals
+        sourceResult :=
+          (CodeEvaluates.ret sourceLookup).sourceResult sourceExternals
         notImport := spec.notImport
         functionFound := spec.targetFunctionFound
         body
@@ -22896,7 +22896,7 @@ theorem ConcreteSupportedExport.correctNaturalLiteralReturn
         initialWitness nextWitness parameters .tobject
         (literal sourceRuntime (.nat value)).2
         (.i32 (UInt32.ofNat word.value)) := {
-    sourceEvaluates := sourceEvaluation.execEvaluates sourceExternals
+    sourceResult := sourceEvaluation.sourceResult sourceExternals
     notImport := spec.notImport
     functionFound := spec.targetFunctionFound
     body
@@ -23033,7 +23033,7 @@ theorem ConcreteSupportedExport.correctStringLiteralReturn
         initialWitness nextWitness parameters .object
         (literal sourceRuntime (.str value)).2
         (.i32 (UInt32.ofNat word.value)) := {
-    sourceEvaluates := sourceEvaluation.execEvaluates sourceExternals
+    sourceResult := sourceEvaluation.sourceResult sourceExternals
     notImport := spec.notImport
     functionFound := spec.targetFunctionFound
     body
@@ -23185,7 +23185,7 @@ theorem ConcreteSupportedExport.correctConstructorReturn
         spec.targetFunctionIndex initial nextStore initialWitness nextWitness
         parameters resultKind sourceValue
         (.i32 (UInt32.ofNat word.value)) := {
-    sourceEvaluates := sourceEvaluation.execEvaluates sourceExternals
+    sourceResult := sourceEvaluation.sourceResult sourceExternals
     notImport := spec.notImport
     functionFound := spec.targetFunctionFound
     body
@@ -23433,7 +23433,7 @@ theorem ConcreteSupportedExport.correctConstructorFVarReturn
         spec.targetFunctionIndex initial nextStore initialWitness nextWitness
         parameters resultKind sourceValue
         (.i32 (UInt32.ofNat word.value)) := {
-    sourceEvaluates := sourceEvaluation.execEvaluates sourceExternals
+    sourceResult := sourceEvaluation.sourceResult sourceExternals
     notImport := spec.notImport
     functionFound := spec.targetFunctionFound
     body

@@ -484,6 +484,54 @@ theorem ExecSteps.withFrameSuffix
   | step head tail ih =>
       exact .step (executeStep_withFrameSuffix head) ih
 
+/-- Compose two executable finite prefixes without exposing step-count
+arithmetic to semantic clients. -/
+theorem ExecSteps.trans
+    {externals : ExternalImpl}
+    {prefixCount suffixCount : Nat}
+    {first middle last : MachineState}
+    (firstSteps : ExecSteps externals prefixCount first middle)
+    (suffix : ExecSteps externals suffixCount middle last) :
+    ∃ count, ExecSteps externals count first last := by
+  induction firstSteps with
+  | refl => exact ⟨suffixCount, suffix⟩
+  | step head tail ih =>
+      obtain ⟨count, steps⟩ := ih suffix
+      exact ⟨count + 1, .step head steps⟩
+
+/--
+Determinism identifies the exact final machine state of two finite runs that
+both stop. This deliberately retains runtime fields omitted from
+`Observation`, such as semantic globals and the next-location frontier.
+-/
+theorem ExecSteps.final_eq_of_done
+    {externals : ExternalImpl}
+    {leftCount rightCount : Nat}
+    {first leftFinal rightFinal : MachineState}
+    {leftObservation rightObservation : Observation}
+    (left : ExecSteps externals leftCount first leftFinal)
+    (leftDone : executeStep externals leftFinal = .done leftObservation)
+    (right : ExecSteps externals rightCount first rightFinal)
+    (rightDone : executeStep externals rightFinal = .done rightObservation) :
+    leftFinal = rightFinal := by
+  induction left generalizing rightCount rightFinal with
+  | refl state =>
+      cases right with
+      | refl => rfl
+      | step head tail =>
+          rw [leftDone] at head
+          contradiction
+  | step leftHead leftTail ih =>
+      cases right with
+      | refl =>
+          rw [rightDone] at leftHead
+          contradiction
+      | step rightHead rightTail =>
+          rw [leftHead] at rightHead
+          injection rightHead with nextEq
+          subst nextEq
+          exact ih leftDone rightTail rightDone
+
 /--
 Structured executable source behavior of one lazy-cache miss.
 

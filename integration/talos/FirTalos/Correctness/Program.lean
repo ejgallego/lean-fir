@@ -69,6 +69,51 @@ def sourceYieldState (context : Fir.Wasm.Context) (runtime : RuntimeState)
     env
     runtime }
 
+/--
+Exact executable source result for a code body.
+
+Unlike `ExecEvaluates`, this relation fixes the complete runtime carried by
+the terminal yielded state. Observations deliberately omit some internal
+runtime fields, so declaration callers that must continue execution use this
+stronger boundary and erase it to `ExecEvaluates` only at observation-facing
+interfaces.
+-/
+def SourceCodeResult (context : Fir.Wasm.Context)
+    (externals : ExternalImpl)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (code : LCNF.Code .impure)
+    (resultRuntime : RuntimeState)
+    (resultValue : Value) : Prop :=
+  ∃ count resultEnv,
+    ExecSteps externals count
+      (sourceCodeState context sourceRuntime sourceEnv code)
+      (sourceYieldState context resultRuntime resultEnv resultValue)
+
+/-- Prefix an exact code result with any executable transition between
+canonical source-code states. -/
+theorem SourceCodeResult.ofSteps
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime middleRuntime resultRuntime : RuntimeState}
+    {sourceEnv middleEnv : Env}
+    {code middleCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {prefixCount : Nat}
+    (firstSteps :
+      ExecSteps externals prefixCount
+        (sourceCodeState context sourceRuntime sourceEnv code)
+        (sourceCodeState context middleRuntime middleEnv middleCode))
+    (continued :
+      SourceCodeResult context externals middleRuntime middleEnv middleCode
+        resultRuntime resultValue) :
+    SourceCodeResult context externals sourceRuntime sourceEnv code
+      resultRuntime resultValue := by
+  obtain ⟨suffixCount, resultEnv, suffix⟩ := continued
+  obtain ⟨count, steps⟩ :=
+    FirTalos.Correctness.ExecSteps.trans firstSteps suffix
+  exact ⟨count, resultEnv, steps⟩
+
 private theorem evalLetValue_sourceCodeState_control_independent
     (context : Fir.Wasm.Context) (runtime : RuntimeState) (env : Env)
     (code : LCNF.Code .impure) (decl : LCNF.LetDecl .impure) :
@@ -119,6 +164,66 @@ private theorem executeStep_source_yield (externals : ExternalImpl)
     executeStep externals (sourceYieldState context runtime env value) =
       .done (ReturnedObservation runtime value) := by
   rfl
+
+/--
+The call-free source judgment retains its exact terminal runtime, rather than
+recovering it from the deliberately lossy returned observation.
+-/
+theorem CodeEvaluates.sourceResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {resultValue : Value}
+    (evaluation :
+      CodeEvaluates context sourceRuntime sourceEnv code resultRuntime
+        resultValue)
+    (externals : ExternalImpl) :
+    SourceCodeResult context externals sourceRuntime sourceEnv code
+      resultRuntime resultValue := by
+  induction evaluation with
+  | @ret sourceEnv result sourceValue sourceRuntime sourceLookup =>
+      exact ⟨1, sourceEnv,
+        .step
+          (executeStep_source_return externals context sourceRuntime sourceEnv
+            result sourceValue sourceLookup)
+          (.refl _)⟩
+  | letValue sourceStep _ ih =>
+      obtain ⟨count, resultEnv, steps⟩ := ih
+      exact ⟨count + 1, resultEnv,
+        .step
+          (executeStep_source_let externals context _ _ _ _ _ _ sourceStep)
+          steps⟩
+  | caseOf sourceStep _ ih =>
+      obtain ⟨count, resultEnv, steps⟩ := ih
+      exact ⟨count + 1, resultEnv,
+        .step
+          (executeStep_source_cases externals context _ _ _ _ sourceStep)
+          steps⟩
+  | effect sourceStep _ ih =>
+      obtain ⟨count, resultEnv, steps⟩ := ih
+      exact ⟨count + 1, resultEnv,
+        .step (by simpa [sourceCodeState] using sourceStep externals) steps⟩
+
+/-- Exact source results erase to the public observation-facing judgment. -/
+theorem SourceCodeResult.execEvaluates
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {resultValue : Value}
+    (result :
+      SourceCodeResult context externals sourceRuntime sourceEnv code
+        resultRuntime resultValue) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv code)
+      (ReturnedObservation resultRuntime resultValue) := by
+  obtain ⟨count, resultEnv, steps⟩ := result
+  exact ⟨count, sourceYieldState context resultRuntime resultEnv resultValue,
+    steps,
+    executeStep_source_yield externals context resultRuntime resultEnv
+      resultValue⟩
 
 /--
 The proof-facing W4 source evaluation is sound for the repository's executable

@@ -61,14 +61,16 @@ def DeclarationBodyWP
             (parameters ++ callerTail)
             (ExactReturnPost afterCall physical callerTail))
 
-/-- A complete successful-execution certificate for one generated concrete
+/-- A complete successful-execution theorem package for one generated concrete
 declaration. This is the first program-level W6 boundary: it joins actual
 source execution, function resolution, compiler/adaptor body correctness, and
 the final runtime/value refinement facts.
 
-The certificate is intentionally stronger than the public relational result:
-it names the deterministic final target store and physical result. That exact
-form remains useful to cache publication and other generated callers. -/
+The package is intentionally stronger than the public relational result:
+it names the deterministic final target store and physical result, and retains
+the complete terminal source runtime rather than only its lossy observation.
+That exact form remains useful to cache publication and other generated
+callers. -/
 structure SuccessfulDeclaration
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -87,10 +89,9 @@ structure SuccessfulDeclaration
     (resultKind : AbiKind)
     (resultValue : Value)
     (physical : Wasm.Value) : Prop where
-  sourceEvaluates :
-    ExecEvaluates sourceExternals
-      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
-      (ReturnedObservation resultRuntime resultValue)
+  sourceResult :
+    SourceCodeResult context sourceExternals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue
   notImport : module.imports[functionIndex]? = none
   functionFound :
     module.funcs[functionIndex - module.imports.length]? =
@@ -105,7 +106,37 @@ structure SuccessfulDeclaration
   valueRelated :
     PhysicalValueRel resultWitness resultKind physical resultValue
 
-/-- The exact body certificate yields the store-specific, fuel-free target
+/-- The exact declaration result entails the existing observation-facing
+source evaluation theorem. -/
+theorem SuccessfulDeclaration.sourceEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultKind : AbiKind}
+    {resultValue : Value}
+    {physical : Wasm.Value}
+    (correct :
+      SuccessfulDeclaration context sourceModule sourceFunction module hostEnv
+        sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+        targetFunction functionIndex initial afterCall initialWitness
+        resultWitness parameters resultKind resultValue physical) :
+    ExecEvaluates sourceExternals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) :=
+  correct.sourceResult.execEvaluates
+
+/-- The exact body theorem yields the store-specific, fuel-free target
 termination theorem used by direct calls. -/
 theorem SuccessfulDeclaration.terminatesWithExact
     {context : Fir.Wasm.Context}
@@ -182,7 +213,7 @@ theorem SuccessfulDeclaration.terminatesWith
   exact ⟨physical :: callerTail, afterCall, executed, resultWitness, physical,
     correct.runtimeRelated, correct.failureClear, correct.valueRelated, rfl⟩
 
-/-- The program-level successful declaration statement: the same certificate
+/-- The program-level successful declaration statement: the same theorem
 proves both finite source execution and fuel-free concrete target execution. -/
 theorem SuccessfulDeclaration.correct
     {context : Fir.Wasm.Context}
@@ -295,8 +326,8 @@ theorem SuccessfulDeclaration.cachedBody
       physical :=
   correct.body.toCachedDeclarationBodyWP
 
-/-- Package any existing nullary cached-body proof, source run, and final
-refinement facts as the public successful declaration certificate. -/
+/-- Package any existing nullary cached-body proof, exact source result, and
+final refinement facts as the public successful declaration theorem. -/
 theorem SuccessfulDeclaration.ofCachedBody
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -313,10 +344,9 @@ theorem SuccessfulDeclaration.ofCachedBody
     {resultKind : AbiKind}
     {resultValue : Value}
     {physical : Wasm.Value}
-    (sourceEvaluates :
-      ExecEvaluates sourceExternals
-        (sourceCodeState context sourceRuntime [] sourceCode)
-        (ReturnedObservation resultRuntime resultValue))
+    (sourceResult :
+      SourceCodeResult context sourceExternals sourceRuntime [] sourceCode
+        resultRuntime resultValue)
     (notImport : module.imports[functionIndex]? = none)
     (functionFound :
       module.funcs[functionIndex - module.imports.length]? =
@@ -334,7 +364,7 @@ theorem SuccessfulDeclaration.ofCachedBody
       sourceExternals sourceRuntime resultRuntime [] sourceCode targetFunction
       functionIndex initial afterCall initialWitness resultWitness []
       resultKind resultValue physical := {
-  sourceEvaluates
+  sourceResult
   notImport
   functionFound
   body := body.toDeclarationBodyWP

@@ -299,7 +299,7 @@ theorem codeWP_caseOf
 
 /-- Prefix a successful executable source run by any finite sequence of
 interpreter steps. This is the source-side composition rule needed once the
-concrete syntax certificate admits calls and foreign operations. -/
+concrete syntax relation admits calls and foreign operations. -/
 theorem execEvaluates_of_steps
     {externals : ExternalImpl}
     {prefixCount : Nat}
@@ -522,9 +522,9 @@ theorem sourceCallLetResult_thenExecEvaluates
       (by simpa [sourceCodeState] using callSteps)
     continued
 
-/-- Syntax-directed W6 certificate for concrete return, direct-value,
+/-- Syntax-directed W6 relation for concrete return, direct-value,
 case-control-flow, no-result-effect, call, external, and lazy-cache code.
-Unlike `SuccessfulDeclaration`, this certificate derives its final
+Unlike `SuccessfulDeclaration`, this relation derives its final
 runtime/value facts from the return leaf and threads them backwards through
 each concrete step. -/
 inductive ConcreteCodeSimulation
@@ -740,10 +740,12 @@ theorem ConcreteCodeSimulation.toCodeWP
   | effect _ _ step _ ih =>
       exact codeWP_effect step ih
 
-/-- The concrete syntax induction composes every exact source prefix with its
-recursive continuation and therefore proves a real finite interpreter run,
-including cases, calls, external calls, and both lazy-cache paths. -/
-theorem ConcreteCodeSimulation.execEvaluates
+/--
+The concrete syntax induction retains the exact terminal source runtime while
+composing direct values, calls, externals, lazy caches, cases, and effects.
+This is the hereditary source boundary used by generated callers.
+-/
+theorem ConcreteCodeSimulation.sourceResult
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
@@ -766,24 +768,72 @@ theorem ConcreteCodeSimulation.execEvaluates
         hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
         targetLocals witness resultRuntime resultValue resultKind resultStore
         resultWitness physical) :
-    ExecEvaluates sourceExternals
-      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
-      (ReturnedObservation resultRuntime resultValue) := by
+    SourceCodeResult context sourceExternals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue := by
   induction simulation with
   | ret _ _ _ sourceLookup _ _ =>
-      exact (CodeEvaluates.ret sourceLookup).execEvaluates sourceExternals
+      exact (CodeEvaluates.ret sourceLookup).sourceResult sourceExternals
   | letValue _ _ _ step _ ih =>
-      exact sourceLetResult_thenExecEvaluates step.1 ih
+      apply SourceCodeResult.ofSteps
+        (.step
+          (executeStep_source_let sourceExternals context _ _ _ _ _ _
+            step.1)
+          (.refl _))
+        ih
   | callLet _ _ _ step _ ih =>
-      exact sourceCallLetResult_thenExecEvaluates step.1 ih
+      obtain ⟨count, callSteps⟩ := step.1
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ ih
+      simpa [sourceCodeState] using callSteps
   | externalLet _ _ _ step _ ih =>
-      exact sourceExternalLetResult_thenExecEvaluates step.1 ih
+      apply SourceCodeResult.ofSteps (prefixCount := 3) ?_ ih
+      have sourceStep := step.1
+      unfold SourceExternalLetResult at sourceStep
+      simpa [sourceCodeState] using sourceStep
   | lazyLet _ _ _ _ step _ ih =>
-      exact sourceLazyLetResult_thenExecEvaluates step.1 ih
+      obtain ⟨count, lazySteps⟩ := step.1.execSteps
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ ih
+      simpa [sourceCodeState] using lazySteps
   | caseOf _ _ step _ ih =>
-      exact sourceCaseResult_thenExecEvaluates step.1 ih
+      apply SourceCodeResult.ofSteps
+        (.step
+          (executeStep_source_cases sourceExternals context _ _ _ _ step.1)
+          (.refl _))
+        ih
   | effect _ _ step _ ih =>
-      exact sourceEffectResult_thenExecEvaluates step.1 ih
+      apply SourceCodeResult.ofSteps
+        (.step
+          (by simpa [sourceCodeState] using step.1 sourceExternals)
+          (.refl _))
+        ih
+
+/-- Exact source results erase to the existing observation-facing theorem. -/
+theorem ConcreteCodeSimulation.execEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore resultStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness resultWitness : RefinementWitness}
+    {resultValue : Value}
+    {resultKind : AbiKind}
+    {physical : Wasm.Value}
+    (simulation :
+      ConcreteCodeSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+        targetStore targetLocals witness resultRuntime resultValue resultKind
+        resultStore resultWitness physical) :
+    ExecEvaluates sourceExternals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) :=
+  simulation.sourceResult.execEvaluates
 
 /-- Final concrete runtime refinement is not an extra declaration hypothesis:
 it is inherited from the return leaf through the syntax induction. -/
@@ -917,7 +967,7 @@ theorem ConcreteCodeSimulation.valueRelated
       exact ih
 
 /-- T2's initial bridge: the syntax-directed simulation constructs every
-field of T1's public successful declaration certificate. -/
+field of T1's public successful declaration theorem. -/
 theorem ConcreteCodeSimulation.toSuccessfulDeclaration
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -952,7 +1002,7 @@ theorem ConcreteCodeSimulation.toSuccessfulDeclaration
       sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
       targetFunction functionIndex initial resultStore initialWitness
       resultWitness parameters resultKind resultValue physical := {
-  sourceEvaluates := simulation.execEvaluates
+  sourceResult := simulation.sourceResult
   notImport
   functionFound
   body := ⟨parameterCount, resultCount,
