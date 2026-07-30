@@ -191,6 +191,19 @@ theorem HeaderCapacityTransport.boxScalar
       (allocateBoxedScalar_prefixExtension state result scalar word valid
         allocated)
 
+/-- Heap-backed arbitrary-precision integer allocation is a fresh prefix
+extension, so every previously mapped owned header retains its complete
+physical extent. -/
+theorem HeaderCapacityTransport.allocateInteger
+    (state result : MemoryState) (witness : RefinementWitness)
+    (value : Int) (address : Word32)
+    (valid : state.FrontierInvariant)
+    (allocated : Fir.Wasm.Concrete.allocateInteger state value =
+      .ok (result, address)) :
+    HeaderCapacityTransport state result witness :=
+  .ofPrefixExtension witness
+    (allocateInteger_prefixExtension state result value address valid allocated)
+
 /-- Natural literals use the same immediate/promoted tagged split below the
 semantic limit and fresh limb allocation above it. -/
 theorem HeaderCapacityTransport.allocateNatural
@@ -866,6 +879,20 @@ theorem OrdinaryPersistenceTransport.refl (runtime : RuntimeState) :
   intro location cell found ordinary
   exact ordinary cell found
 
+/-- Ordinary persistence depends only on the post-state heap. This transports
+an existing proof across changes to the world, trace, globals, or location
+frontier that leave that heap definitionally equal. -/
+theorem OrdinaryPersistenceTransport.congrAfter
+    {before after alternate : RuntimeState}
+    (transport : OrdinaryPersistenceTransport before after)
+    (heapEq : after.heap = alternate.heap) :
+    OrdinaryPersistenceTransport before alternate := by
+  intro location cell found ordinary
+  apply transport location cell
+  · rw [heapEq]
+    exact found
+  · exact ordinary
+
 /-- Ordinary-persistence transports compose across sequential source steps. -/
 theorem OrdinaryPersistenceTransport.trans
     {first middle last : RuntimeState}
@@ -1070,6 +1097,44 @@ theorem literal_ordinaryPersistenceTransport
   | uint32 value => exact OrdinaryPersistenceTransport.refl before
   | uint64 value => exact OrdinaryPersistenceTransport.refl before
   | usize value => exact OrdinaryPersistenceTransport.refl before
+
+/-- A pure heap-integer response appends one fresh ordinary source cell.
+Recording the external event changes no heap ownership property. -/
+theorem semanticIntegerExternalResponse_ordinaryPersistenceTransport
+    (request : ExternalRequest) (before : RuntimeState) (value : Int) :
+    OrdinaryPersistenceTransport before
+      (semanticExternalRuntimeAfter request before
+        (semanticIntegerExternalResponse before value)) := by
+  apply
+    (alloc_ordinaryPersistenceTransport
+      (before := before)
+      (after := (alloc before (.integer value) false).1)
+      (object := .integer value)
+      (reference := (alloc before (.integer value) false).2)
+      (operation := rfl)).congrAfter
+  simp [semanticExternalRuntimeAfter, semanticIntegerExternalResponse,
+    semanticIntegerResult, semanticIntegerCell, alloc]
+
+/-- A pure natural response has exactly the source heap transition of the
+canonical natural literal allocator. -/
+theorem semanticNaturalExternalResponse_ordinaryPersistenceTransport
+    (request : ExternalRequest) (before : RuntimeState) (value : Nat) :
+    OrdinaryPersistenceTransport before
+      (semanticExternalRuntimeAfter request before
+        (semanticNaturalExternalResponse before value)) := by
+  apply
+    (literal_ordinaryPersistenceTransport before (.nat value)).congrAfter
+  simp [semanticExternalRuntimeAfter, semanticNaturalExternalResponse]
+
+/-- A pure scalar response leaves the source heap unchanged. -/
+theorem semanticScalarExternalResponse_ordinaryPersistenceTransport
+    (request : ExternalRequest) (before : RuntimeState)
+    (scalar : BoxedScalar) :
+    OrdinaryPersistenceTransport before
+      (semanticExternalRuntimeAfter request before
+        (semanticScalarExternalResponse before scalar)) := by
+  apply (OrdinaryPersistenceTransport.refl before).congrAfter
+  simp [semanticExternalRuntimeAfter, semanticScalarExternalResponse]
 
 private theorem allocCtor_preserves_persistent_false
     {before after : RuntimeState} {info : LCNF.CtorInfo}

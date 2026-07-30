@@ -5890,6 +5890,31 @@ def PureExternalSupported
       PureScalarExternalSupported context externals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue stepCost
 
+/-- Every currently admitted pure external is an ordinary validator transfer:
+it cannot manufacture a reusable-capacity fact and erases any stale fact
+shadowed by its destination. -/
+theorem PureExternalSupported.reuseCapacityLetFacts?
+    {context : Fir.Wasm.Context} {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceValue : Value} {stepCost : Nat}
+    (supported :
+      PureExternalSupported context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue stepCost)
+    (facts : ReuseCapacityFacts) :
+    reuseCapacityLetFacts? facts decl =
+      some (eraseReuseCapacityFact facts decl.fvarId) := by
+  rcases supported with integer | natural | scalar
+  · cases integer
+    unfold Fir.Wasm.reuseCapacityLetFacts?
+    split <;> simp_all
+  · cases natural
+    unfold Fir.Wasm.reuseCapacityLetFacts?
+    split <;> simp_all
+  · cases scalar
+    unfold Fir.Wasm.reuseCapacityLetFacts?
+    split <;> simp_all
+
 /--
 Static source/compiler admission for a nonempty constructor allocation.
 The relation records only source layout bounds and successful symbolic
@@ -7451,6 +7476,247 @@ def ExternalLetRuntimeRefinesWithCost
               Invariant (remainingBytes - stepCost) nextRuntime
                 (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
                 nextWitness
+
+/--
+Resource-transporting refinement law for one generated pure-external `let`.
+
+This is the operation-family strengthening needed by the reuse-capacity
+simulation. In addition to the ordinary external step and residual invariant,
+it exposes the checked destination write and the three semantic transports
+that were already constructed internally by the concrete implementation:
+old values remain related, old owned headers retain their extents, and
+ordinary source cells remain ordinary. No translated program or numeric
+target index is supplied by the caller.
+-/
+def ExternalLetRuntimeRefinesWithCostAndTransports
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (externals : ExternalImpl)
+    (ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes stepCost : Nat}
+      {witness : RefinementWitness},
+    ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      stepCost ≤ remainingBytes →
+      Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness →
+      SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness resultPhysical,
+        ExternalLetStepSimulates context sourceFunction module hostEnv externals
+          decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+          sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+          witness nextWitness ∧
+        nextStore.host.externals = targetStore.host.externals ∧
+          nextStore.host.closureDescriptors =
+              targetStore.host.closureDescriptors ∧
+            nextWitness.closureDescriptors = witness.closureDescriptors ∧
+              LocalUpdate targetLocals nextLocals resultIndex resultPhysical ∧
+                WitnessTransport witness nextWitness ∧
+                  HeaderCapacityTransport targetStore.host.runtime.heap
+                    nextStore.host.runtime.heap witness ∧
+                    OrdinaryPersistenceTransport sourceRuntime nextRuntime ∧
+                      Invariant (remainingBytes - stepCost) nextRuntime
+                        (bind sourceEnv decl.fvarId sourceValue) nextStore
+                        nextLocals nextWitness
+
+/-- Forget the reuse-specific transports and recover the ordinary structural
+external runtime law. -/
+theorem ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (runtimeRefines :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported
+        Invariant) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      module hostEnv externals ExternalSupported Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, _resultPhysical, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, _localUpdate, _witnessTransport,
+      _capacityTransport, _ordinaryTransport, nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant sourceStep stateRelated
+      valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, step, externalsPreserved,
+    hostDescriptorsPreserved, witnessDescriptorsPreserved, nextInvariant⟩
+
+/-- Transport-strengthened external laws compose by source admission
+disjunction when they share the same invariant. -/
+theorem ExternalLetRuntimeRefinesWithCostAndTransports.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Left Right :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (left :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals Left Invariant)
+    (right :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals Right Invariant) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction labels module hostEnv externals
+      (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+          stepCost =>
+        Left sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+            stepCost ∨
+          Right sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+            stepCost)
+      Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  cases supported with
+  | inl leftSupported =>
+      exact left leftSupported stepFits invariant sourceStep stateRelated
+        valueCompiled valueAdapted resultFound
+  | inr rightSupported =>
+      exact right rightSupported stepFits invariant sourceStep stateRelated
+        valueCompiled valueAdapted resultFound
+
+/-- A transport-strengthened external law retains any additional property of
+the installed handler table. -/
+theorem
+    ExternalLetRuntimeRefinesWithCostAndTransports.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Supported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals Supported Invariant) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction labels module hostEnv externals Supported
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, localUpdate, witnessTransport,
+      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant.1 sourceStep stateRelated
+      valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    localUpdate, witnessTransport, capacityTransport, ordinaryTransport,
+    nextInvariant, by simpa [externalsPreserved] using invariant.2⟩
+
+/-- Transport a strengthened external law across a pointwise equivalent
+threaded invariant. -/
+theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Supported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Old New :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (runtimeRefines :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals Supported Old)
+    (toOld : ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness,
+      New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness)
+    (toNew : ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness,
+      Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction labels module hostEnv externals Supported New := by
+  intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep stateRelated
+    valueCompiled valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, localUpdate, witnessTransport,
+      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      (toOld remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness invariant)
+      sourceStep stateRelated valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    localUpdate, witnessTransport, capacityTransport, ordinaryTransport,
+    toNew (remainingBytes - stepCost) nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
+      nextInvariant⟩
 
 /--
 Uniform runtime condition for one successful no-result effect node.
@@ -10189,7 +10455,8 @@ implementation law jointly discharge every name in
 All physical arguments, decoded lanes, the import/local indices, allocation
 address, response, and extended witness are constructed inside the proof.
 -/
-theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
+theorem
+    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureInteger
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10202,8 +10469,8 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     (externals : ExternalImpl) :
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-      target.wasmModule hosts.env externals
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
       (PureIntegerExternalSupported context externals)
       (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -10387,25 +10654,43 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
       nextStore.host.externals.IntegerResultRefines externals := by
     change targetStore.host.externals.IntegerResultRefines externals
     exact invariant.2
+  have localUpdate :
+      LocalUpdate targetLocals updated resultIndex
+        (physicalOfLane response.value) :=
+    localUpdate_of_set? targetSet
+  have witnessTransport : WitnessTransport witness nextWitness :=
+    WitnessTransport.ofExtension witnessExtension
+  have capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap witness := by
+    have allocatedTransport :=
+      HeaderCapacityTransport.allocateInteger targetStore.host.runtime.heap
+        allocatedHeap witness value address stateRelated.1.heap.frontier
+        allocated
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteIntegerExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using allocatedTransport
+  have ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+    rw [nextRuntimeEq]
+    exact
+      semanticIntegerExternalResponse_ordinaryPersistenceTransport
+        (declarationExternalRequest declaration semanticArgs) sourceRuntime value
   subst nextRuntime
   subst sourceValue
   subst stepCost
-  exact ⟨nextStore, updated, nextWitness, by simpa [requestEq] using step,
+  exact ⟨nextStore, updated, nextWitness, physicalOfLane response.value,
+    by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
     by simp [nextStore, replaceRuntime, clearFailure],
-    witnessExtension.closureDescriptors,
+    witnessExtension.closureDescriptors, localUpdate, witnessTransport,
+    capacityTransport, ordinaryTransport,
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
-/--
-The production compiler, adapter, concrete resolver, and reusable
-natural-result implementation law jointly discharge `Int.natAbs`.
-
-The proof constructs the physical arguments, target indices, concrete natural
-representation, and post-witness from the generated export and source result;
-none of those target artifacts appear in the source admission relation.
--/
-theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
+/-- The transport-strengthened integer law in particular supplies the
+ordinary structural external runtime contract. -/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureInteger
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10420,6 +10705,35 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
       target.wasmModule hosts.env externals
+      (PureIntegerExternalSupported context externals)
+      (ConcreteBudgetedIntegerExternalFrame sourceFunction externals) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals)
+
+/--
+The production compiler, adapter, concrete resolver, and reusable
+natural-result implementation law jointly discharge `Int.natAbs`.
+
+The proof constructs the physical arguments, target indices, concrete natural
+representation, and post-witness from the generated export and source result;
+none of those target artifacts appear in the source admission relation.
+-/
+theorem
+    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureNatural
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
       (PureNaturalExternalSupported context externals)
       (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -10603,26 +10917,42 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
       FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
         targetStore.host.externals externals
     exact invariant.2
+  have localUpdate :
+      LocalUpdate targetLocals updated resultIndex
+        (physicalOfLane response.value) :=
+    localUpdate_of_set? targetSet
+  have witnessTransport : WitnessTransport witness nextWitness :=
+    WitnessTransport.ofExtension witnessExtension
+  have capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap witness := by
+    have allocatedTransport :=
+      HeaderCapacityTransport.allocateNatural targetStore.host.runtime.heap
+        allocatedHeap witness value word stateRelated.1.heap.frontier allocated
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteNaturalExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using allocatedTransport
+  have ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+    rw [nextRuntimeEq]
+    exact
+      semanticNaturalExternalResponse_ordinaryPersistenceTransport
+        (declarationExternalRequest declaration semanticArgs) sourceRuntime value
   subst nextRuntime
   subst sourceValue
   subst stepCost
-  exact ⟨nextStore, updated, nextWitness, by simpa [requestEq] using step,
+  exact ⟨nextStore, updated, nextWitness, physicalOfLane response.value,
+    by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
     by simp [nextStore, replaceRuntime, clearFailure],
-    witnessExtension.closureDescriptors,
+    witnessExtension.closureDescriptors, localUpdate, witnessTransport,
+    capacityTransport, ordinaryTransport,
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
-/--
-Compiler-shaped correctness for the admitted pure scalar-result family,
-initially `Int.decLt`.
-
-The semantic scalar determines the result ABI and exact lane. Production
-compilation, adaptation, static resolution, operand decoding, and destination
-binding are all reconstructed internally, while the heap budget and witness
-remain unchanged.
--/
-theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
+/-- The transport-strengthened natural law in particular supplies the
+ordinary structural external runtime contract. -/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureNatural
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10637,6 +10967,36 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
       target.wasmModule hosts.env externals
+      (PureNaturalExternalSupported context externals)
+      (ConcreteBudgetedNaturalExternalFrame sourceFunction externals) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals)
+
+/--
+Compiler-shaped correctness for the admitted pure scalar-result family,
+initially `Int.decLt`.
+
+The semantic scalar determines the result ABI and exact lane. Production
+compilation, adaptation, static resolution, operand decoding, and destination
+binding are all reconstructed internally, while the heap budget and witness
+remain unchanged.
+-/
+theorem
+    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureScalar
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
       (PureScalarExternalSupported context externals)
       (ConcreteBudgetedScalarExternalFrame sourceFunction externals) := by
   intro sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -10816,14 +11176,57 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
       FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
         targetStore.host.externals externals
     exact invariant.2
+  have localUpdate :
+      LocalUpdate targetLocals updated resultIndex
+        (physicalOfLane response.value) :=
+    localUpdate_of_set? targetSet
+  have capacityTransport :
+      HeaderCapacityTransport targetStore.host.runtime.heap
+        nextStore.host.runtime.heap witness := by
+    simpa [nextStore, response, replaceRuntime, clearFailure,
+      concreteScalarExternalResponse,
+      ConcreteRuntimeState.applyExternalResponse] using
+      (HeaderCapacityTransport.refl targetStore.host.runtime.heap witness)
+  have ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+    rw [nextRuntimeEq]
+    exact
+      semanticScalarExternalResponse_ordinaryPersistenceTransport
+        (declarationExternalRequest declaration semanticArgs) sourceRuntime
+        scalar
   subst nextRuntime
   subst sourceValue
   subst stepCost
-  exact ⟨nextStore, updated, witness, by simpa [requestEq] using step,
+  exact ⟨nextStore, updated, witness, physicalOfLane response.value,
+    by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
     by simp [nextStore, replaceRuntime, clearFailure], rfl,
+    localUpdate, WitnessTransport.refl witness, capacityTransport,
+    ordinaryTransport,
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
+
+/-- The transport-strengthened scalar law in particular supplies the ordinary
+structural external runtime contract. -/
+theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureScalar
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
+      target.wasmModule hosts.env externals
+      (PureScalarExternalSupported context externals)
+      (ConcreteBudgetedScalarExternalFrame sourceFunction externals) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals)
 
 /-- Uniform runtime laws with the same resource invariant compose by source
 admission disjunction. This is the structural bridge for mixed direct-value
@@ -13123,6 +13526,29 @@ def ConcreteReuseCapacityFrame
         targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes
 
 /--
+Facts-indexed resource invariant for code that may call any currently proved
+pure integer-, natural-, or scalar-result external.
+
+The reuse relation and source ownership protocol are independent of the
+installed handlers. Successful direct and external steps preserve the handler
+table, so the three reusable implementation laws can be threaded alongside
+the exact fact map without changing the source admission relation.
+-/
+def ConcreteReuseCapacityPureExternalFrame
+    (sourceFunction : Fir.Wasm.Function) (externals : ExternalImpl)
+    (facts : ReuseCapacityFacts) (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteReuseCapacityFrame sourceFunction facts remainingBytes sourceRuntime
+      sourceEnv targetStore targetLocals witness ∧
+    targetStore.host.externals.IntegerResultRefines externals ∧
+    FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+      targetStore.host.externals externals ∧
+    FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+      targetStore.host.externals externals
+
+/--
 The facts-indexed reuse frame strengthened with the immutable closure
 descriptor agreement required by recursive ownership operations.
 -/
@@ -13287,6 +13713,47 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.or
   | inr rightSupported =>
       exact right rightSupported stepFits invariant sourceStep valueCompiled
         valueAdapted resultFound
+
+/-- A facts-indexed direct law retains any property of the installed external
+handler table because every successful generated direct step preserves that
+table exactly. -/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant.1 sourceStep valueCompiled
+      valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer, nextInvariant,
+    by simpa [externalsPreserved] using invariant.2⟩
 
 /--
 A facts-indexed direct law lifts through closure-descriptor agreement. Every
@@ -14964,6 +15431,83 @@ def ReuseCapacityExternalLetRuntimeRefinesWithCost
                   (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
                   nextWitness
 
+/--
+Lift one transport-strengthened pure-external operation-family law to the
+facts-indexed reuse frame.
+
+The only source-shape premise says that the admitted declaration takes the
+validator's ordinary fallback transfer, erasing a possibly shadowed
+destination fact. The checked local write, witness/header transports, and
+ordinary-source transport reconstruct the two reuse relations; the existing
+budgeted pure-external frame supplies local shape, residual budget, and all
+handler implementation laws.
+-/
+theorem
+    ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityPureExternal
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    (runtimeRefines :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals))
+    (factsTransfer :
+      ∀ {facts : ReuseCapacityFacts}
+          {sourceRuntime nextRuntime : RuntimeState}
+          {sourceEnv : Env} {decl : LCNF.LetDecl .impure}
+          {continuation : LCNF.Code .impure}
+          {sourceValue : Value} {stepCost : Nat},
+        ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+            sourceValue stepCost →
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId)) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals ExternalSupported
+      (ConcreteReuseCapacityPureExternalFrame sourceFunction externals) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  rcases invariant with
+    ⟨⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, localUpdate, witnessTransport,
+      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      ⟨⟨frameAligned, budget⟩, integerImplementation,
+        naturalImplementation, scalarImplementation⟩
+      sourceStep capacityRelated.1 valueCompiled valueAdapted resultFound
+  rcases nextInvariant with
+    ⟨⟨nextFrameAligned, nextBudget⟩, nextIntegerImplementation,
+      nextNaturalImplementation, nextScalarImplementation⟩
+  let nextFacts := eraseReuseCapacityFact facts decl.fvarId
+  have nextCapacity :
+      ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness := by
+    simpa [nextFacts] using
+      capacityRelated.eraseResult step.2.2.1 resultFound localUpdate
+        witnessTransport capacityTransport
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel nextFacts nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa [nextFacts] using ordinaryTokens.eraseBind ordinaryTransport
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    factsTransfer supported,
+    ⟨⟨nextCapacity, nextOrdinary, nextFrameAligned, nextBudget⟩,
+      nextIntegerImplementation, nextNaturalImplementation,
+      nextScalarImplementation⟩⟩
+
 /-- The empty external family satisfies the facts-indexed runtime law
 vacuously. -/
 theorem reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
@@ -16465,6 +17009,50 @@ theorem
   | inr literal =>
       exact literals literal stepFits invariant sourceStep valueCompiled
         valueAdapted resultFound
+
+/-- The complete facts-indexed direct family preserves all installed pure
+external implementation laws alongside the authoritative reuse frame. -/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityPureExternalFrame sourceFunction externals) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          (targetStore.host.externals.IntegerResultRefines externals ∧
+            FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                targetStore.host.externals externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                targetStore.host.externals externals))
+  exact
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.preservingExternalInvariant
+      (ExternalInvariant := fun concrete =>
+        concrete.IntegerResultRefines externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+              concrete externals ∧
+            FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+              concrete externals)
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
 
 /-- The complete facts-indexed direct family also preserves the ownership
 descriptor agreement needed by recursive decrement. -/
@@ -18267,6 +18855,167 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_budgetedDirect_pureExter
 Integer-, natural-, and scalar-result external calls share one invariant and
 compose by source admission disjunction.
 -/
+theorem
+    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+  have integerLaw :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureIntegerExternalSupported context externals)
+        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness =>
+          ConcreteBudgetedIntegerExternalFrame sourceFunction externals
+              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+              witness ∧
+            (FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                targetStore.host.externals externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                targetStore.host.externals externals)) :=
+    ExternalLetRuntimeRefinesWithCostAndTransports.preservingExternalInvariant
+      (ExternalInvariant := fun concrete =>
+        FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            concrete externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            concrete externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureInteger externals)
+  have naturalLaw :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureNaturalExternalSupported context externals)
+        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness =>
+          ConcreteBudgetedNaturalExternalFrame sourceFunction externals
+              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+              witness ∧
+            (targetStore.host.externals.IntegerResultRefines externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                targetStore.host.externals externals)) :=
+    ExternalLetRuntimeRefinesWithCostAndTransports.preservingExternalInvariant
+      (ExternalInvariant := fun concrete =>
+        concrete.IntegerResultRefines externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            concrete externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureNatural externals)
+  have scalarLaw :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureScalarExternalSupported context externals)
+        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness =>
+          ConcreteBudgetedScalarExternalFrame sourceFunction externals
+              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+              witness ∧
+            (targetStore.host.externals.IntegerResultRefines externals ∧
+              FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                targetStore.host.externals externals)) :=
+    ExternalLetRuntimeRefinesWithCostAndTransports.preservingExternalInvariant
+      (ExternalInvariant := fun concrete =>
+        concrete.IntegerResultRefines externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            concrete externals)
+      (spec.externalLetRuntimeRefinesWithCostAndTransports_pureScalar externals)
+  have integerLaw' :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureIntegerExternalSupported context externals)
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+    apply
+      ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant integerLaw
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨⟨invariant.1, invariant.2.1⟩,
+        invariant.2.2.1, invariant.2.2.2⟩
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨invariant.1.1, invariant.1.2,
+        invariant.2.1, invariant.2.2⟩
+  have naturalLaw' :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureNaturalExternalSupported context externals)
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+    apply
+      ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant naturalLaw
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨⟨invariant.1, invariant.2.2.1⟩,
+        invariant.2.1, invariant.2.2.2⟩
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨invariant.1.1, invariant.2.1,
+        invariant.1.2, invariant.2.2⟩
+  have scalarLaw' :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (PureScalarExternalSupported context externals)
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
+    apply
+      ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant scalarLaw
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨⟨invariant.1, invariant.2.2.2⟩,
+        invariant.2.1, invariant.2.2.1⟩
+    · intro _ _ _ _ _ _ invariant
+      exact ⟨invariant.1.1, invariant.2.1,
+        invariant.2.2, invariant.1.2⟩
+  have naturalScalarLaw :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+            stepCost =>
+          PureNaturalExternalSupported context externals sourceRuntime sourceEnv
+              decl continuation nextRuntime sourceValue stepCost ∨
+            PureScalarExternalSupported context externals sourceRuntime sourceEnv
+              decl continuation nextRuntime sourceValue stepCost)
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
+    ExternalLetRuntimeRefinesWithCostAndTransports.or naturalLaw' scalarLaw'
+  have combinedLaw :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals
+        (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+            stepCost =>
+          PureIntegerExternalSupported context externals sourceRuntime sourceEnv
+              decl continuation nextRuntime sourceValue stepCost ∨
+            (PureNaturalExternalSupported context externals sourceRuntime
+                sourceEnv decl continuation nextRuntime sourceValue stepCost ∨
+              PureScalarExternalSupported context externals sourceRuntime
+                sourceEnv decl continuation nextRuntime sourceValue stepCost))
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
+    ExternalLetRuntimeRefinesWithCostAndTransports.or
+      (Left := PureIntegerExternalSupported context externals)
+      (Right := fun sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost =>
+        PureNaturalExternalSupported context externals sourceRuntime sourceEnv
+            decl continuation nextRuntime sourceValue stepCost ∨
+          PureScalarExternalSupported context externals sourceRuntime sourceEnv
+            decl continuation nextRuntime sourceValue stepCost)
+      integerLaw' naturalScalarLaw
+  change
+    ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+          stepCost =>
+        PureIntegerExternalSupported context externals sourceRuntime sourceEnv
+            decl continuation nextRuntime sourceValue stepCost ∨
+          (PureNaturalExternalSupported context externals sourceRuntime
+              sourceEnv decl continuation nextRuntime sourceValue stepCost ∨
+            PureScalarExternalSupported context externals sourceRuntime
+              sourceEnv decl continuation nextRuntime sourceValue stepCost))
+      (ConcreteBudgetedPureExternalFrame sourceFunction externals)
+  exact combinedLaw
+
+/-- Forgetting the reuse transports recovers the existing mixed pure-external
+structural runtime law. -/
 theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureExternal
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -18283,144 +19032,100 @@ theorem ConcreteSupportedExport.externalLetRuntimeRefinesWithCost_pureExternal
     ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
       target.wasmModule hosts.env externals
       (PureExternalSupported context externals)
-      (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
-  have integerLaw :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureIntegerExternalSupported context externals)
-        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-            witness =>
-          ConcreteBudgetedIntegerExternalFrame sourceFunction externals
-              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-              witness ∧
-            (FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-                targetStore.host.externals externals ∧
-              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-                targetStore.host.externals externals)) :=
-    ExternalLetRuntimeRefinesWithCost.preservingExternalInvariant
-      (ExternalInvariant := fun concrete =>
-        FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-            concrete externals ∧
-          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-            concrete externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureInteger externals)
-  have naturalLaw :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureNaturalExternalSupported context externals)
-        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-            witness =>
-          ConcreteBudgetedNaturalExternalFrame sourceFunction externals
-              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-              witness ∧
-            (targetStore.host.externals.IntegerResultRefines externals ∧
-              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-                targetStore.host.externals externals)) :=
-    ExternalLetRuntimeRefinesWithCost.preservingExternalInvariant
-      (ExternalInvariant := fun concrete =>
-        concrete.IntegerResultRefines externals ∧
-          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-            concrete externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureNatural externals)
-  have scalarLaw :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureScalarExternalSupported context externals)
-        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-            witness =>
-          ConcreteBudgetedScalarExternalFrame sourceFunction externals
-              remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-              witness ∧
-            (targetStore.host.externals.IntegerResultRefines externals ∧
-              FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-                targetStore.host.externals externals)) :=
-    ExternalLetRuntimeRefinesWithCost.preservingExternalInvariant
-      (ExternalInvariant := fun concrete =>
-        concrete.IntegerResultRefines externals ∧
-          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-            concrete externals)
-      (spec.externalLetRuntimeRefinesWithCost_pureScalar externals)
-  have integerLaw' :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureIntegerExternalSupported context externals)
-        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
-    apply ExternalLetRuntimeRefinesWithCost.mapInvariant integerLaw
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨⟨invariant.1, invariant.2.1⟩,
-        invariant.2.2.1, invariant.2.2.2⟩
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨invariant.1.1, invariant.1.2,
-        invariant.2.1, invariant.2.2⟩
-  have naturalLaw' :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureNaturalExternalSupported context externals)
-        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
-    apply ExternalLetRuntimeRefinesWithCost.mapInvariant naturalLaw
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨⟨invariant.1, invariant.2.2.1⟩,
-        invariant.2.1, invariant.2.2.2⟩
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨invariant.1.1, invariant.2.1,
-        invariant.1.2, invariant.2.2⟩
-  have scalarLaw' :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (PureScalarExternalSupported context externals)
-        (ConcreteBudgetedPureExternalFrame sourceFunction externals) := by
-    apply ExternalLetRuntimeRefinesWithCost.mapInvariant scalarLaw
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨⟨invariant.1, invariant.2.2.2⟩,
-        invariant.2.1, invariant.2.2.1⟩
-    · intro _ _ _ _ _ _ invariant
-      exact ⟨invariant.1.1, invariant.2.1,
-        invariant.2.2, invariant.1.2⟩
-  have naturalScalarLaw :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
-            stepCost =>
-          PureNaturalExternalSupported context externals sourceRuntime sourceEnv
-              decl continuation nextRuntime sourceValue stepCost ∨
-            PureScalarExternalSupported context externals sourceRuntime sourceEnv
-              decl continuation nextRuntime sourceValue stepCost)
-        (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
-    ExternalLetRuntimeRefinesWithCost.or naturalLaw' scalarLaw'
-  have combinedLaw :
-      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-        target.wasmModule hosts.env externals
-        (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
-            stepCost =>
-          PureIntegerExternalSupported context externals sourceRuntime sourceEnv
-              decl continuation nextRuntime sourceValue stepCost ∨
-            (PureNaturalExternalSupported context externals sourceRuntime
-                sourceEnv decl continuation nextRuntime sourceValue stepCost ∨
-              PureScalarExternalSupported context externals sourceRuntime
-                sourceEnv decl continuation nextRuntime sourceValue stepCost))
-        (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
-    ExternalLetRuntimeRefinesWithCost.or
-      (Left := PureIntegerExternalSupported context externals)
-      (Right := fun sourceRuntime sourceEnv decl continuation nextRuntime
-          sourceValue stepCost =>
-        PureNaturalExternalSupported context externals sourceRuntime sourceEnv
-            decl continuation nextRuntime sourceValue stepCost ∨
-          PureScalarExternalSupported context externals sourceRuntime sourceEnv
-            decl continuation nextRuntime sourceValue stepCost)
-      integerLaw' naturalScalarLaw
-  change
-    ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction []
-      target.wasmModule hosts.env externals
-      (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
-          stepCost =>
-        PureIntegerExternalSupported context externals sourceRuntime sourceEnv
-            decl continuation nextRuntime sourceValue stepCost ∨
-          (PureNaturalExternalSupported context externals sourceRuntime
-              sourceEnv decl continuation nextRuntime sourceValue stepCost ∨
-            PureScalarExternalSupported context externals sourceRuntime
-              sourceEnv decl continuation nextRuntime sourceValue stepCost))
-      (ConcreteBudgetedPureExternalFrame sourceFunction externals)
-  exact combinedLaw
+      (ConcreteBudgetedPureExternalFrame sourceFunction externals) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
+
+/--
+All proved pure external families implement the facts-indexed external
+constructor used by the structural reuse theorem.
+
+Each call executes the production-generated prefix, erases the destination's
+stale capacity fact, transports every unrelated ordinary token and old owned
+header, consumes exactly its response-selected allocation cost, and retains
+all three installed handler laws.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (ConcreteReuseCapacityPureExternalFrame sourceFunction externals) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityPureExternal
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
+    (fun supported => supported.reuseCapacityLetFacts? _)
+
+/--
+First whole-export endpoint that combines authoritative reuse-capacity facts
+with the complete pure integer-, natural-, and scalar-result external family.
+
+The finite source evaluation may freely interleave all current direct/reuse
+operations, response-sized pure external allocations, and default-only case
+wrappers. The target executes the production compiler output with the exact
+residual wasm32 budget; external results erase only their destination fact and
+preserve every unrelated ordinary reuse token.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectPureExternalDefaultCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context externals) DefaultOnlyCaseSupported
+        NoEffectsSupported directLetAllocationCost facts sourceRuntime sourceEnv
+        sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityPureExternalFrame sourceFunction externals facts
+        requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityBudgetedCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+      externals)
+    (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    caseRuntimeRefines_defaultOnly (fun _ => effectRuntimeRefines_noEffects)
+    parameterCount
 
 /--
 All current direct helpers preserve the ownership descriptor agreement in

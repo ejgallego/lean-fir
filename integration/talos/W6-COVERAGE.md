@@ -93,8 +93,15 @@ Cross-cutting W6.5 state:
   object-constructor and scalar-`UInt8` endpoints now reconstruct and execute
   their normalized production comparison chains under the same frame.
   Response-producing external nodes are part of the same structural
-  induction through `ReuseCapacityExternalLetRuntimeRefinesWithCost`; concrete
-  pure Int/Nat/scalar facts-indexed instances are still pending.
+  induction through `ReuseCapacityExternalLetRuntimeRefinesWithCost`.
+  `ExternalLetRuntimeRefinesWithCostAndTransports` exposes the checked local
+  write, witness, mapped-header, and source ordinary-persistence boundaries
+  shared by the concrete pure `Int`, `Nat`, and scalar implementations.
+  `ConcreteReuseCapacityPureExternalFrame` and
+  `correctReuseBudgetedDirectPureExternalDefaultCases` now admit arbitrary
+  finite mixtures of those response-producing calls, the complete
+  direct/reuse family, and default-only cases while retaining exact facts and
+  the response-sized allocation budget.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated

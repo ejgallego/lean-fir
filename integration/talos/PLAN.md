@@ -4689,7 +4689,27 @@ exact implementation condition: from a source response and path cost it must
 execute the production external prefix, prove the validator-selected successor
 fact map, and re-establish the indexed frame after binding the response.
 External-free case clients use the vacuous instance. Concrete pure
-integer/natural/scalar external instances are the next slice.
+integer/natural/scalar external instances are supplied by W6.6gt.
+
+W6.6gt exposes the reusable transport boundary that those concrete pure
+responses already construct. `ExternalLetRuntimeRefinesWithCostAndTransports`
+adds the checked destination-local update, witness transport, old-header
+capacity transport, and source ordinary-persistence transport to the existing
+operation-family law. The ordinary external theorem is now a projection of
+this stronger result; no per-program certificate or target artifact enters the
+premises. Heap `Int`, representation-polymorphic `Nat`, and nonallocating
+scalar results instantiate the boundary using their canonical allocation and
+response theorems.
+
+`ConcreteReuseCapacityPureExternalFrame` threads the authoritative reuse fact
+map, ordinary-token relation, byte budget, and all three installed handler
+laws. The mixed pure-external transport theorem lifts that frame across each
+response, applies the validator's ordinary destination-fact erasure, and
+retains every unrelated ordinary token.
+`correctReuseBudgetedDirectPureExternalDefaultCases` is the first whole-export
+endpoint: arbitrary finite interleavings of the complete direct/reuse family,
+all proved pure external families, and default-only case wrappers execute the
+production Wasm with the exact residual budget.
 
 ## Parallel agent packages
 

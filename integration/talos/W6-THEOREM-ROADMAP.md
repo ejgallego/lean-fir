@@ -720,8 +720,15 @@ acceptance tests pass.
    `ReuseCapacityExternalLetRuntimeRefinesWithCost` requires each external
    operation family to derive its production prefix, authoritative successor
    fact map, and post-frame from the source response and response-dependent
-   cost. The generic structural and whole-export theorems consume that law;
-   concrete pure Int/Nat/scalar instances remain next.
+   cost. The generic structural and whole-export theorems consume that law.
+   `ExternalLetRuntimeRefinesWithCostAndTransports` now exposes the common
+   checked-local, witness, mapped-header, and source ordinary-persistence
+   transports constructed by the concrete pure `Int`, `Nat`, and scalar
+   implementation proofs. Their mixed operation-family theorem lifts to
+   `ConcreteReuseCapacityPureExternalFrame`, and
+   `correctReuseBudgetedDirectPureExternalDefaultCases` closes the first
+   facts-indexed whole-export endpoint containing actual response-producing
+   external calls.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
