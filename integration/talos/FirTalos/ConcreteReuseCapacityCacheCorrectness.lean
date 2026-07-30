@@ -804,6 +804,20 @@ theorem LazyCacheValidationFacts.layout
   LazyCacheTableLayout.ofSignatures checked.signatures
 
 /--
+The one uniform fact the integration-owned symbolic validator must expose for
+generated lazy caches.
+
+This is a theorem about the validator implementation, not a per-module
+certificate: one proof discharges the condition for every successfully
+validated module. W6 keeps this boundary explicit until the monolithic
+`validateModuleShape` initializer loop has an authoritative accessor.
+-/
+def LazyCacheValidatorSound : Prop :=
+  ∀ {source : Fir.Wasm.Module},
+    Fir.Wasm.validateModule source = .ok () →
+      LazyCacheValidationFacts source
+
+/--
 Static result-kind agreement between generated lazy-cache operations and the
 declaration signatures that determine their physical value lanes.
 
@@ -839,6 +853,165 @@ structure LazyCacheGeneratedEnvironment
     context.cachedDeclarations = source.initializers
   resultKinds :
     LazyCacheResultKindsAligned context source
+
+/-- Successful supported lowering exposes the underlying production lowering
+equation; no proof-side lowering function is introduced. -/
+theorem LazyCacheGeneratedEnvironment.lower_of_lowerSupported
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    (lowered : Fir.Wasm.lowerSupported program = .ok source) :
+    Fir.Wasm.lower program = .ok source := by
+  unfold Fir.Wasm.lowerSupported at lowered
+  cases validation : Fir.Wasm.validateSupported program with
+  | error error =>
+      simp only [validation] at lowered
+      change
+        Except.error (Fir.Wasm.SupportedLoweringError.validation error) =
+          Except.ok source at lowered
+      contradiction
+  | ok value =>
+      cases value
+      simp only [validation, pure, Except.pure] at lowered
+      cases lowering : Fir.Wasm.lower program with
+      | error error =>
+          simp only [lowering] at lowered
+          change
+            Except.error (Fir.Wasm.SupportedLoweringError.lowering error) =
+              Except.ok source at lowered
+          contradiction
+      | ok module =>
+          simpa [lowering] using lowered
+
+/--
+Production lowering emits exactly the ordered cache-name table computed once
+for every declaration context. This removes an independent
+`context.cachedDeclarations = source.initializers` certificate from the
+generated-cache boundary.
+-/
+theorem LazyCacheGeneratedEnvironment.initializers_of_lower
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    (lowered : Fir.Wasm.lower program = .ok source) :
+    source.initializers = Fir.Wasm.cachedDeclarationNames program := by
+  unfold Fir.Wasm.lower at lowered
+  dsimp only at lowered
+  generalize functionsEq :
+      program.decls.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        functionsResult at lowered
+  cases functionsResult with
+  | error error =>
+      contradiction
+  | ok functions =>
+      simp only [Bind.bind, Except.bind] at lowered
+      by_cases operations :
+          (Fir.Wasm.collectRuntimeOps functions).all
+              Fir.Wasm.RuntimeOp.abiWellFormed = true
+      · simp only [operations, ↓reduceIte] at lowered
+        generalize externalsEq :
+            (program.decls.filterMapM (fun decl =>
+              match decl.value with
+              | .extern _ => do
+                  match Fir.Wasm.externalImport decl with
+                  | .ok import_ => return some import_
+                  | .error error =>
+                      throw (Fir.Wasm.CompileError.abi error)
+              | .code _ => pure none) :
+                Except Fir.Wasm.CompileError (Array Fir.Wasm.Import)) =
+              externalsResult at lowered
+        cases externalsResult with
+        | error error =>
+            contradiction
+        | ok externals =>
+            simp only [pure, Except.pure, Except.ok.injEq] at lowered
+            subst source
+            rfl
+      · simp [operations] at lowered
+
+/-- Successful production adaptation exposes successful symbolic validation. -/
+theorem LazyCacheGeneratedEnvironment.validated_of_adapt
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (adapted : FirTalos.adapt source = .ok target) :
+    Fir.Wasm.validateModule source = .ok () := by
+  unfold FirTalos.adapt at adapted
+  cases sourceValid : Fir.Wasm.validateModule source with
+  | error error =>
+      simp only [sourceValid] at adapted
+      change
+        Except.error (FirTalos.AdapterError.invalidModule error) =
+          Except.ok target at adapted
+      contradiction
+  | ok value =>
+      have valueEq : value = () := Subsingleton.elim _ _
+      rw [valueEq] at sourceValid
+
+/--
+Canonical whole-pipeline constructor for the generated lazy-cache environment.
+
+Supported lowering fixes the emitted initializer order, adaptation supplies
+symbolic validation, and the uniform validator theorem supplies the checked
+layout facts. The only cache-specific static condition left is exact result
+kind agreement, currently false for the refinement case recorded by
+`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
+-/
+theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (validatorSound : LazyCacheValidatorSound)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : FirTalos.adapt source = .ok target)
+    (contextCacheNames :
+      context.cachedDeclarations =
+        Fir.Wasm.cachedDeclarationNames program)
+    (resultKinds : LazyCacheResultKindsAligned context source) :
+    LazyCacheGeneratedEnvironment context source := by
+  have ordinaryLowering :
+      Fir.Wasm.lower program = .ok source :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  have emittedNames :
+      source.initializers =
+        Fir.Wasm.cachedDeclarationNames program :=
+    LazyCacheGeneratedEnvironment.initializers_of_lower ordinaryLowering
+  exact {
+    checked :=
+      validatorSound
+        (LazyCacheGeneratedEnvironment.validated_of_adapt adapted)
+    cacheNames := contextCacheNames.trans emittedNames.symm
+    resultKinds }
+
+/--
+Specialize the pipeline theorem to the exact context shape constructed and
+threaded by production lowering. Cache-name alignment is then definitional,
+not a caller-provided equality.
+-/
+theorem LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (localKinds : Fir.Wasm.LocalKinds)
+    (joins : Fir.Wasm.JoinPoints)
+    (validatorSound : LazyCacheValidatorSound)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : FirTalos.adapt source = .ok target)
+    (resultKinds :
+      LazyCacheResultKindsAligned {
+        program
+        localKinds
+        joins
+        cachedDeclarations :=
+          Fir.Wasm.cachedDeclarationNames program } source) :
+    LazyCacheGeneratedEnvironment {
+      program
+      localKinds
+      joins
+      cachedDeclarations :=
+        Fir.Wasm.cachedDeclarationNames program } source := by
+  apply LazyCacheGeneratedEnvironment.ofSupportedPipeline validatorSound
+    lowered adapted rfl resultKinds
 
 /--
 Select the exact emitted initializer slot and its physical value kind from

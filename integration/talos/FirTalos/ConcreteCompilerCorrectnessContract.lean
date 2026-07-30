@@ -3624,6 +3624,37 @@ example
     declarationFound targetParams targetBody sourceStep calleeResult
 
 /--
+The production supported-lowering/adaptation pipeline determines the
+generated cache-name table and symbolic validation facts. The integration
+validator owes one uniform soundness theorem; callers retain only the exact
+result-kind condition isolated by the confirmed compiler bug.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {target : FirTalos.AdaptedModule}
+    (localKinds : Fir.Wasm.LocalKinds)
+    (joins : Fir.Wasm.JoinPoints)
+    (validatorSound : LazyCacheValidatorSound)
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (adapted : FirTalos.adapt source = .ok target)
+    (resultKinds :
+      LazyCacheResultKindsAligned {
+        program
+        localKinds
+        joins
+        cachedDeclarations :=
+          Fir.Wasm.cachedDeclarationNames program } source) :
+    LazyCacheGeneratedEnvironment {
+      program
+      localKinds
+      joins
+      cachedDeclarations :=
+        Fir.Wasm.cachedDeclarationNames program } source :=
+  LazyCacheGeneratedEnvironment.ofCanonicalSupportedPipeline localKinds joins
+    validatorSound lowered adapted resultKinds
+
+/--
 One generated environment replaces independent per-call initializer and
 signature premises. The selected index is still the compiler's executable
 `findIdx?` result.
