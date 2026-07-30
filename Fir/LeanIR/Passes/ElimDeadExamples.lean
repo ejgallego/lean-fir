@@ -8293,6 +8293,178 @@ theorem deletedResetExactStepOwnershipPreserved
       runtime (by simpa using deletedResetReady)
       deletedResetSourceMachineOwnershipBelowFrontier step)
 
+/-- A concrete join used to exercise ownership through argument evaluation
+and `bindParamsOver`, independently of compiler liveness. -/
+def ownershipJumpTarget : FVarId := ⟨`ownershipJumpTarget⟩
+
+def ownershipJumpParameter : FVarId := ⟨`ownershipJumpParameter⟩
+
+def ownershipJumpDeclaration : LCNF.FunDecl .impure :=
+  .mk ownershipJumpTarget ownershipJumpTarget.name
+    #[{
+      fvarId := ownershipJumpParameter
+      binderName := ownershipJumpParameter.name
+      type := objType
+      borrow := false
+    }]
+    objType
+    (.return ownershipJumpParameter)
+
+def ownershipJumpState : MachineState :=
+  { allocatingSourceInnerState with
+    control := .code (.jmp ownershipJumpTarget #[.fvar live])
+    joins := [(ownershipJumpTarget, ownershipJumpDeclaration)] }
+
+def ownershipJumpAfterState : MachineState :=
+  { ownershipJumpState with
+    env := bind liveEnv ownershipJumpParameter .erased
+    control := .code (.return ownershipJumpParameter) }
+
+theorem ownershipJumpStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipJumpState := by
+  have bounded :=
+    allocatingSourceInnerMachineOwnershipBelowFrontier.withControlAndJoins
+      ownershipJumpState.control ownershipJumpState.joins
+  simpa [allocatingSourceInnerState, ownershipJumpState] using bounded
+
+/-- The fixture takes the successful jump branch, including the concrete
+one-argument environment fold. -/
+theorem ownershipJumpCoreStep :
+    coreStep ownershipJumpState = .next ownershipJumpAfterState := by
+  simp [ownershipJumpState, ownershipJumpAfterState,
+    ownershipJumpDeclaration, allocatingSourceInnerState,
+    coreStep, findJoinPoint?, evalArgs, Array.mapM_eq_mapM_toList,
+    List.mapM_cons, evalArg, bindParamsOver, liveEnv, lookup,
+    LCNF.FunDecl.params, LCNF.FunDecl.value,
+    List.zip, List.zipWith,
+    Functor.map, Except.map, Bind.bind, Except.bind,
+    Pure.pure, Except.pure]
+
+/-- The unified active-code dispatcher preserves ownership across that
+concrete jump rather than relying on a vacuous error branch. -/
+theorem ownershipJumpCodeStepPreserves
+    (externals : ExternalSpec) :
+    SourceMachineOwnershipBelowFrontier ownershipJumpAfterState :=
+  ownershipJumpStateBelowFrontier.codeStep
+    (Step.internal (externals := externals) ownershipJumpCoreStep)
+
+def ownershipIncrementCell : HeapCell :=
+  { object := .ctor deletedResetObject, rc := 2 }
+
+def ownershipIncrementRuntime : RuntimeState :=
+  { deletedResetSourceRuntime with heap := [(0, ownershipIncrementCell)] }
+
+def ownershipIncrementState : MachineState :=
+  { deletedResetSourceState with
+    control := .code
+      (.inc resetObjectVar 1 true false (.return live)) }
+
+def ownershipIncrementAfterState : MachineState :=
+  { ownershipIncrementState with
+    runtime := ownershipIncrementRuntime
+    control := .code (.return live) }
+
+theorem ownershipIncrementStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipIncrementState := by
+  have bounded :=
+    deletedResetSourceMachineOwnershipBelowFrontier.withControlAndJoins
+      ownershipIncrementState.control ownershipIncrementState.joins
+  simpa [deletedResetSourceState, ownershipIncrementState] using bounded
+
+theorem ownershipIncrementCoreStep :
+    coreStep ownershipIncrementState =
+      .next ownershipIncrementAfterState := by
+  rfl
+
+/-- The ordinary, nonpersistent increment branch really updates `rc` from
+one to two and remains inside the ownership carrier. -/
+theorem ownershipIncrementCodeStepPreserves
+    (externals : ExternalSpec) :
+    SourceMachineOwnershipBelowFrontier ownershipIncrementAfterState :=
+  ownershipIncrementStateBelowFrontier.codeStep
+    (Step.internal (externals := externals) ownershipIncrementCoreStep)
+
+def ownershipDecrementCell : HeapCell :=
+  { object := .ctor deletedResetObject, rc := 0, live := false }
+
+def ownershipDecrementRuntime : RuntimeState :=
+  { deletedResetSourceRuntime with heap := [(0, ownershipDecrementCell)] }
+
+def ownershipDecrementState : MachineState :=
+  { deletedResetSourceState with
+    control := .code
+      (.dec resetObjectVar 1 true false none (.return live)) }
+
+def ownershipDecrementAfterState : MachineState :=
+  { ownershipDecrementState with
+    runtime := ownershipDecrementRuntime
+    control := .code (.return live) }
+
+theorem ownershipDecrementStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipDecrementState := by
+  have bounded :=
+    deletedResetSourceMachineOwnershipBelowFrontier.withControlAndJoins
+      ownershipDecrementState.control ownershipDecrementState.joins
+  simpa [deletedResetSourceState, ownershipDecrementState] using bounded
+
+theorem ownershipDecrementCoreStep :
+    coreStep ownershipDecrementState =
+      .next ownershipDecrementAfterState := by
+  rfl
+
+/-- The ordinary decrement branch takes the recursive-release path, marks
+the sole cell dead, and preserves the ownership invariant. -/
+theorem ownershipDecrementCodeStepPreserves
+    (externals : ExternalSpec) :
+    SourceMachineOwnershipBelowFrontier ownershipDecrementAfterState :=
+  ownershipDecrementStateBelowFrontier.codeStep
+    (Step.internal (externals := externals) ownershipDecrementCoreStep)
+
+def ownershipErasedDeleteState : MachineState :=
+  { allocatingSourceInnerState with
+    control := .code (.del live (.return live)) }
+
+def ownershipErasedDeleteAfterState : MachineState :=
+  { ownershipErasedDeleteState with control := .code (.return live) }
+
+theorem ownershipErasedDeleteStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipErasedDeleteState := by
+  have bounded :=
+    allocatingSourceInnerMachineOwnershipBelowFrontier.withControlAndJoins
+      ownershipErasedDeleteState.control
+      ownershipErasedDeleteState.joins
+  simpa [allocatingSourceInnerState, ownershipErasedDeleteState] using bounded
+
+theorem ownershipErasedDeleteCoreStep :
+    coreStep ownershipErasedDeleteState =
+      .next ownershipErasedDeleteAfterState := by
+  rfl
+
+/-- The erased-sentinel delete discrepancy boundary is explicitly exercised:
+the operation is a runtime no-op and still passes through the generic
+ownership dispatcher. -/
+theorem ownershipErasedDeleteCodeStepPreserves
+    (externals : ExternalSpec) :
+    SourceMachineOwnershipBelowFrontier ownershipErasedDeleteAfterState :=
+  ownershipErasedDeleteStateBelowFrontier.codeStep
+    (Step.internal (externals := externals) ownershipErasedDeleteCoreStep)
+
+/-- The state-level global exact dispatcher now returns ownership together
+with its original non-lockstep path and hereditary compiler relation. -/
+theorem deletedObjectSetGlobalStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedObjectSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        deletedWritesTargetState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 4
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter :=
+  deletedObjectSetExactMachineReadyAt.related
+    |>.matchCodeStep_of_ready_withOwnership
+      deletedObjectSetExactMachineReadyAt rfl
+      deletedObjectSetSourceMachineOwnershipBelowFrontier step
+
 /-- The first mutation in the closed regression takes one source step while
 the transformed target stutters at the live return. -/
 theorem deletedObjectSetSourceOnlyMachineStep :
