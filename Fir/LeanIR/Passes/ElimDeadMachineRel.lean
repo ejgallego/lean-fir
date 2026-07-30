@@ -7688,6 +7688,20 @@ theorem HeapLocationsBelowFrontier.extract
   intro location member
   exact bounded (array_mem_of_mem_extract values member)
 
+/-- Concatenating two bounded value arrays introduces no new heap address. -/
+theorem HeapLocationsBelowFrontier.append
+    (left right : Array Value)
+    (leftBelow :
+      HeapLocationsBelowFrontier runtime left.toList)
+    (rightBelow :
+      HeapLocationsBelowFrontier runtime right.toList) :
+    HeapLocationsBelowFrontier runtime (left ++ right).toList := by
+  intro location member
+  simp only [Array.toList_append, List.mem_append] at member
+  rcases member with member | member
+  · exact leftBelow member
+  · exact rightBelow member
+
 /-- Existing environment values remain bounded as allocation advances. -/
 theorem EnvironmentBelowFrontier.monoFrontier
     (bounded : EnvironmentBelowFrontier before env)
@@ -11879,6 +11893,89 @@ theorem SourceMachineOwnershipBelowFrontier.invokeNameNext
             (bounded.withControlAndJoins
               (.invokeName name arguments) state.joins)
               |>.invokeDeclNext argumentsBelow invocation
+
+/-- A successful value invocation must read a live closure. The closure's
+fixed arguments are owned heap fields and therefore bounded by the heap
+carrier; appending the already bounded dynamic arguments reduces the step to
+the generic declaration-invocation theorem. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeValueNext
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      coreStep
+          { state with
+            control := .invokeValue function arguments } =
+        .next after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [coreStep, invokeClosure, fail] at transition
+      | heap location =>
+          cases read : getLiveCell state.runtime location with
+          | error fault =>
+              simp [coreStep, invokeClosure, read, fail] at transition
+          | ok cell =>
+              cases object : cell.object with
+              | ctor object =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | boxed type value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | string value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | natural value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | integer value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | byteArray value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | «opaque» typeName =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | closure name arity fixed =>
+                  have fixedBelow :
+                      HeapLocationsBelowFrontier
+                        state.runtime fixed.toList := by
+                    intro child member
+                    apply bounded.heap.owned_lt
+                      (getLiveCell_shape_of_ok read).1
+                    simpa [object, HeapObject.ownedValues] using member
+                  have callArgumentsBelow :
+                      HeapLocationsBelowFrontier state.runtime
+                        (fixed ++ arguments).toList :=
+                    HeapLocationsBelowFrontier.append
+                      fixed arguments fixedBelow argumentsBelow
+                  have invocation :
+                      invokeDecl
+                          { state with
+                            control := .invokeValue
+                              (.object (.heap location)) arguments }
+                          name (fixed ++ arguments) =
+                        .next after := by
+                    simpa [coreStep, invokeClosure, read, object] using
+                      transition
+                  exact
+                    (bounded.withControlAndJoins
+                      (.invokeValue (.object (.heap location)) arguments)
+                      state.joins)
+                      |>.invokeDeclNext callArgumentsBelow invocation
+  | usize value =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | scalar value =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | erased =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | reuseToken location? =>
+      cases location? <;>
+        simp [coreStep, invokeClosure, fail] at transition
 
 /-- Restoring a bind frame consumes the yielded-value bound, installs that
 value in the frame's saved environment, and exposes the bounded tail stack. -/
@@ -35766,6 +35863,76 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeValueNext
                                           sourceValue] at sourceTransition'
                                         contradiction
 
+/-- The exact value-call relation publishes the dynamic source arguments as
+control roots. Combined with the heap carrier's bound on closure-owned fixed
+arguments, this discharges the generic source invocation theorem. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.sourceOwnership_matchInvokeValueNext
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeValue function arguments =>
+          have sourceSame : { source with
+              control :=
+                .invokeValue sourceFunction sourceArguments } = source := by
+            cases source
+            simp_all
+          have argumentsBelow :
+              HeapLocationsBelowFrontier source.runtime
+                sourceArguments.toList := by
+            intro location member
+            apply runtime.leftRuntimeRootsBelowFrontier
+            apply extra_subset_runtimeRoots
+            exact List.mem_append_left sourceFrameRoots
+              (List.mem_cons_of_mem sourceFunction member)
+          exact
+            SourceMachineOwnershipBelowFrontier.invokeValueNext
+              (function := sourceFunction)
+              (arguments := sourceArguments)
+              ownership argumentsBelow
+              (by simpa only [sourceSame] using sourceTransition)
+
+/-- Internal value/closure dispatch now preserves hereditary exact compiler
+provenance and complete source ownership in the same result. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.matchInvokeValueNext_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have afterOwnership :=
+    related.sourceOwnership_matchInvokeValueNext
+      ownership sourceControl sourceTransition
+  rcases related.matchInvokeValueNext sourceControl sourceTransition with
+    ⟨targetAfter, targetTransition, afterRelated⟩
+  exact ⟨targetAfter, targetTransition, afterRelated, afterOwnership⟩
+
 /-- Ledger-aware hereditary closure-call matcher for every internal
 transition. Live mapped closures either enter an internal body without
 changing the frontier or allocate one ledger-recorded partial application. -/
@@ -43706,6 +43873,44 @@ theorem SomeReachableMachineRelated.matchNextStep_of_ready
       exact ⟨targetAfter,
         NonLockstep.reaches_of_step (.internal targetTransition),
         afterRelated⟩
+
+/-- Every internal source transition now preserves complete source ownership
+alongside the existing finite target path and hereditary exact relation.
+Active code, yielded restoration, named invocation, and closure invocation
+delegate to their independently checked ownership-strengthened matchers. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.matchNextStep_of_ready_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready_withOwnership
+        ready sourceControl ownership (.internal sourceTransition)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep_withOwnership
+        ownership sourceControl (.internal sourceTransition)
+  | invokeName name sourceArguments =>
+      rcases related.matchInvokeNameNext_withOwnership
+          ownership sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated, afterOwnership⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated, afterOwnership⟩
+  | invokeValue sourceFunction sourceArguments =>
+      rcases related.matchInvokeValueNext_withOwnership
+          ownership sourceControl sourceTransition with
+        ⟨targetAfter, targetTransition, afterRelated, afterOwnership⟩
+      exact ⟨targetAfter,
+        NonLockstep.reaches_of_step (.internal targetTransition),
+        afterRelated, afterOwnership⟩
 
 /-- Every external source step is matched once compiler readiness and the
 foreign-response contract are separated.  Invocation controls expose paired
