@@ -803,6 +803,77 @@ theorem LazyCacheValidationFacts.layout
     LazyCacheTableLayout source :=
   LazyCacheTableLayout.ofSignatures checked.signatures
 
+/--
+Static result-kind agreement between generated lazy-cache operations and the
+declaration signatures that determine their physical value lanes.
+
+This is intentionally stronger than source-level named-call admission:
+`AbiKind.refines` permits an `.object` declaration result at a `.tobject`
+call site, while one generated Wasm global has one exact symbolic kind. See
+`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
+-/
+def LazyCacheResultKindsAligned
+    (context : Fir.Wasm.Context) (source : Fir.Wasm.Module) : Prop :=
+  ∀ {type : Expr} {declaration : Name} {target : LCNF.Decl .impure}
+      {kind : AbiKind} {index : Nat},
+    Fir.Wasm.checkedAbiKind type = .ok kind →
+    context.program.findDecl? declaration = some target →
+    target.params.isEmpty = true →
+    context.cachedDeclarations.findIdx? (· == declaration) = some index →
+    (source.callSignature? (.declaration declaration)).bind
+        (·.results[0]?) = some kind
+
+/--
+One environment-wide static boundary for generated lazy caches.
+
+Lowering must use the same ordered cache-name table as the emitted module,
+validation supplies unique singleton-result initializer signatures, and the
+generated cache operation kind must equal the declaration signature kind.
+Dynamic hit/miss theorems consume this relation instead of independent
+per-call initializer and signature certificates.
+-/
+structure LazyCacheGeneratedEnvironment
+    (context : Fir.Wasm.Context) (source : Fir.Wasm.Module) : Prop where
+  checked : LazyCacheValidationFacts source
+  cacheNames :
+    context.cachedDeclarations = source.initializers
+  resultKinds :
+    LazyCacheResultKindsAligned context source
+
+/--
+Select the exact emitted initializer slot and its physical value kind from
+one compiler cache lookup. The lookup index remains the production
+`findIdx?`; no proof-side cache enumeration is introduced.
+-/
+theorem LazyCacheGeneratedEnvironment.select
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    (generated : LazyCacheGeneratedEnvironment context source)
+    {type : Expr}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {kind : AbiKind}
+    {index : Nat}
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok kind)
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) = some index) :
+    source.initializers[index]? = some declaration ∧
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind := by
+  obtain ⟨inBounds, selected, _⟩ :=
+    Array.findIdx?_eq_some_iff_getElem.mp cacheEq
+  have selectedEq :
+      context.cachedDeclarations[index] = declaration := by
+    simpa using selected
+  have cacheFound :
+      context.cachedDeclarations[index]? = some declaration := by
+    rw [Array.getElem?_eq_getElem inBounds, selectedEq]
+  rw [generated.cacheNames] at cacheFound
+  exact ⟨cacheFound,
+    generated.resultKinds kindEq targetEq paramsEq cacheEq⟩
+
 /-- The validator's executable uniqueness check is exactly `List.Nodup` under
 the lawful Boolean equality used by module names. -/
 theorem listAllUnique_eq_true_iff_nodup
@@ -2037,12 +2108,13 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
   exact ⟨nextLocals, compiled, adapted, hit⟩
 
 /--
-Compiler-anchored hit derived from the whole generated cache-table invariant.
+Compiler-anchored hit derived from the whole generated cache environment.
 
-The caller supplies only the lowering index/signature equations and the
-three-step source execution. Source inversion derives the semantic cache
-lookup; `LazyCacheGlobalsRel` then rules out the empty physical branch,
-recovers the cached lane, and feeds the existing per-slot theorem.
+The compiler lookup is interpreted once by `LazyCacheGeneratedEnvironment`;
+callers no longer supply separate initializer/signature equations. Source
+inversion derives the semantic cache lookup; `LazyCacheGlobalsRel` then rules
+out the empty physical branch, recovers the cached lane, and feeds the
+existing per-slot theorem.
 -/
 theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     {facts : ReuseCapacityFacts}
@@ -2075,11 +2147,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     (cacheSetFound :
       callIndex? sourceModule
         (.runtime (.cacheSet declaration resultKind)) = some cacheSetId)
-    (initializerFound :
-      sourceModule.initializers[cacheIndex]? = some declaration)
-    (signature :
-      (sourceModule.callSignature? (.declaration declaration)).bind
-          (·.results[0]?) = some resultKind)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
     (sourceStep :
       SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
           fvarId
@@ -2146,6 +2215,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
             locals nextLocals resultIndex initialWitness initialWitness physical
             0 := by
   dsimp
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq targetEq paramsEq cacheEq
   obtain ⟨_, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts targetEq paramsEq sourceStep
   obtain ⟨physical, slot⟩ :=
@@ -2439,11 +2510,13 @@ theorem
         initialWitness)
     (cacheTable :
       LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial)
-    (initializerFound :
-      sourceModule.initializers[cacheIndex]? = some declaration)
-    (signature :
-      (sourceModule.callSignature? (.declaration declaration)).bind
-          (·.results[0]?) = some kind)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (kindEq :
+      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) =
+        some cacheIndex)
     (flagIndexEq : flagIndex = 2 * cacheIndex)
     (declarationFound :
       context.program.findDecl? declaration = some sourceDeclaration)
@@ -2507,6 +2580,10 @@ theorem
       sourceRuntime nextRuntime sourceEnv sourceValue initial
       (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
       resultIndex initialWitness callWitness physical stepCost := by
+  have paramsEq : sourceDeclaration.params.isEmpty = true := by
+    simp [declarationParams]
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq declarationFound paramsEq cacheEq
   have publicationRuntimeEq :
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
@@ -2930,9 +3007,10 @@ generated-program theorem selects one budgeted hit or miss result. The
 canonical reuse-capacity frame supplies both semantic refinement and the
 checked local-frame bounds needed to construct the destination write. This is
 a declaration-environment property, not a caller-provided target execution
-certificate.
+certificate. Its static cache table and kind alignment are retained once for
+the whole environment.
 -/
-def LazyCacheImplementation
+structure LazyCacheImplementation
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
@@ -2942,8 +3020,11 @@ def LazyCacheImplementation
     (sourceExternals : ExternalImpl)
     (LazySupported :
       LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
-        LCNF.Code .impure → RuntimeState → Value → Nat → Prop) : Prop :=
-  ∀ {path : LazyCachePath}
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop) : Prop where
+  generated :
+    LazyCacheGeneratedEnvironment context sourceModule
+  step :
+    ∀ {path : LazyCachePath}
       {facts : ReuseCapacityFacts}
       {sourceRuntime nextRuntime : RuntimeState}
       {sourceEnv : Env}
@@ -3005,7 +3086,7 @@ theorem LazyCacheImplementation.runtimeRefines
     valueCompiled valueAdapted resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer,
       nextCache⟩ :=
-    implementation supported sourceStep invariant valueCompiled
+    implementation.step supported sourceStep invariant valueCompiled
       valueAdapted resultFound
   have reconstructed :=
     invariant.ofLazyCacheResult stepFits step (fun _ => nextCache) resultFound

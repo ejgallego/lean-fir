@@ -3624,6 +3624,87 @@ example
     declarationFound targetParams targetBody sourceStep calleeResult
 
 /--
+One generated environment replaces independent per-call initializer and
+signature premises. The selected index is still the compiler's executable
+`findIdx?` result.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    (generated : LazyCacheGeneratedEnvironment context source)
+    {type : Expr}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {kind : AbiKind}
+    {index : Nat}
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok kind)
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) = some index) :
+    source.initializers[index]? = some declaration ∧
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind :=
+  generated.select kindEq targetEq paramsEq cacheEq
+
+/--
+Executable witness for
+`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
+
+Source admission permits the precise `.object` target result at a `.tobject`
+call site. Lowering then emits a `.tobject` cache operation for an `.object`
+value global, and production adaptation rejects that generated module.
+-/
+private def lazyCacheRefinementResult : FVarId :=
+  FVarId.mk `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheResult
+
+private def lazyCacheRefinementTarget : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheTarget
+    levelParams := []
+    type := LCNF.ImpureType.object
+    params := #[]
+    value := .code (.unreach LCNF.ImpureType.object)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
+private def lazyCacheRefinementCaller : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheCaller
+    levelParams := []
+    type := LCNF.ImpureType.tobject
+    params := #[]
+    value := .code <|
+      .let
+        { fvarId := lazyCacheRefinementResult
+          binderName := lazyCacheRefinementResult.name
+          type := LCNF.ImpureType.tobject
+          value :=
+            .fap
+              `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheTarget #[] }
+        (.return lazyCacheRefinementResult)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
+private def lazyCacheRefinementProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[lazyCacheRefinementTarget, lazyCacheRefinementCaller] }
+
+#guard Fir.Wasm.supportedProgram lazyCacheRefinementProgram
+
+#guard
+  match Fir.Wasm.lowerSupported lazyCacheRefinementProgram with
+  | .error _ => false
+  | .ok source =>
+      source.initializers ==
+          #[`FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheTarget] &&
+        match adapt source with
+        | .error (.invalidModule (.invalidGlobalKind function index)) =>
+            function ==
+                `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheCaller &&
+              index == 1
+        | _ => false
+
+/--
 Every related generated cache slot retains two physically allocated lanes,
 even while an unpublished value lane remains semantically unconstrained.
 -/

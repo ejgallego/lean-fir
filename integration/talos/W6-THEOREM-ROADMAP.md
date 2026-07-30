@@ -879,7 +879,26 @@ acceptance tests pass.
    `withCacheSetPublishedTable` constructs the exact successor table after the
    generated value/flag suffix without assuming the selected slot stayed
    empty.
-   Next derive those static declaration equations and resolve the remaining
+   `LazyCacheGeneratedEnvironment` now packages ordered context/module
+   cache-name equality, checked initializer facts, and exact generated
+   cache-operation/result-signature kind equality.
+   `LazyCacheGeneratedEnvironment.select` derives the emitted initializer and
+   signature facts from the compiler's actual `findIdx?` result.
+   `hit_of_compiledCacheTable` and
+   `miss_of_budgetedDeclaration_cacheSet` consume that one static environment
+   rather than independent per-call lookup/signature premises, and
+   `LazyCacheImplementation` retains the environment once for the whole
+   generated program.
+   The corresponding executable contract guard confirms
+   `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
+   `.object`-to-`.tobject` named-call refinement is admitted by the source
+   checker, but current lazy lowering emits caller-kind cache instructions
+   against a declaration-kind value global, so the production adapter rejects
+   the generated module. Coordinate the shared lowering repair before
+   deriving exact kind alignment from supported compiler output; do not weaken
+   W6's exact typed-lane relation.
+   Next expose validator success as `LazyCacheValidationFacts`, derive
+   canonical context/module cache-name equality, and resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the

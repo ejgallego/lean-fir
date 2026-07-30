@@ -5027,6 +5027,31 @@ implementation obligations are static generated-declaration selection,
 callee-table production, and retained-token publication disjointness (or a
 shared validator transfer that invalidates unsafe facts).
 
+W6.6gzn closes the proof-side static cache-selection boundary.
+`LazyCacheGeneratedEnvironment` retains the ordered lowering/module cache-name
+alignment, validator-derived singleton/uniqueness facts, and exact generated
+operation/declaration result-kind agreement once for the complete declaration
+environment. Its `select` theorem turns the production `findIdx?` result into
+the emitted initializer lookup and exact signature kind. Generated hit and
+hereditary-miss theorems no longer accept those two facts independently, and
+the uniform `LazyCacheImplementation` structure carries the static environment
+alongside its dynamic step implementation.
+
+The attempted compiler derivation exposed
+`FIR-BUG-wasm-none-lazy-cache-result-refinement`: source admission allows an
+`.object` nullary declaration result to refine a `.tobject` call site, but
+lazy lowering types the physical cache lane from the declaration while typing
+`cacheSet` and both value-global instructions from the caller. The W6 contract
+guard proves that `lowerSupported` accepts this program and production
+adaptation rejects its generated module at the value global. W6 therefore
+keeps exact result-kind alignment explicit instead of weakening concrete lane
+decoding or claiming it follows from the current supported-source predicate.
+The shared lowering fix should cache at the declaration's actual result kind
+and expose its refinement into the caller destination. After that lands, an
+integration-owned accessor from successful `validateModule` to
+`LazyCacheValidationFacts`, plus canonical context/module cache-name equality,
+can construct the complete generated environment.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
