@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-float-external-nan-canonicalization
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -79,4 +79,13 @@ none
 
 ## Resolution and regression
 
-Unresolved.
+The semantic external codec now returns `0x7fc00000` or
+`0x7ff8000000000000` whenever a floating external produces NaN. Manifest
+parsing and generic ABI encode/decode remain bit-exact; only the Lean external
+boundary canonicalizes.
+
+Focused V8 float run
+`70c06b4045cc216433668da18ca3b6200208b974de9838286ad4680c1d9636ee`
+passes all 67 cases across native, LCNF, and V8. It records 201/201 successful
+backend results, 134/134 equal directed comparisons for every backend, all
+134 provider products opened by V8, and zero findings.
