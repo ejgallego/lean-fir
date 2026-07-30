@@ -1016,9 +1016,17 @@ runtime theorem derives source-only freshness from the paired allocation
 frontier, proves that reset preserves the retained owner, and carries the
 unchanged owner table into reuse readiness. Exact machine-readiness and
 unified-dispatcher regressions lift both source steps through the actual
-transparent reset/reuse compiler edges. This closes the local nonempty-ledger
-edge proof; the checked whole-program contract remains the next client
-instantiation.
+transparent reset/reuse compiler edges. The checked whole-program lift lands
+at `5b9bead7`: a retained heap-backed natural allocates paired location zero,
+the deleted constructor/reset/reuse suffix uses source-only location one, and
+finite source/target entry graphs instantiate
+`ElimDeadLedgerExactOwnershipContract`. Its readiness proof derives owner
+`0 ↦ 0` from the retained live root for every structurally related ledger,
+preserves that owner through reset, and reuses the unchanged ledger at the
+concrete-token overwrite. The fixture includes compiler well-formedness, the
+fail-closed checked traversal, an elaboration-time comparison with Lean
+4.32's actual pass, and
+`retainedPrefixReuseProgramLoweringCorrect_ledgerExact`.
 
 Allocation-capable foreign responses now have an explicit ledger contract.
 `LedgerBinderReadyReachableExternalSpecCompatible` requires the post-response
@@ -1077,6 +1085,10 @@ both expose checked whole-program equations and
 theorems therefore consume the conservative compiler policy together with the
 exact finite-graph ownership proof, rather than stopping at the older semantic
 admissibility endpoint.
+The retained-prefix fixture strengthens this to the ledger-aware endpoint:
+the target owner table is nonempty at both ownership-sensitive source edges,
+and its checked whole-program proof reaches `LoweringCorrect` through the
+unified ledger dispatcher at `5b9bead7`.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1127,13 +1139,14 @@ both unreachable allocations may be omitted.
 
 The remaining general problem is therefore not an operational matcher, a
 missing whole-program theorem, an implicit nullary-purity assumption, an
-unauditable policy graph, a reachability-shaped client API, or a missing
-ledger-aware entry contract. It is to instantiate that contract for arbitrary
-compiler-produced entry states from auditable static ownership facts:
-derive each local operation shape from compiler typing/ownership invariants
-and prove the selected source allocation lies outside a potentially nonempty
-target owner table. The ledger solves the address-map part without assuming an
-empty target, and its proof-relevant carrier covers the allocation primitives
+unauditable policy graph, a reachability-shaped client API, a missing
+ledger-aware entry contract, or an untested nonempty-ledger client. It is to
+derive the contract for arbitrary compiler-produced entry states from
+auditable static ownership facts: derive each local operation shape from
+compiler typing/ownership invariants and prove the selected source allocation
+lies outside a potentially nonempty target owner table. The ledger solves the
+address-map part without assuming an empty target, and its proof-relevant
+carrier covers the allocation primitives
 and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
@@ -1144,12 +1157,11 @@ It now also covers retained/deleted object, `USize`, and scalar writes plus
 retained constructor-tag updates, the complete reference-count/delete family,
 retained/deleted reset/reuse, and allocation-capable external response
 resumption. Those families are now assembled into the unified non-lockstep
-dispatcher and the closed write fixture now discharges its aligned entry
-contract. The remaining compiler-client work is to exercise nonempty ledgers
-through a checked retained-prefix reset/reuse program and then replace finite
-fixture enumeration with general static preservation lemmas. The local
-runtime, exact-machine, and unified-dispatcher obligations for that nonempty
-ledger shape are discharged at `5a42dff6`.
+dispatcher; the closed write fixture and retained-prefix reset/reuse fixture
+now discharge aligned checked entry contracts. The remaining compiler-client
+work is to replace finite fixture enumeration with general static
+preservation lemmas. The local nonempty-ledger edge proof lands at
+`5a42dff6`, and its checked whole-program lift lands at `5b9bead7`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1190,16 +1202,12 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Instantiate `ElimDeadLedgerExactOwnershipContract` for a checked
-   retained-prefix reset/reuse fixture, carrying the nonempty target ledger
-   through entry execution and reusing the local runtime/machine regressions
-   at `5a42dff6`.
-2. Factor the resulting write/reset/reuse arguments into reusable static
+1. Factor the resulting write/reset/reuse arguments into reusable static
    compiler typing, heap-shape, and owner-preservation laws so arbitrary
    checked entries no longer require finite execution-graph enumeration.
-3. Extend the actual-pass matrix when new ownership laws or semantic
+2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
-4. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
+3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
    contract and prove the queued closure-application preservation consumers
    before that shared validation stack lands.
 
