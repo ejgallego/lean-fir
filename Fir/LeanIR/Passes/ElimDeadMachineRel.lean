@@ -11391,6 +11391,44 @@ theorem SourceMachineOwnershipBelowFrontier.withRuntimeMonoFrontier
     BindFrameEnvironmentsBelowFrontier.monoFrontier
       bounded.frames frontier
 
+/-- Minimal source-side ownership law for foreign responses. The foreign
+implementation may replace the heap and world, but it must not move the
+allocation frontier backwards and every owned field in the returned heap must
+lie below that new frontier. The returned value remains a control root and is
+therefore governed by the existing relational foreign-response contract. -/
+def SourceExternalSpecOwnershipCompatible
+    (externals : ExternalSpec) : Prop :=
+  ∀ {request waiting response},
+    externals request waiting.runtime response →
+      waiting.runtime.nextLocation ≤ response.nextLocation ∧
+      HeapOwnershipBelowFrontier
+        (resumeExternal request waiting response).runtime
+
+/-- A response satisfying the source ownership law transports the complete
+waiting-state carrier to the resumed yielded state. Current and suspended
+environments use only the monotone frontier; heap ownership is supplied by the
+foreign implementation for its replacement heap. -/
+theorem SourceMachineOwnershipBelowFrontier.resumeExternal
+    (bounded : SourceMachineOwnershipBelowFrontier waiting)
+    (compatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (externalProof :
+      externals request waiting.runtime response) :
+    SourceMachineOwnershipBelowFrontier
+      (resumeExternal request waiting response) := by
+  rcases compatible externalProof with ⟨frontier, heap⟩
+  exact {
+    heap := heap
+    env := by
+      apply EnvironmentBelowFrontier.monoFrontier bounded.env
+      change waiting.runtime.nextLocation ≤ response.nextLocation
+      exact frontier
+    frames := by
+      apply BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      change waiting.runtime.nextLocation ≤ response.nextLocation
+      exact frontier
+  }
+
 /-- Binding a bounded result updates only the current environment and retains
 all suspended bind-frame environments. -/
 theorem SourceMachineOwnershipBelowFrontier.bindValue
@@ -11848,6 +11886,59 @@ theorem SourceMachineOwnershipBelowFrontier.invokeDeclNext
                   heap := bounded.heap
                   env := nextEnvBelow
                   frames := nextFramesBelow
+                }
+
+/-- Suspending a fully applied external declaration preserves the source
+ownership carrier in the waiting state. The argument prefix installed in the
+fresh environment is bounded, and apply/cache frames introduce no saved
+environment of their own. Fault, under-application, and internal-code branches
+cannot produce the assumed external result. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeDeclExternalWaiting
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      invokeDecl state name arguments = .external request waiting) :
+    SourceMachineOwnershipBelowFrontier waiting := by
+  cases found : state.program.findDecl? name with
+  | none =>
+      simp [invokeDecl, found, fail] at transition
+  | some declaration =>
+      by_cases tooFew : arguments.size < declaration.params.size
+      · simp [invokeDecl, found, tooFew] at transition
+      · let callArguments :=
+          arguments.extract 0 declaration.params.size
+        have callArgumentsBelow :
+            HeapLocationsBelowFrontier state.runtime
+              callArguments.toList :=
+          HeapLocationsBelowFrontier.extract
+            arguments argumentsBelow 0 declaration.params.size
+        cases binding :
+            bindParams declaration.params callArguments with
+        | error fault =>
+            simp [invokeDecl, found, tooFew, callArguments, binding, fail]
+              at transition
+        | ok nextEnv =>
+            have nextEnvBelow :
+                EnvironmentBelowFrontier state.runtime nextEnv :=
+              EnvironmentBelowFrontier.bindParams
+                callArgumentsBelow binding
+            cases value : declaration.value with
+            | code code =>
+                simp [invokeDecl, found, tooFew, callArguments, binding,
+                  value] at transition
+            | extern metadata =>
+                simp [invokeDecl, found, tooFew, callArguments, binding,
+                  value] at transition
+                rcases transition with ⟨_requestEq, waitingEq⟩
+                cases waitingEq
+                exact {
+                  heap := bounded.heap
+                  env := nextEnvBelow
+                  frames := by
+                    split <;> split <;>
+                      simpa [BindFrameEnvironmentsBelowFrontier] using
+                        bounded.frames
                 }
 
 /-- A named-control internal step is either a cache hit or declaration
