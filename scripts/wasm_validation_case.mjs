@@ -214,8 +214,12 @@ export async function executeSemanticWasmCase({
   if (Object.hasOwn(compilerManifest, "initialRuntime")) {
     manifestKeys.push("initialRuntime");
   }
+  if (Object.hasOwn(compilerManifest, "bitExactFloatTransport")) {
+    manifestKeys.push("bitExactFloatTransport");
+  }
   assert.deepStrictEqual(Object.keys(compilerManifest).sort(), manifestKeys.sort(),
     `${caseId} compiler manifest shape mismatch`);
+  semanticRuntime.validateBitExactFloatTransport(compilerManifest);
   assert.equal(compilerManifest.fixture, caseId, `${caseId} fixture mismatch`);
   assert.equal(compilerManifest.sourceEntry, descriptor.entry,
     `${caseId} source entry mismatch`);
@@ -249,7 +253,7 @@ export async function executeSemanticWasmCase({
     compilerManifest.initialRuntime,
     validationExternals.validationExternalRegistry,
   );
-  const physicalArguments = compilerManifest.params.map((kind, index) => {
+  const physicalArguments = compilerManifest.params.map((_kind, index) => {
     const semanticArgument = semanticRuntime.manifestValue(
       compilerManifest.arguments[index]);
     assert.deepStrictEqual(
@@ -263,7 +267,8 @@ export async function executeSemanticWasmCase({
       descriptor.args[index],
       `${caseId} compiler manifest disagrees with the corpus invocation`,
     );
-    return host.encode(kind, semanticArgument);
+    return semanticRuntime.encodeManifestArgument(
+      host, compilerManifest, index, semanticArgument);
   });
 
   assert.ok(WebAssembly.validate(bytes),
@@ -286,18 +291,26 @@ export async function executeSemanticWasmCase({
     [{ name: descriptor.entry, kind: "function" }],
     `${caseId} binary must export its selected entry exactly once`,
   );
+  const entryName = semanticRuntime.manifestEntryName(compilerManifest);
+  if (entryName !== descriptor.entry) {
+    assert.deepStrictEqual(
+      moduleExports.filter((item) => item.name === entryName),
+      [{ name: entryName, kind: "function" }],
+      `${caseId} binary must export its float facade exactly once`,
+    );
+  }
   const instance = await WebAssembly.instantiate(
     wasmModule,
     host.imports(compilerManifest.imports),
   );
-  const entry = instance.exports[descriptor.entry];
-  assert.equal(typeof entry, "function", `missing Wasm export ${descriptor.entry}`);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `missing Wasm export ${entryName}`);
   assert.equal(entry.length, compilerManifest.params.length,
     `${caseId} binary/manifest argument arity mismatch`);
   const physicalResult = entry(...physicalArguments);
   const datum = semanticDatum(
     descriptor.resultSchema,
-    host.decode(compilerManifest.result, physicalResult),
+    semanticRuntime.decodeManifestResult(host, compilerManifest, physicalResult),
     host,
     `${caseId} result`,
     validationExternals,
