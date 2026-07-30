@@ -1090,6 +1090,18 @@ the target owner table is nonempty at both ownership-sensitive source edges,
 and its checked whole-program proof reaches `LoweringCorrect` through the
 unified ledger dispatcher at `5b9bead7`.
 
+The first reusable extraction from that fixture lands at `3f720ba4`.
+`EnvRelOn` now exposes lookup transport, target-lookup existence, and direct
+heap-address mapping laws. `TargetAllocationLedger.owner_eq_of_forward`
+recovers the source owner of a paired target address, while
+`sourceOnly_of_owner_lt` and `ownerFrame_of_owner_lt` turn compiler allocation
+order plus a source-prefix frame into the source-only and owner-preservation
+premises required by reset/reuse. The retained-prefix client now consumes
+these laws and the common
+`deletedReadyAt_of_targetAllocationLedger` bridge instead of rebuilding the
+renaming inverse and runtime frame locally. Compiler typing/heap-shape and
+general reachable-state derivations remain to be extracted.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1161,7 +1173,8 @@ dispatcher; the closed write fixture and retained-prefix reset/reuse fixture
 now discharge aligned checked entry contracts. The remaining compiler-client
 work is to replace finite fixture enumeration with general static
 preservation lemmas. The local nonempty-ledger edge proof lands at
-`5a42dff6`, and its checked whole-program lift lands at `5b9bead7`.
+`5a42dff6`, its checked whole-program lift lands at `5b9bead7`, and the first
+environment/ledger owner-preservation extraction lands at `3f720ba4`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1202,9 +1215,10 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Factor the resulting write/reset/reuse arguments into reusable static
-   compiler typing, heap-shape, and owner-preservation laws so arbitrary
-   checked entries no longer require finite execution-graph enumeration.
+1. Derive reusable compiler typing/heap-shape and reachable-state laws for
+   write/reset/reuse. Environment lookup transport and allocation-ledger
+   owner/source-only/frame laws are already extracted; arbitrary checked
+   entries must still avoid finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
