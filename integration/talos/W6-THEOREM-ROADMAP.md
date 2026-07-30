@@ -624,19 +624,21 @@ acceptance tests pass.
    Exact frontier preservation retains the indexed budget, and the mixed
    whole-export theorem admits all integer setters. Float setters remain an
    explicit unsupported runtime fragment.
-   The successful reuse operation boundary is now branch-independent:
-   `reuseStep_of_capacityEvidence` derives zero versus retained execution from
-   fitting static capacity evidence and its dynamic relation, selects all
-   three concrete representations internally, and returns the exact post fact
-   plus witness/runtime/header transport. The retained-zero empty-layout
-   relation hole is fixed by
-   `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`. Before reuse joins
-   the structural direct family, derive its fresh zero-token allocation from a
-   representation-sensitive path budget, carry ordinary retained-token
-   provenance in the compiler state relation, and coordinate the
-   provenance-sensitive `.tobject` validator condition tracked by
-   `FIR-BUG-wasm-none-reuse-retained-result-kind`.
-   Reuse the
+   Successful reuse is now branch-independent at both the operation and
+   production-`let` boundaries. `reuseStep_of_capacityEvidence` derives zero
+   versus retained execution from fitting static capacity evidence and its
+   dynamic relation. `ReuseSupported` and `reuseLetStep_of_capacity` then
+   reconstruct the actual mixed local/erased prefix, resolver call, result
+   write, and authoritative successor fact. The zero-token branch is
+   constructive from `constructorAllocationBytes`; no allocation result,
+   representation branch, target index, or simulation certificate crosses
+   the interface. The retained-zero empty-layout relation hole is fixed by
+   `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`.
+   Before reuse joins the structural direct family, coordinate two shared
+   validator fixes: stable ordinary-token provenance across effects
+   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
+   provenance-sensitive `.tobject` result-kind condition
+   (`FIR-BUG-wasm-none-reuse-retained-result-kind`). Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
 5. Lift from the current source evaluation view to canonical

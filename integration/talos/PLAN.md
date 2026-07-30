@@ -4432,19 +4432,32 @@ object may be represented by a tagged result because the retained claim
 constrains only a later *nonzero* reset token. The missing case is recorded and
 closed by `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`.
 
-Three honest boundaries remain before reuse joins the certificate-free
-whole-export family. First, zero-token reuse needs a constructive
-representation-sensitive allocation theorem and path budget, rather than an
-assumed successful `reuseObject`. Second, the compiler-facing state relation
-must carry or derive that a nonzero token obtained from reset denotes an
-ordinary source cell, matching the concrete in-place update. Third, retained
-provenance is representation-polymorphic for an empty replacement: the zero
-branch returns a tagged object and the nonzero branch returns a heap address,
-so the result ABI kind must be `.tobject`. The current shared validator does
-not combine provenance with result kind; this supported-domain gap is recorded
-as `FIR-BUG-wasm-none-reuse-retained-result-kind`. Until that coordinated
-contract change lands, the lower theorem exposes the compatibility condition
-explicitly instead of weakening the value relation.
+W6.6fz lifts that operation boundary through the production compiler and
+adapter. `ReuseSupported` is target-free: it records the source declaration,
+compiler equations, authoritative fitting-capacity result, result
+compatibility, and wasm32 bounds. `reuseLetStep_of_capacity` reconstructs the
+mixed token-local plus local/erased-field prefix, runtime import, physical
+arguments, result local, and concrete execution. A new
+`constructorAllocationBytes` boundary and
+`allocateConstructor_eq_ok_of_budget` construct immediate, promoted, or heap
+allocation from one representation-sensitive reservation, so the zero-token
+branch no longer assumes a successful `reuseObject`. The theorem returns the
+exact `reuseCapacityLetFacts?` successor and its complete dynamic state
+relation; it exposes no target index, token word, allocation result,
+representation branch, or simulation certificate.
+
+Two coordinated shared-validator obligations now delimit the structural
+whole-export endpoint. A retained token must remain tied to an ordinary source
+cell across intervening effects; the current fact transfer can preserve it
+after an alias makes the cell persistent, as recorded by
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary`. Also, retained provenance is
+representation-polymorphic for an empty replacement: the zero branch returns
+a tagged object and the nonzero branch returns a heap address, so the result
+ABI kind must be `.tobject`. The current validator does not combine provenance
+with result kind; this gap remains
+`FIR-BUG-wasm-none-reuse-retained-result-kind`. The compiler theorem keeps
+these two semantic obligations explicit rather than weakening the concrete
+runtime relation.
 
 ## Parallel agent packages
 

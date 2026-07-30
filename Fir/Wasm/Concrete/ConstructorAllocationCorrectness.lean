@@ -1,10 +1,23 @@
 import Fir.Wasm.Concrete.HeapRefinement
 import Fir.Wasm.Concrete.FreshAllocationCorrectness
+import Fir.Wasm.Concrete.NaturalAllocationCorrectness
 
 namespace Fir.Wasm.Concrete
 
 open Lean.Compiler
 open Fir.LeanIR.Impure
+
+/--
+Exact address-space reservation for constructor allocation across both
+physical representations. Nonempty layouts allocate their constructor extent;
+empty layouts reuse the tagged-value encoder and may allocate one promoted
+tag object when the constructor index does not fit the wasm32 immediate lane.
+-/
+def constructorAllocationBytes (info : LCNF.CtorInfo) : Nat :=
+  if (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0 then
+    naturalAllocationBytes info.cidx
+  else
+    (ConstructorLayout.ofInfo info).allocationBytes
 
 @[simp] theorem uint32Field_eq_ok (field : String) (value : Nat)
     (fits : value < UInt32.size) :
@@ -206,6 +219,58 @@ theorem MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_budg
     exact middleBudget.cursorPositive
   · rw [cursorEq]
     simpa [layout, allocationEq] using middleBudget.endWithinAddressSpace
+
+/--
+One representation-sensitive source-path budget makes arbitrary constructor
+allocation constructive. This is the common fresh-allocation boundary for
+ordinary constructor declarations and zero-token reuse.
+-/
+theorem MemoryState.FrontierInvariant.allocateConstructor_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (info : LCNF.CtorInfo) (fields : Array Word32)
+    (arity : fields.size = info.size)
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : constructorAllocationBytes info ≤ remainingBytes) :
+    ∃ result address,
+      allocateConstructor state info fields = .ok (result, address) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - constructorAllocationBytes info) := by
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · have sourceTagged : info.cidx ≤ maxTaggedPayload := by
+      exact Nat.le_trans (Nat.le_of_lt tagFits) (by decide)
+    have naturalFits :
+        naturalAllocationBytes info.cidx ≤ remainingBytes := by
+      simpa [constructorAllocationBytes, empty] using fits
+    obtain ⟨result, address, allocated, remaining⟩ :=
+      valid.allocateNatural_eq_ok_of_budget info.cidx budget naturalFits
+    have encoded :
+        encodeTagged state (UInt64.ofNat info.cidx) =
+          .ok (result, address) := by
+      unfold allocateNatural at allocated
+      rw [if_pos sourceTagged] at allocated
+      exact allocated
+    refine ⟨result, address, ?_, ?_⟩
+    · unfold allocateConstructor
+      rw [if_pos arity]
+      rw [uint32Field_eq_ok "constructor tag" info.cidx tagFits]
+      simp only [Bind.bind, Except.bind]
+      rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])]
+      simpa [UInt32.toNat_ofNat_of_lt' tagFits] using encoded
+    · simpa [constructorAllocationBytes, empty] using remaining
+  · have layoutFits :
+        (ConstructorLayout.ofInfo info).allocationBytes ≤ remainingBytes := by
+      simpa [constructorAllocationBytes, empty] using fits
+    obtain ⟨result, address, allocated, remaining⟩ :=
+      valid.allocateConstructor_nonempty_eq_ok_of_budget info fields arity
+        empty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit budget
+        layoutFits
+    exact ⟨result, address, allocated, by
+      simpa [constructorAllocationBytes, empty] using remaining⟩
 
 /-- A public nonempty constructor allocation preserves every byte owned below
 the old frontier, so all previously decoded heap cells can be framed. -/

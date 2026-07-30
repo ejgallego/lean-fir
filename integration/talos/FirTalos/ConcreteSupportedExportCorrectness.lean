@@ -481,6 +481,51 @@ theorem ConcreteSupportedExport.resetCall
   · change imp.results.length = 1 at results
     exact results
 
+/--
+Resolver/adaptor alignment specializes to the exact concrete reuse contract
+selected by the replacement layout and compiler-derived field/result kinds.
+-/
+theorem ConcreteSupportedExport.reuseCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {info : LCNF.CtorInfo}
+    {updateHeader : Bool}
+    {fieldKinds : Array AbiKind}
+    {resultKind : AbiKind}
+    {id : Nat}
+    (found :
+      callIndex? sourceModule
+        (.runtime (.reuse info updateHeader fieldKinds resultKind)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (reuseContract info updateHeader fieldKinds resultKind) ∧
+        imp.params.length = fieldKinds.size + 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result =
+            reuseStep info updateHeader fieldKinds resultKind initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some, reuseFn]
+      using contracted
+  · simpa [RuntimeOp.signature, Nat.add_comm] using params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- Resolver/adaptor alignment for one concrete integer-boxing call. -/
 theorem ConcreteSupportedExport.boxCall
     {program : Fir.LeanIR.ImpureProgram}

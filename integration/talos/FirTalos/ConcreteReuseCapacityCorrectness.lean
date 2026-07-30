@@ -440,6 +440,22 @@ theorem ReuseCapacityValueRel.valueRelated
   | retainedEmptyToken => exact .reuseNone
   | retainedToken valueRelated _ _ _ => exact valueRelated
 
+/-- Every tracked reuse-token value occupies the canonical wasm32 word lane. -/
+theorem ReuseCapacityValueRel.reuseTokenWord
+    {heap : MemoryState} {witness : RefinementWitness}
+    {evidence : ReuseCapacityEvidence} {lane : LaneValue}
+    {semantic : Value}
+    (related :
+      ReuseCapacityValueRel heap witness evidence .reuseToken lane semantic) :
+    ∃ word, lane = .word32 word := by
+  cases related with
+  | emptyObject valueRelated => cases valueRelated
+  | emptyToken => exact ⟨Word32.zero, rfl⟩
+  | retainedObject valueRelated => cases valueRelated
+  | retainedTaggedObject valueRelated => cases valueRelated
+  | retainedEmptyToken => exact ⟨Word32.zero, rfl⟩
+  | retainedToken => exact ⟨_, rfl⟩
+
 /-- Erasing a tracked name removes every occurrence with the same Lean name,
 including shadowed entries left by an earlier binding. -/
 theorem findReuseCapacityEvidence?_erase_same
@@ -807,6 +823,24 @@ def ReuseCapacityStateRelated
       witness ∧
     ReuseCapacityFactsRel facts (functionBindings sourceFunction) sourceEnv
       targetLocals targetStore.host.runtime.heap witness
+
+/--
+Semantic ownership side condition for retained reset tokens.
+
+Capacity alone constrains only the physical allocation extent. In-place reuse
+also requires a nonzero token to keep denoting an ordinary source cell. This
+separate relation names that obligation while the shared validator protocol
+tracked by `FIR-BUG-wasm-none-reuse-retained-token-ordinary` remains open.
+-/
+def ReuseTokenOrdinaryRel (facts : ReuseCapacityFacts)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env) : Prop :=
+  ∀ (tokenId : FVarId) (available : Nat) (location : Location)
+      (cell : HeapCell),
+    findReuseCapacityEvidence? facts tokenId =
+        some (.retainedAtLeast available) →
+      lookup sourceEnv tokenId = some (.reuseToken (some location)) →
+      findCell? sourceRuntime.heap location = some cell →
+      cell.persistent = false
 
 /-- The empty validator fact map adds no obligation to W6's ordinary state
 relation. This is the initial bridge for a validated function body. -/
@@ -2162,6 +2196,35 @@ theorem ReuseCapacityEvidence.afterReuse_eq_emptyToken_of_nonempty
   cases evidence <;>
     simp [ReuseCapacityEvidence.afterReuse,
       constructorReuseCapacityEvidence, allocates]
+
+/--
+A zero reuse token takes exactly the general constructor-allocation path.
+The representation-sensitive constructor budget therefore constructs both
+immediate/promoted empty results and ordinary nonempty heap results.
+-/
+theorem MemoryState.FrontierInvariant.reuseObject_zero_eq_ok_of_budget
+    {state : MemoryState} (valid : state.FrontierInvariant)
+    (info : LCNF.CtorInfo) (updateHeader : Bool) (fields : Array Word32)
+    (arity : fields.size = info.size)
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    {remainingBytes : Nat}
+    (budget : state.AddressSpaceBudget remainingBytes)
+    (fits : constructorAllocationBytes info ≤ remainingBytes) :
+    ∃ result word,
+      reuseObject state Word32.zero info updateHeader fields =
+          .ok (result, word) ∧
+        result.AddressSpaceBudget
+          (remainingBytes - constructorAllocationBytes info) := by
+  obtain ⟨result, word, allocated, remaining⟩ :=
+    valid.allocateConstructor_eq_ok_of_budget info fields arity tagFits
+      objectFieldsFit usizeFieldsFit scalarBytesFit budget fits
+  refine ⟨result, word, ?_, remaining⟩
+  unfold reuseObject
+  rw [if_pos (by decide)]
+  exact allocated
 
 /--
 Branch-independent successful zero-token reuse refinement.

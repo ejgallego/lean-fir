@@ -9251,6 +9251,48 @@ theorem wp_reuse_let
   · simpa [hParams, hResults] using
       FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
 
+/--
+Concrete-host WP for the complete reuse operand prefix emitted by production
+lowering: one token local followed by mixed local/erased constructor fields.
+-/
+theorem wp_reuse_ready_let
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {rest targetArguments : Wasm.Program} {Q : Wasm.Assertion Host}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {word : Word32}
+    (tail : List Wasm.Value)
+    (ready : ConstructorArgsReady locals targetArguments physicalArgs)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : env.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (reuseContract info updateHeader fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : reuseStep info updateHeader fieldKinds resultKind initial
+      physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (hSet : locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) =
+      some updated)
+    (continued :
+      Wasm.wp module rest Q nextStore { updated with values := tail } env) :
+    Wasm.wp module
+      (targetArguments ++ .call id :: .localSet resultIndex :: rest)
+      Q initial { locals with values := tail } env := by
+  apply ready.wp
+  apply wp_exact_host_call_of_return
+    (step := reuseStep info updateHeader fieldKinds resultKind)
+    (physicalArgs := physicalArgs)
+    (results := [.i32 (UInt32.ofNat word.value)]) hImp hSat hi hContract
+  · simp [hParams]
+  · exact operation
+  · simpa [hParams, hResults] using
+      FirTalos.Concrete.wp_localSet_of_set (host := Host) hSet continued
+
 /-- Concrete-host WP for generated integer boxing and its object destination
 local. -/
 theorem wp_box_let
@@ -10443,6 +10485,80 @@ theorem letStepSimulates_reuse
   · intro rest Q tail continued
     simpa [List.append_assoc] using
       wp_reuse_let tail hGets hImp hSat hi hContract hParams hResults
+        operation targetSet continued
+
+/--
+Branch-independent reuse simulation for the complete production operand
+prefix: the token is a local read and constructor fields may be local reads or
+canonical erased zeroes.
+-/
+theorem letStepSimulates_reuseArgs
+    {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
+    {tokenId : Lean.FVarId} {info : Lean.Compiler.LCNF.CtorInfo}
+    {updateHeader : Bool} {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {initial nextStore : Wasm.Store Host} {locals updated : Wasm.Locals}
+    {targetArguments : Wasm.Program} {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat} {word : Word32}
+    {sourceToken sourceValue : Value} {semanticFields : Array Value}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {witness nextWitness : RefinementWitness}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (tokenLookup : lookup sourceEnv tokenId = some sourceToken)
+    (argumentsEvaluated : evalArgs sourceEnv args = .ok semanticFields)
+    (semanticStep : reuse sourceRuntime sourceToken info updateHeader
+      semanticFields = .ok (nextRuntime, sourceValue))
+    (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
+      initial locals witness)
+    (transport : WitnessTransport witness nextWitness)
+    (nextRelated : ConcreteRuntimeRel nextStore.host.runtime nextWitness
+      nextRuntime)
+    (failureClear : nextStore.host.failure? = none)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (ready :
+      ConstructorArgsReady locals targetArguments physicalArgs)
+    (valueRelated : PhysicalValueRel nextWitness resultKind
+      (.i32 (UInt32.ofNat word.value)) sourceValue)
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (reuseContract info updateHeader fieldKinds resultKind))
+    (hParams : imp.params.length = physicalArgs.length)
+    (hResults : imp.results.length = 1)
+    (operation : reuseStep info updateHeader fieldKinds resultKind initial
+      physicalArgs =
+        .Return [.i32 (UInt32.ofNat word.value)] nextStore)
+    (targetSet : locals.set? resultIndex
+      (.i32 (UInt32.ofNat word.value)) = some updated) :
+    LetStepSimulates context sourceFunction module hostEnv decl
+      (targetArguments ++ [.call id])
+      sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore locals
+      updated resultIndex witness nextWitness := by
+  have nextState := initialRelated.bindAfterTransport transport nextRelated
+    failureClear resultFound resultKindAt valueRelated targetSet
+  refine ⟨?_, initialRelated, nextState, ?_⟩
+  · unfold FirTalos.Correctness.SourceLetResult
+    simp [evalLetValue, valueEq]
+    have tokenLookupValue : lookupValue sourceEnv tokenId = .ok sourceToken := by
+      simp [lookupValue, tokenLookup]
+    rw [tokenLookupValue, argumentsEvaluated]
+    change ((fun result : RuntimeState × Value =>
+      (result.1, LetAction.value result.2)) <$>
+        reuse sourceRuntime sourceToken info updateHeader semanticFields) =
+      .ok (nextRuntime, .value sourceValue)
+    rw [semanticStep]
+    rfl
+  · intro rest Q tail continued
+    simpa [List.append_assoc] using
+      wp_reuse_ready_let tail ready hImp hSat hi hContract hParams hResults
         operation targetSet continued
 
 /-- Integer-boxing instance of the concrete direct-`let` boundary. Tagged

@@ -1,4 +1,5 @@
 import FirTalos.ConcreteSupportedExportCorrectness
+import FirTalos.ConcreteReuseCapacityCorrectness
 
 namespace FirTalos.Concrete
 
@@ -1131,6 +1132,17 @@ inductive ConstructorArgumentsRelated (witness : RefinementWitness) :
         ConstructorArgumentsRelated witness kinds physicals semanticValues) :
       ConstructorArgumentsRelated witness (kind :: kinds)
         (physical :: physicals) (semantic :: semanticValues)
+
+/-- Compiled argument refinement preserves source/ABI arity. -/
+theorem ConstructorArgumentsRelated.semanticLength
+    {witness : RefinementWitness} {kinds : List AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness kinds physicals semanticValues) :
+    semanticValues.length = kinds.length := by
+  induction related with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
 
 /--
 An object-field ABI kind rules out every non-i32 physical lane. The remaining
@@ -5601,7 +5613,9 @@ inductive LocalAliasSupported (context : Fir.Wasm.Context) :
 
 /--
 Source-level wasm32 allocation reservation for the currently admitted
-direct-value operations. Nonempty constructors and literals use their exact
+direct-value operations. Constructors and zero-token reuse use their
+representation-sensitive fresh-allocation extent; retained in-place reuse
+conservatively returns that reservation unused. Literals use their exact
 selected extents. Integer boxing reserves one header-plus-slot upper bound:
 promoted tags and heap boxes consume it physically, while immediate results
 weaken the unused logical budget. All other forms are nonallocating.
@@ -5609,6 +5623,7 @@ weaken the unused logical budget. All other forms are nonallocating.
 def directLetAllocationCost (decl : LCNF.LetDecl .impure) : Nat :=
   match decl.value with
   | .ctor info _ => (ConstructorLayout.ofInfo info).allocationBytes
+  | .reuse _ info _ _ => constructorAllocationBytes info
   | .lit (.nat value) => naturalAllocationBytes value
   | .lit (.str value) =>
       align8 (headerBytes + (stringUtf8Bytes value).length)
@@ -6332,6 +6347,46 @@ inductive ResetSupported (context : Fir.Wasm.Context) :
       ResetSupported context decl
 
 /--
+Static source/compiler admission for one capacity-validated reuse declaration.
+
+The relation records the authoritative fitting fact, production compiler
+equations, representation-width checks, and the provenance-sensitive result
+kind condition. It contains no runtime token branch, concrete word/address,
+numeric local/import index, allocation result, or execution witness.
+-/
+inductive ReuseSupported (context : Fir.Wasm.Context)
+    (facts : ReuseCapacityFacts) : LCNF.LetDecl .impure → Prop where
+  | intro
+      (tokenId : FVarId) (info : LCNF.CtorInfo) (updateHeader : Bool)
+      (args : Array (LCNF.Arg .impure))
+      (argumentCode : List Fir.Wasm.Instruction)
+      (fieldKinds : Array AbiKind) (resultKind : AbiKind)
+      (evidence : ReuseCapacityEvidence)
+      (valueEq : decl.value = .reuse tokenId info updateHeader args)
+      (tagFits : Fir.Wasm.constructorTagFitsI32 info = true)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+      (tokenCompiled :
+        Fir.Wasm.getLocal context tokenId =
+          .ok (.localGet tokenId, .reuseToken))
+      (argumentsCompiled :
+        Fir.Wasm.compileArgs context args =
+          .ok (argumentCode, fieldKinds))
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, resultKind))
+      (operationWellFormed :
+        (RuntimeOp.reuse info updateHeader fieldKinds resultKind).abiWellFormed =
+          true)
+      (capacityFitting :
+        findFittingReuseCapacityEvidence? facts tokenId info = some evidence)
+      (resultCompatible :
+        evidence = .emptyToken ∨ resultKind = .tobject)
+      (objectFieldsFit : info.size < UInt32.size)
+      (usizeFieldsFit : info.usize < UInt32.size)
+      (scalarBytesFit : info.ssize < UInt32.size) :
+      ReuseSupported context facts decl
+
+/--
 Source compatibility and the ordinary runtime relation reconstruct every
 representation-specific premise of checked concrete unboxing.
 
@@ -6882,6 +6937,74 @@ theorem sourceLetResult_reset_eq
           subst nextRuntime
           subst sourceValue
           exact ⟨sourceObject, rfl, evaluated⟩
+
+/--
+Invert a successful reuse declaration to the exact source token, evaluated
+field array, and semantic reuse step. No concrete representation or token
+branch is selected by this source-evaluation fact.
+-/
+theorem sourceLetResult_reuse_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {tokenId : FVarId} {info : LCNF.CtorInfo}
+    {updateHeader : Bool} {args : Array (LCNF.Arg .impure)}
+    (valueEq : decl.value = .reuse tokenId info updateHeader args)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceToken semanticFields,
+      lookup sourceEnv tokenId = some sourceToken ∧
+        evalArgs sourceEnv args = .ok semanticFields ∧
+        reuse sourceRuntime sourceToken info updateHeader semanticFields =
+          .ok (nextRuntime, sourceValue) := by
+  simp only [SourceLetResult, evalLetValue, valueEq] at sourceStep
+  cases tokenLookup : lookup sourceEnv tokenId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv tokenId = .error (.unknownVar tokenId) := by
+        simp [lookupValue, tokenLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceToken =>
+      have lookupSucceeded :
+          lookupValue sourceEnv tokenId = .ok sourceToken := by
+        simp [lookupValue, tokenLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases evaluated : evalArgs sourceEnv args with
+      | error fault =>
+          rw [evaluated] at sourceStep
+          contradiction
+      | ok semanticFields =>
+          rw [evaluated] at sourceStep
+          simp only [Bind.bind, Except.bind] at sourceStep
+          cases reused :
+              reuse sourceRuntime sourceToken info updateHeader semanticFields
+          with
+          | error fault =>
+              rw [reused] at sourceStep
+              contradiction
+          | ok result =>
+              rw [reused] at sourceStep
+              rcases result with ⟨actualRuntime, actualValue⟩
+              change
+                Except.ok (actualRuntime, LetAction.value actualValue) =
+                  Except.ok (nextRuntime, LetAction.value sourceValue)
+                at sourceStep
+              have pairEq :
+                  (actualRuntime, LetAction.value actualValue) =
+                    (nextRuntime, LetAction.value sourceValue) :=
+                Except.ok.inj sourceStep
+              have runtimeEq : actualRuntime = nextRuntime :=
+                congrArg Prod.fst pairEq
+              have valueEq' : actualValue = sourceValue :=
+                LetAction.value.inj (congrArg Prod.snd pairEq)
+              subst actualRuntime
+              subst actualValue
+              exact ⟨sourceToken, semanticFields, rfl, rfl, reused⟩
 
 /-- Every successful sharing observation returns the direct `UInt8` lane. -/
 theorem isShared_ok_eq_uint8
@@ -12693,6 +12816,255 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_reset
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
+
+/--
+Certificate-free compiler composition for one successful capacity-validated
+reuse declaration.
+
+Production compilation/adaptation derives the token local, mixed
+local/erased field prefix, runtime import, and result local. Static capacity
+evidence plus its dynamic state relation derives zero versus retained
+execution; a representation-sensitive source budget constructs the fresh
+branch. The remaining `ReuseTokenOrdinaryRel` premise is the explicit shared
+protocol obligation tracked by
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary`.
+-/
+theorem ConcreteSupportedExport.reuseLetStep_of_capacity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {facts : ReuseCapacityFacts}
+    {labels : List FVarId}
+    {decl : LCNF.LetDecl .impure}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {resultIndex remainingBytes : Nat}
+    {witness : RefinementWitness}
+    (supported : ReuseSupported context facts decl)
+    (allocationFits :
+      directLetAllocationCost decl ≤ remainingBytes)
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (ordinaryTokens :
+      ReuseTokenOrdinaryRel facts sourceRuntime sourceEnv)
+    (budget :
+      targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes)
+    (localFrame :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex) :
+    ∃ nextStore nextLocals nextWitness nextFacts,
+      LetStepSimulates context sourceFunction target.wasmModule hosts.env decl
+        targetValue sourceRuntime nextRuntime sourceEnv sourceValue targetStore
+        nextStore targetLocals nextLocals resultIndex witness nextWitness ∧
+      nextStore.host.externals = targetStore.host.externals ∧
+      nextStore.host.closureDescriptors =
+        targetStore.host.closureDescriptors ∧
+      nextWitness.closureDescriptors = witness.closureDescriptors ∧
+      reuseCapacityLetFacts? facts decl = some nextFacts ∧
+      ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness := by
+  rcases supported with
+    ⟨tokenId, info, updateHeader, args, argumentCode, fieldKinds, resultKind,
+      evidence, valueEq, tagFits, valueKind, tokenCompiled, argumentsCompiled,
+      resultCompiled, operationWellFormed, capacityFitting, resultCompatible,
+      objectFieldsFit, usizeFieldsFit, scalarBytesFit⟩
+  obtain ⟨sourceToken, semanticFields, tokenLookup, argumentsEvaluated,
+      semanticReuse⟩ :=
+    sourceLetResult_reuse_eq valueEq sourceStep
+  have operationFacts :
+      (info.size = fieldKinds.size ∧
+        fieldKinds.all AbiKind.isObjectField = true) ∧
+        (constructorKind info).refines resultKind = true := by
+    simpa [RuntimeOp.abiWellFormed] using operationWellFormed
+  have tagFits' : info.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using tagFits
+  have freshCostFits :
+      constructorAllocationBytes info ≤ remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (.localGet tokenId :: argumentCode ++
+          [.call
+            (.runtime
+              (.reuse info updateHeader fieldKinds resultKind))]) :=
+    compileLetValue_reuse valueEq valueKind tokenCompiled argumentsCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨targetToken, targetFields, tokenAdapted, fieldsAdapted,
+      targetArgumentsEq⟩ :=
+    instructions_cons_eq_ok argumentsAdapted
+  obtain ⟨tokenIndex, tokenFound, tokenKindAt⟩ :=
+    spec.localsAligned tokenCompiled
+  have targetTokenEq : targetToken = .localGet tokenIndex := by
+    have tokenFound' :
+        findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            tokenId =
+          some tokenIndex := by
+      simpa [functionBindings] using tokenFound
+    have adaptedEq :
+        (Except.ok (.localGet tokenIndex) :
+          Except AdapterError Wasm.Instruction) =
+            Except.ok targetToken := by
+      simpa [instruction, tokenFound', pure, Except.pure]
+        using tokenAdapted
+    exact (Except.ok.inj adaptedEq).symm
+  obtain ⟨physicalFields, fieldsReady, physicalArity, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
+      fieldsAdapted argumentsEvaluated related.stateRelated
+  obtain ⟨tokenLane, tokenPhysicalFound, tokenCapacity⟩ :=
+    related.resolveFittingToken capacityFitting tokenLookup tokenFound
+      tokenKindAt
+  obtain ⟨tokenWord, tokenLaneEq⟩ := tokenCapacity.reuseTokenWord
+  subst tokenLane
+  obtain ⟨fields, fieldsDecoded, fieldsLength, fieldsRelated⟩ :=
+    argumentsRelated.decodeObjectWords
+      (by simpa using operationFacts.1.2) 1
+  have fieldsArity : fields.toArray.size = info.size := by
+    have fieldKindLength : fieldKinds.toList.length = info.size := by
+      simpa using operationFacts.1.1.symm
+    simpa using fieldsLength.trans fieldKindLength
+  have semanticArity : semanticFields.size = info.size := by
+    have fieldKindLength : fieldKinds.toList.length = info.size := by
+      simpa using operationFacts.1.1.symm
+    simpa using argumentsRelated.semanticLength.trans fieldKindLength
+  have fieldRelated :
+      ∀ (index : Nat) (kind : AbiKind) (value : Value),
+        fieldKinds[index]? = some kind →
+        semanticFields[index]? = some value →
+        ∃ field, fields.toArray[index]? = some field ∧
+          ValueRel witness kind (.word32 field) value := by
+    intro index kind value kindAt valueAt
+    obtain ⟨field, fieldAt, relatedField⟩ :=
+      fieldsRelated index kind value (by simpa using kindAt)
+        (by simpa using valueAt)
+    exact ⟨field, by simpa using fieldAt, relatedField⟩
+  have argsLength :
+      (.i32 (UInt32.ofNat tokenWord.value) :: physicalFields).length =
+        fieldKinds.size + 1 := by
+    simp [physicalArity]
+  have decoded :
+      decodeReuseWords
+          (.i32 (UInt32.ofNat tokenWord.value) :: physicalFields) =
+        .ok (tokenWord, fields) := by
+    simp [decodeReuseWords, fieldsDecoded,
+      Word32.ofUInt32_ofNat_value]
+  have fullReady :
+      ConstructorArgsReady targetLocals
+        (.localGet tokenIndex :: targetFields)
+        (.i32 (UInt32.ofNat tokenWord.value) :: physicalFields) := by
+    apply ConstructorArgsReady.localGet
+    · simpa [physicalOfLane] using tokenPhysicalFound
+    · exact fieldsReady
+  have freshAllocated :
+      sourceToken = .reuseToken none →
+        ∃ heap word,
+          reuseObject targetStore.host.runtime.heap Word32.zero info
+              updateHeader fields.toArray =
+            .ok (heap, word) := by
+    intro _
+    obtain ⟨heap, word, allocated, _⟩ :=
+      FirTalos.Concrete.MemoryState.FrontierInvariant.reuseObject_zero_eq_ok_of_budget
+        related.stateRelated.1.heap.frontier info updateHeader fields.toArray
+        fieldsArity tagFits' objectFieldsFit usizeFieldsFit scalarBytesFit
+        budget freshCostFits
+    exact ⟨heap, word, allocated⟩
+  have tokenOrdinary :
+      ∀ (location : Location) (cell : HeapCell),
+        sourceToken = .reuseToken (some location) →
+        findCell? sourceRuntime.heap location = some cell →
+        cell.persistent = false := by
+    intro location cell tokenEq found
+    cases evidence with
+    | emptyToken =>
+        have tokenNone := tokenCapacity.emptyToken_eq
+        rw [tokenEq] at tokenNone
+        cases tokenNone.2
+    | retainedAtLeast available =>
+        have tracked :=
+          (findFittingReuseCapacityEvidence?_eq_some facts tokenId info
+            (.retainedAtLeast available) capacityFitting).1
+        have tokenLookup' :
+            lookup sourceEnv tokenId =
+              some (.reuseToken (some location)) := by
+          simpa [tokenEq] using tokenLookup
+        exact ordinaryTokens tokenId available location cell tracked
+          tokenLookup' found
+  obtain ⟨heap, word, nextWitness, operation, transport, nextRuntimeRelated,
+      valueRelated, capacityValue, witnessDescriptorsPreserved,
+      capacityTransport⟩ :=
+    reuseStep_of_capacityEvidence related.stateRelated.1 argsLength decoded
+      tokenCapacity capacityFitting fieldsArity semanticArity
+      operationFacts.1.1.symm operationFacts.1.2 fieldRelated tagFits'
+      objectFieldsFit usizeFieldsFit scalarBytesFit operationFacts.2
+      resultCompatible freshAllocated tokenOrdinary semanticReuse
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨updated, targetSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (localFrame.validIndex resultFound)
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.reuseCall callFound
+  have physicalParams :
+      imp.params.length =
+        (.i32 (UInt32.ofNat tokenWord.value) :: physicalFields).length :=
+    params.trans argsLength.symm
+  subst targetToken
+  subst targetArguments
+  have step :=
+    letStepSimulates_reuseArgs (context := context) valueEq tokenLookup
+      argumentsEvaluated semanticReuse related.stateRelated transport
+      nextRuntimeRelated (by simp [replaceHeap, clearFailure]) resultFound
+      resultKindAt fullReady valueRelated imported spec.hostsSatisfy inBounds
+      contracted physicalParams results operation targetSet
+  let nextFacts :=
+    insertReuseCapacityFact facts decl.fvarId (evidence.afterReuse info)
+  have transfer : reuseCapacityLetFacts? facts decl = some nextFacts := by
+    simp [reuseCapacityLetFacts?, valueEq, capacityFitting, nextFacts]
+  have nextCapacity :
+      ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue)
+        (replaceHeap targetStore heap) updated nextWitness := by
+    exact related.ofReuseLetStep step resultFound resultKindAt targetSet
+      transport capacityTransport capacityValue
+  exact ⟨replaceHeap targetStore heap, updated, nextWitness, nextFacts, step,
+    by simp [replaceHeap, clearFailure],
+    by simp [replaceHeap, clearFailure], witnessDescriptorsPreserved,
+    transfer, nextCapacity⟩
 
 /--
 Current mixed allocating structural fragment: local aliases, immediate
