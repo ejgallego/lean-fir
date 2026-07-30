@@ -4256,6 +4256,49 @@ theorem retainedObjectProjectionExactStepLedgerPreserved
         (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
         sourceState targetState programs frames joins env runtime step
 
+/-- Focused ownership regression for retained object projections. The
+successful exact semantic step may bind a heap-valued child; the source heap
+carrier proves that child was already below the allocation frontier. -/
+theorem retainedObjectProjectionExactStepOwnershipPreserved
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated 2)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated 2 rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated 2
+      retainedObjectProjectionUsed sourceState.joins targetState.joins)
+    (env : EnvRelOn rho retainedObjectProjectionUsed
+      sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho
+      sourceState.runtime targetState.runtime
+      (envRootsOn retainedObjectProjectionUsed sourceState.env ++
+        sourceFrameRoots)
+      (envRootsOn retainedObjectProjectionUsed targetState.env ++
+        targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with control := .code retainedObjectProjectionCode }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code retainedObjectProjectionCode }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated 2 rho sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.oproj 0 dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedObjectProjectionCode, retainedObjectProjectionDecl,
+    letDecl] using
+    retainedObjectProjectionStepBinderReady
+      |>.match_retainedObjectProjectionLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        sourceState targetState programs frames joins env runtime ownership
+        step
+
 /-- One paired constructor exercises both root-free retained layout reads. -/
 def retainedRootFreeProjectionObject : ConstructorObject :=
   { tag := 0
@@ -4285,6 +4328,18 @@ def retainedScalarProjectionDecl : LCNF.LetDecl .impure :=
 def retainedScalarProjectionCode : LCNF.Code .impure :=
   .let retainedScalarProjectionDecl (.return live)
 
+def retainedUnboxDecl : LCNF.LetDecl .impure :=
+  letDecl live u8Type (.unbox dead)
+
+def retainedUnboxCode : LCNF.Code .impure :=
+  .let retainedUnboxDecl (.return live)
+
+def retainedIsSharedDecl : LCNF.LetDecl .impure :=
+  letDecl live u8Type (.isShared dead)
+
+def retainedIsSharedCode : LCNF.Code .impure :=
+  .let retainedIsSharedDecl (.return live)
+
 theorem retainedUSizeProjectionShadowRun :
     shadowCode? 2 {} retainedUSizeProjectionCode =
       some (retainedUSizeProjectionCode, retainedObjectProjectionUsed) := by
@@ -4296,6 +4351,20 @@ theorem retainedScalarProjectionShadowRun :
     shadowCode? 2 {} retainedScalarProjectionCode =
       some (retainedScalarProjectionCode, retainedObjectProjectionUsed) := by
   simp [retainedScalarProjectionCode, retainedScalarProjectionDecl, letDecl,
+    retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, live, dead]
+
+theorem retainedUnboxShadowRun :
+    shadowCode? 2 {} retainedUnboxCode =
+      some (retainedUnboxCode, retainedObjectProjectionUsed) := by
+  simp [retainedUnboxCode, retainedUnboxDecl, letDecl,
+    retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
+    collectLetValue, live, dead]
+
+theorem retainedIsSharedShadowRun :
+    shadowCode? 2 {} retainedIsSharedCode =
+      some (retainedIsSharedCode, retainedObjectProjectionUsed) := by
+  simp [retainedIsSharedCode, retainedIsSharedDecl, letDecl,
     retainedObjectProjectionUsed, neutralUsed, shadowCode?, safeToElim,
     collectLetValue, live, dead]
 
@@ -4339,6 +4408,46 @@ theorem retainedScalarProjectionStepBinderReady :
   · intro forbidden member
     simp at member
 
+theorem retainedUnboxStepBinderReady :
+    ExactShadowCodeBinderReady retainedObjectProjectionUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedUnboxDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedUnboxDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.view.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    (binders := [])
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact .ret
+  · simp [BinderNamesUnique]
+  · intro forbidden member
+    simp at member
+
+theorem retainedIsSharedStepBinderReady :
+    ExactShadowCodeBinderReady retainedObjectProjectionUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedIsSharedDecl)
+        retainedLargeNatContinuationRun
+        (Or.inl (by
+          simp [retainedIsSharedDecl, letDecl, neutralUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply retainedLargeNatContinuationRun.toGraph.view.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+    (binders := [])
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact .ret
+  · simp [BinderNamesUnique]
+  · intro forbidden member
+    simp at member
+
 def retainedUSizeProjectionState : MachineState :=
   { program := { decls := #[] }
     control := .code retainedUSizeProjectionCode
@@ -4350,6 +4459,20 @@ def retainedScalarProjectionState : MachineState :=
     control := .code retainedScalarProjectionCode
     env := retainedRootFreeProjectionEnv
     runtime := retainedRootFreeProjectionRuntime }
+
+def retainedIsSharedState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedIsSharedCode
+    env := retainedRootFreeProjectionEnv
+    runtime := retainedRootFreeProjectionRuntime }
+
+def retainedTaggedUnboxEnv : Env :=
+  bind [] dead (.object (.tagged 9))
+
+def retainedTaggedUnboxState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedUnboxCode
+    env := retainedTaggedUnboxEnv }
 
 /-- The paired projection fixture owns its sole heap cell and the matching
 environment reference below frontier one. -/
@@ -4456,6 +4579,145 @@ theorem retainedRootFreeProjectionRuntimeRelated :
     retainedRootFreeProjectionPaired.runtime.runtime.restrictExtra
       (envRootsOn_related retainedRootFreeProjectionEnvRelated)
       rootsSubset rootsSubset
+
+/-- The tagged unbox fixture relates its immediate object environment under
+the empty address renaming. -/
+theorem retainedTaggedUnboxEnvRelated :
+    EnvRelOn emptyAddressRenaming retainedObjectProjectionUsed
+      retainedTaggedUnboxEnv retainedTaggedUnboxEnv := by
+  simpa [retainedTaggedUnboxEnv] using
+    (EnvRelOn.empty emptyAddressRenaming retainedObjectProjectionUsed)
+      |>.bindBoth (binder := dead) (ValueRel.tagged 9)
+
+theorem retainedTaggedUnboxRuntimeRelated :
+    ShadowRuntimeRel emptyAddressRenaming
+      retainedTaggedUnboxState.runtime retainedTaggedUnboxState.runtime
+      (envRootsOn retainedObjectProjectionUsed
+        retainedTaggedUnboxState.env ++ [])
+      (envRootsOn retainedObjectProjectionUsed
+        retainedTaggedUnboxState.env ++ []) := by
+  simpa [retainedTaggedUnboxState] using
+    emptyRuntime_shadowRelated_of_roots
+      (envRootsOn_related retainedTaggedUnboxEnvRelated)
+
+theorem retainedTaggedUnboxOwnership :
+    SourceMachineOwnershipBelowFrontier retainedTaggedUnboxState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        simpa [retainedTaggedUnboxState] using
+          HeapOwnershipBelowFrontier.empty
+      env := by
+        change EnvironmentBelowFrontier
+          retainedTaggedUnboxState.runtime retainedTaggedUnboxState.env
+        rw [retainedTaggedUnboxState, retainedTaggedUnboxEnv]
+        apply EnvironmentBelowFrontier.bind
+          (runtime := ({} : RuntimeState))
+          (env := ([] : Env))
+          EnvironmentBelowFrontier.empty
+        intro location member
+        simp at member
+    }
+  · exact trivial
+
+/-- Concrete exact-dispatch regression for tagged unboxing. -/
+theorem retainedTaggedUnboxExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedTaggedUnboxState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedTaggedUnboxState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedTaggedUnboxState.program retainedTaggedUnboxState.program := by
+    simpa [retainedTaggedUnboxState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedTaggedUnboxState.frames retainedTaggedUnboxState.frames
+        [] [] := by
+    simpa [retainedTaggedUnboxState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedObjectProjectionUsed
+        retainedTaggedUnboxState.joins retainedTaggedUnboxState.joins := by
+    simpa [retainedTaggedUnboxState] using
+      BinderReadyShadowJoinEnvRelated.empty 2
+        retainedObjectProjectionUsed
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.unbox dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedTaggedUnboxState, retainedUnboxCode,
+    retainedUnboxDecl, letDecl] using
+    retainedUnboxStepBinderReady
+      |>.match_retainedUnboxLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        retainedTaggedUnboxState retainedTaggedUnboxState programs frames
+        joins
+        (by
+          simpa [retainedTaggedUnboxState] using
+            retainedTaggedUnboxEnvRelated)
+        retainedTaggedUnboxRuntimeRelated retainedTaggedUnboxOwnership step
+
+/-- Concrete exact-dispatch regression for heap sharedness metadata. -/
+theorem retainedIsSharedExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedIsSharedState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedIsSharedState targetAfter ∧
+      BinderReadyReachableMachineRelated 2
+        retainedRootFreeProjectionPaired.larger sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedIsSharedState.program retainedIsSharedState.program := by
+    simpa [retainedIsSharedState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2
+        retainedRootFreeProjectionPaired.larger
+        retainedIsSharedState.frames retainedIsSharedState.frames [] [] := by
+    simpa [retainedIsSharedState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2
+          retainedRootFreeProjectionPaired.larger [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedObjectProjectionUsed
+        retainedIsSharedState.joins retainedIsSharedState.joins := by
+    simpa [retainedIsSharedState] using
+      BinderReadyShadowJoinEnvRelated.empty 2
+        retainedObjectProjectionUsed
+  have usedBound : UsedSubset
+      (collectLetValue neutralUsed
+        (LCNF.LetValue.isShared dead : LCNF.LetValue .impure))
+      retainedObjectProjectionUsed := by
+    simpa [retainedObjectProjectionUsed, neutralUsed, collectLetValue]
+      using UsedSubset.refl retainedObjectProjectionUsed
+  simpa [retainedIsSharedState, retainedIsSharedCode,
+    retainedIsSharedDecl, letDecl] using
+    retainedIsSharedStepBinderReady
+      |>.match_retainedIsSharedLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) (usedBound := usedBound)
+        retainedIsSharedState retainedIsSharedState programs frames joins
+        (by
+          simpa [retainedIsSharedState] using
+            retainedRootFreeProjectionEnvRelated)
+        (by
+          simpa [retainedIsSharedState] using
+            retainedRootFreeProjectionRuntimeRelated)
+        (by
+          simpa [retainedIsSharedState] using
+            retainedRootFreeProjectionSourceOwnership retainedIsSharedCode)
+        step
 
 /-- Concrete exact-dispatch regression for a retained `USize` projection:
 the successful root-free read advances both machines and preserves complete
