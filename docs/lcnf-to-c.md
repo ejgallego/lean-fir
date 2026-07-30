@@ -203,6 +203,25 @@ Representative translations include:
 Lake subsequently invokes the platform C compiler to produce object files and
 link them against the Lean runtime.
 
+## Using C as a WebAssembly backend
+
+FIR's compiler-native Wasm path preserves this upstream edge: final impure
+LCNF is emitted as C first, then Emscripten/LLVM compiles and links that C with
+the pinned Lean runtime, `Init`, and `Std`. The result is a verified
+`.manifest.json`/`.mjs`/`.wasm` deployment bundle for Node and
+cross-origin-isolated browsers.
+
+This is separate from FIR's symbolic Wasm path. That backend consumes the same
+final impure LCNF but lowers it through `Fir.Wasm`, where instructions,
+semantic imports, resident-runtime helpers, and W6/W7 refinement obligations
+remain explicit. Sharing the source checkpoint supports differential
+validation; it does not imply a shared runtime ABI or artifact loader.
+
+See the [WebAssembly artifact-generation guide](wasm-artifact-generation.md)
+for the comparison and the
+[LCNF-to-C package](../integration/lcnf-c-wasm/README.md) for reproducible
+toolchain pins, optimized flags, loader rules, and acceptance checks.
+
 ## The parallel lower-IR branch
 
 After the impure passes, `LCNF.Main` also invokes `Lean.IR.toIR` followed by

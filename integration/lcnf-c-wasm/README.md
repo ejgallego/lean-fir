@@ -15,6 +15,15 @@ The lane consumes Lean's existing final-impure and generated-C contracts. It
 does not change FIR's symbolic Wasm surface, W6 concrete runtime, W7 resident
 runtime, or shared interpreter semantics.
 
+This is the **compiler-native C/Emscripten Wasm path**. The complementary
+**FIR-native symbolic Wasm path** is packaged under
+[`integration/talos/artifact`](../talos/artifact/README.md); it lowers final
+impure LCNF through `Fir.Wasm` and owns the symbolic/concrete runtime proof
+surface. These paths share the LCNF checkpoint, not an artifact ABI or loader.
+See the [artifact-generation guide](../../docs/wasm-artifact-generation.md)
+for the choice matrix and validation boundary. Host-native executables used
+below are differential or performance oracles, not a third Wasm backend.
+
 ## Runtime profiles
 
 The LCNF-to-C frontend is shared. Runtime selection is a link profile, not a

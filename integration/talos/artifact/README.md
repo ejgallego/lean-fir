@@ -5,6 +5,21 @@ binary artifacts, then runs those artifacts in standard Node and browser
 `WebAssembly` engines with both the established semantic FIR host and an
 incrementally widened concrete wasm32 linear-memory host.
 
+This is the **FIR-native symbolic Wasm path**: final impure LCNF is lowered
+through `Fir.Wasm`, encoded, and incrementally linked with W6/W7 resident
+runtime helpers. It is the path whose instruction surface, host imports, and
+concrete-runtime refinement are explicit FIR objects.
+
+The repository also has a **compiler-native C/Emscripten path** in
+[`integration/lcnf-c-wasm`](../../lcnf-c-wasm/README.md). That path feeds the
+same compiler checkpoint to Lean's upstream C emitter, then uses
+Emscripten/LLVM and the pinned Lean runtime to produce an ES module and Wasm
+bundle. It is the current choice for broad `Init`/`Std` execution, but it does
+not replace this package's symbolic or W6/W7 proof obligations. The
+[artifact-generation guide](../../../docs/wasm-artifact-generation.md)
+compares the artifact shapes, runtime contracts, validation commands, and
+intended uses.
+
 The corpus covers erased and maximum-width unsigned results and entry arguments, tagged
 argument handles, tagged and heap-allocated natural literals, heap strings, constructor
 allocation and projection, exact and default constructor cases, and a transitively

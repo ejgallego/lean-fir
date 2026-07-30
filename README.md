@@ -3,8 +3,9 @@
 FIR is a research workspace for executable semantics and compiler-correctness
 proofs for Lean's `Lean.Compiler.LCNF` pipeline. It contains a phase-indexed
 program model, a small-step interpreter for final impure LCNF, the interfaces
-needed to state same-phase and lowering theorems, and a parallel symbolic
-LCNF-to-WebAssembly backend.
+needed to state same-phase and lowering theorems, and two executable
+LCNF-to-WebAssembly paths: FIR's symbolic backend and Lean's direct C emitter
+followed by an optimized LLVM WebAssembly backend.
 
 The repository is pinned to Lean 4.32.0. The proof campaign works backwards
 from final impure LCNF while the Wasm backend develops against the same
@@ -34,6 +35,15 @@ remains a pass-checkpoint diagnostic; it is not the semantic oracle.
 The optional Talos bridge is deliberately outside the default dependency
 graph. After cloning its pinned revision with `make talos-setup`, validate the
 adapter and executable scalar example with `make talos-check`.
+
+The repository has two native Wasm artifact generators. The FIR-native path
+under `integration/talos/artifact` exposes the symbolic lowering and
+incrementally linked resident runtime used for semantic and refinement work.
+The compiler-native path under `integration/lcnf-c-wasm` sends the same final
+impure LCNF through Lean's C emitter and Emscripten/LLVM, linking the pinned
+Lean runtime, `Init`, and `Std`. They are complementary backends, not two
+loaders for one artifact ABI. See `docs/wasm-artifact-generation.md` for the
+selection guide and exact contract boundary.
 
 Parallel proof and Wasm work uses dedicated branches and worktrees with an
 integration-only `main`. See `AGENTS.md` for the normative rules and
@@ -70,6 +80,11 @@ baseline are not re-exported.
   LCNF.
 - `integration/talos/`: optional pinned translation into Talos syntax and an
   executable Talos smoke test.
+- `integration/talos/artifact/`: FIR-native symbolic Wasm artifact and
+  resident-runtime generation, with Node/browser acceptance clients.
+- `integration/lcnf-c-wasm/`: compiler-native LCNF-to-C-to-Wasm generation;
+  Emscripten is primary, the freestanding profile is deliberately narrow, and
+  the WASI profile is frozen.
 - `Fir/LeanIR/Legacy.lean` and `LegacyExamples.lean`: the original small
   evaluator, isolated as a differential fixture.
 - `Inspect`: legacy coverage and real `simpCase` checkpoint diagnostics.
@@ -78,6 +93,8 @@ baseline are not re-exported.
 - `docs/research.md`: Lean IR and Wasm formalization research notes.
 - `docs/lcnf-to-c.md`: pass-by-pass guide from Lean expressions through LCNF
   to direct C emission.
+- `docs/wasm-artifact-generation.md`: comparison and selection guide for the
+  FIR-native and compiler-native Wasm artifact paths.
 - `docs/pass-correctness-plan.md`: phase-aware semantics and compiler-pass
   correctness roadmap.
 - `docs/parallel-development.md`: worktree ownership, synchronization, and
