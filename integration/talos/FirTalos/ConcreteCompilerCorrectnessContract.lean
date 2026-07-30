@@ -3795,6 +3795,74 @@ example
     externals
 
 /--
+A cache-aware direct-declaration implementation supplies the interprocedural
+call premise over the same fixed-entry cache frame. Its recursive callee
+returns the evolved cache table; no unchanged-global adapter is involved.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    (implementation :
+      DirectDeclarationCallImplementationWithCache context sourceModule
+        sourceFunction labels module hostEnv sourceExternals CallSupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv sourceExternals CallSupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) :=
+  implementation.runtimeRefinesEntryRelative
+
+/--
+The production compiler-generated non-heap lazy family is available over the
+fixed-entry cache frame. Misses thread the recursively evolved table and use
+heap-neutral publication to preserve the hereditary ordinaryness transport.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      LazyCacheInternalHereditaryDeclarationInduction context sourceModule
+        targetModule hosts sourceExternals)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) :=
+  spec.internalNonHeapLazyRuntimeRefines_entryRelativeCache generated
+    resultKinds declarations
+
+/--
 The hereditary theorem for a lazy initializer returns ordinary declaration
 correctness and the exact evolved cache table together. This is the recursive
 induction result consumed by nested miss publication, not a target execution

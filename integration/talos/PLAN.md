@@ -5357,6 +5357,39 @@ they cannot use the cache-neutral unchanged-global adapter. Production
 internal-function selection and source-structural completeness still follow
 those lifts before the generated declaration induction can be constructed.
 
+W6.6ha closes the evolved-cache entry adapters for direct declaration calls
+and the current non-heap internal lazy family. The endpoint-exact
+`ofDirectDeclarationCallExact` theorem now reconstructs the caller frame at
+the hereditary callee's actual post-store and witness instead of hiding them
+behind existential successors.
+`DirectDeclarationCallImplementationWithCache` strengthens the generated
+direct-call selection condition with the callee's evolved
+`LazyCacheGlobalsRel`, and `runtimeRefinesEntryRelative` threads that table
+while composing the callee's witness, capacity, ordinaryness, and immutable
+table transports from the fixed declaration entry.
+
+Lazy hits are semantic runtime identities. For misses,
+`miss_ordinaryTransport_of_internalCompiler_nonHeap` combines the hereditary
+callee's entry-to-return ordinaryness with the fact that publishing a
+non-heap result leaves the semantic heap unchanged.
+`LazyCacheImplementationWithEntryTransports` packages this path-sensitive
+fact alongside the existing compiler-derived hit/miss implementation.
+Its entry-relative runtime theorem uses the exact evolved table returned by
+the implementation, never an unchanged-global premise. The production
+`internalNonHeapLazyRuntimeRefines_entryRelativeCache` theorem and contract
+guard close the current lazy premise.
+
+The remaining interprocedural task is to derive the cache-aware direct-call
+implementation uniformly from production declaration selection, including
+the admitted saturated closure-dispatch family. Then the syntax-directed body
+proof can instantiate all entry-relative operation premises and construct
+`LazyCacheInternalHereditaryDeclarationInduction` recursively for the
+generated declaration environment. Heap-valued cache publication remains a
+separate extension because it cannot satisfy the current all-location
+`OrdinaryPersistenceTransport`; it will require a deliberately weaker
+entry invariant or coordinated alias/fact invalidation, not an unsound
+unchanged-heap adapter.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

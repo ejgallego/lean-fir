@@ -1032,19 +1032,31 @@ acceptance tests pass.
    `effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache`
    theorem and contract guard close the current no-result effect family
    without target evidence.
-   Next lift each admitted call and lazy runtime family over the
-   entry-relative cache frame. Calls and lazy misses consume an evolved cache
-   relation from their recursive callee; they must not use the
-   unchanged-global adapter.
-   Then derive production internal-function selection and construct
+   The endpoint-exact `ofDirectDeclarationCallExact` theorem retains the
+   hereditary callee's actual post-store and witness.
+   `DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative`
+   consumes the callee's evolved `LazyCacheGlobalsRel` and composes its six
+   representation transports from the fixed entry.
+   `LazyCacheImplementationWithEntryTransports` similarly augments the
+   compiler-derived hit/miss implementation with a source ordinaryness
+   transport. Hits are identities; current non-heap misses compose the
+   hereditary callee transport with heap-neutral semantic publication.
+   The production
+   `internalNonHeapLazyRuntimeRefines_entryRelativeCache` theorem and its
+   contract guard close the current internal lazy family without an
+   unchanged-global premise.
+   Next derive the cache-aware direct-call implementation uniformly from
+   production declaration selection, including admitted saturated closure
+   dispatch, and construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment. Do not reintroduce a
    `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site
    target execution premise.
-   Heap-valued `.object`/`.tobject` results then add
-   `ReuseTokenPublicationDisjoint` from source alias information or a
-   coordinated alias-invalidating validator transfer. External nullary
-   declarations remain a separate hereditary external-result branch.
+   Heap-valued `.object`/`.tobject` publication cannot preserve the current
+   all-location `OrdinaryPersistenceTransport`; extending that fragment
+   requires a deliberately weaker entry invariant or coordinated alias/fact
+   invalidation in addition to `ReuseTokenPublicationDisjoint`. External
+   nullary declarations remain a separate hereditary external-result branch.
    Integration must still expose the universal validator accessor needed to
    discharge `LazyCacheValidationFacts` for every successfully validated
    module.

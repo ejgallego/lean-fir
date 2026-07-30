@@ -552,6 +552,18 @@ theorem PhysicalValueRel.isNonHeapReference_of_kind
   | float32Bits related => cases related
   | float64Bits related => cases related
 
+/-- Publishing a non-heap semantic value changes only the global table. -/
+theorem RuntimeState.setGlobal_heap_eq_of_nonHeapReference
+    (runtime : RuntimeState) (name : Name) (value : Value)
+    (nonHeap : IsNonHeapReference value) :
+    (runtime.setGlobal name value).heap = runtime.heap := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload => rfl
+      | heap location => contradiction
+  | usize | scalar | erased | reuseToken => rfl
+
 /--
 Semantic alias-safety condition for publishing one cache value.
 
@@ -3883,6 +3895,132 @@ theorem
     (spec.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation_pureExternal
       externals)
 
+/--
+Uniform cache-aware implementation condition for direct generated declaration
+calls.
+
+This is the interprocedural analogue of
+`DirectDeclarationCallImplementation`: the recursive callee theorem returns
+the evolved whole-cache relation together with ordinary declaration
+correctness. The caller still supplies only source admission, actual
+compiler/adapter outputs, and its current representation/cache relations.
+-/
+def DirectDeclarationCallImplementationWithCache
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {resultIndex stepCost : Nat}
+      {initialWitness : RefinementWitness},
+    CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      ReuseCapacityStateRelated facts callerFunction sourceRuntime sourceEnv
+        initial locals initialWitness →
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule callerFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex →
+      ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
+          argumentTarget afterCall updated resultWitness physicalArgs
+          resultKind physical,
+        targetValue = argumentTarget ++ [.call functionIndex] ∧
+          (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+            some resultKind ∧
+          ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+            initial locals ∧
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+            sourceModule calleeFunction module hostEnv sourceExternals
+            sourceRuntime nextRuntime calleeEnv calleeCode targetFunction
+            functionIndex initial afterCall initialWitness resultWitness
+            physicalArgs.reverse resultKind sourceValue physical stepCost ∧
+          locals.set? resultIndex physical = some updated ∧
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId)
+
+/--
+A cache-aware direct declaration implementation supplies the complete call
+law over one fixed execution entry.
+
+The callee's evolved table becomes the successor cache invariant. Its
+witness, capacity, ordinaryness, and immutable-table transports extend the
+entry-to-current package, so no unchanged-global premise or target execution
+certificate is introduced.
+-/
+theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    (implementation :
+      DirectDeclarationCallImplementationWithCache context sourceModule
+        callerFunction labels module hostEnv sourceExternals CallSupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels module hostEnv sourceExternals CallSupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  rcases invariant with
+    ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+  obtain ⟨calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
+      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
+      resultKind, physical, targetEq, resultKindAt, assembled, callee,
+      targetSet, transfer⟩ :=
+    implementation supported sourceStep baseInvariant.1.1.1 cacheTable
+      valueCompiled valueAdapted resultFound
+  subst targetValue
+  obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, nextTransfer, nextBaseInvariant⟩ :=
+    baseInvariant.ofDirectDeclarationCallExact stepFits sourceStep resultFound
+      resultKindAt assembled callee.declaration targetSet transfer
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        afterCall entryWitness resultWitness :=
+    entryTransports.step
+      callee.declaration.capacityPreserving.witnessTransport
+      callee.declaration.capacityPreserving.capacityTransport
+      callee.declaration.ordinaryTransport
+      callee.declaration.externalsPreserved
+      callee.declaration.hostDescriptorsPreserved
+      callee.declaration.witnessDescriptorsPreserved
+  exact ⟨afterCall, updated, resultWitness,
+    eraseReuseCapacityFact facts decl.fvarId, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    nextTransfer, ⟨⟨nextBaseInvariant, callee.cacheTable⟩, nextEntry⟩⟩
+
 /-- Lift an existing canonical entry frame to the cache-augmented invariant
 for the production adapter/Talos initial store. -/
 theorem ConcreteReuseCapacityCacheFrame.adaptedInitial
@@ -4577,6 +4715,82 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
   · simp [Fir.Wasm.reuseCapacityLetFacts?, valueEq]
 
 /--
+A compiler-selected internal lazy miss with a non-heap result preserves source
+ordinaryness from body entry through cache publication.
+
+The hereditary callee supplies entry-to-return ordinaryness. Compiler
+inversion selects that exact callee, while non-heap publication leaves the
+semantic heap unchanged. This is the source-side transport needed by a fixed
+declaration-entry invariant; it is intentionally unavailable for arbitrary
+heap-valued cache results.
+-/
+theorem
+    SourceLazyLetResult.miss_ordinaryTransport_of_internalCompiler_nonHeap
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {calleeCode : LCNF.Code .impure}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {stepCost : Nat}
+    (supported :
+      LazyCacheInternalMissSupported context decl declaration
+        sourceDeclaration resultKind calleeCode)
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule callerFunction labels valueCode =
+        .ok targetValue)
+    (induction :
+      LazyCacheInternalHereditaryInduction context sourceModule module hostEnv
+        sourceExternals sourceRuntime declaration calleeCode resultKind initial
+        initialWitness sourceValue stepCost)
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject) :
+    OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+  rcases supported with
+    ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
+  obtain ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationCall,
+      cacheSetCall, valueCodeEq, targetValueEq⟩ :=
+    compileCachedLetValue_adapted_inv context sourceModule callerFunction
+      labels decl declaration sourceDeclaration resultKind valueCode
+      targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
+  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+      physical, callee, hereditaryPost⟩ :=
+    induction declarationCall
+  have declarationParams : sourceDeclaration.params = #[] :=
+    Array.isEmpty_iff.mp paramsEq
+  have publicationRuntimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue :=
+    (SourceLazyLetResult.miss_cacheFacts_of_callee valueEq targetEq
+      declarationParams bodyEq sourceStep
+      callee.declaration.capacityPreserving.successful.sourceResult).2
+  have nonHeap : IsNonHeapReference sourceValue :=
+    callee.declaration.capacityPreserving.successful.valueRelated
+      |>.isNonHeapReference_of_kind notObject notTObject
+  apply callee.declaration.ordinaryTransport.congrAfter
+  rw [publicationRuntimeEq]
+  exact
+    (RuntimeState.setGlobal_heap_eq_of_nonHeapReference callRuntime declaration
+      sourceValue nonHeap).symm
+
+/--
 Structural compiler-derived cache hit.
 
 The source-only facts identify a nullary declaration and its result lane.
@@ -4665,6 +4879,33 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
   · rw [targetValueEq]
     exact hit
   · simp [Fir.Wasm.reuseCapacityLetFacts?, valueEq]
+
+/-- A generated cache hit returns in the unchanged semantic runtime. -/
+theorem SourceLazyLetResult.hit_ordinaryTransport_of_supported
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    (supported :
+      LazyCacheCallSupported context decl declaration sourceDeclaration
+        resultKind)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue) :
+    OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
+  rcases supported with
+    ⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩
+  obtain ⟨runtimeEq, semanticFound⟩ :=
+    SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
+      sourceStep
+  subst nextRuntime
+  exact OrdinaryPersistenceTransport.refl sourceRuntime
 
 /--
 Source-facing internal lazy-cache family handled by the structural compiler
@@ -4906,6 +5147,55 @@ structure LazyCacheImplementation
             LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore
 
 /--
+Lazy-cache implementation strengthened with the source ordinaryness transport
+needed by a fixed declaration-entry invariant.
+
+The executable/cache implementation remains the existing reusable structure.
+The additional field is a semantic consequence of the selected source path
+and hereditary callee. It is valid for hits and the current non-heap internal
+fragment, but deliberately not postulated for arbitrary heap publication.
+-/
+structure LazyCacheImplementationWithEntryTransports
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop) : Prop where
+  implementation :
+    LazyCacheImplementation context sourceModule sourceFunction labels module
+      hostEnv sourceExternals LazySupported
+  ordinaryTransport :
+    ∀ {path : LazyCachePath}
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {stepCost remainingBytes : Nat}
+      {initialWitness : RefinementWitness},
+      LazySupported path sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost →
+        SourceLazyLetResult path context sourceExternals sourceRuntime sourceEnv
+            decl continuation nextRuntime sourceValue →
+          ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals facts remainingBytes sourceRuntime sourceEnv
+              initial locals initialWitness →
+            Fir.Wasm.compileLetValue context decl = .ok valueCode →
+              instructions sourceModule sourceFunction labels valueCode =
+                  .ok targetValue →
+                OrdinaryPersistenceTransport sourceRuntime nextRuntime
+
+/--
 Production internal hit/miss composition constructs the uniform lazy
 implementation from one generated cache environment and the recursive
 declaration theorem.
@@ -4959,6 +5249,59 @@ theorem LazyCacheImplementation.ofInternalCompiler
             (resultId := decl.fvarId)
             (declarations call sourceStep invariant))
 
+/--
+The compiler-generated non-heap internal lazy family supplies both its
+evolved-cache implementation and the source ordinaryness transport required
+at a fixed declaration entry.
+
+Hits are runtime identities. On a miss the same hereditary callee used for
+publication preserves ordinaryness to its return, and the non-heap result-kind
+policy makes the subsequent semantic `setGlobal` heap-neutral.
+-/
+theorem
+    LazyCacheImplementationWithEntryTransports.ofInternalCompilerNonHeap
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      LazyCacheInternalHereditaryDeclarationInduction context sourceModule
+        targetModule hosts sourceExternals) :
+    LazyCacheImplementationWithEntryTransports context sourceModule
+      sourceFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context) := by
+  refine
+    ⟨LazyCacheImplementation.ofInternalCompiler spec generated
+      (LazyCacheInternalDeclarationInduction.ofHereditaryNonHeap resultKinds
+        declarations),
+      ?_⟩
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue initial locals stepCost remainingBytes
+    initialWitness supported sourceStep invariant valueCompiled valueAdapted
+  cases supported with
+  | hit call =>
+      exact
+        SourceLazyLetResult.hit_ordinaryTransport_of_supported call sourceStep
+  | miss call =>
+      obtain ⟨notObject, notTObject⟩ := resultKinds call
+      exact
+        SourceLazyLetResult.miss_ordinaryTransport_of_internalCompiler_nonHeap
+          (stepCost := stepCost) call sourceStep valueCompiled valueAdapted
+          (declarations (stepCost := stepCost) call sourceStep invariant)
+          notObject notTObject
+
 /-- A uniform lazy-declaration implementation instantiates the generic cache
 law for the canonical mixed frame. -/
 theorem LazyCacheImplementation.runtimeRefines
@@ -4992,6 +5335,67 @@ theorem LazyCacheImplementation.runtimeRefines
       transfer
   exact ⟨nextStore, nextLocals, nextWitness,
     eraseReuseCapacityFact facts decl.fvarId, reconstructed⟩
+
+/--
+An entry-transporting lazy implementation supplies the complete lazy runtime
+law over one fixed execution entry.
+
+The implementation's successor cache table is used verbatim. The
+path-specific source ordinaryness theorem and the budgeted step's concrete
+transports extend the entry accumulator, so both cache hits and non-heap
+misses compose inside hereditary declaration bodies.
+-/
+theorem
+    LazyCacheImplementationWithEntryTransports.runtimeRefinesEntryRelative
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    (implementation :
+      LazyCacheImplementationWithEntryTransports context sourceModule
+        sourceFunction labels module hostEnv sourceExternals LazySupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv sourceExternals LazySupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) := by
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue initial locals resultIndex remainingBytes
+    stepCost initialWitness supported stepFits invariant sourceStep
+    valueCompiled valueAdapted resultFound
+  rcases invariant with ⟨cacheInvariant, entryTransports⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer,
+      nextCache⟩ :=
+    implementation.implementation.step supported sourceStep cacheInvariant
+      valueCompiled valueAdapted resultFound
+  have ordinary :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+    implementation.ordinaryTransport supported sourceStep cacheInvariant
+      valueCompiled valueAdapted
+  obtain ⟨simulates, externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, nextTransfer, nextCacheInvariant⟩ :=
+    cacheInvariant.ofLazyCacheResult stepFits step (fun _ => nextCache)
+      resultFound transfer
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness :=
+    entryTransports.step step.witnessTransport step.capacityTransport ordinary
+      step.externalsPreserved step.hostDescriptorsPreserved
+      step.witnessDescriptorsPreserved
+  exact ⟨nextStore, nextLocals, nextWitness,
+    eraseReuseCapacityFact facts decl.fvarId, simulates, externalsPreserved,
+    hostDescriptorsPreserved, witnessDescriptorsPreserved, nextTransfer,
+    ⟨nextCacheInvariant, nextEntry⟩⟩
 
 /--
 Public facts-indexed lazy runtime law for compiler-generated internal
@@ -5066,5 +5470,48 @@ theorem ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines
   spec.internalLazyRuntimeRefines generated
     (LazyCacheInternalDeclarationInduction.ofHereditaryNonHeap
       resultKinds declarations)
+
+/--
+Public compiler-generated non-heap lazy law over the entry-relative
+whole-cache frame.
+
+This is the lazy premise consumed by the structural hereditary body theorem:
+hits preserve the existing table, misses consume the recursively evolved
+table and publish their own non-heap result, and both paths extend every
+fixed-entry representation transport.
+-/
+theorem
+    ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      LazyCacheInternalHereditaryDeclarationInduction context sourceModule
+        targetModule hosts sourceExternals)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) :=
+  (LazyCacheImplementationWithEntryTransports.ofInternalCompilerNonHeap spec
+    generated resultKinds declarations).runtimeRefinesEntryRelative
 
 end FirTalos.Concrete
