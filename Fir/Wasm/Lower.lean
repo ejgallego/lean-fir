@@ -318,10 +318,23 @@ def checkedJoinParamKind (decl : LCNF.FunDecl .impure)
   let kind ← checkedAbiKind param.type
   return if kind == .tobject && guardedObjectJoinParam decl param then .object else kind
 
+/--
+Refine compiler-declared `tobject` boxes whose source type guarantees a heap
+representation. Lean 4.32 always heap-allocates Float32 and Float boxes; the
+precise `.object` kind lets closure capture and unchecked release retain that
+fact without changing the physical i32 lane.
+-/
+def boxResultKind (type : Expr) (declared : AbiKind) : AbiKind :=
+  if type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float then
+    .object
+  else
+    declared
+
 def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
   match decl.value with
   | .erased => pure .erased
   | .reset .. => pure .reuseToken
+  | .box type _ => return boxResultKind type (← checkedAbiKind decl.type)
   | _ => checkedAbiKind decl.type
 
 def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :

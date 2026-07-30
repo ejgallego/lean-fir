@@ -152,7 +152,7 @@ def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
       let annotationKind ← abiValueKind? type
       if annotationKind == scalarKind && supportedBoxScalarKind scalarKind &&
           declared == .tobject then
-        some declared
+        some (boxResultKind type declared)
       else
         none
   | .unbox objectId =>

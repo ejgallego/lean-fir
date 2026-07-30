@@ -39,6 +39,9 @@ def classifiesAs (type : Lean.Expr) (expected : AbiKind) : Bool :=
 #guard supportedScalarProjectionKind .float
 #guard supportedBoxScalarKind .float32
 #guard supportedBoxScalarKind .float
+#guard boxResultKind LCNF.ImpureType.float32 .tobject == .object
+#guard boxResultKind LCNF.ImpureType.float .tobject == .object
+#guard boxResultKind LCNF.ImpureType.uint32 .tobject == .tobject
 #guard match abiKind? LCNF.ImpureType.void with
   | .ok none => true
   | _ => false
