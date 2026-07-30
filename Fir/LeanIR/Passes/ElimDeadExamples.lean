@@ -5311,6 +5311,18 @@ def retainedPapState : MachineState :=
   { program := retainedPapProgram
     control := .code retainedPapCode }
 
+theorem retainedPapSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedPapState := by
+  exact {
+    heap := by
+      simpa [retainedPapState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [retainedPapState, lookup] at found
+    frames := trivial
+  }
+
 theorem retainedPapProgramBinderReadyRelated :
     ProgramRelated (BinderReadyShadowCodeRelated 2)
       retainedPapProgram retainedPapProgram := by
@@ -5383,6 +5395,51 @@ theorem retainedPapExactStepLedgerPreserved
       (usedBound := UsedSubset.refl neutralUsed)
       retainedPapState retainedPapState
       retainedPapProgramBinderReadyRelated frames joins env runtime step
+
+/-- The same concrete paired closure allocation preserves complete source
+ownership while extending the semantic address renaming. -/
+theorem retainedPapExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedPapState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedPapState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedPapState.frames retainedPapState.frames [] [] := by
+    simpa [retainedPapState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedPapState.joins retainedPapState.joins := by
+    simpa [retainedPapState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedPapState.env retainedPapState.env := by
+    simpa [retainedPapState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedPapState.runtime retainedPapState.runtime
+        (envRootsOn neutralUsed retainedPapState.env ++ [])
+        (envRootsOn neutralUsed retainedPapState.env ++ []) := by
+    simpa [retainedPapState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  simpa [retainedPapState, retainedPapCode,
+    retainedPapDecl, letDecl] using
+    retainedPapStepBinderReady
+      |>.match_retainedPapLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2)
+        (usedBound := UsedSubset.refl neutralUsed)
+        retainedPapState retainedPapState
+        retainedPapProgramBinderReadyRelated frames joins env runtime
+        retainedPapSourceOwnership step
 
 /-- The deleted PAP fixture's successful source-only closure allocation keeps
 the empty target ledger unchanged. -/
@@ -5490,6 +5547,25 @@ def retainedBoxState : MachineState :=
     control := .code retainedBoxCode
     env := retainedBoxEnv }
 
+theorem retainedBoxSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedBoxState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        simpa [retainedBoxState] using
+          HeapOwnershipBelowFrontier.empty
+      env := by
+        change EnvironmentBelowFrontier
+          ({} : RuntimeState) retainedBoxEnv
+        rw [retainedBoxEnv]
+        apply EnvironmentBelowFrontier.bind
+          (binder := boxInputVar)
+          EnvironmentBelowFrontier.empty
+        intro location member
+        simp at member
+    }
+  · exact trivial
+
 /-- Compiler-facing retained-box regression: a large `UInt64` payload forces
 paired heap allocation and returns the extended target owner ledger. -/
 theorem retainedBoxExactStepLedgerPreserved
@@ -5551,6 +5627,65 @@ theorem retainedBoxExactStepLedgerPreserved
       (fuelBound := Nat.le_refl 2)
       usedBound retainedBoxState retainedBoxState programs frames joins env
       runtime step
+
+/-- The concrete heap-backed box allocation preserves complete source
+ownership alongside the paired non-lockstep relation. -/
+theorem retainedBoxExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedBoxState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedBoxState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedBoxState.program retainedBoxState.program := by
+    simpa [retainedBoxState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedBoxState.frames retainedBoxState.frames [] [] := by
+    simpa [retainedBoxState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedBoxUsed
+        retainedBoxState.joins retainedBoxState.joins := by
+    simpa [retainedBoxState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedBoxUsed
+  have env :
+      EnvRelOn emptyAddressRenaming retainedBoxUsed
+        retainedBoxState.env retainedBoxState.env := by
+    simpa [retainedBoxState, retainedBoxEnv] using
+      (EnvRelOn.empty emptyAddressRenaming retainedBoxUsed).bindBoth
+        (binder := boxInputVar)
+        (ValueRel.scalar (.uint64 18446744073709551615))
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedBoxState.runtime retainedBoxState.runtime
+        (envRootsOn retainedBoxUsed retainedBoxState.env ++ [])
+        (envRootsOn retainedBoxUsed retainedBoxState.env ++ []) := by
+    simpa [retainedBoxState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  have usedBound :
+      UsedSubset
+        (collectLetValue neutralUsed
+          (LCNF.LetValue.box u64Type boxInputVar :
+            LCNF.LetValue .impure))
+        retainedBoxUsed := by
+    simpa [collectLetValue, retainedBoxUsed] using
+      UsedSubset.refl retainedBoxUsed
+  simpa [retainedBoxState, retainedBoxCode,
+    retainedBoxDecl, letDecl] using
+    retainedBoxStepBinderReady
+      |>.match_retainedBoxLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2)
+        usedBound retainedBoxState retainedBoxState programs frames joins env
+        runtime retainedBoxSourceOwnership step
 
 /-- The deleted large scalar box may allocate one source-only cell while the
 target's empty allocation ledger remains unchanged. -/
