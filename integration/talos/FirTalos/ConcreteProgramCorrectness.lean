@@ -485,12 +485,13 @@ theorem sourceLazyLetResult_thenExecEvaluates
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
       observation := by
+  obtain ⟨prefixCount, sourceSteps⟩ := sourceStep.execSteps
   apply execEvaluates_of_steps
       (middle := sourceCodeState context nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) continuation)
+      (prefixCount := prefixCount)
       (by
-        unfold SourceLazyLetResult at sourceStep
-        simpa [sourceCodeState] using sourceStep)
+        simpa [sourceCodeState] using sourceSteps)
     continued
 
 theorem sourceCallLetResult_thenExecEvaluates

@@ -130,32 +130,194 @@ def SourceExternalLetResult (context : Fir.Wasm.Context)
       env := bind sourceEnv decl.fvarId sourceValue
       runtime := nextRuntime }
 
-/-- The two executable source paths for a zero-argument declaration. A cache
-hit stages and binds the cached value in three steps; a miss additionally
-consumes the interpreter's cache frame after evaluating the declaration. -/
+/-- The two executable source paths for a zero-argument declaration. -/
 inductive LazyCachePath where
   | hit
   | miss
   deriving Inhabited, BEq
 
-def LazyCachePath.sourceSteps : LazyCachePath → Nat
-  | .hit => 3
-  | .miss => 4
+/--
+Structured executable source behavior of one lazy-cache miss.
+
+The first step stages the nullary named invocation under the caller's binding
+frame. The second step establishes that the semantic cache lookup missed by
+entering a declaration with a fresh cache frame. The declaration may then take
+any finite number of steps before yielding its result with both frames still
+present. The final two steps publish the result and resume the caller.
+
+Keeping the declaration execution as an existential finite prefix admits
+internal declarations independently of body length while retaining the exact
+states needed to invert cache absence and publication.
+-/
+def SourceLazyMissResult (context : Fir.Wasm.Context)
+    (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) : Prop :=
+  ∃ (declaration : Lean.Name)
+      (calleeControl : Control)
+      (calleeEnv : Env)
+      (calleeJoins : JoinEnv)
+      (calleeRuntime : RuntimeState)
+      (resultEnv : Env)
+      (resultJoins : JoinEnv)
+      (callRuntime : RuntimeState)
+      (calleeSteps : Nat),
+    executeStep externals {
+        program := context.program
+        control := .code (.let decl continuation)
+        env := sourceEnv
+        runtime := sourceRuntime } =
+      .next {
+        program := context.program
+        control := .invokeName declaration #[]
+        env := sourceEnv
+        frames := [.bind decl.fvarId continuation sourceEnv []]
+        runtime := sourceRuntime } ∧
+    executeStep externals {
+        program := context.program
+        control := .invokeName declaration #[]
+        env := sourceEnv
+        frames := [.bind decl.fvarId continuation sourceEnv []]
+        runtime := sourceRuntime } =
+      .next {
+        program := context.program
+        control := calleeControl
+        env := calleeEnv
+        joins := calleeJoins
+        frames := [
+          .cache declaration,
+          .bind decl.fvarId continuation sourceEnv []]
+        runtime := calleeRuntime } ∧
+    ExecSteps externals calleeSteps {
+        program := context.program
+        control := calleeControl
+        env := calleeEnv
+        joins := calleeJoins
+        frames := [
+          .cache declaration,
+          .bind decl.fvarId continuation sourceEnv []]
+        runtime := calleeRuntime } {
+        program := context.program
+        control := .yielded sourceValue
+        env := resultEnv
+        joins := resultJoins
+        frames := [
+          .cache declaration,
+          .bind decl.fvarId continuation sourceEnv []]
+        runtime := callRuntime } ∧
+    executeStep externals {
+        program := context.program
+        control := .yielded sourceValue
+        env := resultEnv
+        joins := resultJoins
+        frames := [
+          .cache declaration,
+          .bind decl.fvarId continuation sourceEnv []]
+        runtime := callRuntime } =
+      .next {
+        program := context.program
+        control := .yielded sourceValue
+        env := resultEnv
+        joins := resultJoins
+        frames := [.bind decl.fvarId continuation sourceEnv []]
+        runtime := nextRuntime } ∧
+    executeStep externals {
+        program := context.program
+        control := .yielded sourceValue
+        env := resultEnv
+        joins := resultJoins
+        frames := [.bind decl.fvarId continuation sourceEnv []]
+        runtime := nextRuntime } =
+      .next {
+        program := context.program
+        control := .code continuation
+        env := bind sourceEnv decl.fvarId sourceValue
+        runtime := nextRuntime }
 
 def SourceLazyLetResult (path : LazyCachePath) (context : Fir.Wasm.Context)
     (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (decl : Lean.Compiler.LCNF.LetDecl .impure)
     (continuation : Lean.Compiler.LCNF.Code .impure)
     (nextRuntime : RuntimeState) (sourceValue : Value) : Prop :=
-  ExecSteps externals path.sourceSteps {
-      program := context.program
-      control := .code (.let decl continuation)
-      env := sourceEnv
-      runtime := sourceRuntime } {
-      program := context.program
-      control := .code continuation
-      env := bind sourceEnv decl.fvarId sourceValue
-      runtime := nextRuntime }
+  match path with
+  | .hit =>
+      ExecSteps externals 3 {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } {
+          program := context.program
+          control := .code continuation
+          env := bind sourceEnv decl.fvarId sourceValue
+          runtime := nextRuntime }
+  | .miss =>
+      SourceLazyMissResult context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue
+
+private theorem execSteps_compose
+    {externals : ExternalImpl} {prefixCount suffixCount : Nat}
+    {first middle last : MachineState}
+    (firstSteps : ExecSteps externals prefixCount first middle)
+    (lastSteps : ExecSteps externals suffixCount middle last) :
+    ∃ count, ExecSteps externals count first last := by
+  induction firstSteps with
+  | refl => exact ⟨suffixCount, lastSteps⟩
+  | step head _ ih =>
+      obtain ⟨count, steps⟩ := ih lastSteps
+      exact ⟨count + 1, .step head steps⟩
+
+/--
+Either structured lazy-cache path denotes an exact finite interpreter prefix.
+The miss count is existential because it includes the declaration body's
+finite execution rather than a fixed protocol constant.
+-/
+theorem SourceLazyLetResult.execSteps
+    {path : LazyCachePath}
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    (sourceStep :
+      SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue) :
+    ∃ count,
+      ExecSteps externals count {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } {
+          program := context.program
+          control := .code continuation
+          env := bind sourceEnv decl.fvarId sourceValue
+          runtime := nextRuntime } := by
+  cases path with
+  | hit => exact ⟨3, sourceStep⟩
+  | miss =>
+      rcases sourceStep with
+        ⟨declaration, calleeControl, calleeEnv, calleeJoins, calleeRuntime,
+          resultEnv, resultJoins, callRuntime, calleeSteps, staged, entered,
+          evaluated, published, bound⟩
+      have suffix :
+          ExecSteps externals 2 {
+              program := context.program
+              control := .yielded sourceValue
+              env := resultEnv
+              joins := resultJoins
+              frames := [
+                .cache declaration,
+                .bind decl.fvarId continuation sourceEnv []]
+              runtime := callRuntime } {
+              program := context.program
+              control := .code continuation
+              env := bind sourceEnv decl.fvarId sourceValue
+              runtime := nextRuntime } :=
+        .step published (.step bound (.refl _))
+      obtain ⟨count, tail⟩ := execSteps_compose evaluated suffix
+      exact ⟨_, .step staged (.step entered tail)⟩
 
 /-- Exact terminating source behavior for an internal named call or closure
 application. The existential step count admits recursive callees without

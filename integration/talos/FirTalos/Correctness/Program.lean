@@ -200,8 +200,8 @@ theorem SourceExternalLetResult.thenCodeEvaluates
   obtain ⟨count, steps⟩ := execSteps_compose externalSteps suffix
   exact ⟨count, final, steps, done⟩
 
-/-- Either exact lazy-cache prefix (three-step hit or four-step miss) composes
-with the existing call-free source evaluation relation. -/
+/-- Either structured lazy-cache prefix composes with the existing call-free
+source evaluation relation. -/
 theorem SourceLazyLetResult.thenCodeEvaluates
     {path : LazyCachePath} {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
@@ -216,13 +216,13 @@ theorem SourceLazyLetResult.thenCodeEvaluates
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
       (ReturnedObservation resultRuntime resultValue) := by
+  obtain ⟨prefixCount, sourceSteps⟩ := sourceStep.execSteps
   have lazySteps :
-      ExecSteps externals path.sourceSteps
+      ExecSteps externals prefixCount
         (sourceCodeState context sourceRuntime sourceEnv (.let decl continuation))
         (sourceCodeState context nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation) := by
-    unfold SourceLazyLetResult at sourceStep
-    simpa [sourceCodeState] using sourceStep
+    simpa [sourceCodeState] using sourceSteps
   rcases continued.execEvaluates externals with
     ⟨suffixCount, final, suffix, done⟩
   obtain ⟨count, steps⟩ := execSteps_compose lazySteps suffix
