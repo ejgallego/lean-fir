@@ -21,8 +21,10 @@ lands and must not be used as the current feature-branch identity.
 
 - Validation's validated pre-record coordination head is `3ae6c37d`, with
   functional head `96eec154` on semantic base `fff91175`. Current `main` is the
-  later proof/documentation checkpoint `50bd4a3c`, so validation is four
-  commits behind and one hundred twelve commits ahead.
+  later validation checkpoint `15b8727e`, so the long validation branch is nine
+  commits behind and one hundred twelve commits ahead. Its older
+  patch-equivalent commit `a2907a66` has landed independently as `15b8727e`;
+  the next long-branch rebase must skip that duplicate.
 - Rebased native/LCNF run
   `92b727e4a1d82ccfb3a9f419e28f9afd880ccd43ca1b1f0b985dcaa0874e19cb`
   passes 1,008/1,008. Immutable evidence
@@ -45,11 +47,14 @@ lands and must not be used as the current feature-branch identity.
   All three edges are equal, all 1,162 compiler-product reads are confirmed by
   `strace`, and the 581 native-to-V8 cases exceed the 413-case global oracle
   floor. The retained 67-case protocol-v4 float/mixed triangle is an additive
-  frontier, not the total real-engine baseline. The later proof-only main
-  checkpoint `50bd4a3c` also passes the full Lean build and examples. The
-  current protocol-v4 attestor correctly rejects the protocol-v3 baseline
-  evidence as an unsupported version, so it is strong runtime evidence but not
-  a current global oracle attestation; that v4 claim still waits for W7.
+  frontier, not the total real-engine baseline. Current `main` at `15b8727e`
+  passes the complete `make check`, including the same 581-case triangle and
+  its 590-case composed coverage index. It also supplies enforceable
+  `portable` and `exact` equivalence gates for two independently verified
+  evidence graphs. The current protocol-v4 attestor correctly rejects the
+  protocol-v3 baseline evidence as an unsupported version, so it is strong
+  runtime evidence but not a current global oracle attestation; that v4 claim
+  still waits for W7.
 - The first rebased lane-4 commit, `7053d748`, passes the full Lean build,
   examples, harness tests, native/LCNF baseline, and direct tier in isolation.
   Its only `make check` stop is the W7-owned exhaustive match at
@@ -57,18 +62,21 @@ lands and must not be used as the current feature-branch identity.
   nonempty lane-4 prefix is currently landable by itself; the first integration
   slice is the float scalar contract plus W7's manifest handoff.
 - The whole lane-4 stack is not landable on green `main` until the proof lane
-  checks the successive shared-contract boundaries and repairs exactly
+  checks the successive shared-contract boundaries. The last pre-rebase probe
+  stopped exactly at
   `AlphaEqvCode.lean:2209,2358,2360,2616` plus
-  `SimpCaseRelation.lean:427,1248,1250,1317,1319`. Proof commits `7c0bb6c3` and
-  `28aa7930` are now on `main`: captured fixed arguments are recovered from
+  `SimpCaseRelation.lean:427,1248,1250,1317,1319`; those locations must be
+  re-probed after the next validation rebase rather than assumed current.
+  Proof commits `7c0bb6c3`, `28aa7930`, and documentation checkpoint
+  `405d910f` are now on `main`: captured fixed arguments are recovered from
   heap ownership, full and re-partial value invocation preserve the source
   carrier, and the ownership-strengthened internal dispatcher covers code,
   yielded, named, and value controls. The next proof boundary is an explicit
   source ownership contract for foreign-response resumption.
 - W6 is active at committed head `4f1646e5`, one hundred twenty-eight commits
-  ahead and zero behind current `main`, with an uncommitted change in its owned
-  `ConcreteCompilerCorrectness.lean` and no formal handoff yet. W7 is clean at
-  `621b8552`, eighteen commits ahead and six behind `main`; it contains the
+  ahead and five behind current `main`, with uncommitted changes in four owned
+  concrete-correctness modules and no formal handoff yet. W7 is clean at
+  `6a899a03`, nineteen commits ahead and eleven behind `main`; it contains the
   generation-owned float manifest arms needed by the full V8 plan and must
   rebase and hand them off before lane 4 reruns the whole-corpus triangle.
 
