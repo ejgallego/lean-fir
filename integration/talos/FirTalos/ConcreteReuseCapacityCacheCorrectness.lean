@@ -2002,6 +2002,7 @@ theorem SourceLazyLetResult.hit_cacheFacts
     {sourceRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {fvarId : FVarId}
+    {binderName : Name}
     {type : Expr}
     {declaration : Name}
     {target : LCNF.Decl .impure}
@@ -2012,7 +2013,7 @@ theorem SourceLazyLetResult.hit_cacheFacts
     (sourceStep :
       SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
           fvarId
-          binderName := fvarId.name
+          binderName
           type
           value := .fap declaration #[] }
         continuation nextRuntime sourceValue) :
@@ -2139,6 +2140,35 @@ theorem SourceLazyLetResult.hit_cacheFacts
                   subst sourceValue
                   subst nextRuntime
                   exact ⟨rfl, rfl⟩
+
+/--
+Generic-`LetDecl` adapter for `hit_cacheFacts`. Binder metadata is irrelevant
+to the source transition, so compiler inversion needs only the exact nullary
+call value.
+-/
+theorem SourceLazyLetResult.hit_cacheFacts_of_valueEq
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (valueEq : decl.value = .fap declaration #[])
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue) :
+    nextRuntime = sourceRuntime ∧
+      findGlobal? sourceRuntime.globals declaration = some sourceValue := by
+  cases decl with
+  | mk fvarId binderName type value =>
+      simp only at valueEq
+      subst value
+      exact SourceLazyLetResult.hit_cacheFacts targetEq paramsEq sourceStep
 
 /--
 A structured source cache miss determines the two semantic facts consumed by
@@ -3812,6 +3842,99 @@ theorem
       cacheKindEq cacheDescriptorsEq publicationExternals
       publicationDescriptors
   exact ⟨nextStore, nextLocals, step, nextCache⟩
+
+/--
+Structural compiler-derived cache hit.
+
+The source-only facts identify a nullary declaration and its result lane.
+Successful production lowering/adaptation then supplies the cache and call
+indices by inversion, while the generated environment and canonical frame
+supply the populated slot and checked local update. No target execution
+certificate is a premise.
+-/
+theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
+    {facts : ReuseCapacityFacts}
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {resultKind : AbiKind}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {resultIndex remainingBytes stepCost : Nat}
+    {initialWitness : RefinementWitness}
+    (valueEq : decl.value = .fap declaration #[])
+    (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (resultCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, resultKind))
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (stepCostEq : stepCost = 0) :
+    ∃ nextStore nextLocals nextWitness physical,
+      BudgetedCapacityPreservingLazyStep .hit facts context sourceFunction
+          module hostEnv sourceExternals decl continuation targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+          locals nextLocals resultIndex initialWitness nextWitness physical
+          stepCost ∧
+        reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) ∧
+          LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
+  obtain ⟨runtimeEq, semanticFound⟩ :=
+    SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
+      sourceStep
+  subst nextRuntime
+  subst stepCost
+  obtain ⟨cacheIndex, _, _, cacheEq, _, _, valueCodeEq, targetValueEq⟩ :=
+    compileCachedLetValue_adapted_inv context sourceModule sourceFunction labels
+      decl declaration target resultKind valueCode targetValue valueEq kindEq
+      targetEq paramsEq valueCompiled valueAdapted
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  rcases invariant with
+    ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩, _⟩, cacheTable⟩
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq targetEq paramsEq cacheEq
+  obtain ⟨physical, slot⟩ :=
+    cacheTable.populatedSlot initializerFound signature semanticFound
+  obtain ⟨nextLocals, hit⟩ :=
+    BudgetedCapacityPreservingLazyStep.hit_of_populatedSlot sourceStep
+      initialRelated.stateRelated frameAligned resultFound resultKindAt slot
+  refine ⟨initial, nextLocals, initialWitness, physical, ?_, ?_, cacheTable⟩
+  · rw [targetValueEq]
+    exact hit
+  · simp [Fir.Wasm.reuseCapacityLetFacts?, valueEq]
 
 /--
 Uniform implementation condition for compiler-generated lazy declarations.

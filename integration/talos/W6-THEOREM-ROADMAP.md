@@ -907,6 +907,18 @@ acceptance tests pass.
    `miss_of_cachedDeclarationFrame` no longer accepts `cacheFound` or
    `cacheKindEq`. Its remaining work belongs to the recursive generated
    declaration-environment induction, not another runtime cache premise.
+   Successful cached nullary lowering and Talos adaptation now have joint
+   production inversions: `compileCachedLetValue_adapted_inv` recovers the
+   cache index, declaration/runtime call indices, symbolic code, and
+   executable target code from the two actual pipeline success equations.
+   The generic source-hit inversion derives the unchanged runtime and semantic
+   cache lookup without constraining binder metadata.
+   `BudgetedCapacityPreservingLazyStep.hit_of_compiler` composes those facts
+   with local-layout alignment, the generated cache environment, and the
+   canonical runtime frame, yielding the exact zero-cost hit, checked result
+   write, reuse-fact erasure, and successor cache relation. Thus the uniform
+   hit branch is structural and target-certificate-free; the remaining cache
+   induction work is the hereditary miss/publication branch.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source
@@ -915,12 +927,14 @@ acceptance tests pass.
    the generated module. Coordinate the shared lowering repair before
    deriving exact kind alignment from supported compiler output; do not weaken
    W6's exact typed-lane relation.
-   Next expose validator success as `LazyCacheValidationFacts`, derive
-   canonical context/module cache-name equality, and resolve the remaining
-   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
-   deriving those facts from the generated declaration environment or by
-   coordinating alias-invalidating validator transfer, then close the
-   generated-environment selection and successor-cache-table conditions.
+   Next package the source/static nullary admission used by the hit theorem,
+   construct the hereditary miss from generated declaration/import
+   selection, and resolve the remaining
+   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication instance by
+   deriving it from the generated declaration environment or by coordinating
+   alias-invalidating validator transfer. Integration must still expose the
+   universal validator accessor needed to discharge
+   `LazyCacheValidationFacts` for every successfully validated module.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

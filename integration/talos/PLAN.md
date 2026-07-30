@@ -5130,12 +5130,33 @@ facts to derive the selected concrete slot and its exact signature kind.
 `miss_of_cachedDeclarationFrame` consequently no longer accepts
 `cacheFound` or `cacheKindEq`.
 
+W6.6gzs closes the compiler-derived structural hit branch.
+`compileCachedLetValue_inv` inverts a successful production
+`compileLetValue` result for a source nullary call, recovering the actual
+cache index and exact symbolic flag/branch/value sequence.
+`adaptCachedLetValue_inv` then inverts successful Talos adaptation, recovering
+both call indices and the exact executable block.
+`compileCachedLetValue_adapted_inv` composes these facts directly from the two
+pipeline success equations; neither indices nor target code are source
+evaluation certificates.
+
+`SourceLazyLetResult.hit_cacheFacts` now ignores arbitrary binder metadata,
+and its generic `hit_cacheFacts_of_valueEq` adapter derives both the unchanged
+source runtime and populated semantic cache lookup from an actual three-step
+source hit. Finally,
+`BudgetedCapacityPreservingLazyStep.hit_of_compiler` combines compiler
+inversion, local-layout alignment, the generated cache table, and the
+canonical runtime frame. It returns the exact zero-cost target hit, checked
+caller-local update, authoritative reuse-fact transfer, and unchanged
+whole-cache relation from source/static facts plus the real compiler and
+adapter outputs. No target execution witness is a premise.
+
 The remaining uniform implementation work is now declaration-environment
-induction rather than another caller-side cache lemma. Its miss branch must
-select the generated callee/import operations, obtain the cache-aware
-hereditary declaration result, and establish the facts-aware publication
-transport. Independently, integration still owes the universal validator
-accessor, and the shared lowering bug
+induction on the miss branch rather than another caller-side hit/cache lemma.
+That branch must select the generated callee/import operations, obtain the
+cache-aware hereditary declaration result, and establish the facts-aware
+publication transport. Independently, integration still owes the universal
+validator accessor, and the shared lowering bug
 `FIR-BUG-wasm-none-lazy-cache-result-refinement` still prevents deriving
 result-kind alignment for every source program currently admitted by
 `lowerSupported`.

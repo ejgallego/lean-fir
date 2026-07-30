@@ -66,6 +66,192 @@ theorem compileCachedLetValue_adapted
   · simp [instructions, instruction, declarationFound, cacheSetFound]
     rfl
 
+/--
+Successful lowering of a cached nullary declaration determines its cache
+slot and exact symbolic instruction sequence.
+
+This is an inversion theorem for the production compiler result. In
+particular, the cache index is recovered from `compileLetValue`; it is not an
+execution certificate supplied by a source evaluation.
+-/
+theorem compileCachedLetValue_inv
+    (context : Fir.Wasm.Context)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (name : Lean.Name)
+    (target : Lean.Compiler.LCNF.Decl .impure)
+    (resultKind : AbiKind)
+    (valueCode : List Fir.Wasm.Instruction)
+    (valueEq : decl.value = .fap name #[])
+    (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
+    (targetEq : context.program.findDecl? name = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode) :
+    ∃ cacheIndex,
+      context.cachedDeclarations.findIdx? (· == name) = some cacheIndex ∧
+      valueCode = [
+        .globalGet (2 * cacheIndex) .uint32,
+        .ifElse [] [
+          .call (.declaration name),
+          .call (.runtime (.cacheSet name resultKind)),
+          .globalSet (2 * cacheIndex + 1) resultKind,
+          .i32Const .uint32 1,
+          .globalSet (2 * cacheIndex) .uint32],
+        .globalGet (2 * cacheIndex + 1) resultKind] := by
+  cases cacheEq : context.cachedDeclarations.findIdx? (· == name) with
+  | none =>
+      simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, valueEq, kindEq,
+        Fir.Wasm.compileArgs, targetEq, paramsEq, cacheEq] at valueCompiled
+      nomatch valueCompiled
+  | some cacheIndex =>
+      have compiledExpected :
+          Fir.Wasm.compileLetValue context decl = .ok [
+            .globalGet (2 * cacheIndex) .uint32,
+            .ifElse [] [
+              .call (.declaration name),
+              .call (.runtime (.cacheSet name resultKind)),
+              .globalSet (2 * cacheIndex + 1) resultKind,
+              .i32Const .uint32 1,
+              .globalSet (2 * cacheIndex) .uint32],
+            .globalGet (2 * cacheIndex + 1) resultKind] := by
+        simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, valueEq, kindEq,
+          Fir.Wasm.compileArgs, targetEq, paramsEq, cacheEq]
+      rw [compiledExpected] at valueCompiled
+      injection valueCompiled with codeEq
+      exact ⟨cacheIndex, rfl, codeEq.symm⟩
+
+/--
+Successful Talos adaptation of the canonical cached sequence determines both
+call indices and the exact executable Wasm block.
+
+Together with `compileCachedLetValue_inv`, this makes the static indices
+consequences of the actual compiler pipeline rather than extra assumptions of
+the cache simulation theorem.
+-/
+theorem adaptCachedLetValue_inv
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (name : Lean.Name) (resultKind : AbiKind) (cacheIndex : Nat)
+    (targetValue : Wasm.Program)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels [
+        .globalGet (2 * cacheIndex) .uint32,
+        .ifElse [] [
+          .call (.declaration name),
+          .call (.runtime (.cacheSet name resultKind)),
+          .globalSet (2 * cacheIndex + 1) resultKind,
+          .i32Const .uint32 1,
+          .globalSet (2 * cacheIndex) .uint32],
+        .globalGet (2 * cacheIndex + 1) resultKind] = .ok targetValue) :
+    ∃ declarationId cacheSetId,
+      callIndex? sourceModule (.declaration name) = some declarationId ∧
+      callIndex? sourceModule (.runtime (.cacheSet name resultKind)) =
+        some cacheSetId ∧
+      targetValue = [
+        .globalGet (2 * cacheIndex),
+        .iff 0 0 [] [
+          .call declarationId,
+          .call cacheSetId,
+          .globalSet (2 * cacheIndex + 1),
+          .const 1,
+          .globalSet (2 * cacheIndex)],
+        .globalGet (2 * cacheIndex + 1)] := by
+  cases declarationFound : callIndex? sourceModule (.declaration name) with
+  | none =>
+      simp [instructions, instruction, declarationFound] at valueAdapted
+      nomatch valueAdapted
+  | some declarationId =>
+      cases cacheSetFound :
+          callIndex? sourceModule (.runtime (.cacheSet name resultKind)) with
+      | none =>
+          simp [instructions, instruction, declarationFound, cacheSetFound]
+            at valueAdapted
+          nomatch valueAdapted
+      | some cacheSetId =>
+          have adaptedExpected :
+              instructions sourceModule sourceFunction labels [
+                .globalGet (2 * cacheIndex) .uint32,
+                .ifElse [] [
+                  .call (.declaration name),
+                  .call (.runtime (.cacheSet name resultKind)),
+                  .globalSet (2 * cacheIndex + 1) resultKind,
+                  .i32Const .uint32 1,
+                  .globalSet (2 * cacheIndex) .uint32],
+                .globalGet (2 * cacheIndex + 1) resultKind] = .ok [
+                  .globalGet (2 * cacheIndex),
+                  .iff 0 0 [] [
+                    .call declarationId,
+                    .call cacheSetId,
+                    .globalSet (2 * cacheIndex + 1),
+                    .const 1,
+                    .globalSet (2 * cacheIndex)],
+                  .globalGet (2 * cacheIndex + 1)] := by
+            simp [instructions, instruction, declarationFound, cacheSetFound]
+            rfl
+          rw [adaptedExpected] at valueAdapted
+          injection valueAdapted with targetEq
+          exact ⟨declarationId, cacheSetId, rfl, rfl, targetEq.symm⟩
+
+/--
+Joint compiler/adapter inversion for a successful cached nullary lowering.
+
+The returned cache and call indices, symbolic code, and executable code are
+all recovered from the two production success equations. This is the
+compiler-facing boundary used by structural cache simulation.
+-/
+theorem compileCachedLetValue_adapted_inv
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure)
+    (name : Lean.Name)
+    (target : Lean.Compiler.LCNF.Decl .impure)
+    (resultKind : AbiKind)
+    (valueCode : List Fir.Wasm.Instruction)
+    (targetValue : Wasm.Program)
+    (valueEq : decl.value = .fap name #[])
+    (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
+    (targetEq : context.program.findDecl? name = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    ∃ cacheIndex declarationId cacheSetId,
+      context.cachedDeclarations.findIdx? (· == name) = some cacheIndex ∧
+      callIndex? sourceModule (.declaration name) = some declarationId ∧
+      callIndex? sourceModule (.runtime (.cacheSet name resultKind)) =
+        some cacheSetId ∧
+      valueCode = [
+        .globalGet (2 * cacheIndex) .uint32,
+        .ifElse [] [
+          .call (.declaration name),
+          .call (.runtime (.cacheSet name resultKind)),
+          .globalSet (2 * cacheIndex + 1) resultKind,
+          .i32Const .uint32 1,
+          .globalSet (2 * cacheIndex) .uint32],
+        .globalGet (2 * cacheIndex + 1) resultKind] ∧
+      targetValue = [
+        .globalGet (2 * cacheIndex),
+        .iff 0 0 [] [
+          .call declarationId,
+          .call cacheSetId,
+          .globalSet (2 * cacheIndex + 1),
+          .const 1,
+          .globalSet (2 * cacheIndex)],
+        .globalGet (2 * cacheIndex + 1)] := by
+  obtain ⟨cacheIndex, cacheEq, valueCodeEq⟩ :=
+    compileCachedLetValue_inv context decl name target resultKind valueCode
+      valueEq kindEq targetEq paramsEq valueCompiled
+  rw [valueCodeEq] at valueAdapted
+  obtain ⟨declarationId, cacheSetId, declarationFound, cacheSetFound,
+      targetValueEq⟩ :=
+    adaptCachedLetValue_inv sourceModule sourceFunction labels name resultKind
+      cacheIndex targetValue valueAdapted
+  exact ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationFound,
+    cacheSetFound, valueCodeEq, targetValueEq⟩
+
 /-- The proof package required from one compiler-generated zero-argument
 declaration before its result may be published through the lazy cache.
 
