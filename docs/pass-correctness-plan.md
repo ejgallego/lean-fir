@@ -1350,6 +1350,20 @@ the same active-code pattern to deleted constructor allocation, object writes,
 and reset, then cover retained result bindings and frame-pushing invocation
 edges before assembling the general dispatcher.
 
+The remaining heap-changing deleted-let families and the first write family
+land at `1cef5df2`, with concrete regressions at `23898302`.
+Constructor allocation, object-field replacement, and reset now reuse one
+successful runtime effect for both the exact source-only compiler relation and
+the complete machine carrier. Reset additionally proves that every successful
+result is an internal reuse token and therefore adds no ordinary heap-object
+root when the dead result is bound. Three semantic-step fixtures check the
+actual allocating constructor, unreachable object write, and recursive-reset
+edges; each returns the target stuttering path, exact hereditary relation, and
+post-step source ownership. Next cover the unboxed word/scalar write variants,
+thread these operation-specific theorems through the exact active-code
+dispatcher, and then handle retained result bindings and invocation/frame
+pushes.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1452,6 +1466,9 @@ under the hereditary yielded dispatcher.
 `a43b7f4c` lifts allocation, object-write, reset, and reuse ownership through
 the complete machine stack, preserves the carrier across both deleted-reuse
 token branches, and checks the semantic missing-token transition.
+`1cef5df2` preserves the same carrier across deleted constructor allocation,
+object-field replacement, and reset, including reset's dead token binding;
+`23898302` checks all three concrete semantic edges.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1526,10 +1543,14 @@ the existing nullary-`.fap` semantic discrepancy.
    constructor allocation, object writes, reset, and both reuse modes; the
    deleted-reuse active-code matcher preserves the carrier in both token
    branches and its semantic wrapper is checked by the failed-token fixture.
-   Next extend that pattern to deleted constructor allocation, object writes,
-   and reset, then preserve the carrier across retained result bindings,
-   invocation/control changes, and pushed frames before carrying the
-   compositional closure certificate through the general dispatcher.
+   Deleted constructor allocation, object-field replacement, and reset now
+   have the same ownership-strengthened core and semantic matchers, with
+   concrete regressions for each. Next extend the pattern to unboxed word and
+   scalar writes, expose all of these operation-specific results through the
+   exact active-code dispatcher, and preserve the carrier across retained
+   result bindings, invocation/control changes, and pushed frames before
+   carrying the compositional closure certificate through the general
+   dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
