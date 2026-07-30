@@ -11174,6 +11174,121 @@ theorem SourceMachineOwnershipBelowFrontier.retainedFVarLetStep
             · trivial
             · exact step
 
+/-- A retained erased value is runtime-neutral and introduces no heap
+location when it is bound in the continuation environment. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedErasedLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  apply bounded.runtimeNeutralLetStep
+    (declaration := {
+      fvarId, binderName, type, value := .erased })
+    (action := .value .erased)
+  · simp [evalLetValue, Pure.pure, Except.pure]
+  · intro location member
+    simp at member
+  · exact step
+
+/-- A retained absolute-slot `USize` projection binds an unboxed word and
+therefore introduces no heap location into the owned environment. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedUSizeProjectionLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .uproj slot object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize fieldRead :
+        getUSizeSlot state.runtime objectValue slot = fieldResult
+      cases fieldResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok field =>
+          rcases getUSizeSlot_ok_eq_usize fieldRead with
+            ⟨word, rfl⟩
+          apply bounded.runtimeNeutralLetStep
+            (declaration := {
+              fvarId, binderName, type, value := .uproj slot object })
+            (action := .value (.usize word))
+          · simp [evalLetValue, objectRead, fieldRead,
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · intro location member
+            simp at member
+          · exact step
+
+/-- A retained packed-scalar projection binds an immediate scalar and
+therefore introduces no heap location into the owned environment. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedScalarProjectionLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .sproj width offset object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize fieldRead :
+        getScalarField state.runtime objectValue width offset = fieldResult
+      cases fieldResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok field =>
+          rcases getScalarField_ok_eq_scalar fieldRead with
+            ⟨scalar, rfl⟩
+          apply bounded.runtimeNeutralLetStep
+            (declaration := {
+              fvarId, binderName, type,
+              value := .sproj width offset object })
+            (action := .value (.scalar scalar))
+          · simp [evalLetValue, objectRead, fieldRead,
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · intro location member
+            simp at member
+          · exact step
+
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
 garbage. Unlike a ledger reconstructed from a final relation witness, this
@@ -18291,6 +18406,46 @@ theorem match_retainedErasedLetStep_binderReady
       sourceTransition targetTransition afterRelated
       (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained erased value. -/
+theorem match_retainedErasedLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .erased
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :=
+    ownership.retainedErasedLetStep step
+  rcases match_retainedErasedLetStep_binderReady
+      sourceState targetState programs frames continuation joins env runtime
+      step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
+
 /-- Ledger-carrying retained erased-let matcher. The paired transition changes
 only environments and control, so the target frontier and owner ledger are
 unchanged. -/
@@ -18556,6 +18711,61 @@ theorem ExactShadowCodeBinderReady.match_retainedErasedLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env runtime step
+
+/-- Ownership-strengthened exact retained erased value. -/
+theorem ExactShadowCodeBinderReady.match_retainedErasedLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.erased : LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .erased
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.erased : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .erased
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .erased
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  exact match_retainedErasedLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env runtime ownership step
 
 /-- Deleted counterpart of `match_retainedErasedLetStep`: exact branch
 provenance supplies both ambient binder absence and the hereditary
@@ -21973,6 +22183,47 @@ theorem match_retainedUSizeProjectionLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained `USize` projection. -/
+theorem match_retainedUSizeProjectionLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .uproj slot object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .uproj slot object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :=
+    ownership.retainedUSizeProjectionLetStep step
+  rcases match_retainedUSizeProjectionLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
+
 /-- Ledger-carrying hereditary `USize` projection matcher. Successful slot
 selection publishes the identical immediate word while the runtime-neutral
 retained-let rule preserves the exact target allocation frontier. -/
@@ -22150,6 +22401,64 @@ theorem ExactShadowCodeBinderReady.match_retainedUSizeProjectionLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained `USize` projection. -/
+theorem ExactShadowCodeBinderReady.match_retainedUSizeProjectionLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel slot : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.uproj slot object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .uproj slot object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.uproj slot object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .uproj slot object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .uproj slot object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedUSizeProjectionLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted `USize` projection provenance supplies binder absence and
 the hereditary continuation; its successful read is runtime-neutral. -/
@@ -22632,6 +22941,47 @@ theorem match_retainedScalarProjectionLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained packed-scalar projection. -/
+theorem match_retainedScalarProjectionLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .sproj width offset object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .sproj width offset object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :=
+    ownership.retainedScalarProjectionLetStep step
+  rcases match_retainedScalarProjectionLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
+
 /-- Ledger-carrying hereditary packed-scalar projection matcher. Successful
 field selection publishes the identical immediate scalar while the
 runtime-neutral retained-let rule preserves the target allocation frontier. -/
@@ -22812,6 +23162,66 @@ theorem ExactShadowCodeBinderReady.match_retainedScalarProjectionLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained packed-scalar projection. -/
+theorem ExactShadowCodeBinderReady.match_retainedScalarProjectionLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel width offset : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.sproj width offset object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type,
+            value := .sproj width offset object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.sproj width offset object :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .sproj width offset object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .sproj width offset object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedScalarProjectionLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted packed-scalar projection provenance supplies binder absence
 and the hereditary continuation; its successful read is runtime-neutral. -/
