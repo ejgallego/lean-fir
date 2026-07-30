@@ -1390,6 +1390,19 @@ fixtures check the bind-frame and local-alias successors. Next cover the
 remaining retained result-producing active-code families before strengthening
 the global exact dispatcher.
 
+The root-free retained-result ownership bridge lands at `51494be3`, with
+concrete projection regressions at `89d6a99e`. Retained `.erased`, `.uproj`,
+and `.sproj` successors all use the runtime-neutral ownership seam: erased,
+`USize`, and scalar results contain no heap locations, so successful
+evaluation and result binding preserve the complete source carrier without a
+new allocation or ownership premise. Hereditary and exact graph matchers
+return the semantic relation and post-step ownership together. A paired
+one-cell constructor fixture checks actual retained `USize` and packed-scalar
+projection steps, including the environment-root restriction needed by the
+runtime relation. Next cover the heap-derived retained read family
+(`.oproj`, `.unbox`, and `.isShared`), then the allocation-capable retained
+results before strengthening the global exact dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1503,6 +1516,9 @@ ownership-aware exact matchers for all three deleted-write branches;
 machine invariant through retained `.fap`/`.fvar` value binding, control
 changes, and bind-frame pushes; `633d259d` checks exact named invocation and
 nullary local aliasing.
+`51494be3` carries the same invariant through retained `.erased`, `.uproj`,
+and `.sproj` result binding; `89d6a99e` checks concrete exact `USize` and
+packed-scalar projection steps over a related owned constructor.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1585,10 +1601,12 @@ the existing nullary-`.fap` semantic discrepancy.
    regressions, and all three deleted-write views expose branch-local exact
    ownership matchers. Runtime-neutral let actions now preserve the carrier
    across retained named/local invocation control changes, pushed bind frames,
-   and nullary local-value result binding, with exact wrappers and concrete
-   regressions. Next cover the remaining retained active-code result-producing
-   families, then strengthen the global exact active-code dispatcher and carry
-   the compositional closure certificate through the general dispatcher.
+   nullary local-value result binding, erased results, and root-free `USize`
+   and scalar projections, with exact wrappers and concrete regressions. Next
+   cover retained object projections, unboxing, and ownership queries, then
+   the remaining allocation-capable retained results; after that strengthen
+   the global exact active-code dispatcher and carry the compositional closure
+   certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
