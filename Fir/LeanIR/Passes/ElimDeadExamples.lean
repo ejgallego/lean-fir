@@ -12574,6 +12574,15 @@ def closedWritesExactOwnershipContract
       (closedWritesTargetReachable_runtimeShape targetReachable)
       related
 
+/-- The complete write fixture also checks the source-owned exact interface.
+Its existing readiness proof is ownership-independent, so the generic
+migration embeds it directly; later clients may use the supplied carrier. -/
+def closedWritesSourceOwnedExactContract
+    (externals : ExternalSpec) :
+    ElimDeadSourceOwnedExactContract externals 8
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  (closedWritesExactOwnershipContract externals).sourceOwned
+
 /-- Ledger-exact entry contract for the complete write fixture. This is the
 concrete client of the allocation-history-aware checked-pass endpoint. -/
 def closedWritesLedgerExactOwnershipContract
@@ -12639,6 +12648,25 @@ theorem closedWritesProgramLoweringCorrect
       (reachablePhaseSimulation externals)
       closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
   (closedWritesCompilerAdmissibleRun externals).loweringCorrect compatible
+
+/-- The same checked write program reaches whole-program correctness through
+the current-state source-owned exact simulation. This exercises source and
+target invariant transport together with separately maintained ownership. -/
+theorem closedWritesProgramLoweringCorrect_sourceOwnedExact
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 8)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedWritesBeforeProgram closedWritesAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_sourceOwnedExact
+    closedWritesBeforeProgramElimDeadWellFormed
+    closedWritesCheckedProgramRun
+    (closedWritesSourceOwnedExactContract externals)
+    compatible sourceCompatible
 
 /-- Direct checked-pass correctness for the write fixture through the unified
 ledger dispatcher. Unlike the legacy endpoint above, allocation-capable

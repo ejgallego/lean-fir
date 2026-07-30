@@ -19777,6 +19777,40 @@ theorem SourceOwnedBinderReadyReachableMachineRelatedWith.strong
   sourceRuntime := related.sourceRuntime
 }
 
+/-- Current-state source-owned simulation package parameterized by an
+ordinary source/target invariant. Unlike the hereditary package above, this
+relation does not ask the client to predict concrete source ownership at
+future states: the operational dispatcher carries that fact constructively,
+while the client invariant may retain only compiler typing and local
+operation-shape facts. -/
+structure SourceOwnedInvariantMachineRelatedWith
+    (fuel : Nat) (invariant : MachineState → MachineState → Prop)
+    (source target : MachineState) : Prop where
+  structural :
+    SomeBinderReadyReachableMachineRelated fuel source target
+  invariant :
+    invariant source target
+  sourceOwnership :
+    SourceMachineOwnershipBelowFrontier source
+
+/-- A current-state invariant becomes exact compiler readiness when its
+readiness law is allowed to consume the separately maintained source
+ownership carrier. -/
+theorem SourceOwnedInvariantMachineRelatedWith.ready
+    {fuel : Nat}
+    {invariant : MachineState → MachineState → Prop}
+    {source target : MachineState}
+    (ready : ∀ {source target},
+      invariant source target →
+      SourceMachineOwnershipBelowFrontier source →
+      SomeBinderReadyReachableMachineRelated fuel source target →
+        BinderReadyReachableMachineReadyAt fuel source target)
+    (related :
+      SourceOwnedInvariantMachineRelatedWith
+        fuel invariant source target) :
+    BinderReadyReachableMachineReadyAt fuel source target :=
+  ready related.invariant related.sourceOwnership related.structural
+
 /-- Ledger-retaining strong simulation package.  The structural witness owns
 the exact target allocation history, while the hereditary entry contract
 supplies aligned readiness at every matched future pair. -/
@@ -44445,6 +44479,58 @@ theorem SourceOwnedBinderReadyReachableMachineRelatedWith.advance
     sourceOwnership := afterOwnership
   }⟩
 
+/-- Advance a current-state compiler invariant without asking it to preserve
+the concrete ownership carrier. The source invariant follows the actual
+source step, the target invariant follows the selected finite matching path,
+and the operational dispatcher supplies successor ownership. -/
+theorem SourceOwnedInvariantMachineRelatedWith.advance
+    {externals : ExternalSpec}
+    {fuel : Nat}
+    {invariant : MachineState → MachineState → Prop}
+    {source target sourceAfter : MachineState}
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (sourcePreserved : ∀ {sourceBefore sourceAfter targetState},
+      invariant sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant sourceAfter targetState)
+    (targetPreserved : ∀ {sourceState targetBefore targetAfter},
+      invariant sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant sourceState targetAfter)
+    (ready : ∀ {sourceState targetState},
+      invariant sourceState targetState →
+      SourceMachineOwnershipBelowFrontier sourceState →
+      SomeBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        BinderReadyReachableMachineReadyAt
+          fuel sourceState targetState)
+    (related :
+      SourceOwnedInvariantMachineRelatedWith
+        fuel invariant source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SourceOwnedInvariantMachineRelatedWith
+        fuel invariant sourceAfter targetAfter := by
+  rcases related.structural.matchStep_of_ready_withOwnership
+      compatible sourceCompatible (related.ready ready)
+      related.sourceOwnership step with
+    ⟨targetAfter, targetPath, afterStructural, afterOwnership⟩
+  have sourceInvariant : invariant sourceAfter target :=
+    sourcePreserved related.invariant step
+  have afterInvariant : invariant sourceAfter targetAfter :=
+    targetPath.invariant sourceInvariant
+      (fun current targetStep =>
+        targetPreserved current targetStep)
+  exact ⟨targetAfter, targetPath, {
+    structural := afterStructural
+    invariant := afterInvariant
+    sourceOwnership := afterOwnership
+  }⟩
+
 /-- Every external source step is matched once compiler readiness and the
 foreign-response contract are separated.  Invocation controls expose paired
 requests; code and yielded controls delegate to their general step
@@ -47031,6 +47117,81 @@ theorem SourceOwnedBinderReadyReachableMachineRelatedWith.simulation
     SourceOwnedBinderReadyReachableMachineRelatedWith.advance
       compatible sourceCompatible related step
 
+/-- A current-state source-owned invariant induces the same observation-level
+stuttering simulation. Readiness consumes current ownership; source and target
+preservation follow only the concrete paths selected by the simulation. -/
+theorem SourceOwnedInvariantMachineRelatedWith.simulation
+    {externals : ExternalSpec}
+    {fuel : Nat}
+    {invariant : MachineState → MachineState → Prop}
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (sourcePreserved : ∀ {sourceBefore sourceAfter targetState},
+      invariant sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant sourceAfter targetState)
+    (targetPreserved : ∀ {sourceState targetBefore targetAfter},
+      invariant sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant sourceState targetAfter)
+    (ready : ∀ {sourceState targetState},
+      invariant sourceState targetState →
+      SourceMachineOwnershipBelowFrontier sourceState →
+      SomeBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        BinderReadyReachableMachineReadyAt
+          fuel sourceState targetState) :
+    RelationalStutteringSimulation externals ObservationRel
+      (SourceOwnedInvariantMachineRelatedWith fuel invariant) where
+  terminal related done :=
+    related.structural.related.terminal
+      (related.ready ready).readyAt done
+  advance related step :=
+    SourceOwnedInvariantMachineRelatedWith.advance
+      compatible sourceCompatible sourcePreserved targetPreserved
+      ready related step
+
+/-- Finite source prefixes retain the client invariant and the operational
+source ownership carrier without requiring a hereditary client contract. -/
+theorem SourceOwnedInvariantMachineRelatedWith.reaches
+    {externals : ExternalSpec}
+    {fuel : Nat}
+    {invariant : MachineState → MachineState → Prop}
+    {source target sourceAfter : MachineState}
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (sourcePreserved : ∀ {sourceBefore sourceAfter targetState},
+      invariant sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant sourceAfter targetState)
+    (targetPreserved : ∀ {sourceState targetBefore targetAfter},
+      invariant sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant sourceState targetAfter)
+    (ready : ∀ {sourceState targetState},
+      invariant sourceState targetState →
+      SourceMachineOwnershipBelowFrontier sourceState →
+      SomeBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        BinderReadyReachableMachineReadyAt
+          fuel sourceState targetState)
+    (related :
+      SourceOwnedInvariantMachineRelatedWith
+        fuel invariant source target)
+    (path : NonLockstep.Reaches externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SourceOwnedInvariantMachineRelatedWith
+        fuel invariant sourceAfter targetAfter :=
+  (SourceOwnedInvariantMachineRelatedWith.simulation
+    (invariant := invariant)
+    compatible sourceCompatible sourcePreserved targetPreserved
+    ready).reaches related path
+
 /-- Every finite source prefix has a finite matching target prefix that
 retains exact compiler provenance and concrete source ownership. -/
 theorem SourceOwnedBinderReadyReachableMachineRelatedWith.reaches
@@ -47617,6 +47778,69 @@ theorem ElimDeadExactOwnershipContract.initialInvariant
       targetPath
   exact contract.ready targetInvariant related
 
+/-- Exact source/target compiler invariant whose readiness law may consume the
+concrete source ownership carrier maintained by the operational simulation.
+The client still preserves its auditable typing and local-shape predicate
+across source and target steps, but it no longer has to duplicate heap,
+environment, frame, or foreign-response ownership preservation inside that
+predicate. -/
+structure ElimDeadSourceOwnedExactContract
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : ImpureProgram) (entries : Array Name) : Type where
+  invariant :
+    Name → Array Value → Array Value →
+      MachineState → MachineState → Prop
+  initial : ∀ entry, entry ∈ entries →
+    ∀ sourceArguments targetArguments,
+      ArrayRel (ValueRel emptyAddressRenaming)
+        sourceArguments targetArguments →
+      invariant entry sourceArguments targetArguments
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments)
+  sourcePreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceBefore sourceAfter targetState},
+      invariant entry sourceArguments targetArguments
+        sourceBefore targetState →
+      Step externals sourceBefore sourceAfter →
+        invariant entry sourceArguments targetArguments
+          sourceAfter targetState
+  targetPreserved :
+    ∀ {entry sourceArguments targetArguments
+        sourceState targetBefore targetAfter},
+      invariant entry sourceArguments targetArguments
+        sourceState targetBefore →
+      Step externals targetBefore targetAfter →
+        invariant entry sourceArguments targetArguments
+          sourceState targetAfter
+  ready :
+    ∀ {entry sourceArguments targetArguments sourceState targetState},
+      invariant entry sourceArguments targetArguments
+        sourceState targetState →
+      SourceMachineOwnershipBelowFrontier sourceState →
+      SomeBinderReadyReachableMachineRelated
+        fuel sourceState targetState →
+        BinderReadyReachableMachineReadyAt
+          fuel sourceState targetState
+
+/-- Existing exact contracts embed a readiness proof that does not need the
+new ownership argument, so they migrate losslessly to the source-owned
+interface. New clients can instead make that dependency explicit. -/
+def ElimDeadExactOwnershipContract.sourceOwned
+    (contract :
+      ElimDeadExactOwnershipContract
+        externals fuel source target entries) :
+    ElimDeadSourceOwnedExactContract
+      externals fuel source target entries where
+  invariant := contract.invariant
+  initial := contract.initial
+  sourcePreserved := contract.sourcePreserved
+  targetPreserved := contract.targetPreserved
+  ready := by
+    intro entry sourceArguments targetArguments
+      sourceState targetState current _sourceOwnership related
+    exact contract.ready current related
+
 /-- Entry-indexed exact ownership interface retaining target allocation
 history.  Clients prove an ordinary rectangular invariant and use its local
 typing/heap-shape and source-owner facts only when an exact ledger-carrying
@@ -48007,5 +48231,62 @@ theorem
   (ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
     wellFormed checked ownership).loweringCorrect_sourceOwned
       compatible sourceCompatible
+
+/-- Direct checked-pass correctness from a current-state exact invariant.
+Concrete source ownership is initialized by canonical entries and maintained
+by the operational simulation, so the client readiness law may consume it
+without adding it to either source or target preservation obligations. -/
+theorem nullarySafeShadowProgram_loweringCorrect_sourceOwnedExact
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadSourceOwnedExactContract
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated fuel) source target :=
+    shadowProgram_binderReadyShadowRelated wellFormed
+      (nullarySafeShadowProgram_certifies checked).1
+  intro entry member sourceArguments targetArguments arguments
+    sourceObservation sourceEvaluation
+  let invariant : MachineState → MachineState → Prop :=
+    ownership.invariant entry sourceArguments targetArguments
+  have initialStructural :
+      SomeBinderReadyReachableMachineRelated fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) :=
+    (initialState_binderReadyReachableMachineReadyAt
+      programs arguments).related
+  have initialRelated :
+      SourceOwnedInvariantMachineRelatedWith fuel invariant
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) := {
+    structural := initialStructural
+    invariant :=
+      ownership.initial entry member
+        sourceArguments targetArguments arguments
+    sourceOwnership :=
+      initialState_sourceMachineOwnershipBelowFrontier
+        source entry sourceArguments
+  }
+  exact
+    (SourceOwnedInvariantMachineRelatedWith.simulation
+      (invariant := invariant)
+      compatible sourceCompatible
+      (fun current step =>
+        ownership.sourcePreserved current step)
+      (fun current step =>
+        ownership.targetPreserved current step)
+      (fun current sourceOwnership related =>
+        ownership.ready current sourceOwnership related)
+    ).evaluatesState initialRelated sourceEvaluation
 
 end Fir.LeanIR.Passes.ElimDead
