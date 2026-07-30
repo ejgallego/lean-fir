@@ -8653,6 +8653,206 @@ theorem ownershipNamedCacheStepOwnershipPreserved :
     (by simpa [ownershipNamedCacheState] using
       ownershipNamedCacheCoreStep)
 
+/-- A live closure with one fixed argument; applying one more argument enters
+the two-parameter `first` declaration. -/
+def ownershipValueFullObject : HeapObject :=
+  .closure `first firstDecl.params.size #[.erased]
+
+def ownershipValueFullRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) ownershipValueFullObject).1
+
+def ownershipValueFullState : MachineState :=
+  { program := ownershipNamedProgram
+    runtime := ownershipValueFullRuntime
+    control :=
+      .invokeValue (.object (.heap 0)) #[.erased] }
+
+def ownershipValueFullAfterState : MachineState :=
+  { ownershipValueFullState with
+    env := bind (bind [] x .erased) y .erased
+    joins := []
+    control := .code (.return x) }
+
+theorem ownershipValueFullStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipValueFullState := by
+  have fixedBelow :
+      HeapLocationsBelowFrontier
+        ({} : RuntimeState) #[.erased].toList := by
+    intro location member
+    simp at member
+  exact {
+    heap := by
+      simpa [ownershipValueFullState, ownershipValueFullRuntime,
+        ownershipValueFullObject] using
+        (HeapOwnershipBelowFrontier.empty.allocClosure
+          #[.erased] fixedBelow `first firstDecl.params.size)
+    env := by
+      intro fvarId value found
+      simp [ownershipValueFullState, lookup] at found
+    frames := trivial
+  }
+
+theorem ownershipValueFullCoreStep :
+    coreStep ownershipValueFullState =
+      .next ownershipValueFullAfterState := by
+  rfl
+
+/-- Closure application combines the heap-owned fixed argument and the
+dynamic control argument before full declaration binding. -/
+theorem ownershipValueFullStepOwnershipPreserved :
+    SourceMachineOwnershipBelowFrontier ownershipValueFullAfterState :=
+  SourceMachineOwnershipBelowFrontier.invokeValueNext
+    (function := .object (.heap 0)) (arguments := #[.erased])
+    ownershipValueFullStateBelowFrontier
+    (by
+      intro location member
+      simp at member)
+    (by simpa [ownershipValueFullState] using
+      ownershipValueFullCoreStep)
+
+/-- A closure with no fixed arguments remains under-applied after one
+dynamic argument, forcing closure invocation to allocate a second closure. -/
+def ownershipValuePartialObject : HeapObject :=
+  .closure `first firstDecl.params.size #[]
+
+def ownershipValuePartialRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState) ownershipValuePartialObject).1
+
+def ownershipValuePartialState : MachineState :=
+  { program := ownershipNamedProgram
+    runtime := ownershipValuePartialRuntime
+    control :=
+      .invokeValue (.object (.heap 0)) #[.erased] }
+
+def ownershipValuePartialAfterState : MachineState :=
+  { ownershipValuePartialState with
+    runtime :=
+      (alloc ownershipValuePartialState.runtime
+        (.closure `first firstDecl.params.size #[.erased])).1
+    control :=
+      .yielded
+        (.object
+          (alloc ownershipValuePartialState.runtime
+            (.closure `first firstDecl.params.size #[.erased])).2) }
+
+theorem ownershipValuePartialStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipValuePartialState := by
+  have fixedBelow :
+      HeapLocationsBelowFrontier
+        ({} : RuntimeState) #[].toList := by
+    intro location member
+    simp at member
+  exact {
+    heap := by
+      simpa [ownershipValuePartialState, ownershipValuePartialRuntime,
+        ownershipValuePartialObject] using
+        (HeapOwnershipBelowFrontier.empty.allocClosure
+          #[] fixedBelow `first firstDecl.params.size)
+    env := by
+      intro fvarId value found
+      simp [ownershipValuePartialState, lookup] at found
+    frames := trivial
+  }
+
+theorem ownershipValuePartialCoreStep :
+    coreStep ownershipValuePartialState =
+      .next ownershipValuePartialAfterState := by
+  rfl
+
+/-- The re-partial-application branch preserves the original closure cell,
+allocates its successor at location one, and keeps both below the new
+frontier. -/
+theorem ownershipValuePartialStepOwnershipPreserved :
+    SourceMachineOwnershipBelowFrontier
+      ownershipValuePartialAfterState :=
+  SourceMachineOwnershipBelowFrontier.invokeValueNext
+    (function := .object (.heap 0)) (arguments := #[.erased])
+    ownershipValuePartialStateBelowFrontier
+    (by
+      intro location member
+      simp at member)
+    (by simpa [ownershipValuePartialState] using
+      ownershipValuePartialCoreStep)
+
+theorem ownershipValueFullExactRelated :
+    SomeBinderReadyReachableMachineRelated 2
+      ownershipValueFullState ownershipValueFullState := by
+  have fixed :
+      ArrayRel (ValueRel emptyAddressRenaming)
+        #[.erased] #[.erased] := by
+    change ListRel (ValueRel emptyAddressRenaming)
+      [.erased] [.erased]
+    exact .cons .erased .nil
+  let base : LedgerShadowRuntimeRel emptyAddressRenaming
+      ({} : RuntimeState) ({} : RuntimeState)
+      [.erased] [.erased] := {
+    runtime := emptyRuntime_shadowRelated_of_roots
+      (ListRel.cons ValueRel.erased ListRel.nil)
+    ledger := TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  have objects :
+      HeapObjectRel emptyAddressRenaming
+        ownershipValueFullObject ownershipValueFullObject := by
+    exact HeapObjectRel.closure fixed
+  let paired := base.allocBoth
+    objects
+    (by
+      intro value member
+      apply extra_subset_runtimeRoots
+      simpa [ownershipValueFullObject, HeapObject.ownedValues] using member)
+    (by
+      intro value member
+      apply extra_subset_runtimeRoots
+      simpa [ownershipValueFullObject, HeapObject.ownedValues] using member)
+    false
+  have dynamic :
+      ArrayRel (ValueRel paired.larger)
+        #[.erased] #[.erased] := by
+    change ListRel (ValueRel paired.larger)
+      [.erased] [.erased]
+    exact .cons .erased .nil
+  refine ⟨paired.larger,
+    [.object (.heap 0), .erased],
+    [.object (.heap 0), .erased],
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [ownershipValueFullState] using
+      ownershipNamedProgramBinderReadyRelated
+  · have function :
+        ValueRel paired.larger
+          (.object (.heap 0)) (.object (.heap 0)) := by
+      simpa [alloc, ownershipValueFullObject] using paired.values
+    simpa [ownershipValueFullState] using
+      (BinderReadyReachableControlRelated.invokeValue
+        (fuel := 2) function dynamic)
+  · simpa [ownershipValueFullState, ownershipValueFullRuntime,
+      ownershipValueFullObject, alloc] using paired.runtime.runtime
+
+theorem ownershipValueFullExactReady :
+    BinderReadyReachableMachineReadyAt 2
+      ownershipValueFullState ownershipValueFullState := by
+  apply
+    ownershipValueFullExactRelated
+      |>.binderReadyReachableMachineReadyAt_of_code
+  intro sourceCode control
+  simp [ownershipValueFullState] at control
+
+/-- The ownership-strengthened global internal dispatcher now covers its
+closure/value branch as well as code, yielded, and named controls. -/
+theorem ownershipValueFullGlobalStepOwnershipPreserved
+    (externals : ExternalSpec) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        ownershipValueFullState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 2
+        ownershipValueFullAfterState targetAfter ∧
+      SourceMachineOwnershipBelowFrontier
+        ownershipValueFullAfterState :=
+  ownershipValueFullExactRelated
+    |>.matchNextStep_of_ready_withOwnership
+      ownershipValueFullExactReady
+      ownershipValueFullStateBelowFrontier
+      ownershipValueFullCoreStep
+
 /-- The first mutation in the closed regression takes one source step while
 the transformed target stutters at the live return. -/
 theorem deletedObjectSetSourceOnlyMachineStep :
