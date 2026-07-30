@@ -4507,6 +4507,16 @@ finite generated export without a target certificate. Further direct and
 effect families join by proving this same source transport plus the already
 isolated witness/header-capacity transport.
 
+W6.6gd widens that first mixed endpoint to the complete heap-preserving direct
+family. Immediate integer/`USize` literals and successful `USize`, object, and
+packed-scalar projections each preserve the facts relation, ordinary-token
+relation, exact local frame, and address-space budget while deriving their
+production compiler/adapter code. `ReuseReadOnlySupported` composes those laws
+with reuse and aliases; `correctReuseReadOnlyCode` proves arbitrary finite
+interleavings through the actual generated export. The next widening step is
+allocating direct results, whose existing prefix/header transport must be
+paired with source ordinary-persistence for fresh cells.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

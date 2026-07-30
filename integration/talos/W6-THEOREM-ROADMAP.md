@@ -655,6 +655,10 @@ acceptance tests pass.
    arbitrary finite alias/reuse interleavings. Each additional family can
    join by supplying the same ordinary-persistence condition together with
    its existing witness and retained-header transport.
+   Immediate integer/`USize` literals and successful `USize`, object, and
+   packed-scalar projections now supply that proof as well.
+   `correctReuseReadOnlyCode` covers arbitrary finite interleavings of reuse
+   with the complete heap-preserving direct family.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
