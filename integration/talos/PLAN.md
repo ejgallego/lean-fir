@@ -4662,11 +4662,11 @@ object, `USize`, and packed-integer mutation families. Float setters remain
 outside the concrete runtime fragment.
 
 W6.6gq opens the facts-indexed control-flow frontier.
-`ReuseCapacityCaseEffectCodeEvaluates` adds selected case nodes to the same
+`ReuseCapacityBudgetedCodeEvaluates` adds selected case nodes to the same
 source-only finite evaluation relation: entering the selected branch retains
 the authoritative fact map, source runtime/environment, and remaining byte
 budget. The generic
-`codeWP_of_reuseCapacityCaseEffectCodeEvaluates_exactReturn` consumes the
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn` consumes the
 existing `CaseRuntimeRefines` implementation law and reconstructs the target
 case chain from the production compiler. Its first instance,
 `correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases`, proves
@@ -4682,6 +4682,14 @@ the import-free scalar comparison-chain law. Both endpoints retain the exact
 fact map and byte budget across every selected case branch while allowing the
 full current direct/reuse and ownership/tag/field-mutation families within the
 selected continuation.
+
+W6.6gs generalizes that relation and theorem across response-producing
+external `let` nodes. `ReuseCapacityExternalLetRuntimeRefinesWithCost` is the
+exact implementation condition: from a source response and path cost it must
+execute the production external prefix, prove the validator-selected successor
+fact map, and re-establish the indexed frame after binding the response.
+External-free case clients use the vacuous instance. Concrete pure
+integer/natural/scalar external instances are the next slice.
 
 ## Parallel agent packages
 

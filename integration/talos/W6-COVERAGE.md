@@ -87,11 +87,14 @@ Cross-cutting W6.5 state:
   whole-export composition now covers every current direct operation and
   every ownership/tag/object/`USize`/packed-integer mutation whose
   ordinary-persistence transport has been proved. The facts-indexed
-  `ReuseCapacityCaseEffectCodeEvaluates` relation additionally retains the
-  exact facts and budget through selected case nodes; the first endpoint
+  `ReuseCapacityBudgetedCodeEvaluates` relation additionally retains the exact
+  facts and budget through selected case nodes; the first endpoint
   permits arbitrary nesting of default-only cases. The corresponding
   object-constructor and scalar-`UInt8` endpoints now reconstruct and execute
   their normalized production comparison chains under the same frame.
+  Response-producing external nodes are part of the same structural
+  induction through `ReuseCapacityExternalLetRuntimeRefinesWithCost`; concrete
+  pure Int/Nat/scalar facts-indexed instances are still pending.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated
