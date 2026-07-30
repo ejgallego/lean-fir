@@ -16421,6 +16421,10 @@ theorem retainedPrefixReuseResetFresh :
 The only code-related target state is the post-literal return state; its
 covered live root fixes the paired address at `0`. -/
 theorem retainedPrefixReuseResetPairReady_ledger
+    (resetFresh :
+      ∀ location,
+        nonemptyLedgerResetRuntime.nextLocation ≤ location →
+          findCell? nonemptyLedgerResetRuntime.heap location = none)
     (targetReachable :
       RetainedPrefixReuseTargetReachable targetArguments target)
     (related : SomeLedgerBinderReadyReachableMachineRelated 6
@@ -16522,7 +16526,7 @@ theorem retainedPrefixReuseResetPairReady_ledger
                 · rfl
                 · rfl
                 · rfl
-                · exact retainedPrefixReuseResetFresh
+                · exact resetFresh
             have removed :
                 DeletedLetReadyAt
                   (retainedPrefixReuseSourceResetState sourceArguments)
@@ -16560,6 +16564,27 @@ theorem retainedPrefixReuseResetPairReady_ledger
   | invokeValue targetFunction targetArguments =>
       rw [targetControl] at control
       cases control
+
+/-- Source-owned form of the nonempty-ledger reset proof. The target owner
+table still establishes source-only closure provenance, while post-reset
+freshness now comes from the maintained source carrier rather than the
+fixture's enumerated heap. -/
+theorem retainedPrefixReuseResetPairReady_sourceOwnedLedger
+    (sourceOwnership :
+      SourceMachineOwnershipBelowFrontier
+        (retainedPrefixReuseSourceResetState sourceArguments))
+    (targetReachable :
+      RetainedPrefixReuseTargetReachable targetArguments target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 6
+      (retainedPrefixReuseSourceResetState sourceArguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 6
+      (retainedPrefixReuseSourceResetState sourceArguments) target := by
+  apply retainedPrefixReuseResetPairReady_ledger
+  · exact
+      (retainedPrefixReuseResetLocalReady sourceArguments)
+        |>.afterFresh_of_sourceOwnership sourceOwnership
+  · exact targetReachable
+  · exact related
 
 /-- The same carried owner table proves that concrete reuse overwrites only
 source location `1`. -/
@@ -16821,7 +16846,7 @@ theorem retainedPrefixReuseSourceReachable_pairReady_ledger
           (retainedPrefixReuseObjectSourceMachineReadyAt sourceArguments)
   | reset =>
       exact retainedPrefixReuseResetPairReady_ledger
-        targetReachable related
+        retainedPrefixReuseResetFresh targetReachable related
   | argument =>
       exact
         related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
@@ -16847,6 +16872,51 @@ theorem retainedPrefixReuseSourceReachable_pairReady_ledger
       apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
       intro sourceCode control
       simp [retainedPrefixReuseSourceInvokingState] at control
+
+/-- Combined readiness for every retained-prefix source state. The reset edge
+uses source ownership and the nonempty target ledger together; all other
+edges reuse the established ledger-exact readiness proofs. -/
+theorem retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
+    (sourceReachable :
+      RetainedPrefixReuseSourceReachable sourceArguments source)
+    (targetReachable :
+      RetainedPrefixReuseTargetReachable targetArguments target)
+    (sourceOwnership :
+      SourceMachineOwnershipBelowFrontier source)
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
+    LedgerBinderReadyReachableMachineReadyAt 6 source target := by
+  cases sourceReachable with
+  | entry =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .entry targetReachable related
+  | outer =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .outer targetReachable related
+  | object =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .object targetReachable related
+  | reset =>
+      exact retainedPrefixReuseResetPairReady_sourceOwnedLedger
+        sourceOwnership targetReachable related
+  | argument =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .argument targetReachable related
+  | reuse =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .reuse targetReachable related
+  | ret =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .ret targetReachable related
+  | yielded =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        .yielded targetReachable related
+  | cached empty =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        (.cached empty) targetReachable related
+  | invoking notEmpty =>
+      exact retainedPrefixReuseSourceReachable_pairReady_ledger
+        (.invoking notEmpty) targetReachable related
 
 theorem retainedPrefixReuseSourceReachable_of_reaches
     (path : NonLockstep.Reaches externals
@@ -16898,6 +16968,27 @@ def retainedPrefixReuseLedgerExactOwnershipContract
       ⟨sourceReachable, targetReachable⟩ related
     exact retainedPrefixReuseSourceReachable_pairReady_ledger
       sourceReachable targetReachable related
+
+/-- Combined source-owned/ledger-exact contract for the same nonempty-prefix
+program. Its rectangular execution graph remains unchanged, but reset
+readiness now consumes the separately maintained source carrier. -/
+def retainedPrefixReuseSourceOwnedLedgerExactContract
+    (externals : ExternalSpec) :
+    ElimDeadSourceOwnedLedgerExactContract externals 6
+      retainedPrefixReuseBeforeProgram
+      retainedPrefixReuseAfterProgram #[`main] := by
+  let base := retainedPrefixReuseLedgerExactOwnershipContract externals
+  refine {
+    invariant := base.invariant
+    initial := base.initial
+    sourcePreserved := base.sourcePreserved
+    targetPreserved := base.targetPreserved
+    ready := ?_
+  }
+  rintro entry sourceArguments targetArguments source target
+    ⟨sourceReachable, targetReachable⟩ sourceOwnership related
+  exact retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
+    sourceReachable targetReachable sourceOwnership related
 
 theorem retainedPrefixReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed retainedPrefixReuseBeforeProgram := by
@@ -16974,5 +17065,26 @@ theorem retainedPrefixReuseProgramLoweringCorrect_ledgerExact
     retainedPrefixReuseCheckedProgramRun
     (retainedPrefixReuseLedgerExactOwnershipContract externals)
     compatible
+
+/-- Source-owned checked-pass correctness for the genuinely nonempty target
+ledger. Reset freshness is supplied by the operational source carrier, while
+the target owner table proves the reset/reuse location remains source-only. -/
+theorem
+    retainedPrefixReuseProgramLoweringCorrect_sourceOwnedLedgerExact
+    (externals : ExternalSpec)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals 6)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      retainedPrefixReuseBeforeProgram
+      retainedPrefixReuseAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_sourceOwnedLedgerExact
+    retainedPrefixReuseBeforeProgramElimDeadWellFormed
+    retainedPrefixReuseCheckedProgramRun
+    (retainedPrefixReuseSourceOwnedLedgerExactContract externals)
+    compatible sourceCompatible
 
 end Fir.LeanIR.Passes.ElimDeadExamples
