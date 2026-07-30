@@ -1,5 +1,6 @@
 import FirTalos.ConcreteReuseCapacityProgramCorrectness
 import FirTalos.ConcreteClosureDispatch
+import FirTalos.ConcreteCompilerCorrectness
 
 namespace FirTalos.Concrete
 
@@ -45,6 +46,56 @@ structure CapacityPreservingSuccessfulDeclaration
   capacityTransport :
     HeaderCapacityTransport initial.host.runtime.heap
       afterCall.host.runtime.heap initialWitness
+
+/--
+Hereditary callee theorem at the exact boundary required by the structural
+facts-indexed caller proof.
+
+The existing capacity-preserving declaration owns source/target execution,
+the returned value, witness growth, and old-header transport. This stronger
+package additionally states the source ordinary-token transport, immutable
+host-table preservation, and a response-cost-indexed address-space budget.
+All fields are uniform properties of the callee execution; callers do not
+supply an execution certificate.
+-/
+structure BudgetedCapacityPreservingSuccessfulDeclaration
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (sourceRuntime resultRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceCode : LCNF.Code .impure)
+    (targetFunction : Wasm.Function)
+    (functionIndex : Nat)
+    (initial afterCall : Wasm.Store Host)
+    (initialWitness resultWitness : RefinementWitness)
+    (parameters : List Wasm.Value)
+    (resultKind : AbiKind)
+    (resultValue : Value)
+    (physical : Wasm.Value)
+    (stepCost : Nat) : Prop where
+  capacityPreserving :
+    CapacityPreservingSuccessfulDeclaration context sourceModule sourceFunction
+      module hostEnv sourceExternals sourceRuntime resultRuntime sourceEnv
+      sourceCode targetFunction functionIndex initial afterCall initialWitness
+      resultWitness parameters resultKind resultValue physical
+  ordinaryTransport :
+    OrdinaryPersistenceTransport sourceRuntime resultRuntime
+  externalsPreserved :
+    afterCall.host.externals = initial.host.externals
+  hostDescriptorsPreserved :
+    afterCall.host.closureDescriptors = initial.host.closureDescriptors
+  witnessDescriptorsPreserved :
+    resultWitness.closureDescriptors = initialWitness.closureDescriptors
+  residualBudget :
+    ∀ {remainingBytes : Nat},
+      stepCost ≤ remainingBytes →
+        initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
+          afterCall.host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - stepCost)
 
 /--
 Exact concrete partial-application execution plus the two hereditary frame
@@ -355,6 +406,223 @@ theorem ReuseCapacityCallLetStepSimulates.ofDirectDeclaration
     simpa [List.append_assoc] using
       wp_directCallBody_of_assembly assembled
         (callee.successful.terminatesWithExact tail) targetSet continued
+
+/--
+One direct generated declaration call re-establishes the canonical structural
+frame used by the certificate-free compiler theorem.
+
+The caller contributes only its current frame and compiler-derived argument
+assembly/local slot. The hereditary callee theorem supplies execution and all
+cross-call transports; the validator's ordinary result transfer erases only
+the destination fact.
+-/
+theorem
+    ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCall
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {argumentTarget : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv calleeEnv : Env}
+    {calleeCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex remainingBytes stepCost : Nat}
+    {initialWitness resultWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultKind : AbiKind} {physical : Wasm.Value}
+    (invariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (stepFits : stepCost ≤ remainingBytes)
+    (sourceStep :
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (assembled :
+      ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+        initial locals)
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+        calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
+        calleeEnv calleeCode targetFunction functionIndex initial afterCall
+        initialWitness resultWitness physicalArgs.reverse resultKind sourceValue
+        physical stepCost)
+    (targetSet :
+      locals.set? resultIndex physical = some updated)
+    (transfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId)) :
+    ∃ nextStore nextLocals nextWitness nextFacts,
+      CallLetStepSimulates context callerFunction module hostEnv sourceExternals
+          decl continuation (argumentTarget ++ [.call functionIndex])
+          sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+          locals nextLocals resultIndex initialWitness nextWitness ∧
+        nextStore.host.externals = initial.host.externals ∧
+          nextStore.host.closureDescriptors =
+              initial.host.closureDescriptors ∧
+            nextWitness.closureDescriptors =
+                initialWitness.closureDescriptors ∧
+              reuseCapacityLetFacts? facts decl = some nextFacts ∧
+                ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+                  sourceExternals nextFacts (remainingBytes - stepCost)
+                  nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+                  nextStore nextLocals nextWitness := by
+  rcases invariant with
+    ⟨⟨⟨initialRelated, ordinaryTokens, frameAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩
+  have capacityStep :
+      ReuseCapacityCallLetStepSimulates facts
+        (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+        hostEnv sourceExternals decl continuation
+        (argumentTarget ++ [.call functionIndex]) sourceRuntime nextRuntime
+        sourceEnv sourceValue initial afterCall locals updated resultIndex
+        initialWitness resultWitness :=
+    ReuseCapacityCallLetStepSimulates.ofDirectDeclaration sourceStep
+      initialRelated resultFound resultKindAt assembled
+      callee.capacityPreserving targetSet
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa using ordinaryTokens.eraseBind callee.ordinaryTransport
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+  have nextFrameAligned :
+      ConcreteLocalFrameAligned callerFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+        resultWitness :=
+    ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+  have nextBudget :
+      afterCall.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - stepCost) :=
+    callee.residualBudget stepFits budget
+  have nextDescriptorAgreement :
+      afterCall.host.closureDescriptors =
+        resultWitness.closureDescriptors :=
+    callee.hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans callee.witnessDescriptorsPreserved.symm)
+  exact ⟨afterCall, updated, resultWitness,
+    eraseReuseCapacityFact facts decl.fvarId, capacityStep.ordinary,
+    callee.externalsPreserved, callee.hostDescriptorsPreserved,
+    callee.witnessDescriptorsPreserved, transfer,
+    ⟨⟨⟨capacityStep.nextRelated, nextOrdinary, nextFrameAligned, nextBudget⟩,
+      by rw [callee.externalsPreserved]; exact integerImplementation,
+      by rw [callee.externalsPreserved]; exact naturalImplementation,
+      by rw [callee.externalsPreserved]; exact scalarImplementation⟩,
+      nextDescriptorAgreement⟩⟩
+
+/--
+Uniform implementation condition for source calls that compile to direct
+generated declaration calls.
+
+This theorem condition isolates the genuinely interprocedural obligation. It
+must derive the production argument/call prefix and callee result from source
+admission, executable compiler output, adapter output, and the caller state
+relation. The conclusion is a budgeted hereditary callee theorem, not a
+program-specific execution certificate.
+-/
+def DirectDeclarationCallImplementation
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {resultIndex stepCost : Nat}
+      {initialWitness : RefinementWitness},
+    CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      ReuseCapacityStateRelated facts callerFunction sourceRuntime sourceEnv
+        initial locals initialWitness →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule callerFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex →
+      ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
+          argumentTarget afterCall updated resultWitness physicalArgs
+          resultKind physical,
+        targetValue = argumentTarget ++ [.call functionIndex] ∧
+          (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+            some resultKind ∧
+          ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+            initial locals ∧
+          BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+            calleeFunction module hostEnv sourceExternals sourceRuntime
+            nextRuntime calleeEnv calleeCode targetFunction functionIndex
+            initial afterCall initialWitness resultWitness physicalArgs.reverse
+            resultKind sourceValue physical stepCost ∧
+          locals.set? resultIndex physical = some updated ∧
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId)
+
+/--
+A uniform direct-declaration implementation theorem instantiates the generic
+facts-indexed call law for the canonical mixed frame.
+
+The proof merely connects compiler/callee selection to
+`ofDirectDeclarationCall`; all resource reconstruction remains in that common
+adapter.
+-/
+theorem DirectDeclarationCallImplementation.runtimeRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    (implementation :
+      DirectDeclarationCallImplementation context sourceModule callerFunction
+        labels module hostEnv sourceExternals CallSupported) :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels module hostEnv sourceExternals CallSupported
+      (ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+        sourceExternals) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  obtain ⟨calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
+      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
+      resultKind, physical, targetEq, resultKindAt, assembled, callee,
+      targetSet, transfer⟩ :=
+    implementation supported sourceStep invariant.1.1.1 valueCompiled
+      valueAdapted resultFound
+  subst targetValue
+  exact invariant.ofDirectDeclarationCall stepFits sourceStep resultFound
+    resultKindAt assembled callee targetSet transfer
 
 /--
 A saturated selected closure candidate has the same hereditary call boundary

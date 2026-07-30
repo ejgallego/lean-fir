@@ -4756,6 +4756,23 @@ certificate, must provide ordinary-token persistence, witness/header
 transport, immutable-table preservation, and exact residual allocation
 headroom.
 
+W6.6gx defines and connects that direct-declaration boundary.
+`BudgetedCapacityPreservingSuccessfulDeclaration` strengthens the existing
+hereditary callee result with precisely those four missing transports.
+`ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCall`
+combines it with the compiler-derived argument assembly and checked caller
+result write, erases only the destination fact, and reconstructs the complete
+mixed frame.
+
+`DirectDeclarationCallImplementation` is the remaining recursive program
+theorem condition: from source call admission plus actual compiler/adapter
+outputs and the caller state relation, derive the generated direct-call prefix
+and a budgeted hereditary callee result.
+`DirectDeclarationCallImplementation.runtimeRefines` proves that this one
+uniform theorem discharges the generic call law. The next work is therefore
+not another caller-side adapter; it is to prove this implementation condition
+from the generated program's declaration environment.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

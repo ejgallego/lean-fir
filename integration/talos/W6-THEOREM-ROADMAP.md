@@ -751,9 +751,18 @@ acceptance tests pass.
    closure-dispatch prefix and re-establishes the validator-selected fact map
    and complete residual frame. Existing endpoints instantiate the vacuous
    call family, so no earlier fragment is weakened.
-   The next theorem is the nonvacuous direct-declaration adapter from a
-   budgeted hereditary callee result; lazy-cache publication follows the same
-   result-step pattern afterward.
+   `BudgetedCapacityPreservingSuccessfulDeclaration` now states the exact
+   hereditary callee result: execution/value correctness, ordinary-token
+   persistence, witness/header transport, immutable handler/descriptor
+   tables, and residual allocation headroom.
+   `ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCall`
+   turns that result plus compiler-derived argument assembly and local update
+   into the full post-call frame.
+   `DirectDeclarationCallImplementation.runtimeRefines` then reduces the
+   generic call law to one recursive generated-program condition that selects
+   this callee theorem from actual compiler/adapter output.
+   Proving that environment-wide condition is the next interprocedural task;
+   lazy-cache publication follows the same result-step pattern afterward.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

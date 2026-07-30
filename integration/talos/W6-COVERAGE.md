@@ -120,6 +120,14 @@ Cross-cutting W6.5 state:
   frame. Call-free endpoints use the false admission instance; a direct
   declaration call becomes green only when the budgeted hereditary callee
   adapter discharges this boundary.
+  `BudgetedCapacityPreservingSuccessfulDeclaration` and
+  `ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCall`
+  now provide that adapter, including exact residual budget and all caller
+  fact transports. `DirectDeclarationCallImplementation.runtimeRefines`
+  identifies the sole remaining direct-call obligation as an environment-wide
+  recursive theorem deriving the compiled callee and its hereditary result
+  from production compiler/adapter output. This condition is not yet
+  instantiated for the complete generated declaration environment.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated
