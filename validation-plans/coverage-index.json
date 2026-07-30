@@ -564,6 +564,572 @@
         "tag": "scalar",
         "minimumCases": 357
       }
+    ],
+    "semanticDomains": [
+      {
+        "tier": "direct-lcnf-machine",
+        "name": "recursive-release-ownership",
+        "allTags": ["ownership", "recursive-release"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "direct-lcnf-machine",
+        "name": "reset-reuse",
+        "allTags": ["reset", "reuse"],
+        "minimumCases": 7
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "arithmetic-overflow",
+        "allTags": ["arithmetic", "overflow"],
+        "minimumCases": 37
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "arithmetic-underflow",
+        "allTags": ["arithmetic", "underflow"],
+        "minimumCases": 11
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "bytearray-copy-on-write",
+        "allTags": ["bytearray", "copy-on-write"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "bytearray-mutation",
+        "allTags": ["bytearray", "mutation"],
+        "minimumCases": 11
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "bytes-external",
+        "allTags": ["bytes", "external"],
+        "minimumCases": 15
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "bytes-out-of-bounds",
+        "allTags": ["bytes", "out-of-bounds"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "closure-capture",
+        "allTags": ["capture", "closure"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "closure-partial-application",
+        "allTags": ["closure", "partial-application"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "conditional-bytes-control",
+        "allTags": ["bytes", "control-flow"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "division-zero-divisor",
+        "allTags": ["division", "zero-divisor"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "effect-external",
+        "allTags": ["effect", "external"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "effect-heap-mutation",
+        "allTags": ["effect", "heap", "mutation"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "effect-sequence",
+        "allTags": ["effect", "sequence"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-int16-external",
+        "allTags": ["fixed-width-signed-external", "int16"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-int32-external",
+        "allTags": ["fixed-width-signed-external", "int32"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-int64-external",
+        "allTags": ["fixed-width-signed-external", "int64"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-int8-external",
+        "allTags": ["fixed-width-signed-external", "int8"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-isize-external",
+        "allTags": ["fixed-width-signed-external", "isize"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-signed-masked-count",
+        "allTags": ["fixed-width-signed-external", "masked-count"],
+        "minimumCases": 30
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-signed-overflow",
+        "allTags": ["fixed-width-signed-external", "overflow"],
+        "minimumCases": 35
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-uint16-external",
+        "allTags": ["fixed-width-unsigned-external", "uint16"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-uint32-external",
+        "allTags": ["fixed-width-unsigned-external", "uint32"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-uint64-external",
+        "allTags": ["fixed-width-unsigned-external", "uint64"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-uint8-external",
+        "allTags": ["fixed-width-unsigned-external", "uint8"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-unsigned-masked-count",
+        "allTags": ["fixed-width-unsigned-external", "masked-count"],
+        "minimumCases": 20
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-unsigned-overflow",
+        "allTags": ["fixed-width-unsigned-external", "overflow"],
+        "minimumCases": 15
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "fixed-usize-external",
+        "allTags": ["fixed-width-unsigned-external", "usize"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "heap-boundary",
+        "allTags": ["boundary", "heap"],
+        "minimumCases": 45
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "mixed-layout-mutation",
+        "allTags": ["mixed-layout", "mutation"],
+        "minimumCases": 23
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "mixed-layout-projection",
+        "allTags": ["mixed-layout", "projection"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "multi-limb-arithmetic",
+        "allTags": ["arithmetic", "multi-limb"],
+        "minimumCases": 19
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "mutation-neighbor-preservation",
+        "allTags": ["mutation", "neighbor"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "mutation-refcount",
+        "allTags": ["mutation", "refcount"],
+        "minimumCases": 9
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "ownership-copy-on-write",
+        "allTags": ["copy-on-write", "ownership"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "ownership-shared",
+        "allTags": ["ownership", "shared"],
+        "minimumCases": 6
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "ownership-unique",
+        "allTags": ["ownership", "unique"],
+        "minimumCases": 6
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "packed-layout-mutation",
+        "allTags": ["mutation", "packed-layout"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "recursive-constructor",
+        "allTags": ["constructor", "recursion"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "remainder-zero-divisor",
+        "allTags": ["remainder", "zero-divisor"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-comparison",
+        "allTags": ["comparison", "string"],
+        "minimumCases": 10
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-construction",
+        "allTags": ["construction", "string"],
+        "minimumCases": 9
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-copy-on-write",
+        "allTags": ["copy-on-write", "string"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-external",
+        "allTags": ["external", "string"],
+        "minimumCases": 39
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-navigation",
+        "allTags": ["navigation", "string"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-non-bmp",
+        "allTags": ["non-bmp", "string"],
+        "minimumCases": 24
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "string-unicode",
+        "allTags": ["string", "unicode"],
+        "minimumCases": 41
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "arithmetic-overflow",
+        "allTags": ["arithmetic", "overflow"],
+        "minimumCases": 37
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "arithmetic-underflow",
+        "allTags": ["arithmetic", "underflow"],
+        "minimumCases": 11
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "bytearray-copy-on-write",
+        "allTags": ["bytearray", "copy-on-write"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "bytearray-mutation",
+        "allTags": ["bytearray", "mutation"],
+        "minimumCases": 11
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "bytes-external",
+        "allTags": ["bytes", "external"],
+        "minimumCases": 15
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "bytes-out-of-bounds",
+        "allTags": ["bytes", "out-of-bounds"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-capture",
+        "allTags": ["capture", "closure"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-partial-application",
+        "allTags": ["closure", "partial-application"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "conditional-bytes-control",
+        "allTags": ["bytes", "control-flow"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "division-zero-divisor",
+        "allTags": ["division", "zero-divisor"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "effect-external",
+        "allTags": ["effect", "external"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "effect-heap-mutation",
+        "allTags": ["effect", "heap", "mutation"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "effect-sequence",
+        "allTags": ["effect", "sequence"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-int16-external",
+        "allTags": ["fixed-width-signed-external", "int16"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-int32-external",
+        "allTags": ["fixed-width-signed-external", "int32"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-int64-external",
+        "allTags": ["fixed-width-signed-external", "int64"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-int8-external",
+        "allTags": ["fixed-width-signed-external", "int8"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-isize-external",
+        "allTags": ["fixed-width-signed-external", "isize"],
+        "minimumCases": 28
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-signed-masked-count",
+        "allTags": ["fixed-width-signed-external", "masked-count"],
+        "minimumCases": 30
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-signed-overflow",
+        "allTags": ["fixed-width-signed-external", "overflow"],
+        "minimumCases": 35
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-uint16-external",
+        "allTags": ["fixed-width-unsigned-external", "uint16"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-uint32-external",
+        "allTags": ["fixed-width-unsigned-external", "uint32"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-uint64-external",
+        "allTags": ["fixed-width-unsigned-external", "uint64"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-uint8-external",
+        "allTags": ["fixed-width-unsigned-external", "uint8"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-unsigned-masked-count",
+        "allTags": ["fixed-width-unsigned-external", "masked-count"],
+        "minimumCases": 20
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-unsigned-overflow",
+        "allTags": ["fixed-width-unsigned-external", "overflow"],
+        "minimumCases": 15
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "fixed-usize-external",
+        "allTags": ["fixed-width-unsigned-external", "usize"],
+        "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "heap-boundary",
+        "allTags": ["boundary", "heap"],
+        "minimumCases": 45
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "mixed-layout-mutation",
+        "allTags": ["mixed-layout", "mutation"],
+        "minimumCases": 23
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "mixed-layout-projection",
+        "allTags": ["mixed-layout", "projection"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "multi-limb-arithmetic",
+        "allTags": ["arithmetic", "multi-limb"],
+        "minimumCases": 19
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "mutation-neighbor-preservation",
+        "allTags": ["mutation", "neighbor"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "mutation-refcount",
+        "allTags": ["mutation", "refcount"],
+        "minimumCases": 9
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "ownership-copy-on-write",
+        "allTags": ["copy-on-write", "ownership"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "ownership-shared",
+        "allTags": ["ownership", "shared"],
+        "minimumCases": 6
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "ownership-unique",
+        "allTags": ["ownership", "unique"],
+        "minimumCases": 6
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "packed-layout-mutation",
+        "allTags": ["mutation", "packed-layout"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "recursive-constructor",
+        "allTags": ["constructor", "recursion"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "remainder-zero-divisor",
+        "allTags": ["remainder", "zero-divisor"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-comparison",
+        "allTags": ["comparison", "string"],
+        "minimumCases": 10
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-construction",
+        "allTags": ["construction", "string"],
+        "minimumCases": 9
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-copy-on-write",
+        "allTags": ["copy-on-write", "string"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-external",
+        "allTags": ["external", "string"],
+        "minimumCases": 39
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-navigation",
+        "allTags": ["navigation", "string"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-non-bmp",
+        "allTags": ["non-bmp", "string"],
+        "minimumCases": 24
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "string-unicode",
+        "allTags": ["string", "unicode"],
+        "minimumCases": 41
+      }
     ]
   }
 }

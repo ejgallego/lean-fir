@@ -197,6 +197,21 @@ numeric cases or by retaining the same instruction-form inventory. Source,
 direct-machine, and Wasm/V8 floors are separate, so the index exposes which
 semantic dimensions have reached the real engine without claiming that the
 compiler-supported subset already equals the larger native/LCNF corpus.
+
+Single-tag totals do not prove that two important dimensions still intersect:
+an aggregate `scalar` and `overflow` count, for example, could both survive
+after all signed-overflow fixtures were removed. The policy therefore also
+declares named `semanticDomains`. Each domain is a conjunction of at least two
+sorted tags and a positive minimum case count. Evaluation intersects the exact
+tag-to-case sets, retains the resulting ordered case IDs in the policy report,
+and fails on any deficit. Source, direct-machine, and Wasm/V8 domains are
+evaluated independently, exposing whether a conjunction has reached the real
+engine. The mechanism is backend-neutral, so a later Talos tier uses the same
+conjunctive policy rather than adding an interpreter-specific counter.
+The current plan pins 94 domains and 1,469 witnessed memberships: 46 matching
+source and V8 domains cover numeric boundaries, external families, failures,
+closures, control flow, effects, ownership, mutation, and text/byte behavior,
+while two direct-machine domains cover recursive release and reset/reuse.
 Relocatable index snapshots retain the exact tag-to-case attribution; current
 input verification rederives it from the content-addressed corpus evidence.
 
@@ -488,6 +503,8 @@ and interpreter-step counts plus required static forms, executed forms,
 administrative transitions, and externals. Counts may grow and inventories may
 gain members without changing the policy; losing an established floor or
 required member produces an explicit deficit or missing-name list. The
+semantic policy includes both one-tag floors and named conjunctions, with the
+exact cases satisfying every conjunction retained as its witness. The
 evaluated policy and its failure count are covered by the index identity, and
 both index creation and verification exit unsuccessfully when the policy is
 unsatisfied. This catches removal of a fixture together with its local
@@ -496,16 +513,17 @@ obligations, including loss of the direct tier's otherwise source-unreachable
 
 The index's `attribution` block explains where that aggregate coverage comes
 from. It records every case, static form, executed form, administrative kind,
-and executed external together with the ordered tier list that observed it.
+executed external, semantic tag, and satisfied semantic domain together with
+the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 192 source cases are shared by the source-LCNF and V8
+current baseline, the 581 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
 direct-tier-only static and executed forms. The source tier uniquely
-contributes 13 static forms, 13 executed forms, and all 35 interpreter
+contributes 13 static forms, 13 executed forms, and all 262 interpreter
 externals. Attribution is derived from the same verified inputs and policy and
 is covered by the index identity.
 
@@ -530,7 +548,8 @@ paths. It reports added, removed, and changed tiers; inventory gains and losses
 for cases, static and executed forms, administrative transitions, and
 externals; changes in the tiers responsible for an existing observation;
 newly covered or uncovered policy requirements; and signed slack changes for
-every tier, aggregate, and machine-coverage floor. A regression classification
+every tier, aggregate, machine-coverage, semantic-tag, and conjunctive-domain
+floor. A regression classification
 distinguishes actual coverage or attribution loss, increased policy failures,
 and shrinking headroom even while a floor remains satisfied. The command
 returns success after two valid snapshots are compared; differences are data

@@ -9298,6 +9298,7 @@ class CoverageIndexTests(unittest.TestCase):
                 "requiredExternals": [],
             },
             "semanticTags": [],
+            "semanticDomains": [],
         }
 
     def test_machine_coverage_requires_the_matrix_case_domain(self) -> None:
@@ -9686,6 +9687,7 @@ class CoverageIndexTests(unittest.TestCase):
                         "requiredExternals": [],
                     },
                     "semanticTags": [],
+                    "semanticDomains": [],
                 },
             }
             plan_path = plan_dir / "coverage-index.json"
@@ -9909,12 +9911,55 @@ class CoverageIndexTests(unittest.TestCase):
             {"tier": "source", "tag": "arithmetic", "minimumCases": 2},
             {"tier": "source", "tag": "ownership", "minimumCases": 2},
         ]
+        policy["semanticDomains"] = [
+            {
+                "tier": "source",
+                "name": "arithmetic-ownership",
+                "allTags": ["arithmetic", "ownership"],
+                "minimumCases": 1,
+            },
+            {
+                "tier": "source",
+                "name": "arithmetic-quick",
+                "allTags": ["arithmetic", "quick"],
+                "minimumCases": 2,
+            },
+            {
+                "tier": "source",
+                "name": "ownership-quick",
+                "allTags": ["ownership", "quick"],
+                "minimumCases": 2,
+            },
+        ]
         report = coverage_index.coverage_policy_report(
             policy, [tier], summary
         )
         self.assertEqual(report["semanticTags"][0]["caseDeficit"], 0)
         self.assertEqual(report["semanticTags"][1]["caseDeficit"], 1)
-        self.assertEqual(report["failureCount"], 1)
+        self.assertEqual(
+            report["semanticDomains"][0]["caseIds"], ["shared-case"]
+        )
+        self.assertEqual(
+            report["semanticDomains"][1]["caseIds"],
+            ["arithmetic-case", "shared-case"],
+        )
+        self.assertEqual(report["semanticDomains"][2]["caseDeficit"], 1)
+        self.assertEqual(report["failureCount"], 2)
+        self.assertEqual(
+            coverage_index.coverage_policy_declaration(report)[
+                "semanticDomains"
+            ],
+            policy["semanticDomains"],
+        )
+        self.assertEqual(
+            [
+                item["cases"]
+                for item in coverage_index.coverage_policy_slack(report)[
+                    "semanticDomains"
+                ]
+            ],
+            [0, 0, -1],
+        )
         attribution = coverage_index.coverage_attribution([tier], report)
         self.assertEqual(
             attribution["semanticTags"]["summary"]["requiredItemCount"], 2
@@ -9924,6 +9969,122 @@ class CoverageIndexTests(unittest.TestCase):
                 "coveredRequiredItemCount"
             ],
             2,
+        )
+        self.assertEqual(
+            attribution["semanticDomains"]["summary"]["requiredItemCount"], 3
+        )
+        self.assertEqual(
+            attribution["semanticDomains"]["summary"][
+                "coveredRequiredItemCount"
+            ],
+            3,
+        )
+
+    def test_verified_index_comparison_detects_semantic_domain_loss(
+        self,
+    ) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            plan_dir = root / "validation-plans"
+            build_dir = root / "_build"
+            plan_dir.mkdir()
+            build_dir.mkdir()
+            matrix_path = build_dir / "matrix.json"
+            policy = self.policy(
+                "source",
+                ["native", "lcnf"],
+                require_machine=False,
+            )
+            policy["semanticDomains"] = [
+                {
+                    "tier": "source",
+                    "name": "arithmetic-ownership",
+                    "allTags": ["arithmetic", "ownership"],
+                    "minimumCases": 1,
+                }
+            ]
+            plan = {
+                "version": 3,
+                "tiers": [
+                    {
+                        "id": "source",
+                        "kind": "source-compiled",
+                        "matrix": "../_build/matrix.json",
+                        "pairs": [
+                            {"reference": "native", "candidate": "lcnf"}
+                        ],
+                        "machineCoverage": None,
+                    }
+                ],
+                "policy": policy,
+            }
+            plan_path = plan_dir / "coverage-index.json"
+            plan_path.write_bytes(json_bytes(plan))
+
+            def build(tags: list[str], snapshot_name: str) -> Path:
+                corpus_content = core.corpus_artifact_bytes(
+                    [descriptor("case", tags=tags)]
+                )
+                corpus_digest = core.sha256_bytes(corpus_content)
+                corpus_path = (
+                    build_dir / "evidence" / "inputs" / corpus_digest
+                )
+                corpus_path.parent.mkdir(parents=True, exist_ok=True)
+                corpus_path.write_bytes(corpus_content)
+                matrix = self.matrix(
+                    ["case"],
+                    ["native", "lcnf"],
+                    [("native", "lcnf")],
+                )
+                matrix["inputs"] = [
+                    {
+                        "kind": "corpus",
+                        "name": "corpus.json",
+                        "sha256": corpus_digest,
+                        "artifact": f"evidence/inputs/{corpus_digest}",
+                    }
+                ]
+                matrix_path.write_bytes(json_bytes(matrix))
+                with mock.patch.object(
+                    coverage_index,
+                    "verify_matrix_artifact",
+                    return_value=matrix,
+                ):
+                    report = coverage_index.build_coverage_index(
+                        plan_path, root
+                    )
+                snapshot_path = root / f"{snapshot_name}.json"
+                coverage_index.write_coverage_index(snapshot_path, report)
+                return snapshot_path
+
+            before_path = build(
+                ["arithmetic", "ownership"], "before"
+            )
+            after_path = build(["arithmetic"], "after")
+            comparison = coverage_index.compare_verified_coverage_indexes(
+                before_path, after_path
+            )
+
+        semantic_domains = comparison["coverage"]["semanticDomains"]
+        self.assertEqual(
+            semantic_domains["removed"],
+            ["source:arithmetic-ownership"],
+        )
+        self.assertEqual(
+            semantic_domains["newlyUncoveredRequired"],
+            ["source:arithmetic-ownership"],
+        )
+        self.assertTrue(
+            comparison["classification"]["coverageRegressed"]
+        )
+        self.assertTrue(
+            comparison["classification"]["policyFailuresIncreased"]
+        )
+        self.assertTrue(
+            comparison["classification"]["policySlackRegressed"]
+        )
+        self.assertTrue(
+            comparison["classification"]["regressionDetected"]
         )
 
     def test_policy_rejects_ambiguous_required_inventories(self) -> None:
@@ -9945,6 +10106,22 @@ class CoverageIndexTests(unittest.TestCase):
         }
         with self.assertRaisesRegex(
             core.ValidationError, "sorted array of unique"
+        ):
+            coverage_index.coverage_policy_report(
+                policy, [tier], summary
+            )
+
+        policy = self.policy("source", ["native", "lcnf"])
+        policy["semanticDomains"] = [
+            {
+                "tier": "source",
+                "name": "not-conjunctive",
+                "allTags": ["arithmetic"],
+                "minimumCases": 1,
+            }
+        ]
+        with self.assertRaisesRegex(
+            core.ValidationError, "must require at least two tags"
         ):
             coverage_index.coverage_policy_report(
                 policy, [tier], summary

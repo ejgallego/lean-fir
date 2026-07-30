@@ -624,10 +624,11 @@ def coverage_policy_report(
         "aggregate",
         "machine",
         "semanticTags",
+        "semanticDomains",
     }:
         raise ValidationError(
             "coverage index policy requires tiers, aggregate, machine, and "
-            "semanticTags"
+            "semanticTags plus semanticDomains"
         )
     raw_tier_policies = raw_policy["tiers"]
     if not isinstance(raw_tier_policies, list):
@@ -934,17 +935,100 @@ def coverage_policy_report(
     semantic_failure_count = sum(
         report["failureCount"] for report in semantic_reports
     )
+    raw_domains = raw_policy["semanticDomains"]
+    if not isinstance(raw_domains, list):
+        raise ValidationError(
+            "coverage index semantic domain policy must be an array"
+        )
+    domain_reports: list[dict] = []
+    domain_keys: list[tuple[str, str]] = []
+    for requirement in raw_domains:
+        if not isinstance(requirement, dict) or set(requirement) != {
+            "tier",
+            "name",
+            "allTags",
+            "minimumCases",
+        }:
+            raise ValidationError(
+                "coverage index semantic domain entries require tier, name, "
+                "allTags, and minimumCases"
+            )
+        tier_id = validate_backend_name(
+            requirement["tier"], "coverage semantic domain tier"
+        )
+        name = validate_backend_name(
+            requirement["name"], "coverage semantic domain name"
+        )
+        all_tags = _checked_string_list(
+            requirement["allTags"],
+            f"coverage semantic domain {tier_id}/{name} allTags",
+        )
+        if len(all_tags) < 2:
+            raise ValidationError(
+                f"coverage semantic domain {tier_id}/{name} must require "
+                "at least two tags"
+            )
+        for tag in all_tags:
+            validate_backend_name(
+                tag, f"coverage semantic domain {tier_id}/{name} tag"
+            )
+        minimum = _checked_nat(
+            requirement["minimumCases"],
+            f"coverage semantic domain {tier_id}/{name} minimumCases",
+        )
+        if minimum == 0:
+            raise ValidationError(
+                f"coverage semantic domain {tier_id}/{name} minimumCases "
+                "must be positive"
+            )
+        if tier_id not in tier_by_id:
+            raise ValidationError(
+                f"coverage semantic domain names unknown tier {tier_id}"
+            )
+        domain_keys.append((tier_id, name))
+        coverage_by_tag = {
+            item["tag"]: set(item["caseIds"])
+            for item in tier_by_id[tier_id]["semanticCoverage"]
+        }
+        case_sets = [
+            coverage_by_tag.get(tag, set()) for tag in all_tags
+        ]
+        covered_cases = sorted(set.intersection(*case_sets))
+        observed = len(covered_cases)
+        deficit = max(0, minimum - observed)
+        domain_reports.append(
+            {
+                "tier": tier_id,
+                "name": name,
+                "allTags": all_tags,
+                "minimumCases": minimum,
+                "observedCases": observed,
+                "caseIds": covered_cases,
+                "caseDeficit": deficit,
+                "failureCount": int(deficit > 0),
+                "satisfied": deficit == 0,
+            }
+        )
+    if domain_keys != sorted(set(domain_keys)):
+        raise ValidationError(
+            "coverage index semantic domain policy must be sorted and unique"
+        )
+    domain_failure_count = sum(
+        report["failureCount"] for report in domain_reports
+    )
     failure_count = (
         sum(report["failureCount"] for report in tier_reports)
         + aggregate_failure_count
         + machine_failure_count
         + semantic_failure_count
+        + domain_failure_count
     )
     return {
         "tiers": tier_reports,
         "aggregate": aggregate_report,
         "machine": machine_report,
         "semanticTags": semantic_reports,
+        "semanticDomains": domain_reports,
         "failureCount": failure_count,
         "satisfied": failure_count == 0,
     }
@@ -1050,10 +1134,22 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
         ]
         for tier in tiers
     }
+    semantic_domain_contributions = {
+        tier["id"]: [
+            f"{item['tier']}:{item['name']}"
+            for item in policy.get("semanticDomains", [])
+            if item["tier"] == tier["id"] and item["observedCases"] > 0
+        ]
+        for tier in tiers
+    }
     machine_policy = policy["machine"]
     required_semantic_tags = [
         f"{item['tier']}:{item['tag']}"
         for item in policy.get("semanticTags", [])
+    ]
+    required_semantic_domains = [
+        f"{item['tier']}:{item['name']}"
+        for item in policy.get("semanticDomains", [])
     ]
     dimensions = {
         "cases": _attributed_dimension(
@@ -1084,6 +1180,11 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
             tier_order,
             required_semantic_tags,
         ),
+        "semanticDomains": _attributed_dimension(
+            semantic_domain_contributions,
+            tier_order,
+            required_semantic_domains,
+        ),
     }
     tier_reports = []
     contribution_maps = {
@@ -1093,6 +1194,7 @@ def coverage_attribution(tiers: list[dict], policy: dict) -> dict:
         "administrativeKinds": administrative_contributions,
         "externals": external_contributions,
         "semanticTags": semantic_tag_contributions,
+        "semanticDomains": semantic_domain_contributions,
     }
     for tier in tiers:
         tier_id = tier["id"]
@@ -1594,6 +1696,7 @@ def coverage_policy_declaration(report: object) -> dict:
         "aggregate",
         "machine",
         "semanticTags",
+        "semanticDomains",
         "failureCount",
         "satisfied",
     }:
@@ -1685,6 +1788,29 @@ def coverage_policy_declaration(report: object) -> dict:
         raise ValidationError(
             "coverage index snapshot semantic tag policy is malformed"
         )
+    semantic_domains = report["semanticDomains"]
+    semantic_domain_keys = {
+        "tier",
+        "name",
+        "allTags",
+        "minimumCases",
+        "observedCases",
+        "caseIds",
+        "caseDeficit",
+        "failureCount",
+        "satisfied",
+    }
+    if (
+        not isinstance(semantic_domains, list)
+        or any(
+            not isinstance(item, dict)
+            or set(item) != semantic_domain_keys
+            for item in semantic_domains
+        )
+    ):
+        raise ValidationError(
+            "coverage index snapshot semantic domain policy is malformed"
+        )
     return {
         "tiers": [
             {
@@ -1718,6 +1844,15 @@ def coverage_policy_declaration(report: object) -> dict:
                 "minimumCases": item["minimumCases"],
             }
             for item in semantic_tags
+        ],
+        "semanticDomains": [
+            {
+                "tier": item["tier"],
+                "name": item["name"],
+                "allTags": item["allTags"],
+                "minimumCases": item["minimumCases"],
+            }
+            for item in semantic_domains
         ],
     }
 
@@ -2109,6 +2244,15 @@ def coverage_policy_slack(policy: dict) -> dict:
             }
             for item in policy["semanticTags"]
         ],
+        "semanticDomains": [
+            {
+                "tier": item["tier"],
+                "name": item["name"],
+                "allTags": item["allTags"],
+                "cases": item["observedCases"] - item["minimumCases"],
+            }
+            for item in policy["semanticDomains"]
+        ],
     }
 
 
@@ -2186,6 +2330,40 @@ def _policy_slack_comparison(before: dict, after: dict) -> dict:
             {"tier": tier_id, "tag": tag, "cases": cases}
         )
 
+    before_domains = {
+        (item["tier"], item["name"]): item
+        for item in before["semanticDomains"]
+    }
+    after_domains = {
+        (item["tier"], item["name"]): item
+        for item in after["semanticDomains"]
+    }
+    semantic_domains = []
+    for tier_id, name in sorted(
+        before_domains.keys() | after_domains.keys()
+    ):
+        before_item = before_domains.get((tier_id, name))
+        after_item = after_domains.get((tier_id, name))
+        cases = _slack_field_delta(
+            None if before_item is None else before_item["cases"],
+            None if after_item is None else after_item["cases"],
+        )
+        if cases["delta"] is not None:
+            comparable_deltas.append(cases["delta"])
+        semantic_domains.append(
+            {
+                "tier": tier_id,
+                "name": name,
+                "beforeAllTags": (
+                    None if before_item is None else before_item["allTags"]
+                ),
+                "afterAllTags": (
+                    None if after_item is None else after_item["allTags"]
+                ),
+                "cases": cases,
+            }
+        )
+
     return {
         "before": before,
         "after": after,
@@ -2195,6 +2373,7 @@ def _policy_slack_comparison(before: dict, after: dict) -> dict:
         ),
         "machine": compared_group(before["machine"], after["machine"]),
         "semanticTags": semantic_tags,
+        "semanticDomains": semantic_domains,
         "increaseCount": sum(delta > 0 for delta in comparable_deltas),
         "decreaseCount": sum(delta < 0 for delta in comparable_deltas),
     }
@@ -2218,6 +2397,7 @@ def compare_coverage_indexes(before: dict, after: dict) -> dict:
         "administrativeKinds",
         "externals",
         "semanticTags",
+        "semanticDomains",
     )
     dimensions = {
         name: _attribution_dimension_delta(
@@ -2489,6 +2669,8 @@ def render_coverage_index(report: dict) -> list[str]:
         f"externals {attribution['externals']['summary']['observedItemCount']}, "
         f"semantic tags "
         f"{attribution['semanticTags']['summary']['observedItemCount']}, "
+        f"semantic domains "
+        f"{attribution['semanticDomains']['summary']['observedItemCount']}, "
         f"unique contributions "
         f"{attribution['summary']['uniqueContributionItemCount']}, "
         f"uncovered required "
@@ -2508,7 +2690,8 @@ def render_coverage_index(report: dict) -> list[str]:
             f"executed forms {len(unique['executedForms'])}, "
             f"administrative {unique_administrative}, "
             f"externals {len(unique['externals'])}, "
-            f"semantic tags {len(unique['semanticTags'])}"
+            f"semantic tags {len(unique['semanticTags'])}, "
+            f"semantic domains {len(unique['semanticDomains'])}"
         )
     policy = report["policy"]
     lines.append(
@@ -2562,6 +2745,15 @@ def render_coverage_index(report: dict) -> list[str]:
         f"cases {sum(item['observedCases'] for item in semantic_policy)}/"
         f"{sum(item['minimumCases'] for item in semantic_policy)} minimum, "
         f"failures {sum(item['failureCount'] for item in semantic_policy)}"
+    )
+    domain_policy = policy["semanticDomains"]
+    lines.append(
+        "coverage policy semantic domains: "
+        f"{sum(int(item['satisfied']) for item in domain_policy)}/"
+        f"{len(domain_policy)} conjunctive floors satisfied, "
+        f"cases {sum(item['observedCases'] for item in domain_policy)}/"
+        f"{sum(item['minimumCases'] for item in domain_policy)} minimum, "
+        f"failures {sum(item['failureCount'] for item in domain_policy)}"
     )
     return lines
 
