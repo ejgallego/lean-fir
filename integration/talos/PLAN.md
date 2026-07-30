@@ -5220,6 +5220,35 @@ still require their distinct hereditary external-result branch. The universal
 validator accessor and exact lazy result-kind alignment remain the independent
 shared-contract obligations described above.
 
+W6.6gzv closes publication reasoning for exact non-object result kinds.
+`PhysicalValueRel.isNonHeapReference_of_kind` proves that every ABI result
+other than `.object` or representation-polymorphic `.tobject` has no semantic
+heap-reference ownership root. This covers exact tagged, erased, reuse-token,
+integer-width, and scalar lanes directly from the already-proved physical
+result relation.
+
+`LazyCacheInternalHereditaryDeclarationInduction` now isolates the ordinary
+recursive generated-declaration theorem before publication reasoning, while
+`LazyCacheInternalResultKindsNonHeap` is its source-only fragment policy.
+`LazyCacheInternalDeclarationInduction.ofHereditaryNonHeap` derives the
+complete publication-aware module theorem from those two premises.
+`ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines` consequently
+exposes the full compiler-generated cache law without a separate alias premise
+for that fragment.
+
+The next recursive proof step is no longer cache-specific. The generic
+structural `codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn` theorem
+already returns the final cache frame, but its public conclusion currently
+drops the entry-to-exit `WitnessTransport`, `HeaderCapacityTransport`,
+`OrdinaryPersistenceTransport`, and immutable external/descriptor equations
+required by `BudgetedCapacityPreservingSuccessfulDeclarationWithCache`.
+Strengthen that structural conclusion (or thread an equivalent entry-relative
+frame) and select generated declaration bodies uniformly; do not reintroduce
+`ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or a per-call target
+execution as a premise. Heap-valued `.object`/`.tobject` results still add the
+independent reachability-disjointness or alias-invalidating fact-transfer
+obligation described above.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -953,6 +953,17 @@ acceptance tests pass.
    compiler-derived hit and miss branches, and
    `ConcreteSupportedExport.internalLazyRuntimeRefines` exposes the exact
    facts-indexed runtime law consumed by the generic structural code theorem.
+   `PhysicalValueRel.isNonHeapReference_of_kind` now derives source
+   publication safety for every exact ABI result except `.object` and
+   representation-polymorphic `.tobject`. Exact tagged, erased, reuse-token,
+   integer-width, and scalar results therefore need no alias theorem.
+   `LazyCacheInternalHereditaryDeclarationInduction` isolates the ordinary
+   recursive generated-declaration theorem before publication reasoning, and
+   `LazyCacheInternalResultKindsNonHeap` records the source-only fragment
+   policy. Their `ofHereditaryNonHeap` adapter constructs the complete
+   publication-aware declaration induction, while
+   `internalNonHeapLazyRuntimeRefines` exposes the resulting compiler cache
+   law.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source
@@ -961,14 +972,21 @@ acceptance tests pass.
    the generated module. Coordinate the shared lowering repair before
    deriving exact kind alignment from supported compiler output; do not weaken
    W6's exact typed-lane relation.
-   Next construct `LazyCacheInternalDeclarationInduction` recursively for the
-   generated declaration environment. Non-heap result branches use the proved
-   hereditary adapter directly; heap results must derive
-   `ReuseTokenPublicationDisjoint` from source alias information or coordinate
-   an alias-invalidating validator transfer. External nullary declarations
-   remain a separate hereditary external-result branch. Integration must
-   still expose the universal validator accessor needed to discharge
-   `LazyCacheValidationFacts` for every successfully validated module.
+   Next construct `LazyCacheInternalHereditaryDeclarationInduction`
+   recursively for the generated declaration environment. The generic
+   structural code theorem already returns the final cache frame, but its
+   current conclusion drops entry-to-exit witness, header-capacity,
+   ordinary-persistence, external-table, and descriptor transports required
+   by the hereditary declaration package. Strengthen that conclusion or
+   thread an equivalent entry-relative frame; do not reintroduce a
+   `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site
+   target execution premise. Heap-valued `.object`/`.tobject` results then add
+   `ReuseTokenPublicationDisjoint` from source alias information or a
+   coordinated alias-invalidating validator transfer. External nullary
+   declarations remain a separate hereditary external-result branch.
+   Integration must still expose the universal validator accessor needed to
+   discharge `LazyCacheValidationFacts` for every successfully validated
+   module.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

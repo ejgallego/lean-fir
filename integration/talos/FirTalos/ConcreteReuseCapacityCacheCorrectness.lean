@@ -531,6 +531,28 @@ def ReuseTokenOrdinaryBindTransport
       (bind sourceEnv resultId result)
 
 /--
+Every exact ABI result kind other than `object` or representation-polymorphic
+`tobject` denotes a semantic value with no heap-reference ownership root.
+
+This includes exact tagged values and retained reuse tokens: both may carry a
+physical word associated with an allocation, but neither is a semantic
+`.object (.heap _)` root for cache persistence.
+-/
+theorem PhysicalValueRel.isNonHeapReference_of_kind
+    {witness : RefinementWitness} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness kind physical semantic)
+    (notObject : kind ≠ .object) (notTObject : kind ≠ .tobject) :
+    IsNonHeapReference semantic := by
+  cases related with
+  | word32 related =>
+      cases related <;> simp_all [IsNonHeapReference]
+  | word64 related =>
+      cases related <;> simp_all [IsNonHeapReference]
+  | float32Bits related => cases related
+  | float64Bits related => cases related
+
+/--
 Semantic alias-safety condition for publishing one cache value.
 
 Every retained nonzero reuse token must point outside the ownership closure
@@ -4080,6 +4102,52 @@ theorem
     ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap⟩
 
 /--
+Every hereditary declaration returning an exact non-object ABI kind satisfies
+cache-publication disjointness constructively.
+
+The returned semantic value is recovered from the recursive declaration's
+existing physical refinement. Only `.object` and representation-polymorphic
+`.tobject` can denote a semantic heap-reference root, so exact tagged, erased,
+reuse-token, integer-width, and scalar results need no separate alias theorem.
+-/
+theorem
+    LazyCacheInternalHereditaryInduction.publication_of_nonHeapKind
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {declaration : Name}
+    {calleeCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (induction :
+      LazyCacheInternalHereditaryInduction context sourceModule module hostEnv
+        sourceExternals sourceRuntime declaration calleeCode resultKind initial
+        initialWitness sourceValue stepCost)
+    (notObject : resultKind ≠ .object)
+    (notTObject : resultKind ≠ .tobject) :
+    LazyCacheInternalPublicationInduction context sourceModule module hostEnv
+      sourceExternals facts sourceRuntime sourceEnv declaration calleeCode
+      resultKind initial initialWitness sourceValue stepCost := by
+  intro declarationId declarationCall
+  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+      physical, callee, _⟩ :=
+    induction declarationCall
+  have nonHeap : IsNonHeapReference sourceValue :=
+    callee.declaration.capacityPreserving.successful.valueRelated
+      |>.isNonHeapReference_of_kind notObject notTObject
+  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+    physical, callee,
+    ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap⟩
+
+/--
 Structural compiler-derived internal lazy-cache miss.
 
 The source support relation supplies only the nullary declaration and its
@@ -4319,6 +4387,67 @@ inductive LazyCacheInternalSupported (context : Fir.Wasm.Context) :
         continuation nextRuntime sourceValue stepCost
 
 /--
+Source-only result-kind policy for the internal lazy fragment whose
+publication safety is representation-derived.
+
+Exact `.object` results are heap references, while `.tobject` is
+representation-polymorphic and may be one. Every other ABI kind determines a
+non-heap semantic publication root from `PhysicalValueRel`.
+-/
+def LazyCacheInternalResultKindsNonHeap
+    (context : Fir.Wasm.Context) : Prop :=
+  ∀ {decl : LCNF.LetDecl .impure}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure},
+    LazyCacheInternalMissSupported context decl declaration sourceDeclaration
+        resultKind calleeCode →
+      resultKind ≠ .object ∧ resultKind ≠ .tobject
+
+/--
+Recursive generated-declaration theorem before cache-publication alias
+reasoning.
+
+This is the ordinary hereditary target induction uniformly selected from an
+admitted internal source miss and the canonical caller frame. It retains no
+publication postcondition; result-kind classification or a heap alias theorem
+adds that source property separately.
+-/
+def LazyCacheInternalHereditaryDeclarationInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {callerFunction : Fir.Wasm.Function}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure}
+      {sourceValue : Value}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {remainingBytes stepCost : Nat}
+      {initialWitness : RefinementWitness},
+    LazyCacheInternalMissSupported context decl declaration sourceDeclaration
+        resultKind calleeCode →
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+          decl continuation nextRuntime sourceValue →
+        ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+            sourceExternals facts remainingBytes sourceRuntime sourceEnv
+            initial locals initialWitness →
+          LazyCacheInternalHereditaryInduction context sourceModule
+            targetModule.wasmModule hosts.env sourceExternals sourceRuntime
+            declaration calleeCode resultKind initial initialWitness
+            sourceValue stepCost
+
+/--
 Module-level recursive theorem required by internal lazy misses.
 
 For every admitted source miss and canonical caller frame, declaration
@@ -4361,6 +4490,36 @@ def LazyCacheInternalDeclarationInduction
             targetModule.wasmModule hosts.env sourceExternals facts
             sourceRuntime sourceEnv declaration calleeCode resultKind initial
             initialWitness sourceValue stepCost
+
+/--
+For modules whose admitted internal lazy results have exact non-heap ABI
+kinds, ordinary hereditary declaration induction supplies the complete
+publication-aware induction.
+
+The adapter is uniform over source executions. It derives the semantic
+non-heap fact from the callee's already-proved physical result relation and
+therefore adds no target execution premise.
+-/
+theorem LazyCacheInternalDeclarationInduction.ofHereditaryNonHeap
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      LazyCacheInternalHereditaryDeclarationInduction context sourceModule
+        targetModule hosts sourceExternals) :
+    LazyCacheInternalDeclarationInduction context sourceModule targetModule
+      hosts sourceExternals := by
+  intro facts callerFunction sourceRuntime nextRuntime sourceEnv decl
+    continuation declaration sourceDeclaration resultKind calleeCode
+    sourceValue initial locals remainingBytes stepCost initialWitness call
+    sourceStep invariant
+  obtain ⟨notObject, notTObject⟩ := resultKinds call
+  exact
+    LazyCacheInternalHereditaryInduction.publication_of_nonHeapKind
+      (declarations call sourceStep invariant) notObject notTObject
 
 /--
 Uniform implementation condition for compiler-generated lazy declarations.
@@ -4547,5 +4706,42 @@ theorem ConcreteSupportedExport.internalLazyRuntimeRefines
         sourceExternals) :=
   (LazyCacheImplementation.ofInternalCompiler spec generated
     declarations).runtimeRefines
+
+/--
+Public internal lazy-runtime law for the representation-derived non-heap
+fragment.
+
+Clients provide only the recursive hereditary declaration theorem and the
+source result-kind policy. Publication disjointness, retained-token transport,
+and the complete compiler-generated hit/miss implementation are derived.
+-/
+theorem ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      LazyCacheInternalHereditaryDeclarationInduction context sourceModule
+        targetModule hosts sourceExternals) :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context)
+      (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals) :=
+  spec.internalLazyRuntimeRefines generated
+    (LazyCacheInternalDeclarationInduction.ofHereditaryNonHeap
+      resultKinds declarations)
 
 end FirTalos.Concrete
