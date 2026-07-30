@@ -450,6 +450,112 @@ function fixedWidthScalarValue(scalarKind, value) {
     ]));
 }
 
+{
+  const closureOperation = {
+    kind: "partialApply",
+    function: "capture",
+    arity: 2,
+    fixed: 1,
+    fields: ["object"],
+    result: "object",
+  };
+  const matchOperation = {
+    kind: "closureMatches",
+    function: "capture",
+    arity: 2,
+    fixed: 1,
+  };
+  const mismatchOperation = { ...matchOperation, function: "other" };
+  const projectOperation = {
+    kind: "closureProj",
+    function: "capture",
+    arity: 2,
+    fixed: 1,
+    index: 0,
+    result: "object",
+  };
+
+  const uniqueHost = new SemanticHost();
+  const uniqueCapture = uniqueHost.alloc({ kind: "natural", value: 91n });
+  const uniqueCapturePhysical = uniqueHost.encode("object", uniqueCapture);
+  const uniqueClosurePhysical =
+    uniqueHost.importFunction(closureOperation)(uniqueCapturePhysical);
+  const uniqueClosure = uniqueHost.decode("object", uniqueClosurePhysical);
+  assert.equal(
+    uniqueHost.importFunction(mismatchOperation)(uniqueClosurePhysical),
+    0,
+  );
+  assert.equal(uniqueHost.liveCell(uniqueClosure.location).rc, 1);
+  assert.equal(uniqueHost.liveCell(uniqueCapture.location).rc, 1);
+  assert.equal(uniqueHost.importFunction(matchOperation)(uniqueClosurePhysical), 1);
+  assert.throws(() => uniqueHost.liveCell(uniqueClosure.location));
+  assert.equal(uniqueHost.liveCell(uniqueCapture.location).rc, 1);
+  assert.deepStrictEqual(
+    uniqueHost.decode(
+      "object",
+      uniqueHost.importFunction(projectOperation)(uniqueClosurePhysical),
+    ),
+    uniqueCapture,
+  );
+  assert.throws(() =>
+    uniqueHost.importFunction(projectOperation)(uniqueClosurePhysical));
+
+  const sharedHost = new SemanticHost();
+  const sharedCapture = sharedHost.alloc({ kind: "natural", value: 92n });
+  const sharedClosurePhysical = sharedHost.importFunction(closureOperation)(
+    sharedHost.encode("object", sharedCapture));
+  const sharedClosure = sharedHost.decode("object", sharedClosurePhysical);
+  sharedHost.importFunction({
+    kind: "inc",
+    amount: 1,
+    check: false,
+  })(sharedClosurePhysical);
+  assert.equal(sharedHost.importFunction(matchOperation)(sharedClosurePhysical), 1);
+  assert.equal(sharedHost.liveCell(sharedClosure.location).rc, 1);
+  assert.equal(sharedHost.liveCell(sharedCapture.location).rc, 2);
+  const firstCapture = sharedHost.importFunction(projectOperation)(sharedClosurePhysical);
+  sharedHost.importFunction({
+    kind: "dec",
+    amount: 1,
+    check: false,
+    objectFields: null,
+  })(firstCapture);
+  assert.equal(sharedHost.liveCell(sharedCapture.location).rc, 1);
+  assert.equal(sharedHost.importFunction(matchOperation)(sharedClosurePhysical), 1);
+  assert.throws(() => sharedHost.liveCell(sharedClosure.location));
+  assert.equal(sharedHost.liveCell(sharedCapture.location).rc, 1);
+  const secondCapture = sharedHost.importFunction(projectOperation)(sharedClosurePhysical);
+  sharedHost.importFunction({
+    kind: "dec",
+    amount: 1,
+    check: false,
+    objectFields: null,
+  })(secondCapture);
+  assert.throws(() => sharedHost.liveCell(sharedCapture.location));
+
+  const persistentHost = new SemanticHost();
+  const persistentCapture = persistentHost.alloc({ kind: "natural", value: 93n });
+  const persistentClosurePhysical = persistentHost.importFunction(closureOperation)(
+    persistentHost.encode("object", persistentCapture));
+  const persistentClosure = persistentHost.decode("object", persistentClosurePhysical);
+  persistentHost.markPersistent(persistentClosure);
+  assert.equal(
+    persistentHost.importFunction(matchOperation)(persistentClosurePhysical),
+    1,
+  );
+  assert.equal(persistentHost.liveCell(persistentClosure.location).persistent, true);
+  assert.equal(persistentHost.liveCell(persistentClosure.location).rc, 0);
+  assert.equal(persistentHost.liveCell(persistentCapture.location).persistent, true);
+  assert.equal(persistentHost.liveCell(persistentCapture.location).rc, 0);
+  assert.deepStrictEqual(
+    persistentHost.decode(
+      "object",
+      persistentHost.importFunction(projectOperation)(persistentClosurePhysical),
+    ),
+    persistentCapture,
+  );
+}
+
 for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies) {
   const declaration = suffix => `${typeName}.${suffix}`;
   const max = (1n << BigInt(width)) - 1n;

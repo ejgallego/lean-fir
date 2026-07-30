@@ -334,6 +334,10 @@ export class SemanticHost {
     // are kept separate from the public semantic trace so adapters can project
     // structured effects without changing the runtime observation contract.
     this.externalSnapshots = [];
+    // A successful closure matcher is the generated dispatch's application
+    // boundary. It consumes one closure reference and snapshots the fixed
+    // arguments that the immediately following projection calls transfer.
+    this.pendingClosureApplications = new Map();
     this.externalRegistry = externalRegistry instanceof Map
       ? new Map(externalRegistry)
       : new Map(Object.entries(externalRegistry ?? {}));
@@ -670,22 +674,51 @@ export class SemanticHost {
     assert.equal(physicalArgs.length, 1, "closure match host arity mismatch");
     const source = this.decode("tobject", physicalArgs[0]);
     const closure = this.closureData(source);
-    return closure.function === operation.function &&
-      closure.arity === operation.arity && closure.fixed.length === operation.fixed
-      ? 1
-      : 0;
+    const matches = closure.function === operation.function &&
+      closure.arity === operation.arity && closure.fixed.length === operation.fixed;
+    if (!matches) {
+      return 0;
+    }
+    const cell = this.liveCell(source.location);
+    if (!cell.persistent) {
+      assert.ok(cell.rc > 0, "closure application reference count underflow");
+      if (cell.rc === 1) {
+        cell.rc = 0;
+        cell.live = false;
+      } else {
+        --cell.rc;
+        for (const value of closure.fixed) {
+          if (value.kind === "heap") {
+            this.incLocation(value.location, 1);
+          }
+        }
+      }
+    }
+    this.pendingClosureApplications.set(source.location, {
+      function: closure.function,
+      arity: closure.arity,
+      fixed: [...closure.fixed],
+      projected: new Set(),
+    });
+    return 1;
   }
 
   closureProj(operation, physicalArgs) {
     assert.equal(physicalArgs.length, 1, "closure projection host arity mismatch");
     const source = this.decode("tobject", physicalArgs[0]);
-    const closure = this.closureData(source);
-    if (closure.function !== operation.function || closure.arity !== operation.arity ||
-        closure.fixed.length !== operation.fixed) {
+    assert.equal(source.kind, "heap", "closure projection requires a heap closure");
+    const application = this.pendingClosureApplications.get(source.location);
+    if (application === undefined ||
+        application.function !== operation.function ||
+        application.arity !== operation.arity ||
+        application.fixed.length !== operation.fixed) {
       throw new Error("FIR target failure: closure metadata mismatch");
     }
-    const value = closure.fixed[operation.index];
+    assert.ok(!application.projected.has(operation.index),
+      "closure projection transferred one capture more than once");
+    const value = application.fixed[operation.index];
     assert.notEqual(value, undefined, "closure projection index is out of bounds");
+    application.projected.add(operation.index);
     return this.encode(operation.result, value);
   }
 
