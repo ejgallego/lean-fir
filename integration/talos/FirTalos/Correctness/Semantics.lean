@@ -136,18 +136,370 @@ inductive LazyCachePath where
   | miss
   deriving Inhabited, BEq
 
+/-- Append a protected caller-frame suffix to an interpreter state. -/
+def withFrameSuffix (state : MachineState)
+    (suffix : List Frame) : MachineState :=
+  { state with frames := state.frames ++ suffix }
+
+private theorem evalLetValue_withFrameSuffix
+    (state : MachineState) (suffix : List Frame)
+    (decl : Lean.Compiler.LCNF.LetDecl .impure) :
+    evalLetValue (withFrameSuffix state suffix) decl =
+      evalLetValue state decl := by
+  cases state
+  rfl
+
+set_option linter.unusedSimpArgs false in
+private theorem invokeDecl_next_withFrameSuffix
+    {state after : MachineState}
+    {name : Lean.Name}
+    {args : Array Value}
+    {suffix : List Frame}
+    (transition : invokeDecl state name args = .next after) :
+    invokeDecl (withFrameSuffix state suffix) name args =
+      .next (withFrameSuffix after suffix) := by
+  cases state with
+  | mk program control env joins frames runtime =>
+      simp_all [invokeDecl, withFrameSuffix, MachineState.withValue, fail,
+        observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals cases transition
+      all_goals try split <;> simp_all
+      all_goals try split <;> simp_all
+      all_goals simp
+
+set_option linter.unusedSimpArgs false in
+private theorem invokeDecl_external_withFrameSuffix
+    {state waiting : MachineState}
+    {name : Lean.Name}
+    {args : Array Value}
+    {request : ExternalRequest}
+    {suffix : List Frame}
+    (transition : invokeDecl state name args = .external request waiting) :
+    invokeDecl (withFrameSuffix state suffix) name args =
+      .external request (withFrameSuffix waiting suffix) := by
+  cases state with
+  | mk program control env joins frames runtime =>
+      simp_all [invokeDecl, withFrameSuffix, MachineState.withValue, fail,
+        observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals try split <;> simp_all [fail, observe]
+      all_goals cases transition
+      all_goals try split <;> simp_all
+      all_goals try split <;> simp_all
+      all_goals subst waiting
+      all_goals simp
+
+set_option linter.unusedSimpArgs false in
+private theorem invokeClosure_next_withFrameSuffix
+    {state after : MachineState}
+    {function : Value}
+    {args : Array Value}
+    {suffix : List Frame}
+    (transition : invokeClosure state function args = .next after) :
+    invokeClosure (withFrameSuffix state suffix) function args =
+      .next (withFrameSuffix after suffix) := by
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [invokeClosure, fail] at transition
+      | heap location =>
+          simp_all [invokeClosure, withFrameSuffix, fail, observe]
+          split <;> simp_all [fail, observe]
+          split <;> simp_all [fail, observe]
+          next name arity fixed cell found objectEq =>
+            exact invokeDecl_next_withFrameSuffix transition
+  | usize value => simp [invokeClosure, fail] at transition
+  | scalar value => simp [invokeClosure, fail] at transition
+  | erased => simp [invokeClosure, fail] at transition
+  | reuseToken location => simp [invokeClosure, fail] at transition
+
+set_option linter.unusedSimpArgs false in
+private theorem invokeClosure_external_withFrameSuffix
+    {state waiting : MachineState}
+    {function : Value}
+    {args : Array Value}
+    {request : ExternalRequest}
+    {suffix : List Frame}
+    (transition :
+      invokeClosure state function args = .external request waiting) :
+    invokeClosure (withFrameSuffix state suffix) function args =
+      .external request (withFrameSuffix waiting suffix) := by
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [invokeClosure, fail] at transition
+      | heap location =>
+          simp_all [invokeClosure, withFrameSuffix, fail, observe]
+          split <;> simp_all [fail, observe]
+          split <;> simp_all [fail, observe]
+          next name arity fixed cell found objectEq =>
+            exact invokeDecl_external_withFrameSuffix transition
+  | usize value => simp [invokeClosure, fail] at transition
+  | scalar value => simp [invokeClosure, fail] at transition
+  | erased => simp [invokeClosure, fail] at transition
+  | reuseToken location => simp [invokeClosure, fail] at transition
+
+private theorem resumeExternal_withFrameSuffix
+    (request : ExternalRequest) (waiting : MachineState)
+    (response : ExternalResponse) (suffix : List Frame) :
+    resumeExternal request (withFrameSuffix waiting suffix) response =
+      withFrameSuffix (resumeExternal request waiting response) suffix := by
+  cases waiting
+  rfl
+
+set_option linter.unusedSimpArgs false in
+set_option linter.unnecessarySeqFocus false in
+private theorem coreStep_let_next_withFrameSuffix
+    {program : Fir.LeanIR.ImpureProgram}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {env : Env} {joins : JoinEnv} {frames suffix : List Frame}
+    {runtime : RuntimeState} {after : MachineState}
+    (transition : coreStep {
+      program
+      control := .code (.let decl continuation)
+      env
+      joins
+      frames
+      runtime } = .next after) :
+    coreStep {
+      program
+      control := .code (.let decl continuation)
+      env
+      joins
+      frames := frames ++ suffix
+      runtime } = .next (withFrameSuffix after suffix) := by
+  simp only [coreStep] at transition ⊢
+  cases evaluated : evalLetValue {
+      program
+      control := .code (.let decl continuation)
+      env
+      joins
+      frames
+      runtime } decl with
+  | error fault =>
+      simp [evaluated, fail] at transition
+  | ok result =>
+      rcases result with ⟨nextRuntime, action⟩
+      have evaluatedSuffix :
+          evalLetValue {
+            program
+            control := .code (.let decl continuation)
+            env
+            joins
+            frames := frames ++ suffix
+            runtime } decl = .ok (nextRuntime, action) := by
+        change evalLetValue (withFrameSuffix {
+          program
+          control := .code (.let decl continuation)
+          env
+          joins
+          frames
+          runtime } suffix) decl = .ok (nextRuntime, action)
+        rw [evalLetValue_withFrameSuffix]
+        exact evaluated
+      rw [evaluatedSuffix]
+      rw [evaluated] at transition
+      cases action <;> simp_all [withFrameSuffix, pushBindFrame]
+      all_goals cases transition <;> simp
+
+set_option linter.unusedSimpArgs false in
+set_option linter.unnecessarySeqFocus false in
+private theorem coreStep_code_next_withFrameSuffix
+    {program : Fir.LeanIR.ImpureProgram}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {env : Env} {joins : JoinEnv} {frames suffix : List Frame}
+    {runtime : RuntimeState} {after : MachineState}
+    (transition : coreStep {
+      program
+      control := .code code
+      env
+      joins
+      frames
+      runtime } = .next after) :
+    coreStep {
+      program
+      control := .code code
+      env
+      joins
+      frames := frames ++ suffix
+      runtime } = .next (withFrameSuffix after suffix) := by
+  cases code
+  case «let» decl continuation =>
+    exact coreStep_let_next_withFrameSuffix transition
+  case «fun» decl continuation purity =>
+    contradiction
+  all_goals
+    simp_all [coreStep, withFrameSuffix, fail, observe]
+    all_goals try split <;> simp_all [fail, observe]
+    all_goals try split <;> simp_all [fail, observe]
+    all_goals try split <;> simp_all [fail, observe]
+    all_goals cases transition <;> simp [withFrameSuffix]
+
+set_option linter.unusedSimpArgs false in
+set_option linter.unnecessarySeqFocus false in
+private theorem coreStep_next_withFrameSuffix
+    {state after : MachineState} {suffix : List Frame}
+    (transition : coreStep state = .next after) :
+    coreStep (withFrameSuffix state suffix) =
+      .next (withFrameSuffix after suffix) := by
+  cases state with
+  | mk program control env joins frames runtime =>
+      cases control with
+      | yielded value =>
+          cases frames with
+          | nil => simp [coreStep] at transition
+          | cons frame frames =>
+              cases frame <;> simp_all [coreStep, withFrameSuffix]
+              all_goals cases transition <;> simp
+      | invokeName name args =>
+          by_cases empty : args.isEmpty
+          · simp only [withFrameSuffix, coreStep, empty] at transition ⊢
+            cases found : findGlobal? runtime.globals name with
+            | none =>
+                simp only [found, if_true] at transition ⊢
+                exact invokeDecl_next_withFrameSuffix transition
+            | some cached =>
+                simp only [found, if_true] at transition ⊢
+                cases transition
+                rfl
+          · simp only [withFrameSuffix, coreStep, empty, if_false]
+              at transition ⊢
+            exact invokeDecl_next_withFrameSuffix transition
+      | invokeValue function args =>
+          simp only [withFrameSuffix, coreStep] at transition ⊢
+          exact invokeClosure_next_withFrameSuffix transition
+      | code code =>
+          change coreStep {
+            program
+            control := .code code
+            env
+            joins
+            frames := frames ++ suffix
+            runtime } = .next (withFrameSuffix after suffix)
+          exact coreStep_code_next_withFrameSuffix transition
+
+private theorem coreStep_code_ne_external
+    {program : Fir.LeanIR.ImpureProgram}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {env : Env} {joins : JoinEnv} {frames : List Frame}
+    {runtime : RuntimeState} {request : ExternalRequest}
+    {waiting : MachineState} :
+    coreStep {
+      program
+      control := .code code
+      env
+      joins
+      frames
+      runtime } ≠ .external request waiting := by
+  intro transition
+  cases code <;> simp only [coreStep] at transition
+  all_goals repeat' first | split at transition | contradiction
+
+set_option linter.unusedSimpArgs false in
+private theorem coreStep_external_withFrameSuffix
+    {state waiting : MachineState}
+    {request : ExternalRequest} {suffix : List Frame}
+    (transition : coreStep state = .external request waiting) :
+    coreStep (withFrameSuffix state suffix) =
+      .external request (withFrameSuffix waiting suffix) := by
+  cases state with
+  | mk program control env joins frames runtime =>
+      cases control with
+      | yielded value =>
+          cases frames with
+          | nil => simp [coreStep] at transition
+          | cons frame frames =>
+              cases frame <;> simp [coreStep] at transition
+      | invokeName name args =>
+          by_cases empty : args.isEmpty
+          · simp only [coreStep, empty] at transition
+            simp only [withFrameSuffix, coreStep, empty]
+            cases found : findGlobal? runtime.globals name with
+            | none =>
+                simp only [found, if_true] at transition ⊢
+                exact invokeDecl_external_withFrameSuffix transition
+            | some cached =>
+                simp [found] at transition
+          · simp only [coreStep, empty, if_false] at transition
+            simp only [withFrameSuffix, coreStep, empty, if_false]
+            exact invokeDecl_external_withFrameSuffix transition
+      | invokeValue function args =>
+          simp only [coreStep] at transition
+          simp only [withFrameSuffix, coreStep]
+          exact invokeClosure_external_withFrameSuffix transition
+      | code code =>
+          exact (coreStep_code_ne_external transition).elim
+
+private theorem executeStep_withFrameSuffix
+    {externals : ExternalImpl} {before after : MachineState}
+    {suffix : List Frame}
+    (transition : executeStep externals before = .next after) :
+    executeStep externals (withFrameSuffix before suffix) =
+      .next (withFrameSuffix after suffix) := by
+  unfold executeStep at transition ⊢
+  cases stepped : coreStep before with
+  | next next =>
+      simp only [stepped] at transition
+      cases transition
+      rw [coreStep_next_withFrameSuffix stepped]
+  | done observation =>
+      simp [stepped] at transition
+  | external request waiting =>
+      simp only [stepped] at transition
+      cases called : externals.call request before.runtime with
+      | error fault =>
+          simp [called] at transition
+      | ok response =>
+          simp [called] at transition
+          cases transition
+          rw [coreStep_external_withFrameSuffix stepped]
+          have calledSuffix :
+              externals.call request
+                  (withFrameSuffix before suffix).runtime = .ok response := by
+            simpa [withFrameSuffix] using called
+          simp only [calledSuffix]
+          rw [resumeExternal_withFrameSuffix]
+
+/--
+An executable prefix remains valid when the same protected caller-frame
+suffix is appended to every intermediate state.
+-/
+theorem ExecSteps.withFrameSuffix
+    {externals : ExternalImpl} {count : Nat}
+    {first last : MachineState} {suffix : List Frame}
+    (steps : ExecSteps externals count first last) :
+    ExecSteps externals count
+      (withFrameSuffix first suffix) (withFrameSuffix last suffix) := by
+  induction steps with
+  | refl state => exact .refl _
+  | step head tail ih =>
+      exact .step (executeStep_withFrameSuffix head) ih
+
 /--
 Structured executable source behavior of one lazy-cache miss.
 
 The first step stages the nullary named invocation under the caller's binding
 frame. The second step establishes that the semantic cache lookup missed by
 entering a declaration with a fresh cache frame. The declaration may then take
-any finite number of steps before yielding its result with both frames still
-present. The final two steps publish the result and resume the caller.
+any finite number of steps in isolation before yielding its result. Generic
+frame-suffix preservation lifts that execution beneath the protected cache and
+caller-binding frames. The final two steps publish the result and resume the
+caller.
 
 Keeping the declaration execution as an existential finite prefix admits
-internal declarations independently of body length while retaining the exact
-states needed to invert cache absence and publication.
+internal declarations independently of body length, while the isolated
+execution prevents a witness from consuming or reconstructing the caller's
+frames and retains the exact states needed to invert cache absence and
+publication.
 -/
 def SourceLazyMissResult (context : Fir.Wasm.Context)
     (externals : ExternalImpl) (sourceRuntime : RuntimeState) (sourceEnv : Env)
@@ -194,17 +546,11 @@ def SourceLazyMissResult (context : Fir.Wasm.Context)
         control := calleeControl
         env := calleeEnv
         joins := calleeJoins
-        frames := [
-          .cache declaration,
-          .bind decl.fvarId continuation sourceEnv []]
         runtime := calleeRuntime } {
         program := context.program
         control := .yielded sourceValue
         env := resultEnv
         joins := resultJoins
-        frames := [
-          .cache declaration,
-          .bind decl.fvarId continuation sourceEnv []]
         runtime := callRuntime } ∧
     executeStep externals {
         program := context.program
@@ -301,6 +647,29 @@ theorem SourceLazyLetResult.execSteps
         ⟨declaration, calleeControl, calleeEnv, calleeJoins, calleeRuntime,
           resultEnv, resultJoins, callRuntime, calleeSteps, staged, entered,
           evaluated, published, bound⟩
+      have protectedEvaluation :
+          ExecSteps externals calleeSteps {
+              program := context.program
+              control := calleeControl
+              env := calleeEnv
+              joins := calleeJoins
+              frames := [
+                .cache declaration,
+                .bind decl.fvarId continuation sourceEnv []]
+              runtime := calleeRuntime } {
+              program := context.program
+              control := .yielded sourceValue
+              env := resultEnv
+              joins := resultJoins
+              frames := [
+                .cache declaration,
+                .bind decl.fvarId continuation sourceEnv []]
+              runtime := callRuntime } := by
+        simpa [withFrameSuffix] using
+          FirTalos.Correctness.ExecSteps.withFrameSuffix evaluated
+            (suffix := [
+              .cache declaration,
+              .bind decl.fvarId continuation sourceEnv []])
       have suffix :
           ExecSteps externals 2 {
               program := context.program
@@ -316,7 +685,8 @@ theorem SourceLazyLetResult.execSteps
               env := bind sourceEnv decl.fvarId sourceValue
               runtime := nextRuntime } :=
         .step published (.step bound (.refl _))
-      obtain ⟨count, tail⟩ := execSteps_compose evaluated suffix
+      obtain ⟨count, tail⟩ :=
+        execSteps_compose protectedEvaluation suffix
       exact ⟨_, .step staged (.step entered tail)⟩
 
 /-- Exact terminating source behavior for an internal named call or closure
