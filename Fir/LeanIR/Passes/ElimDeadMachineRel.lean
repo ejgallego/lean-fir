@@ -8587,6 +8587,138 @@ theorem getConstructor_shape_of_ok
   | erased => simp at effect
   | reuseToken location? => simp at effect
 
+/-- A successful object-field read returns either a non-heap value or one of
+the constructor's owned children, hence any heap result lies below the
+allocation frontier. -/
+theorem HeapOwnershipBelowFrontier.getObjectFieldResult
+    (bounded : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      getObjectField runtime object index = .ok field) :
+    HeapLocationsBelowFrontier runtime [field] := by
+  unfold getObjectField at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at effect
+  cases constructorResult with
+  | error fault => simp at effect
+  | ok triple =>
+      obtain ⟨parent, cell, constructor⟩ := triple
+      simp only at effect
+      generalize fieldEq :
+        constructor.objectFields[index]? = fieldResult at effect
+      cases fieldResult with
+      | none => simp [fieldEq] at effect
+      | some actualField =>
+          simp [fieldEq] at effect
+          have resultEq : actualField = field := by
+            simpa [Pure.pure, Except.pure] using effect
+          subst field
+          have shape := getConstructor_shape_of_ok constructorEq
+          intro location member
+          simp only [List.mem_singleton] at member
+          subst actualField
+          exact bounded.owned_lt shape.2.1
+            (by
+              simpa [shape.2.2.2, HeapObject.ownedValues] using
+                array_mem_of_getElem?_eq_some index fieldEq)
+
+/-- Unboxing is runtime-neutral. Tagged boxes return immediate words/scalars;
+heap boxes return an owned cell payload, so every possible heap result remains
+strictly below the existing frontier. -/
+theorem HeapOwnershipBelowFrontier.unboxResult
+    (bounded : HeapOwnershipBelowFrontier runtime)
+    (effect : unbox runtime type object = .ok result) :
+    HeapLocationsBelowFrontier runtime [result] := by
+  cases object with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          have scalarRead :
+              scalarFromType type payload = .ok result := by
+            simpa [unbox] using effect
+          rcases scalarFromType_ok_eq_immediate scalarRead with
+            ⟨scalar, resultEq⟩ | ⟨word, resultEq⟩
+          · subst result
+            intro location member
+            simp at member
+          · subst result
+            intro location member
+            simp at member
+      | heap parent =>
+          unfold unbox at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime parent = cellResult at effect
+          cases cellResult with
+          | error fault => simp at effect
+          | ok cell =>
+              simp only at effect
+              cases objectEq : cell.object with
+              | boxed boxedType stored =>
+                  simp [objectEq] at effect
+                  have resultEq : stored = result := by
+                    simpa [Pure.pure, Except.pure] using effect
+                  subst result
+                  have shape := getLiveCell_shape_of_ok cellEq
+                  intro location member
+                  simp only [List.mem_singleton] at member
+                  subst stored
+                  exact bounded.owned_lt shape.1
+                    (by simp [objectEq, HeapObject.ownedValues])
+              | ctor constructor =>
+                  simp [objectEq] at effect
+              | closure name arity fixed =>
+                  simp [objectEq] at effect
+              | string value =>
+                  simp [objectEq] at effect
+              | natural value =>
+                  simp [objectEq] at effect
+              | integer value =>
+                  simp [objectEq] at effect
+              | byteArray value =>
+                  simp [objectEq] at effect
+              | «opaque» value =>
+                  simp [objectEq] at effect
+  | usize value => simp [unbox] at effect
+  | scalar value => simp [unbox] at effect
+  | erased => simp [unbox] at effect
+  | reuseToken location? => simp [unbox] at effect
+
+/-- Every successful sharedness query returns an immediate `UInt8`, so its
+result carries no heap location. -/
+theorem isShared_resultBelowFrontier
+    (effect : isShared runtime object = .ok result) :
+    HeapLocationsBelowFrontier runtime [result] := by
+  cases object with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [isShared] at effect
+          subst result
+          intro location member
+          simp at member
+      | heap parent =>
+          unfold isShared at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime parent = cellResult at effect
+          cases cellResult with
+          | error fault => simp at effect
+          | ok cell =>
+              simp at effect
+              have resultEq :
+                  Value.scalar (.uint8
+                    (if cell.persistent || cell.rc != 1 then 1 else 0)) =
+                    result := by
+                simpa [Pure.pure, Except.pure] using effect
+              subst result
+              intro location member
+              simp at member
+  | usize value => simp [isShared] at effect
+  | scalar value => simp [isShared] at effect
+  | erased => simp [isShared] at effect
+  | reuseToken location? => simp [isShared] at effect
+
 /-- A successful cell replacement preserves the allocation frontier. -/
 theorem setCell_nextLocation_eq_of_ok
     (effect : setCell runtime location replacement = .ok result) :
@@ -11287,6 +11419,141 @@ theorem SourceMachineOwnershipBelowFrontier.retainedScalarProjectionLetStep
               Bind.bind, Except.bind, Pure.pure, Except.pure]
           · intro location member
             simp at member
+          · exact step
+
+/-- A retained object projection may bind a heap-valued child, but successful
+lookup exposes that child as an owned constructor field and the heap invariant
+places every such address below the current frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedObjectProjectionLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize fieldRead :
+        getObjectField state.runtime objectValue index = fieldResult
+      cases fieldResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, fieldRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok field =>
+          apply bounded.runtimeNeutralLetStep
+            (declaration := {
+              fvarId, binderName, type,
+              value := .oproj index object })
+            (action := .value field)
+          · simp [evalLetValue, objectRead, fieldRead,
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · exact bounded.heap.getObjectFieldResult fieldRead
+          · exact step
+
+/-- A retained unbox either returns an immediate tagged payload or one of the
+boxed cell's owned values, both already covered by the source heap carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedUnboxLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .unbox object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize valueRead :
+        unbox state.runtime type objectValue = valueResult
+      cases valueResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, valueRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, valueRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok value =>
+          apply bounded.runtimeNeutralLetStep
+            (declaration := {
+              fvarId, binderName, type, value := .unbox object })
+            (action := .value value)
+          · simp [evalLetValue, objectRead, valueRead,
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · exact bounded.heap.unboxResult valueRead
+          · exact step
+
+/-- A retained sharedness query binds only an immediate `UInt8`, preserving
+the complete source ownership carrier without inspecting the result shape at
+the caller. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedIsSharedLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .isShared object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize sharedRead :
+        isShared state.runtime objectValue = sharedResult
+      cases sharedResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, sharedRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, sharedRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok value =>
+          apply bounded.runtimeNeutralLetStep
+            (declaration := {
+              fvarId, binderName, type, value := .isShared object })
+            (action := .value value)
+          · simp [evalLetValue, objectRead, sharedRead,
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · exact isShared_resultBelowFrontier sharedRead
           · exact step
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
@@ -20871,6 +21138,46 @@ theorem match_retainedIsSharedLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary sharedness matcher. -/
+theorem match_retainedIsSharedLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .isShared object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .isShared object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedIsSharedLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, reaches, related⟩
+  exact ⟨targetAfter, reaches, related,
+    ownership.retainedIsSharedLetStep step⟩
+
 /-- Ledger-carrying hereditary sharedness matcher.  The ownership query
 publishes its related scalar result while the runtime-neutral retained-let
 rule preserves the exact target allocation frontier. -/
@@ -21086,6 +21393,64 @@ theorem ExactShadowCodeBinderReady.match_retainedIsSharedLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained sharedness query. -/
+theorem ExactShadowCodeBinderReady.match_retainedIsSharedLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.isShared object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .isShared object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.isShared object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .isShared object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .isShared object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedIsSharedLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted sharedness provenance supplies binder absence and the
 hereditary continuation; dynamic readiness supplies its successful
@@ -21522,6 +21887,46 @@ theorem match_retainedObjectProjectionLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary object-projection matcher. -/
+theorem match_retainedObjectProjectionLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedObjectProjectionLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, reaches, related⟩
+  exact ⟨targetAfter, reaches, related,
+    ownership.retainedObjectProjectionLetStep step⟩
+
 /-- Ledger-carrying hereditary object-projection matcher. Successful field
 selection publishes the related child while the runtime-neutral retained-let
 rule preserves the exact target allocation frontier. -/
@@ -21700,6 +22105,64 @@ theorem ExactShadowCodeBinderReady.match_retainedObjectProjectionLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained object projection. -/
+theorem ExactShadowCodeBinderReady.match_retainedObjectProjectionLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.oproj index object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .oproj index object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.oproj index object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .oproj index object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .oproj index object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedObjectProjectionLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted object-projection provenance supplies binder absence and
 the hereditary continuation; its dynamic certificate can only be the
@@ -23708,6 +24171,46 @@ theorem match_retainedUnboxLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary unbox matcher. -/
+theorem match_retainedUnboxLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .unbox object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .unbox object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedUnboxLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, reaches, related⟩
+  exact ⟨targetAfter, reaches, related,
+    ownership.retainedUnboxLetStep step⟩
+
 /-- Ledger-carrying hereditary unbox matcher. Tagged payloads are immediate;
 heap payloads are published as related children, and in both cases the
 runtime-neutral retained-let rule preserves the exact target frontier. -/
@@ -23924,6 +24427,64 @@ theorem ExactShadowCodeBinderReady.match_retainedUnboxLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained unbox. -/
+theorem ExactShadowCodeBinderReady.match_retainedUnboxLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.unbox object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .unbox object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.unbox object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .unbox object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .unbox object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedUnboxLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted unbox provenance supplies binder absence and the hereditary
 continuation; dynamic readiness supplies its successful runtime-neutral
