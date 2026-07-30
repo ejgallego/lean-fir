@@ -842,6 +842,73 @@ def ReuseTokenOrdinaryRel (facts : ReuseCapacityFacts)
       findCell? sourceRuntime.heap location = some cell →
       cell.persistent = false
 
+/--
+The exact source-runtime condition needed to retain ordinary-token facts
+across an unrelated operation.
+
+For every cell visible after the step, if all matching cells visible before
+the step were ordinary, the final cell is ordinary too. The quantified
+premise deliberately covers fresh allocation: when the location was absent,
+an admitted transition must still prove that any newly introduced cell is
+non-persistent.
+-/
+def OrdinaryPersistenceTransport (before after : RuntimeState) : Prop :=
+  ∀ (location : Location) (afterCell : HeapCell),
+    findCell? after.heap location = some afterCell →
+      (∀ beforeCell,
+        findCell? before.heap location = some beforeCell →
+          beforeCell.persistent = false) →
+      afterCell.persistent = false
+
+/-- Heap identity is an ordinary-persistence transport. -/
+theorem OrdinaryPersistenceTransport.refl (runtime : RuntimeState) :
+    OrdinaryPersistenceTransport runtime runtime := by
+  intro location cell found ordinary
+  exact ordinary cell found
+
+/-- Ordinary-persistence transports compose across sequential source steps. -/
+theorem OrdinaryPersistenceTransport.trans
+    {first middle last : RuntimeState}
+    (left : OrdinaryPersistenceTransport first middle)
+    (right : OrdinaryPersistenceTransport middle last) :
+    OrdinaryPersistenceTransport first last := by
+  intro location lastCell lastFound firstOrdinary
+  apply right location lastCell lastFound
+  intro middleCell middleFound
+  exact left location middleCell middleFound firstOrdinary
+
+/--
+Bind an ordinary result and erase its shadowed capacity fact while retaining
+every differently named ordinary-token fact across the exact source-runtime
+transport condition.
+-/
+theorem ReuseTokenOrdinaryRel.eraseBind
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {before after : RuntimeState} {sourceEnv : Env} {result : Value}
+    (ordinary : ReuseTokenOrdinaryRel facts before sourceEnv)
+    (transport : OrdinaryPersistenceTransport before after) :
+    ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts resultId) after
+      (Fir.LeanIR.Impure.bind sourceEnv resultId result) := by
+  intro tokenId available location cell tracked tokenLookup found
+  have different : resultId.name ≠ tokenId.name := by
+    intro same
+    have erasedNone :=
+      findReuseCapacityEvidence?_erase_same facts resultId tokenId same
+    rw [erasedNone] at tracked
+    contradiction
+  have oldTracked :
+      findReuseCapacityEvidence? facts tokenId =
+        some (.retainedAtLeast available) := by
+    rw [← findReuseCapacityEvidence?_erase_other facts resultId tokenId
+      different]
+    exact tracked
+  have oldLookup :
+      lookup sourceEnv tokenId = some (.reuseToken (some location)) := by
+    simpa [Fir.LeanIR.Impure.bind, lookup, different] using tokenLookup
+  exact transport location cell found fun beforeCell beforeFound =>
+    ordinary tokenId available location beforeCell oldTracked oldLookup
+      beforeFound
+
 private theorem alloc_ordinary_preserves_persistent_false
     {before after : RuntimeState} {object : HeapObject}
     {reference : ObjectRef} {location : Location}

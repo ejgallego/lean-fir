@@ -4493,6 +4493,20 @@ reuse path; the same uniform step law is retained for the later trace-based
 simulation/bisimulation layer. Mixed effects still require the two shared
 validator fixes above.
 
+W6.6gc states the exact semantic condition for safe mixed composition.
+`OrdinaryPersistenceTransport` says that every cell visible after an
+unrelated source step is ordinary whenever all matching pre-step cells were
+ordinary; the formulation also requires newly introduced cells to be
+ordinary. The relation is reflexive and transitive, and
+`ReuseTokenOrdinaryRel.eraseBind` uses it to preserve all non-shadowed token
+facts. The facts-indexed runtime law and all three structural/export theorems
+are now operation-family generic. Their first disjunctive instance,
+`ReuseAliasSupported`, combines successful validated reuse with arbitrary
+cost-zero local aliases, and `correctReuseAliasCode` proves the resulting
+finite generated export without a target certificate. Further direct and
+effect families join by proving this same source transport plus the already
+isolated witness/header-capacity transport.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -648,6 +648,13 @@ acceptance tests pass.
    termination of the actual generated export with a refined return; its
    premises contain source evaluation and authoritative facts but no target
    code or translation certificate.
+   The structural theorem is now generic in a facts-indexed operation-family
+   runtime law. `OrdinaryPersistenceTransport` names the remaining
+   source-runtime condition precisely, and the first mixed instance proves it
+   reflexively for local aliases. `correctReuseAliasCode` consequently covers
+   arbitrary finite alias/reuse interleavings. Each additional family can
+   join by supplying the same ordinary-persistence condition together with
+   its existing witness and retained-header transport.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

@@ -79,8 +79,12 @@ implies it.
 The accepted compiler fragment can contain a successful source reuse whose
 concrete result disagrees on ownership metadata after an invalidating
 intervening effect. The facts-indexed reuse-only whole-export theorem is
-available when its threaded ordinary-token invariant holds; this bug blocks
-mixing reuse with every effect family under the current shared validator.
+available when its threaded ordinary-token invariant holds.
+`OrdinaryPersistenceTransport` now isolates the exact condition for an
+intervening operation, and local aliases satisfy it, yielding a mixed
+alias/reuse whole-export theorem. This bug still blocks validator-wide
+admission of effects that can create persistent aliases or otherwise fail
+that transport.
 
 ## Classification and triage
 
