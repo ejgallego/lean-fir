@@ -3351,7 +3351,8 @@ theorem deletedReuseNoneReady :
       (runtimeRoots deletedReuseNoneSourceState.runtime
         (envRootsOn neutralUsed deletedReuseNoneSourceState.env))
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  apply DeletedReuseReadyAt.none #[.erased]
+  apply DeletedReuseReadyAt.none_of_effect
+      (values := #[.erased]) (updateHeader := true)
   · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
       lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
   · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
@@ -3709,22 +3710,6 @@ def nonemptyLedgerResetLocalReady :
       (tokenValue := .reuseToken (some 1))
   rfl
 
-def nonemptyLedgerReuseLocalReady :
-    DeletedReuseSomeLocalReadyAt nonemptyLedgerReuseState
-      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
-      (values := #[.erased]) (updateHeader := true)
-  · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
-      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-      lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, live]
-  · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
-      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-      evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, live]
-    rfl
-  · rfl
-
 /-- Nonempty-ledger reset/reuse ownership regression. The ledger records
 target owner `0`; reset and concrete reuse operate on source-only location
 `1`. Reset preserves the recorded owner, after which the same ledger proves
@@ -3829,9 +3814,26 @@ theorem nonemptyTargetAllocationLedger_resetReuseReady :
         (runtimeRoots nonemptyLedgerResetRuntime
           [.object (.heap 0)])
         reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] :=
-    nonemptyLedgerReuseLocalReady
-      |>.deletedReadyAt_of_targetAllocationLedger
-        relatedAfter sourceOnlyRuntime.ledger sourceOnly
+    by
+      have binding :
+          SourceOnlyReuseTokenBinding sourceOnlyRuntime.ledger
+            nonemptyLedgerReuseState.env reuseTokenVar 1 := {
+        read := by
+          simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
+            nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+            lookupValue, Impure.bind, lookup,
+            reuseTokenVar, reuseArgVar, resetObjectVar, live]
+        sourceOnly
+      }
+      apply binding.deletedReuseSomeReadyAt_of_effect
+          (values := #[.erased]) (updateHeader := true)
+          (related := relatedAfter)
+      · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
+          nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+          evalArgs, evalArg, Impure.bind, lookup,
+          reuseTokenVar, reuseArgVar, resetObjectVar, live]
+        rfl
+      · rfl
   exact ⟨paired.larger, sourceOnlyRuntime.ledger, related, sourceOnly,
     resetReady, relatedAfter, reuseReady⟩
 
@@ -9645,7 +9647,8 @@ theorem closedReuseDeletedReuseReadyAt
     (arguments : Array Value) (roots : List Value) :
     DeletedReuseReadyAt (closedReuseSourceReuseState arguments)
       roots reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  apply DeletedReuseReadyAt.none #[.erased]
+  apply DeletedReuseReadyAt.none_of_effect
+      (values := #[.erased]) (updateHeader := true)
   · simp [closedReuseSourceReuseState, closedReuseArgEnv,
       closedReuseTokenEnv, closedReuseLiveEnv,
       lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
@@ -10387,27 +10390,6 @@ theorem closedConcreteReuseResetPairReady
       rw [targetControl] at control
       cases control
 
-/-- Concrete-token reuse overwrites only the same source-only cell already
-shown unreachable by the related target's empty frontier. -/
-def closedConcreteReuseLocalReady :
-    DeletedReuseSomeLocalReadyAt
-      (closedConcreteReuseSourceReuseState arguments)
-      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 := by
-  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
-      (values := #[.erased]) (updateHeader := true)
-  · simp [closedConcreteReuseSourceReuseState,
-      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar]
-  · simp [closedConcreteReuseSourceReuseState,
-      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar]
-    rfl
-  · rfl
-
 theorem closedConcreteReuseReady_of_shadowRuntime
     (target : MachineState)
     (runtime :
@@ -10421,8 +10403,35 @@ theorem closedConcreteReuseReady_of_shadowRuntime
         (closedConcreteReuseSourceReuseState arguments).runtime
         sourceRoots)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  exact closedConcreteReuseLocalReady
-    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
+  have ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation := by
+    rw [targetEmpty]
+    exact TargetAllocationLedger.empty rho
+  have binding :
+      SourceOnlyReuseTokenBinding ledger
+        (closedConcreteReuseSourceReuseState arguments).env
+        reuseTokenVar 0 := {
+    read := by
+      simp [closedConcreteReuseSourceReuseState,
+        closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+        closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+        lookupValue, Impure.bind, lookup,
+        reuseTokenVar, reuseArgVar, resetObjectVar]
+    sourceOnly := by
+      intro rightLocation bounded
+      rw [targetEmpty] at bounded
+      exact (Nat.not_lt_zero rightLocation bounded).elim
+  }
+  apply binding.deletedReuseSomeReadyAt_of_effect
+      (values := #[.erased]) (updateHeader := true)
+      (related := runtime)
+  · simp [closedConcreteReuseSourceReuseState,
+      closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
+      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar]
+    rfl
+  · rfl
 
 /-- Exact provenance selects deletion of the concrete reuse because no
 reachable target is headed by the same declaration. -/
@@ -11301,25 +11310,6 @@ theorem closedOwnedReuseResetPairReady
       rw [targetControl] at control
       cases control
 
-def closedOwnedReuseLocalReady :
-    DeletedReuseSomeLocalReadyAt
-      (closedOwnedReuseSourceReuseState arguments)
-      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
-      (values := #[.erased]) (updateHeader := true)
-  · simp [closedOwnedReuseSourceReuseState,
-      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
-  · simp [closedOwnedReuseSourceReuseState,
-      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
-    rfl
-  · rfl
-
 theorem closedOwnedReuseReady_of_shadowRuntime
     (target : MachineState)
     (runtime :
@@ -11333,8 +11323,35 @@ theorem closedOwnedReuseReady_of_shadowRuntime
         (closedOwnedReuseSourceReuseState arguments).runtime
         sourceRoots)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
-  exact closedOwnedReuseLocalReady
-    |>.deletedReadyAt_of_rightNextLocation_zero runtime targetEmpty
+  have ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation := by
+    rw [targetEmpty]
+    exact TargetAllocationLedger.empty rho
+  have binding :
+      SourceOnlyReuseTokenBinding ledger
+        (closedOwnedReuseSourceReuseState arguments).env
+        reuseTokenVar 1 := {
+    read := by
+      simp [closedOwnedReuseSourceReuseState,
+        closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+        closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+        closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
+        reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+    sourceOnly := by
+      intro rightLocation bounded
+      rw [targetEmpty] at bounded
+      exact (Nat.not_lt_zero rightLocation bounded).elim
+  }
+  apply binding.deletedReuseSomeReadyAt_of_effect
+      (values := #[.erased]) (updateHeader := true)
+      (related := runtime)
+  · simp [closedOwnedReuseSourceReuseState,
+      closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
+      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
+      closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
+    rfl
+  · rfl
 
 theorem closedOwnedReusePairReady
     (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
@@ -12785,25 +12802,42 @@ def retainedPrefixReuseResetLocalReady
       (tokenValue := .reuseToken (some 1))
   rfl
 
-def retainedPrefixReuseLocalReady
-    (arguments : Array Value) :
-    DeletedReuseSomeLocalReadyAt
-      (retainedPrefixReuseSourceReuseState arguments)
-      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
-      (values := #[.erased]) (updateHeader := true)
-  · simp [retainedPrefixReuseSourceReuseState,
-      nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
-      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-      lookupValue, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, live]
-  · simp [retainedPrefixReuseSourceReuseState,
-      nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
-      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-      evalArgs, evalArg, Impure.bind, lookup,
-      reuseTokenVar, reuseArgVar, resetObjectVar, live]
-    rfl
-  · rfl
+/-- The successful reset publishes its source-only object address as the
+concrete token capability consumed after the intervening argument binding. -/
+theorem retainedPrefixReuseTokenBinding
+    (arguments : Array Value)
+    (ledger :
+      TargetAllocationLedger rho
+        nonemptyLedgerTargetRuntime.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger 1) :
+    SourceOnlyReuseTokenBinding ledger
+      (retainedPrefixReuseSourceReuseState arguments).env
+      reuseTokenVar 1 := by
+  have objectBinding :
+      SourceOnlyHeapBinding ledger
+        (retainedPrefixReuseSourceResetState arguments).env
+        resetObjectVar 1 := {
+    read := by
+      simp [retainedPrefixReuseSourceResetState,
+        nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+        lookupValue, Impure.bind, lookup,
+        resetObjectVar, live]
+    sourceOnly
+  }
+  have tokenBinding :=
+    (retainedPrefixReuseResetLocalReady arguments)
+      |>.sourceOnlyReuseTokenBinding
+        objectBinding rfl reuseTokenVar
+  have tokenEq :
+      (retainedPrefixReuseResetLocalReady arguments).token =
+        .reuseToken (some 1) := rfl
+  rw [tokenEq] at tokenBinding
+  have preserved :=
+    tokenBinding.bindOther
+      (other := reuseArgVar) (by native_decide) .erased
+  simpa [retainedPrefixReuseSourceReuseState,
+    retainedPrefixReuseSourceResetState,
+    nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv] using preserved
 
 /-- Exact owner zero follows from the retained live root and the ledger's
 reverse-map law. -/
@@ -13089,9 +13123,28 @@ theorem retainedPrefixReusePairReady_ledger
                         sourceArguments).env ++
                       sourceFrameRoots))
                   reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] :=
-              (retainedPrefixReuseLocalReady sourceArguments)
-                |>.deletedReadyAt_of_targetAllocationLedger
-                  runtime ledger sourceOnly
+              by
+                have binding :
+                    SourceOnlyReuseTokenBinding ledger
+                      (retainedPrefixReuseSourceReuseState
+                        sourceArguments).env reuseTokenVar 1 :=
+                  retainedPrefixReuseTokenBinding
+                    sourceArguments
+                    (by
+                      simpa [retainedPrefixReuseTargetReturnState]
+                        using ledger)
+                    sourceOnly
+                apply binding.deletedReuseSomeReadyAt_of_effect
+                    (values := #[.erased]) (updateHeader := true)
+                    (related := runtime)
+                · simp [retainedPrefixReuseSourceReuseState,
+                    nonemptyLedgerReuseEnv,
+                    nonemptyLedgerResetEnv,
+                    nonemptyLedgerRetainedEnv,
+                    evalArgs, evalArg, Impure.bind, lookup,
+                    reuseTokenVar, reuseArgVar, resetObjectVar, live]
+                  rfl
+                · rfl
             have decision :
                 exact.view.runtimeDecision = .deletedLet :=
               exact.view

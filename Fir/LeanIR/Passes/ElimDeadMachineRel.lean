@@ -11610,6 +11610,21 @@ theorem coreStep_deletedScalarSet_of_ready_binderReady
       sourceState targetState programs frames continuation joins env
       objectRead fieldRead effect next⟩
 
+/-- A successful failed-token reuse has passed the constructor arity check.
+This is the allocation branch's root-independent operational inversion. -/
+theorem reuseNone_arity_of_ok
+    (effect :
+      reuse runtime (.reuseToken none) info updateHeader values =
+        .ok result) :
+    values.size = info.size := by
+  simp only [reuse, Bind.bind, Except.bind] at effect
+  unfold allocCtor at effect
+  simp only [Bind.bind, Except.bind] at effect
+  by_cases arity : values.size = info.size
+  · exact arity
+  · rw [if_pos (by simpa using arity)] at effect
+    simp at effect
+
 /-- Operational ownership split for a deleted `reuse`: a `none` token may
 allocate fresh garbage, while a concrete token may overwrite only an
 unreachable compiler-owned constructor cell. -/
@@ -11632,6 +11647,20 @@ inductive DeletedReuseReadyAt (state : MachineState) (roots : List Value)
       (arity : values.size = info.size)
       (unreachable : ¬Reachable state.runtime.heap roots location) :
       DeletedReuseReadyAt state roots token info arguments
+
+/-- Successful evaluation of the allocation branch supplies its complete
+deleted-reuse certificate; no separately asserted arity fact remains. -/
+theorem DeletedReuseReadyAt.none_of_effect
+    (tokenRead :
+      lookupValue state.env token = .ok (.reuseToken Option.none))
+    (argumentsRead :
+      evalArgs state.env arguments = .ok values)
+    (effect :
+      reuse state.runtime (.reuseToken Option.none)
+          info updateHeader values = .ok result) :
+    DeletedReuseReadyAt state roots token info arguments :=
+  .none values tokenRead argumentsRead
+    (reuseNone_arity_of_ok effect)
 
 /-- Root-independent operational shape for the concrete-token branch of a
 deleted `reuse`.  Its final ownership premise is supplied for the actual
@@ -11713,6 +11742,28 @@ theorem
       (runtimeRoots state.runtime sourceExtra) token info arguments :=
   shape.deletedReadyAt_of_forwardUnmapped related
     (ledger.forward_eq_none_of_sourceOnly related sourceOnly)
+
+/-- Compiler-facing concrete-token reuse bridge: exact token provenance,
+successful argument evaluation, and the interpreter effect supply the full
+root-aware deleted-reuse certificate. -/
+theorem SourceOnlyReuseTokenBinding.deletedReuseSomeReadyAt_of_effect
+    {ledger : TargetAllocationLedger rho target.nextLocation}
+    (binding :
+      SourceOnlyReuseTokenBinding ledger state.env token location)
+    (argumentsRead :
+      evalArgs state.env arguments = .ok values)
+    (effect :
+      reuse state.runtime (.reuseToken (some location))
+          info updateHeader values = .ok result)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra) :
+    DeletedReuseReadyAt state
+      (runtimeRoots state.runtime sourceExtra) token info arguments := by
+  exact
+    (DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      binding.read argumentsRead effect)
+      |>.deletedReadyAt_of_targetAllocationLedger
+        related ledger binding.sourceOnly
 
 /-- Empty-target specialization for a concrete-token reuse certificate. -/
 theorem
