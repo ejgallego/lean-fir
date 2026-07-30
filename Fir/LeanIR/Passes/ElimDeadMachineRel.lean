@@ -11992,6 +11992,149 @@ theorem SourceMachineOwnershipBelowFrontier.retainedBoxLetStep
           simp [coreStep, evalLetValue, inputRead, boxed,
             Bind.bind, Except.bind, Pure.pure, Except.pure]
 
+/-- A retained reset may recursively release owned constructor fields, but
+its fixed frontier and root-free reuse token preserve complete machine
+ownership after the enclosing `let` binds the token. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedResetLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize objectRead :
+    lookupValue state.env object = objectResult
+  cases objectResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, objectRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok objectValue =>
+      generalize resetEffect :
+        reset state.runtime count objectValue = resetResult
+      cases resetResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, objectRead, resetEffect, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, objectRead, resetEffect, fail,
+                Bind.bind, Except.bind] at transition
+      | ok result =>
+          obtain ⟨nextRuntime, token⟩ := result
+          have afterBounded :=
+            (bounded.resetBindState
+              (binder := fvarId) resetEffect)
+              |>.withControlAndJoins
+                (.code continuation) state.joins
+          apply afterBounded.ofStepNext _ step
+          simp [coreStep, evalLetValue, objectRead, resetEffect,
+            Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+/-- Retained reuse preserves complete ownership in both dynamic branches:
+the missing-token branch allocates a fresh constructor, while a concrete
+token overwrites its live cell in place and binds that cell as the result. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedReuseLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize tokenRead :
+    lookupValue state.env token = tokenResult
+  cases tokenResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, tokenRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, tokenRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok tokenValue =>
+      generalize argumentsRead :
+        evalArgs state.env arguments = argumentsResult
+      cases argumentsResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, tokenRead, argumentsRead, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, tokenRead, argumentsRead, fail,
+                Bind.bind, Except.bind] at transition
+      | ok argumentValues =>
+          cases tokenValue with
+          | reuseToken tokenLocation =>
+              generalize reuseEffect :
+                reuse state.runtime (.reuseToken tokenLocation)
+                  info updateHeader argumentValues = reuseResult
+              cases reuseResult with
+              | error fault =>
+                  cases step with
+                  | internal transition =>
+                      simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                        reuseEffect, fail, Bind.bind, Except.bind]
+                        at transition
+                  | external transition externalProof =>
+                      simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                        reuseEffect, fail, Bind.bind, Except.bind]
+                        at transition
+              | ok result =>
+                  obtain ⟨nextRuntime, value⟩ := result
+                  have afterBounded :=
+                    (bounded.reuseState
+                      (binder := fvarId) argumentsRead reuseEffect)
+                      |>.withControlAndJoins
+                        (.code continuation) state.joins
+                  apply afterBounded.ofStepNext _ step
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuseEffect, Bind.bind, Except.bind,
+                    Pure.pure, Except.pure]
+          | object reference =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+          | usize value =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+          | scalar value =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+          | erased =>
+              cases step with
+              | internal transition =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+              | external transition externalProof =>
+                  simp [coreStep, evalLetValue, tokenRead, argumentsRead,
+                    reuse, fail, Bind.bind, Except.bind] at transition
+
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
 garbage. Unlike a ledger reconstructed from a final relation witness, this
@@ -29602,6 +29745,46 @@ theorem match_retainedResetLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained-reset matcher. -/
+theorem match_retainedResetLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (objectMember : used.contains object = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedResetLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      objectMember runtime step with
+    ⟨targetAfter, reaches, related⟩
+  exact ⟨targetAfter, reaches, related,
+    ownership.retainedResetLetStep step⟩
+
 /-- Hereditary deleted-reset matcher.  Dynamic readiness supplies either a
 runtime-neutral token result or the ownership frame for a source-only
 reference-count/update/release transition. -/
@@ -29955,6 +30138,64 @@ theorem ExactShadowCodeBinderReady.match_retainedResetLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env objectMember runtime step
+
+/-- Ownership-strengthened exact retained reset. -/
+theorem ExactShadowCodeBinderReady.match_retainedResetLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel count : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId object : FVarId} {binderName : Name} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.reset count object :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .reset count object
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reset count object : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .reset count object
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .reset count object
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objectMember : ambient.contains object = true :=
+    usedBound object (by simp [collectLetValue])
+  exact match_retainedResetLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env objectMember runtime ownership step
 
 /-- Exact deleted reset provenance supplies binder absence and the hereditary
 continuation; dynamic readiness supplies the ownership frame for any
@@ -30598,6 +30839,54 @@ theorem match_retainedReuseLetStep_binderReady
                           targetTransition afterRelated
                           (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained-reuse matcher. -/
+theorem match_retainedReuseLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (tokenMember : used.contains token = true)
+    (covered : ArgsCovered used arguments)
+    (ready : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedReuseLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      tokenMember covered ready runtime step with
+    ⟨larger, targetAfter, extension, reaches, related⟩
+  exact ⟨larger, targetAfter, extension, reaches, related,
+    ownership.retainedReuseLetStep step⟩
+
 /-- Hereditary deleted-reuse matcher.  Dynamic readiness certifies either a
 fresh source-only garbage allocation or an overwrite of an unreachable
 compiler-owned constructor cell. -/
@@ -31158,6 +31447,81 @@ theorem ExactShadowCodeBinderReady.match_retainedReuseLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env valueCovered.1 valueCovered.2 retainedReady runtime step
+
+/-- Ownership-strengthened exact retained reuse. -/
+theorem ExactShadowCodeBinderReady.match_retainedReuseLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId token : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim
+          (LCNF.LetValue.reuse token info updateHeader arguments :
+            LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.reuse token info updateHeader arguments :
+          LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (retainedReady : RetainedLetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      (.reuse token info updateHeader arguments))
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type,
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type,
+            value := .reuse token info updateHeader arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have valueCovered : LetValueCovered ambient
+      (LCNF.LetValue.reuse token info updateHeader arguments :
+        LCNF.LetValue .impure) :=
+    (collectLetValue_covers continuationUsed
+      (LCNF.LetValue.reuse token info updateHeader arguments :
+        LCNF.LetValue .impure)).mono usedBound
+  exact match_retainedReuseLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env valueCovered.1 valueCovered.2 retainedReady runtime
+    ownership step
 
 /-- Exact deleted reuse provenance supplies binder absence and the hereditary
 continuation; dynamic readiness isolates any allocation or overwrite from all
