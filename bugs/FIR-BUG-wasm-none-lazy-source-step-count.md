@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-lazy-source-step-count
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 3407f806ee122cc550913ba60c12e0e4ddbbdc6f
@@ -98,6 +98,21 @@ none
 
 ## Resolution and regression
 
-Unresolved. Replace the fixed miss count with a structured or
-callee-length-indexed relation, prove cache lookup/publication inversion, and
-retain the internal cached-declaration regression.
+Fixed. `SourceLazyMissResult` now records the staging step, cache-miss
+declaration entry, arbitrary finite *isolated* callee execution, semantic
+publication, and caller bind separately. `ExecSteps.withFrameSuffix` lifts the
+callee execution under the protected cache and caller-bind frames, so a miss
+witness cannot consume or reconstruct those frames. `SourceLazyLetResult.execSteps`
+then composes either the exact three-step hit or that structured miss into an
+ordinary finite interpreter prefix.
+
+`SourceLazyLetResult.miss_cacheFacts_of_valueEq` derives both the initial
+semantic cache absence and exact `RuntimeState.setGlobal` publication equation
+from the structured execution. The generated miss theorem uses the absence
+fact through `LazyCacheGlobalsRel.emptySlot`, so its zero Wasm flag is no
+longer caller supplied.
+
+`cachedHeapFourStepsRemainInCallee` retains the original negative regression.
+`cachedHeapSevenStepsPublishAndResume` checks that the same nontrivial internal
+declaration now completes its three-step body, publishes the cache entry, and
+resumes the caller after seven total steps.

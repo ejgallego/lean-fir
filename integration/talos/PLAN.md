@@ -4962,21 +4962,34 @@ export a proof accessor constructing `LazyCacheValidationFacts` from
 successful module validation. That two-field theorem is now the complete
 coordination boundary; no offset arithmetic or dynamic cache invariant needs
 to cross it.
-Independently, the proof lane must extract semantic cache absence, the source
-publication equation, and retained-token disjointness (or validator
-invalidation) from generated source miss execution.
 
-That source inversion is currently blocked by
-`FIR-BUG-wasm-none-lazy-source-step-count`. `SourceLazyLetResult .miss`
-requires exactly four interpreter steps, but an internal nullary declaration
-needs an arbitrary finite body execution before its cache frame can publish
-the result and resume the caller. `cachedHeapFourStepsRemainInCallee` records
-the executable counterexample: after four steps the canonical cached-heap
-fixture is still at the callee return with both cache and caller-bind frames
-pending. Repair belongs to the shared proof-semantics contract: replace the
-fixed miss count with a structured or callee-length-indexed relation, then
-derive lookup absence and publication from that relation. W6 will not add a
-per-program execution certificate or a private evaluator as a workaround.
+W6.6gzk repairs `FIR-BUG-wasm-none-lazy-source-step-count`.
+`SourceLazyMissResult` replaces the fixed four-step convention with five
+structural pieces: staging, cache-miss declaration entry, arbitrary finite
+isolated callee execution, semantic publication, and caller bind.
+`ExecSteps.withFrameSuffix` lifts the isolated execution under the cache and
+caller-binding frames; therefore the witness cannot consume or reconstruct
+protected caller frames.
+`SourceLazyLetResult.execSteps` composes either path back into the ordinary
+finite interpreter relation used by whole-program correctness.
+`SourceLazyLetResult.miss_cacheFacts_of_valueEq` then derives initial semantic
+absence and the exact `RuntimeState.setGlobal` publication equation directly
+from execution. The exact generated miss constructors combine that absence
+with `LazyCacheGlobalsRel.emptySlot`, so the zero physical flag is no longer a
+caller premise. `cachedHeapFourStepsRemainInCallee` retains the counterexample
+to the old contract, while `cachedHeapSevenStepsPublishAndResume` confirms the
+nontrivial internal body now publishes and resumes through the structured
+protocol.
+
+The next local theorem is callee alignment: connect the structured miss's
+pre-publication `callRuntime` to the hereditary declaration theorem's result
+runtime. This must allow nested declarations to evolve unrelated cache slots;
+it must not assume that the complete globals table is unchanged. That
+alignment will remove the remaining source publication equation from the
+budgeted miss constructor and allow `LazyCacheGlobalsRel.publish` to close at
+the exact generated post-state. Retained-token disjointness (or
+alias-invalidating validator transfer) remains the subsequent environment
+condition.
 
 ## Parallel agent packages
 

@@ -3566,4 +3566,29 @@ example
   FirTalos.Concrete.SourceLazyLetResult.hit_cacheFacts targetEq paramsEq
     sourceStep
 
+/--
+The structured cache-miss source premise determines both initial absence and
+the exact semantic publication. The callee runtime is existential because an
+internal declaration may execute an arbitrary finite body before publishing.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (valueEq : decl.value = .fap declaration #[])
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue) :
+    ∃ callRuntime : RuntimeState,
+      findGlobal? sourceRuntime.globals declaration = none ∧
+        nextRuntime =
+          callRuntime.setGlobal declaration sourceValue :=
+  FirTalos.Concrete.SourceLazyLetResult.miss_cacheFacts_of_valueEq valueEq
+    sourceStep
+
 end FirTalos.Concrete.CompilerCorrectnessContract

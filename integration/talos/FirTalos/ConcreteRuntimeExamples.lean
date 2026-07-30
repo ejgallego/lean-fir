@@ -382,6 +382,28 @@ private def cachedHeapFourStepsRemainInCallee : Bool :=
 
 #guard cachedHeapFourStepsRemainInCallee
 
+/--
+The structured miss protocol reaches the caller after the three-step internal
+body, publishes the semantic global, and consumes both cache and bind frames.
+-/
+private def cachedHeapSevenStepsPublishAndResume : Bool :=
+  match cachedHeapProgram.findDecl? `main with
+  | some { value := .code code, .. } =>
+      match run 7 rejectExternals {
+          program := cachedHeapProgram
+          control := .code code } with
+      | .outOfFuel {
+          control := .code (.let _ _)
+          frames := []
+          runtime
+          .. } =>
+          (findGlobal? runtime.globals
+            `FirTalos.Concrete.cachedHeap).isSome
+      | _ => false
+  | _ => false
+
+#guard cachedHeapSevenStepsPublishAndResume
+
 #guard fixtureReturnsWord? cachedHeapProgram 85
 
 /--

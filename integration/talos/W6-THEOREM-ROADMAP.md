@@ -845,15 +845,23 @@ acceptance tests pass.
    premises from initial construction and publication.
    Coordinate one integration-owned validator proof accessor constructing
    `LazyCacheValidationFacts` from successful validation.
-   Source miss inversion is separately blocked by
-   `FIR-BUG-wasm-none-lazy-source-step-count`: the fixed four-step
-   `SourceLazyLetResult .miss` cannot reach the caller continuation after an
-   internal cached declaration with a nontrivial body. The executable
-   `cachedHeapFourStepsRemainInCallee` guard preserves that counterexample.
-   Coordinate an integration-owned structured or callee-length-indexed source
-   relation, then derive semantic lookup absence and publication from it; do
-   not replace that shared relation with a per-program execution certificate
-   or W6-private evaluator. Resolve the
+   `FIR-BUG-wasm-none-lazy-source-step-count` is fixed by the shared
+   `SourceLazyMissResult` relation. It separates staging, cache-miss entry,
+   arbitrary finite isolated callee execution, publication, and binding.
+   `ExecSteps.withFrameSuffix` lifts the isolated execution under the protected
+   cache and caller-bind frames, ruling out witnesses that consume or
+   reconstruct caller frames, while
+   `SourceLazyLetResult.execSteps` preserves the generic finite-prefix API.
+   `SourceLazyLetResult.miss_cacheFacts_of_valueEq` derives initial lookup
+   absence and the exact semantic publication. The generated miss theorem now
+   derives its zero physical flag from that absence and the whole-table
+   relation. The paired `cachedHeapFourStepsRemainInCallee` and
+   `cachedHeapSevenStepsPublishAndResume` guards retain the old counterexample
+   and validate the repaired protocol.
+   Next prove callee-result alignment between the structured miss's
+   pre-publication runtime and the hereditary declaration theorem, preserving
+   unrelated nested cache evolution rather than assuming global-table
+   equality. Then resolve the
    remaining `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration
    instance by
    deriving those facts from the generated declaration environment or by

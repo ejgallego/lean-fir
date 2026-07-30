@@ -1485,6 +1485,88 @@ theorem SourceLazyLetResult.hit_cacheFacts
                   exact ⟨rfl, rfl⟩
 
 /--
+A structured source cache miss determines the two semantic facts consumed by
+generated miss publication: the named global was absent in the initial
+runtime, and the post-runtime is exactly the declaration-call runtime followed
+by `RuntimeState.setGlobal`.
+
+The failed lookup is derived from the invocation step entering a state with a
+cache frame. The publication equation is derived from the explicit
+cache-frame transition after the declaration's arbitrary finite execution.
+-/
+theorem SourceLazyLetResult.miss_cacheFacts
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {fvarId : FVarId}
+    {binderName : Name}
+    {type : Expr}
+    {declaration : Name}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv {
+          fvarId
+          binderName
+          type
+          value := .fap declaration #[] }
+        continuation nextRuntime sourceValue) :
+    ∃ callRuntime : RuntimeState,
+      findGlobal? sourceRuntime.globals declaration = none ∧
+        nextRuntime =
+          callRuntime.setGlobal declaration sourceValue := by
+  unfold SourceLazyLetResult SourceLazyMissResult at sourceStep
+  rcases sourceStep with
+    ⟨missDeclaration, calleeControl, calleeEnv, calleeJoins, calleeRuntime,
+      resultEnv, resultJoins, callRuntime, calleeSteps, staged, entered,
+      evaluated, published, bound⟩
+  have declarationEq : missDeclaration = declaration := by
+    simp [executeStep, coreStep, evalLetValue, evalArgs, Bind.bind,
+      Except.bind, pure, Except.pure, pushBindFrame] at staged
+    exact staged.symm
+  subst missDeclaration
+  have semanticEmpty :
+      findGlobal? sourceRuntime.globals declaration = none := by
+    cases found : findGlobal? sourceRuntime.globals declaration with
+    | none => rfl
+    | some cached =>
+        simp [executeStep, coreStep, found] at entered
+  have runtimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue := by
+    simp [executeStep, coreStep] at published
+    exact published.symm
+  exact ⟨callRuntime, semanticEmpty, runtimeEq⟩
+
+/--
+Generic-let adapter for `miss_cacheFacts`. Compiler inversion normally exposes
+the declaration call as a value equation, so callers need not reconstruct the
+`LetDecl` record to use the structured miss theorem.
+-/
+theorem SourceLazyLetResult.miss_cacheFacts_of_valueEq
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (valueEq : decl.value = .fap declaration #[])
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue) :
+    ∃ callRuntime : RuntimeState,
+      findGlobal? sourceRuntime.globals declaration = none ∧
+        nextRuntime =
+          callRuntime.setGlobal declaration sourceValue := by
+  cases decl with
+  | mk fvarId binderName type value =>
+      simp only at valueEq
+      subst value
+      exact SourceLazyLetResult.miss_cacheFacts sourceStep
+
+/--
 The generated cache-hit path is a zero-allocation budgeted lazy step.
 
 The populated flag/value globals select and identify the cached physical
@@ -1961,15 +2043,22 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
     {locals nextLocals : Wasm.Locals}
     {initialWitness nextWitness : RefinementWitness}
     {physical oldValue oldFlag : Wasm.Value}
-    {flagIndex valueIndex resultIndex stepCost : Nat}
+    {cacheIndex flagIndex valueIndex resultIndex stepCost : Nat}
     (sourceStep :
       SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
         decl continuation nextRuntime sourceValue)
+    (declValue : decl.value = .fap declaration #[])
     (initialRelated :
       StateRelated callerFunction sourceRuntime sourceEnv initial locals
         initialWitness)
-    (flagEmpty :
-      initial.globals.globals[flagIndex]? = some (.i32 0))
+    (cacheTable :
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial)
+    (initializerFound :
+      sourceModule.initializers[cacheIndex]? = some declaration)
+    (signature :
+      (sourceModule.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (flagIndexEq : flagIndex = 2 * cacheIndex)
     (body :
       CachedDeclarationBodyWP context sourceModule calleeFunction module
         hostEnv sourceRuntime sourceCode targetFunction initial afterCall
@@ -2043,6 +2132,14 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
       sourceRuntime nextRuntime sourceEnv sourceValue initial
       (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
       resultIndex initialWitness nextWitness physical stepCost := by
+  obtain ⟨_, semanticEmpty, _⟩ :=
+    SourceLazyLetResult.miss_cacheFacts_of_valueEq declValue sourceStep
+  have flagEmptyAt :
+      initial.globals.globals[2 * cacheIndex]? = some (.i32 0) :=
+    cacheTable.emptySlot initializerFound signature semanticEmpty
+  have flagEmpty :
+      initial.globals.globals[flagIndex]? = some (.i32 0) := by
+    simpa [flagIndexEq] using flagEmptyAt
   have missBody :
       LazyMissBodySimulates module hostEnv
         [.call declarationId, .call cacheSetId, .globalSet valueIndex,
@@ -2112,15 +2209,22 @@ theorem
     {locals nextLocals : Wasm.Locals}
     {initialWitness callWitness : RefinementWitness}
     {physical oldValue oldFlag : Wasm.Value}
-    {flagIndex valueIndex resultIndex stepCost : Nat}
+    {cacheIndex flagIndex valueIndex resultIndex stepCost : Nat}
     (sourceStep :
       SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
         decl continuation nextRuntime sourceValue)
+    (declValue : decl.value = .fap declaration #[])
     (initialRelated :
       StateRelated callerFunction sourceRuntime sourceEnv initial locals
         initialWitness)
-    (flagEmpty :
-      initial.globals.globals[flagIndex]? = some (.i32 0))
+    (cacheTable :
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial)
+    (initializerFound :
+      sourceModule.initializers[cacheIndex]? = some declaration)
+    (signature :
+      (sourceModule.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (flagIndexEq : flagIndex = 2 * cacheIndex)
     (callee :
       BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime callRuntime
@@ -2183,7 +2287,7 @@ theorem
       resultIndex initialWitness callWitness physical stepCost := by
   subst nextRuntime
   apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
-    initialRelated flagEmpty
+    declValue initialRelated cacheTable initializerFound signature flagIndexEq
     callee.capacityPreserving.successful.cachedBody
     callee.capacityPreserving.successful.notImport
     callee.capacityPreserving.successful.functionFound
