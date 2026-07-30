@@ -4802,11 +4802,22 @@ hereditary declaration theorem as direct calls and composes its ordinary,
 witness, header, immutable-table, and residual-budget transports with the
 publication step.
 
+W6.6gza proves the nonallocation property of cache publication from the
+executable runtime. `markPersistentFuel_preserves_heapCursor` follows the
+recursive constructor/closure graph while composing cursor-preserving header
+writes; its public wrapper feeds
+`persistGlobalValue_preserves_heapCursor`,
+`ConcreteRuntimeState.writeGlobal_preserves_heapCursor`, and finally
+`cacheSetStep_preserves_heapCursor`.
+`cachePublication_preserves_addressSpaceBudget` turns that exact equality into
+the residual resource theorem and `miss_of_budgetedDeclaration_cacheSet` now
+derives it internally rather than accepting a publication-budget premise.
+
 The remaining miss proof is now sharply local: show that recursive cache
-persistence preserves every unrelated ordinary reuse token, every mapped
-allocation extent, and the unchanged heap frontier. The concrete cache
-execution, callee recursion, handler/descriptor tables, local write, global
-publication, and residual-budget composition are no longer open.
+persistence preserves every unrelated ordinary reuse token and every mapped
+allocation extent. The concrete cache execution, callee recursion,
+handler/descriptor tables, local write, global publication, heap frontier,
+and residual-budget composition are no longer open.
 
 ## Parallel agent packages
 

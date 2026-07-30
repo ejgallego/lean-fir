@@ -778,11 +778,14 @@ acceptance tests pass.
    instead of accepting a preassembled lazy simulation.
    `miss_of_budgetedDeclaration_cacheSet` composes that block with the
    budgeted hereditary callee theorem and threads all declaration transports
-   into cache publication. The remaining miss-local theorem is recursive
-   persistence preservation for unrelated ordinary facts, mapped header
-   extents, and the unchanged frontier. Proving that theorem and the two
-   generated-environment selection conditions is the next interprocedural
-   task.
+   into cache publication.
+   `markPersistentFuel_preserves_heapCursor` and its concrete-global/Talos
+   adapters now prove exact frontier preservation through recursive cache
+   publication, so the miss theorem derives residual-budget preservation
+   internally. The remaining miss-local theorem is recursive persistence
+   preservation for unrelated ordinary facts and mapped header extents.
+   Proving those transports and the two generated-environment selection
+   conditions is the next interprocedural task.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

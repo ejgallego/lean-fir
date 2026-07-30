@@ -9,6 +9,237 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/-- Successful folds of cursor-preserving memory transitions preserve the
+cursor from the first state to the final state. -/
+private theorem List.foldlM_cache_preserves_heapCursor
+    {α ε : Type} {step : MemoryState → α → Except ε MemoryState}
+    (preserves : ∀ before value after,
+      step before value = .ok after →
+      after.heapCursor = before.heapCursor)
+    {values : List α} {before after : MemoryState}
+    (operation :
+      values.foldlM (init := before) step = .ok after) :
+    after.heapCursor = before.heapCursor := by
+  induction values generalizing before with
+  | nil =>
+      simpa only [List.foldlM_nil, Except.ok.injEq] using
+        (congrArg MemoryState.heapCursor
+          (Except.ok.inj operation)).symm
+  | cons value rest ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at operation
+      cases firstOperation : step before value with
+      | error failure =>
+          rw [firstOperation] at operation
+          contradiction
+      | ok middle =>
+          rw [firstOperation] at operation
+          exact (ih operation).trans
+            (preserves before value middle firstOperation)
+
+/-- The canonical-dead persistence fallback is either a failure or an exact
+state no-op, hence every successful result preserves the heap frontier. -/
+theorem persistenceDeadNoOp_preserves_heapCursor
+    {state result : MemoryState} {object : Word32}
+    (operation :
+      persistenceDeadNoOp state object = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  unfold persistenceDeadNoOp at operation
+  cases read : Header.read state.memory object with
+  | error failure =>
+      simp [liftMemory, read, Bind.bind,
+        Except.bind] at operation
+  | ok header =>
+      simp only [liftMemory, read, Bind.bind,
+        Except.bind] at operation
+      by_cases canonical : header.isCanonicalFreedAt state object = true
+      · simp [canonical, pure, Except.pure] at operation
+        subst result
+        rfl
+      · simp [canonical] at operation
+
+/-- Recursive cache persistence rewrites only allocation metadata. It may
+visit an arbitrary constructor/closure graph, but no successful recursive
+step advances or retracts the concrete heap frontier. -/
+theorem markPersistentFuel_preserves_heapCursor
+    {fuel : Nat} {state result : MemoryState} {object : Word32}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      markPersistentFuel fuel state object descriptors = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  induction fuel generalizing state result object descriptors with
+  | zero =>
+      simp only [markPersistentFuel] at operation
+      cases classified : object.classify <;> rw [classified] at operation
+      · simp [pure, Except.pure] at operation
+        subst result
+        rfl
+      · simp [pure, Except.pure] at operation
+        subst result
+        rfl
+      · cases read : state.readLiveHeader object with
+        | error failure =>
+            cases failure with
+            | deadObject address =>
+                simp only [read] at operation
+                exact persistenceDeadNoOp_preserves_heapCursor operation
+            | _ => simp [read] at operation
+        | ok header =>
+            by_cases persistent : header.persistent = true
+            · simp [read, persistent, pure, Except.pure] at operation
+              subst result
+              rfl
+            · simp [read, persistent] at operation
+      · simp at operation
+  | succ fuel ih =>
+      simp only [markPersistentFuel] at operation
+      cases classified : object.classify <;> rw [classified] at operation
+      · simp [pure, Except.pure] at operation
+        subst result
+        rfl
+      · simp [pure, Except.pure] at operation
+        subst result
+        rfl
+      · cases read : state.readLiveHeader object with
+        | error failure =>
+            cases failure with
+            | deadObject address =>
+                simp only [read] at operation
+                exact persistenceDeadNoOp_preserves_heapCursor operation
+            | _ => simp [read] at operation
+        | ok header =>
+            simp only [read, Bind.bind, Except.bind] at operation
+            by_cases persistent : header.persistent = true
+            · simp [persistent, pure, Except.pure] at operation
+              subst result
+              rfl
+            · simp only [persistent] at operation
+              cases ownedOperation :
+                  readOwnedReferences state object header descriptors with
+              | error failure =>
+                  rw [ownedOperation] at operation
+                  contradiction
+              | ok owned =>
+                  rw [ownedOperation] at operation
+                  cases writeOperation :
+                      writeLiveHeader state object
+                        { header with persistent := true, refCount := 0 } with
+                  | error failure =>
+                      rw [writeOperation] at operation
+                      contradiction
+                  | ok middle =>
+                      rw [writeOperation] at operation
+                      exact
+                        (List.foldlM_cache_preserves_heapCursor
+                          (fun before child after childOperation =>
+                            ih childOperation)
+                          operation).trans
+                          (writeLiveHeader_preserves_heapCursor writeOperation)
+      · simp at operation
+
+/-- The public cursor-bounded persistence wrapper inherits exact frontier
+preservation from its fuel-indexed implementation. -/
+theorem markPersistent_preserves_heapCursor
+    {state result : MemoryState} {object : Word32}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      markPersistent state object descriptors = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  unfold markPersistent at operation
+  exact markPersistentFuel_preserves_heapCursor operation
+
+/-- Publishing a concrete ABI lane may recursively mark its object graph, but
+it never allocates and therefore preserves the exact heap frontier. -/
+theorem persistGlobalValue_preserves_heapCursor
+    {state result : MemoryState} {kind : AbiKind} {value : LaneValue}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      persistGlobalValue state kind value descriptors = .ok result) :
+    result.heapCursor = state.heapCursor := by
+  cases kind <;> cases value <;>
+    simp only [persistGlobalValue] at operation
+  all_goals try exact markPersistent_preserves_heapCursor operation
+  all_goals
+    simpa [pure, Except.pure] using
+      (congrArg MemoryState.heapCursor (Except.ok.inj operation)).symm
+
+/-- A successful concrete global publication changes the persistent bits and
+the global table only; it cannot consume or recover heap address space. -/
+theorem ConcreteRuntimeState.writeGlobal_preserves_heapCursor
+    {state result : ConcreteRuntimeState} {name : Name} {kind : AbiKind}
+    {value : LaneValue} {descriptors : ClosureDescriptorTable}
+    (operation :
+      state.writeGlobal name kind value descriptors = .ok result) :
+    result.heap.heapCursor = state.heap.heapCursor := by
+  unfold ConcreteRuntimeState.writeGlobal at operation
+  cases persistentOperation :
+      persistGlobalValue state.heap kind value descriptors with
+  | error failure =>
+      rw [persistentOperation] at operation
+      contradiction
+  | ok heap =>
+      rw [persistentOperation] at operation
+      cases globalOperation : state.globals.write name kind value with
+      | error failure =>
+          rw [globalOperation] at operation
+          contradiction
+      | ok globals =>
+          rw [globalOperation] at operation
+          simp only [Bind.bind, Except.bind] at operation
+          have resultEq := Except.ok.inj operation
+          subst result
+          exact persistGlobalValue_preserves_heapCursor persistentOperation
+
+/-- The executable Talos cache host call is allocation-free. Failure clearing,
+physical decoding, persistent-bit publication, and store reconstruction leave
+the heap cursor exactly where the declaration call left it. -/
+theorem cacheSetStep_preserves_heapCursor
+    {declaration : Name} {kind : AbiKind}
+    {initial after : Wasm.Store Host} {physical : Wasm.Value}
+    (operation :
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] after) :
+    after.host.runtime.heap.heapCursor =
+      initial.host.runtime.heap.heapCursor := by
+  unfold cacheSetStep at operation
+  cases decoded : decodePhysicalLane kind physical with
+  | error failure =>
+      simp [decoded, trap] at operation
+  | ok lane =>
+      cases published :
+          (clearFailure initial).host.runtime.writeGlobal declaration kind lane
+            (clearFailure initial).host.closureDescriptors with
+      | error failure =>
+          simp [decoded, published, trap] at operation
+      | ok runtime =>
+          simp only [decoded, published] at operation
+          have storeEq :
+              replaceRuntime (clearFailure initial) runtime = after := by
+            injection operation
+          subst after
+          simpa [replaceRuntime, clearFailure] using
+            ConcreteRuntimeState.writeGlobal_preserves_heapCursor published
+
+/-- The complete cache-publication suffix preserves every residual address
+space budget. The host cache write preserves the heap cursor, while both
+generated Wasm global writes preserve the host definitionally. -/
+theorem cachePublication_preserves_addressSpaceBudget
+    {declaration : Name} {kind : AbiKind}
+    {afterCall afterCache valueStore : Wasm.Store Host}
+    {physical : Wasm.Value} {valueIndex flagIndex : Nat}
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueStoreEq :
+      valueStore = writeWasmGlobal afterCache valueIndex physical)
+    {remainingBytes : Nat}
+    (budget :
+      afterCall.host.runtime.heap.AddressSpaceBudget remainingBytes) :
+    (writeWasmGlobal valueStore flagIndex
+      (.i32 1)).host.runtime.heap.AddressSpaceBudget remainingBytes := by
+  apply budget.of_heapCursor_eq
+  simpa [writeWasmGlobal, valueStoreEq] using
+    cacheSetStep_preserves_heapCursor operation
+
 /--
 One lazy-cache result with all transports needed by the facts-indexed
 resource frame.
@@ -345,9 +576,9 @@ publication closes the complete lazy miss resource boundary.
 
 The declaration consumes the path's allocation cost. `cacheSet` may update
 persistence metadata and semantic globals but must preserve already mapped
-header extents and the residual address-space budget; the two Wasm
-`global.set`s are part of the same final store and require no additional
-resource premise.
+header extents. Its exact heap-frontier preservation is proved from the
+implementation, so the residual address-space budget and the two Wasm
+`global.set`s require no additional resource premise.
 -/
 theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
@@ -425,13 +656,7 @@ theorem
     (publicationDescriptors :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
         afterCall.host.closureDescriptors)
-    (publicationBudget :
-      ∀ remainingBytes,
-        afterCall.host.runtime.heap.AddressSpaceBudget remainingBytes →
-          ((writeWasmGlobal valueStore flagIndex
-              (.i32 1)).host.runtime.heap).AddressSpaceBudget
-            remainingBytes) :
-    BudgetedCapacityPreservingLazyStep .miss context callerFunction module
+    : BudgetedCapacityPreservingLazyStep .miss context callerFunction module
       hostEnv sourceExternals decl continuation
       [.globalGet flagIndex,
         .iff 0 0 [] [
@@ -460,7 +685,7 @@ theorem
   · exact publicationDescriptors.trans callee.hostDescriptorsPreserved
   · exact callee.witnessDescriptorsPreserved
   · intro remainingBytes stepFits budget
-    exact publicationBudget _
+    exact cachePublication_preserves_addressSpaceBudget operation valueStoreEq
       (callee.residualBudget stepFits budget)
 
 /--
