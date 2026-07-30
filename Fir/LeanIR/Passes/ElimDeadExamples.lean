@@ -5082,6 +5082,131 @@ theorem deletedReuseNoneBoundContinuationOwnershipBelowFrontier :
   · exact next.heap
   · exact @next.env
 
+/-- A yielded bind-frame state over the source-only failed-reuse heap. The
+saved source environment deliberately contains locals absent from the target
+continuation's liveness set. -/
+noncomputable def deletedReuseYieldedBindSourceState : MachineState :=
+  { deletedReuseNoneSourceState with
+    runtime := deletedReuseNoneLedgerResult.nextRuntime
+    control := .yielded .erased
+    frames := [
+      .bind dead (.return live) deletedReuseNoneSourceState.env []] }
+
+def deletedReuseYieldedBindTargetState : MachineState :=
+  { deletedReuseTargetState with
+    control := .yielded .erased
+    frames := [
+      .bind dead (.return live) deletedReuseTargetState.env []] }
+
+noncomputable def deletedReuseYieldedBindSourceAfter : MachineState :=
+  { deletedReuseNoneSourceState with
+    runtime := deletedReuseNoneLedgerResult.nextRuntime
+    control := .code (.return live)
+    env := bind deletedReuseNoneSourceState.env dead .erased
+    joins := []
+    frames := [] }
+
+def deletedReuseYieldedBindTargetAfter : MachineState :=
+  { deletedReuseTargetState with
+    control := .code (.return live)
+    env := bind deletedReuseTargetState.env dead .erased
+    joins := []
+    frames := [] }
+
+/-- Exact bind-frame restoration now preserves both hereditary compiler
+provenance and the complete source machine ownership carrier. This fixture
+keeps the earlier source-only allocation in the heap while restoring a saved
+environment containing target-dead locals. -/
+theorem deletedReuseYieldedBindOwnershipPreserved :
+    coreStep deletedReuseYieldedBindSourceState =
+        .next deletedReuseYieldedBindSourceAfter ∧
+      coreStep deletedReuseYieldedBindTargetState =
+        .next deletedReuseYieldedBindTargetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        deletedReuseYieldedBindSourceAfter
+        deletedReuseYieldedBindTargetAfter ∧
+      SourceMachineOwnershipBelowFrontier
+        deletedReuseYieldedBindSourceAfter := by
+  have continuation :
+      BinderReadyShadowCodeGraph 2 neutralUsed
+        (.return live) (.return live) := by
+    apply
+      retainedLargeNatContinuationRun.toBinderReadyShadowCodeGraphAt
+    · omega
+    · exact UsedSubset.refl neutralUsed
+    · apply
+        retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+        (index :=
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+      · simp [codeBinderIds, BinderNamesUnique]
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        [] [] [] [] :=
+    BinderReadyReachableFramesRelated.nil
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed [] [] :=
+    BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseTargetState.runtime
+        ([.erased] ++
+          (envRootsOn neutralUsed deletedReuseNoneSourceState.env ++ []))
+        ([.erased] ++
+          (envRootsOn neutralUsed deletedReuseTargetState.env ++ [])) := by
+    simpa using
+      deletedReuseNoneLedgerResult.runtime.runtime.prependErased
+  have resultBound :=
+    deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.heap
+      |>.reuseResultBelowFrontier
+        deletedReuseNoneLedgerResult.effect
+  have sourceEnvBound :
+      EnvironmentBelowFrontier
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseNoneSourceState.env := by
+    exact EnvironmentBelowFrontier.monoFrontier
+      (before := deletedReuseNoneSourceState.runtime)
+      (after := deletedReuseNoneLedgerResult.nextRuntime)
+      (env := deletedReuseNoneSourceState.env)
+      deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.env
+      resultBound.frontier
+  have ownership :
+      SourceMachineOwnershipBelowFrontier
+        deletedReuseYieldedBindSourceState := by
+    refine {
+      heap := deletedReuseNoneOwnershipBelowFrontier
+      env := ?_
+      frames := ?_
+    }
+    · change EnvironmentBelowFrontier
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseNoneSourceState.env
+      exact sourceEnvBound
+    · change
+        EnvironmentBelowFrontier
+            deletedReuseNoneLedgerResult.nextRuntime
+            deletedReuseNoneSourceState.env ∧
+          True
+      exact And.intro sourceEnvBound True.intro
+  simpa [deletedReuseYieldedBindSourceState,
+    deletedReuseYieldedBindTargetState,
+    deletedReuseYieldedBindSourceAfter,
+    deletedReuseYieldedBindTargetAfter,
+    deletedReuseNoneSourceState,
+    deletedReuseTargetState] using
+    (coreStep_yieldedBind_binderReadyReachableRelated_withOwnership
+      (binder := dead)
+      (sourceState :=
+        { deletedReuseNoneSourceState with
+          runtime := deletedReuseNoneLedgerResult.nextRuntime })
+      (targetState := deletedReuseTargetState)
+      deletedReuseSomeProgramBinderReadyRelated frames continuation
+      joins deletedReuseNoneEnvReachableRelated ValueRel.erased
+      runtime ownership)
+
 /-- The deleted-write fixture starts from the same ownership invariant: its
 single constructor cell owns only the erased value. -/
 theorem deletedWriteSourceOwnershipBelowFrontier :

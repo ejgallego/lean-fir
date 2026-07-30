@@ -10404,6 +10404,166 @@ theorem SourceEnvironmentOwnershipBelowFrontier.reuseState
     (afterRuntime.bindValue
       (binder := binder) output.value)
 
+/-- Every saved bind frame retains a complete bound for the environment that
+will be restored when its suspended computation yields. Apply and cache
+frames contain no saved environment and therefore contribute no obligation. -/
+def BindFrameEnvironmentsBelowFrontier
+    (runtime : RuntimeState) : List Frame → Prop
+  | [] => True
+  | .bind _ _ env _ :: frames =>
+      EnvironmentBelowFrontier runtime env ∧
+        BindFrameEnvironmentsBelowFrontier runtime frames
+  | _ :: frames =>
+      BindFrameEnvironmentsBelowFrontier runtime frames
+
+/-- Saved bind environments remain bounded when an operation advances the
+allocation frontier. -/
+theorem BindFrameEnvironmentsBelowFrontier.monoFrontier
+    (bounded : BindFrameEnvironmentsBelowFrontier before frames)
+    (frontier : before.nextLocation ≤ after.nextLocation) :
+    BindFrameEnvironmentsBelowFrontier after frames := by
+  induction frames with
+  | nil => trivial
+  | cons head tail ih =>
+      cases head with
+      | bind binder continuation env joins =>
+          constructor
+          · exact EnvironmentBelowFrontier.monoFrontier
+              (@bounded.1) frontier
+          · exact ih bounded.2
+      | apply arguments =>
+          exact ih bounded
+      | cache name =>
+          exact ih bounded
+
+/-- Machine-level ownership carrier. Besides the current source environment
+and heap, it remembers every complete environment suspended in a bind frame.
+Control values and apply-frame arguments remain covered by the published roots
+of the exact shadow-runtime relation. -/
+structure SourceMachineOwnershipBelowFrontier
+    (state : MachineState) : Prop where
+  heap : HeapOwnershipBelowFrontier state.runtime
+  env : EnvironmentBelowFrontier state.runtime state.env
+  frames :
+    BindFrameEnvironmentsBelowFrontier state.runtime state.frames
+
+/-- Forget the suspended-frame component to recover the local operation
+carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.environment
+    (bounded : SourceMachineOwnershipBelowFrontier state) :
+    SourceEnvironmentOwnershipBelowFrontier state where
+  heap := bounded.heap
+  env := @bounded.env
+
+/-- A local environment/heap carrier and a separately checked stack assemble
+the machine carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (frames :
+      BindFrameEnvironmentsBelowFrontier
+        state.runtime state.frames) :
+    SourceMachineOwnershipBelowFrontier state where
+  heap := bounded.heap
+  env := @bounded.env
+  frames := frames
+
+/-- Control and join changes do not affect the machine ownership carrier. -/
+theorem SourceMachineOwnershipBelowFrontier.withControlAndJoins
+    (bounded : SourceMachineOwnershipBelowFrontier state) :
+    (control : Control) → (joins : JoinEnv) →
+    SourceMachineOwnershipBelowFrontier
+      { state with control := control, joins := joins } := by
+  intro control joins
+  exact {
+    heap := bounded.heap
+    env := @bounded.env
+    frames := bounded.frames
+  }
+
+/-- Runtime replacement at a monotone frontier transports the current and
+all suspended environments together. -/
+theorem SourceMachineOwnershipBelowFrontier.withRuntimeMonoFrontier
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (heap : HeapOwnershipBelowFrontier result)
+    (frontier : state.runtime.nextLocation ≤ result.nextLocation) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } where
+  heap := heap
+  env := EnvironmentBelowFrontier.monoFrontier
+    (@bounded.env) frontier
+  frames :=
+    BindFrameEnvironmentsBelowFrontier.monoFrontier
+      bounded.frames frontier
+
+/-- Binding a bounded result updates only the current environment and retains
+all suspended bind-frame environments. -/
+theorem SourceMachineOwnershipBelowFrontier.bindValue
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (valueBound :
+      HeapLocationsBelowFrontier state.runtime [value]) :
+    SourceMachineOwnershipBelowFrontier
+      { state with env := bind state.env binder value } where
+  heap := bounded.heap
+  env := EnvironmentBelowFrontier.bind
+    (binder := binder) (value := value)
+    bounded.env valueBound
+  frames := bounded.frames
+
+/-- Pushing a bind frame saves the already bounded current environment. -/
+theorem SourceMachineOwnershipBelowFrontier.pushBindFrame
+    (bounded : SourceMachineOwnershipBelowFrontier state) :
+    SourceMachineOwnershipBelowFrontier
+      (Fir.LeanIR.Impure.pushBindFrame state declaration continuation) := by
+  constructor
+  · exact bounded.heap
+  · exact @bounded.env
+  · exact And.intro (@bounded.env) bounded.frames
+
+/-- Restoring a bind frame consumes the yielded-value bound, installs that
+value in the frame's saved environment, and exposes the bounded tail stack. -/
+theorem SourceMachineOwnershipBelowFrontier.restoreBindFrame
+    {state : MachineState}
+    (binder : FVarId) (continuation : LCNF.Code .impure)
+    (savedEnv : Env) (savedJoins : JoinEnv)
+    (frames : List Frame) (value : Value)
+    (bounded :
+      SourceMachineOwnershipBelowFrontier
+        { state with
+          frames := .bind binder continuation savedEnv savedJoins :: frames
+          control := .yielded value })
+    (valueBound :
+      HeapLocationsBelowFrontier state.runtime [value]) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        env := bind savedEnv binder value
+        joins := savedJoins
+        frames := frames
+        control := .code continuation } := by
+  constructor
+  · exact bounded.heap
+  · exact EnvironmentBelowFrontier.bind
+      (binder := binder) (value := value)
+      (@bounded.frames).1 valueBound
+  · exact (@bounded.frames).2
+
+/-- Restoring an apply frame changes only control and removes a stack head
+that carries no saved environment. -/
+theorem SourceMachineOwnershipBelowFrontier.restoreApplyFrame
+    {state : MachineState} (arguments : Array Value)
+    (frames : List Frame) (function : Value)
+    (bounded :
+      SourceMachineOwnershipBelowFrontier
+        { state with
+          frames := .apply arguments :: frames
+          control := .yielded function }) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        frames := frames
+        control := .invokeValue function arguments } where
+  heap := bounded.heap
+  env := @bounded.env
+  frames := bounded.frames
+
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
 garbage. Unlike a ledger reconstructed from a final relation witness, this
@@ -28992,6 +29152,118 @@ theorem coreStep_yieldedApply_binderReadyReachableRelated
     targetValue :: targetArguments.toList,
     sourceFrameRoots, targetFrameRoots,
     programs, .invokeValue value arguments, frames, by simpa using runtime⟩
+
+/-- Hereditary bind-frame restoration also preserves the complete source
+machine ownership carrier. The yielded value bound comes from the exact
+shadow runtime's published control root; the saved environment comes from the
+new bind-frame component. -/
+theorem coreStep_yieldedBind_binderReadyReachableRelated_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceJoins targetJoins)
+    (env : EnvRelOn rho used sourceEnv targetEnv)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++
+        (envRootsOn used sourceEnv ++ sourceFrameRoots))
+      ([targetValue] ++
+        (envRootsOn used targetEnv ++ targetFrameRoots)))
+    (ownership :
+      SourceMachineOwnershipBelowFrontier
+        { sourceState with
+          frames := .bind binder sourceContinuation sourceEnv sourceJoins ::
+            sourceFrames
+          control := .yielded sourceValue }) :
+    let sourceAfter := {
+      sourceState with
+      env := bind sourceEnv binder sourceValue
+      joins := sourceJoins
+      frames := sourceFrames
+      control := .code sourceContinuation }
+    let targetAfter := {
+      targetState with
+      env := bind targetEnv binder targetValue
+      joins := targetJoins
+      frames := targetFrames
+      control := .code targetContinuation }
+    coreStep { sourceState with
+        frames := .bind binder sourceContinuation sourceEnv sourceJoins ::
+          sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .bind binder targetContinuation targetEnv targetJoins ::
+          targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  dsimp only
+  rcases coreStep_yieldedBind_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env value
+      runtime with
+    ⟨sourceStep, targetStep, related⟩
+  refine ⟨sourceStep, targetStep, related, ?_⟩
+  have valueBound :
+      HeapLocationsBelowFrontier sourceState.runtime [sourceValue] := by
+    intro location member
+    simp only [List.mem_singleton] at member
+    apply runtime.leftRuntimeRootsBelowFrontier
+    simp only [runtimeRoots, List.mem_append, List.mem_cons,
+      List.mem_nil_iff, or_false]
+    exact Or.inl (Or.inl (Or.inl member))
+  exact ownership.restoreBindFrame
+    binder sourceContinuation sourceEnv sourceJoins sourceFrames sourceValue
+    valueBound
+
+/-- Apply-frame restoration removes no saved environment and therefore
+preserves the complete source machine ownership carrier while the exact
+relation exposes the function and argument roots in control. -/
+theorem coreStep_yieldedApply_binderReadyReachableRelated_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ (sourceArguments.toList ++ sourceFrameRoots))
+      ([targetValue] ++ (targetArguments.toList ++ targetFrameRoots)))
+    (ownership :
+      SourceMachineOwnershipBelowFrontier
+        { sourceState with
+          frames := .apply sourceArguments :: sourceFrames
+          control := .yielded sourceValue }) :
+    let sourceAfter := {
+      sourceState with
+      frames := sourceFrames
+      control := .invokeValue sourceValue sourceArguments }
+    let targetAfter := {
+      targetState with
+      frames := targetFrames
+      control := .invokeValue targetValue targetArguments }
+    coreStep { sourceState with
+        frames := .apply sourceArguments :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .apply targetArguments :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  dsimp only
+  rcases coreStep_yieldedApply_binderReadyReachableRelated
+      sourceState targetState programs frames value arguments runtime with
+    ⟨sourceStep, targetStep, related⟩
+  exact ⟨sourceStep, targetStep, related,
+    ownership.restoreApplyFrame sourceArguments sourceFrames sourceValue⟩
 
 /-- Hereditary cache-frame restoration preserves exact provenance in the
 remaining stack while publishing the returned value on both sides. -/
