@@ -4562,6 +4562,18 @@ correctness for arbitrary interleavings of that complete direct fragment.
 The next widening frontier is the ownership/effect family rather than another
 direct-result case.
 
+W6.6gi opens that effect frontier without reintroducing certificates.
+`ReuseCapacityEffectCodeEvaluates` extends the source-only facts-indexed
+relation with successful no-result effect nodes that retain the fact map and
+consume no allocation budget. Its structural theorem accepts one uniform
+direct law and one uniform effect law for every fact map, recovers the
+production effect prefix/continuation, and proves the same generated-export
+postcondition. `correctReuseBudgetedDirectPersistentCode` instantiates it for
+compiler-erased persistent `inc`/`dec`, whose source and target transitions
+are both identities. Ordinary ownership updates are the next effect instances;
+they must establish nontrivial source ordinary-persistence in addition to
+their existing witness/header transport.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

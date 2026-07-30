@@ -672,6 +672,10 @@ acceptance tests pass.
    `correctReuseBudgetedDirectCode` covers the full
    `BudgetedDirectSupported` fragment plus reuse; the next widening obligation
    is ownership/effect composition.
+   `ReuseCapacityEffectCodeEvaluates` and
+   `correctReuseBudgetedDirectPersistentCode` now add source/target-identity
+   persistent ownership effects. Ordinary ownership updates must next supply
+   the same ordinary-persistence condition already named for direct steps.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
