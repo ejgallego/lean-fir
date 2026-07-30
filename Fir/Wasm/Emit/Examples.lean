@@ -529,4 +529,57 @@ def w5ManifestOperations : Array RuntimeOp := #[
 #guard (Fir.Wasm.Emit.Manifest.heapObjectJson (.integer (-2147483649))).isOk
 #guard (Fir.Wasm.Emit.Manifest.heapObjectJson (.byteArray #[0, 127, 128, 255])).isOk
 
+private def float32NaNPayloadJson : Lean.Json :=
+  Lean.Json.mkObj [("kind", "float32"), ("value", "2143289345")]
+
+private def float64NegativeZeroJson : Lean.Json :=
+  Lean.Json.mkObj [("kind", "float"), ("value", "9223372036854775808")]
+
+private def float32NaNPayloadArgumentJson : Lean.Json :=
+  Lean.Json.mkObj [
+    ("kind", "scalar"),
+    ("scalarKind", "float32"),
+    ("value", "2143289345")]
+
+private def float64NegativeZeroArgumentJson : Lean.Json :=
+  Lean.Json.mkObj [
+    ("kind", "scalar"),
+    ("scalarKind", "float"),
+    ("value", "9223372036854775808")]
+
+private def isExpectedJson (expected : Lean.Json) : Except String Lean.Json → Bool
+  | .ok actual => actual == expected
+  | .error _ => false
+
+private def isManifestError : Except String Lean.Json → Bool
+  | .ok _ => false
+  | .error _ => true
+
+#guard Fir.Wasm.Emit.Manifest.scalarValueJson
+  (.float32Bits 0x7fc00001) == float32NaNPayloadJson
+#guard Fir.Wasm.Emit.Manifest.scalarValueJson
+  (.float64Bits 0x8000000000000000) == float64NegativeZeroJson
+
+#guard isExpectedJson float32NaNPayloadArgumentJson <|
+  Fir.Wasm.Emit.Manifest.argumentJson .float32
+    (.scalar (.float32Bits 0x7fc00001))
+#guard isExpectedJson float64NegativeZeroArgumentJson <|
+  Fir.Wasm.Emit.Manifest.argumentJson .float
+    (.scalar (.float64Bits 0x8000000000000000))
+#guard isExpectedJson float32NaNPayloadArgumentJson <|
+  Fir.Wasm.Emit.Manifest.argumentJsonWithRuntime {} .float32
+    (.scalar (.float32Bits 0x7fc00001))
+#guard isExpectedJson float64NegativeZeroArgumentJson <|
+  Fir.Wasm.Emit.Manifest.argumentJsonWithRuntime {} .float
+    (.scalar (.float64Bits 0x8000000000000000))
+
+#guard isManifestError <| Fir.Wasm.Emit.Manifest.argumentJson .float32
+  (.scalar (.float64Bits 0x7ff8000000000001))
+#guard isManifestError <| Fir.Wasm.Emit.Manifest.argumentJson .float
+  (.scalar (.float32Bits 0x80000000))
+#guard isManifestError <| Fir.Wasm.Emit.Manifest.argumentJsonWithRuntime {} .float32
+  (.scalar (.float64Bits 0x7ff8000000000001))
+#guard isManifestError <| Fir.Wasm.Emit.Manifest.argumentJsonWithRuntime {} .float
+  (.scalar (.float32Bits 0x80000000))
+
 end Fir.Wasm.Emit.Examples

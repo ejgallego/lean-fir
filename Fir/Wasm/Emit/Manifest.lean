@@ -150,6 +150,8 @@ def scalarValueJson : ScalarValue → Json
   | .uint16 value => Json.mkObj [("kind", "uint16"), ("value", s!"{value}")]
   | .uint32 value => Json.mkObj [("kind", "uint32"), ("value", s!"{value}")]
   | .uint64 value => Json.mkObj [("kind", "uint64"), ("value", s!"{value}")]
+  | .float32Bits bits => Json.mkObj [("kind", "float32"), ("value", s!"{bits}")]
+  | .float64Bits bits => Json.mkObj [("kind", "float"), ("value", s!"{bits}")]
 
 def valueJson : Value → Json
   | .object (.tagged payload) =>
@@ -267,6 +269,10 @@ def argumentJsonWithRuntime (runtime : RuntimeState) (kind : AbiKind)
       return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint32"), ("value", s!"{value}")]
   | .scalar (.uint64 value) =>
       return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint64"), ("value", s!"{value}")]
+  | .scalar (.float32Bits bits) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "float32"), ("value", s!"{bits}")]
+  | .scalar (.float64Bits bits) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "float"), ("value", s!"{bits}")]
   | .erased => return Json.mkObj [("kind", "erased")]
   | .reuseToken none =>
       return Json.mkObj [("kind", "reuseToken"), ("location", Json.null)]
@@ -290,6 +296,10 @@ def argumentJson (kind : AbiKind) (value : Value) : Except String Json := do
       return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint32"), ("value", s!"{value}")]
   | .scalar (.uint64 value) =>
       return Json.mkObj [("kind", "scalar"), ("scalarKind", "uint64"), ("value", s!"{value}")]
+  | .scalar (.float32Bits bits) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "float32"), ("value", s!"{bits}")]
+  | .scalar (.float64Bits bits) =>
+      return Json.mkObj [("kind", "scalar"), ("scalarKind", "float"), ("value", s!"{bits}")]
   | .erased => return Json.mkObj [("kind", "erased")]
   | .reuseToken none =>
       return Json.mkObj [("kind", "reuseToken"), ("location", Json.null)]
