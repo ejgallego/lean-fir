@@ -7634,6 +7634,27 @@ theorem EnvironmentBelowFrontier.bindPairs
                 bounded valueBelow)
               tailBelow) found
 
+/-- Binding a complete declaration parameter array starts from the empty
+environment and installs only values already below the current frontier. -/
+theorem EnvironmentBelowFrontier.bindParams
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
+    (effect :
+      Fir.LeanIR.Impure.bindParams params arguments = .ok result) :
+    EnvironmentBelowFrontier runtime result := by
+  unfold Fir.LeanIR.Impure.bindParams at effect
+  split at effect
+  · have resultEq := Except.ok.inj effect
+    subst result
+    intro fvarId value found
+    exact
+      (EnvironmentBelowFrontier.bindPairs
+        (runtime := runtime) (env := [])
+        params.toList arguments.toList
+        (@EnvironmentBelowFrontier.empty runtime)
+        argumentsBelow) found
+  · simp at effect
+
 /-- Successful join-parameter binding preserves the complete starting
 environment and installs only argument values already below the frontier. -/
 theorem EnvironmentBelowFrontier.bindParamsOver
@@ -7654,6 +7675,18 @@ theorem EnvironmentBelowFrontier.bindParamsOver
         (runtime := runtime) (env := env)
         params.toList arguments.toList bounded argumentsBelow) found
   · simp at effect
+
+/-- Every value selected by an array slice inherits the source array's
+frontier bound. -/
+theorem HeapLocationsBelowFrontier.extract
+    (values : Array Value)
+    (bounded :
+      HeapLocationsBelowFrontier runtime values.toList)
+    (start stop : Nat) :
+    HeapLocationsBelowFrontier runtime
+      (values.extract start stop).toList := by
+  intro location member
+  exact bounded (array_mem_of_mem_extract values member)
 
 /-- Existing environment values remain bounded as allocation advances. -/
 theorem EnvironmentBelowFrontier.monoFrontier
@@ -11686,6 +11719,166 @@ theorem SourceMachineOwnershipBelowFrontier.pushBindFrame
   · exact bounded.heap
   · exact @bounded.env
   · exact And.intro (@bounded.env) bounded.frames
+
+/-- Allocating an under-applied declaration closure advances the frontier,
+preserves every current and suspended environment, and does not yet bind the
+fresh reference. -/
+theorem SourceMachineOwnershipBelowFrontier.allocClosureRuntime
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (name : Name) (arity : Nat) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime :=
+          (alloc state.runtime
+            (.closure name arity arguments)).1 } := by
+  have output :=
+    alloc_resultBelowFrontier state.runtime
+      (.closure name arity arguments)
+  exact bounded.withRuntimeMonoFrontier
+    (bounded.heap.allocClosure arguments argumentsBelow name arity)
+    output.frontier
+
+/-- Declaration invocation preserves the source ownership carrier on every
+internal successor. Under-application allocates a closure from bounded call
+arguments; full application binds a bounded argument prefix into a fresh
+environment. External declarations and terminal faults cannot produce the
+assumed `.next` result. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeDeclNext
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      invokeDecl state name arguments = .next after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  cases found : state.program.findDecl? name with
+  | none =>
+      simp [invokeDecl, found, fail] at transition
+  | some declaration =>
+      by_cases tooFew : arguments.size < declaration.params.size
+      · have afterRuntime :=
+          bounded.allocClosureRuntime argumentsBelow
+            name declaration.params.size
+        have afterBounded :=
+          afterRuntime.withControlAndJoins
+            (.yielded
+              (.object
+                (alloc state.runtime
+                  (.closure name declaration.params.size arguments)).2))
+            state.joins
+        have expected :
+            invokeDecl state name arguments =
+              .next
+                (state.withValue
+                  (alloc state.runtime
+                    (.closure name declaration.params.size arguments)).1
+                  (.object
+                    (alloc state.runtime
+                      (.closure name declaration.params.size arguments)).2)) := by
+          simp [invokeDecl, found, tooFew]
+        rw [expected] at transition
+        cases transition
+        simpa [MachineState.withValue] using afterBounded
+      · let callArguments :=
+          arguments.extract 0 declaration.params.size
+        have callArgumentsBelow :
+            HeapLocationsBelowFrontier state.runtime
+              callArguments.toList :=
+          HeapLocationsBelowFrontier.extract
+            arguments argumentsBelow 0 declaration.params.size
+        cases binding :
+            bindParams declaration.params callArguments with
+        | error fault =>
+            simp [invokeDecl, found, tooFew, callArguments, binding, fail]
+              at transition
+        | ok nextEnv =>
+            have nextEnvBelow :
+                EnvironmentBelowFrontier state.runtime nextEnv :=
+              EnvironmentBelowFrontier.bindParams
+                callArgumentsBelow binding
+            cases value : declaration.value with
+            | extern metadata =>
+                simp [invokeDecl, found, tooFew, callArguments, binding,
+                  value] at transition
+            | code code =>
+                let extraArguments :=
+                  arguments.extract declaration.params.size arguments.size
+                let nextFrames :=
+                  let nextFrames :=
+                    if extraArguments.isEmpty then state.frames
+                    else .apply extraArguments :: state.frames
+                  if declaration.params.isEmpty && arguments.isEmpty then
+                    .cache name :: nextFrames
+                  else nextFrames
+                have nextFramesBelow :
+                    BindFrameEnvironmentsBelowFrontier
+                      state.runtime nextFrames := by
+                  dsimp [nextFrames]
+                  split <;> split <;>
+                    simpa [BindFrameEnvironmentsBelowFrontier] using
+                      bounded.frames
+                have expected :
+                    invokeDecl state name arguments =
+                      .next
+                        { state with
+                          env := nextEnv
+                          joins := []
+                          frames := nextFrames
+                          control := .code code } := by
+                  simp [invokeDecl, found, tooFew, callArguments, binding,
+                    value, extraArguments, nextFrames]
+                rw [expected] at transition
+                cases transition
+                exact {
+                  heap := bounded.heap
+                  env := nextEnvBelow
+                  frames := nextFramesBelow
+                }
+
+/-- A named-control internal step is either a cache hit or declaration
+invocation. Cache hits change only control; declaration calls use the generic
+allocation/binding theorem above. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeNameNext
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      coreStep { state with control := .invokeName name arguments } =
+        .next after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  cases empty : arguments.isEmpty with
+  | false =>
+      have invocation :
+          invokeDecl { state with control := .invokeName name arguments }
+              name arguments = .next after := by
+        simpa [coreStep, empty] using transition
+      exact
+        (bounded.withControlAndJoins
+          (.invokeName name arguments) state.joins)
+          |>.invokeDeclNext argumentsBelow invocation
+  | true =>
+      cases found : findGlobal? state.runtime.globals name with
+      | some value =>
+          have afterBounded :=
+            bounded.withControlAndJoins (.yielded value) state.joins
+          have expected :
+              coreStep { state with
+                control := .invokeName name arguments } =
+                .next { state with control := .yielded value } := by
+            simp [coreStep, empty, found]
+          rw [expected] at transition
+          cases transition
+          exact afterBounded
+      | none =>
+          have invocation :
+              invokeDecl { state with control := .invokeName name arguments }
+                  name arguments = .next after := by
+            simpa [coreStep, empty, found] using transition
+          exact
+            (bounded.withControlAndJoins
+              (.invokeName name arguments) state.joins)
+              |>.invokeDeclNext argumentsBelow invocation
 
 /-- Restoring a bind frame consumes the yielded-value bound, installs that
 value in the frame's saved environment, and exposes the bounded tail stack. -/
@@ -34466,6 +34659,73 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeNameNext
                   exact ⟨targetNext,
                     by simpa only [targetSame] using targetStep,
                     ⟨rho, nextRelated⟩⟩
+
+/-- The exact named-call relation publishes every source call argument as a
+runtime root. Those roots supply the frontier premise needed by the generic
+source invocation theorem. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.sourceOwnership_matchInvokeNameNext
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have argumentsBelow :
+              HeapLocationsBelowFrontier source.runtime
+                sourceArguments.toList := by
+            intro location member
+            apply runtime.leftRuntimeRootsBelowFrontier
+            apply extra_subset_runtimeRoots
+            exact List.mem_append_left sourceFrameRoots member
+          exact
+            SourceMachineOwnershipBelowFrontier.invokeNameNext
+              (name := name) (arguments := sourceArguments)
+              ownership argumentsBelow
+              (by simpa only [sourceSame] using sourceTransition)
+
+/-- Internal named-call dispatch now returns the exact non-lockstep successor
+relation and the complete successor source ownership carrier together. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.matchInvokeNameNext_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition : coreStep source = .next sourceAfter) :
+    ∃ targetAfter,
+      coreStep target = .next targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have afterOwnership :=
+    related.sourceOwnership_matchInvokeNameNext
+      ownership sourceControl sourceTransition
+  rcases related.matchInvokeNameNext sourceControl sourceTransition with
+    ⟨targetAfter, targetTransition, afterRelated⟩
+  exact ⟨targetAfter, targetTransition, afterRelated, afterOwnership⟩
 
 /-- Ledger-aware hereditary matcher for every internal named-call
 transition. Internal entry and cache hits preserve the current ledger;
