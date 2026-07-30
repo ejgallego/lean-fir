@@ -9,6 +9,11 @@ namespace Fir.Wasm.Emit.SourceExamples
 open Lean Elab Command
 open Fir.Wasm.Emit.Source
 
+#guard validationSchemaAcceptsAbiKind .float32 .float32
+#guard validationSchemaAcceptsAbiKind .float64 .float
+#guard !validationSchemaAcceptsAbiKind .float32 .float
+#guard !validationSchemaAcceptsAbiKind .float64 .float32
+
 #fir_wasm_pretty_facade prettyRawFixture
 
 private def prettyRuntimeImports : Array String := #[
