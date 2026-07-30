@@ -1142,9 +1142,20 @@ the heap binding into the exact successor token binding. A focused lifecycle
 regression allocates a deleted constructor, binds it as the reset operand,
 derives the concrete reset-token binding, and preserves that token provenance
 after a later paired source/target allocation enlarges the owner ledger.
-The remaining static work is now compiler typing/local-shape preservation:
-derive the write/reset/reuse operands and successful local evaluation facts
-along arbitrary checked executions rather than enumerating fixture states.
+
+The deleted-write operation-shape layer lands at `7ecdc33b`.
+`getLiveCell_shape_of_ok` and `getConstructor_shape_of_ok` expose the heap
+lookup, liveness bit, address, and constructor payload already checked by a
+successful runtime helper. The object, absolute-slot `USize`, and packed
+scalar write inversions then recover their exact operand kind and layout
+bounds from the corresponding successful mutation. Proof-relevant selectors
+package these facts as the existing local readiness structures. The
+three-write fixture now consumes those inversions and supplies only its
+operand evaluations, successful effects, selected source address, and
+independent unreachable-root fact; it no longer restates cell contents,
+liveness, or slot bounds. The remaining static work is now to prove those
+operand evaluations and successful operation facts from compiler
+typing/ownership invariants along arbitrary checked executions.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1220,7 +1231,9 @@ preservation lemmas. The local nonempty-ledger edge proof lands at
 `5a42dff6`, its checked whole-program lift lands at `5b9bead7`, and the first
 environment/ledger owner-preservation extraction lands at `3f720ba4`;
 source-only allocation lifecycle transport lands at `3744edf1`, and exact
-heap-binding/reset-token provenance lands at `0041d70c`.
+heap-binding/reset-token provenance lands at `0041d70c`. Successful
+deleted-write effects are converted into all three local heap shapes at
+`7ecdc33b`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1266,9 +1279,11 @@ the existing nullary-`.fap` semantic discrepancy.
    induction, successful reset/reuse operational shapes, source-only
    allocation entry certificates, and lifecycle transport across
    same-frontier operations and paired allocations, plus exact heap-binding
-   and reset-token provenance, are extracted. Arbitrary checked entries must
-   still derive and preserve the compiler typing/ownership facts that imply
-   each local write/reset/reuse shape, without finite execution-graph
+   and reset-token provenance, are extracted. Successful object, `USize`, and
+   scalar writes, reset, and concrete reuse now expose their local operation
+   shapes generically. Arbitrary checked entries must still derive and
+   preserve the compiler typing/ownership facts that guarantee the operand
+   evaluations and successful operations, without finite execution-graph
    enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
