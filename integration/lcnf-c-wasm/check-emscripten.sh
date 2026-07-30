@@ -22,6 +22,7 @@ native_executable="$out_dir/RuntimeSmoke.native"
 native_results="$out_dir/RuntimeSmoke.native.txt"
 module="$out_dir/RuntimeSmoke.mjs"
 artifact="$out_dir/RuntimeSmoke.wasm"
+manifest="$out_dir/RuntimeSmoke.manifest.json"
 
 "$lane_dir/build-emscripten.sh" \
   --root "$lane_dir" \
@@ -73,10 +74,9 @@ lake env leanc \
 
 node \
   "$lane_dir/check-emscripten.mjs" \
-  "$module" \
-  "$artifact" \
+  "$manifest" \
   "$native_results"
 if [[ -n "${FIR_BROWSER:-}" ]]; then
   "$lane_dir/check-emscripten-browser.sh" "$FIR_BROWSER"
 fi
-sha256sum "$module" "$artifact" "$native_results"
+sha256sum "$module" "$artifact" "$manifest" "$native_results"

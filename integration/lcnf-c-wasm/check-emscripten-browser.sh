@@ -16,6 +16,7 @@ done
 
 test -s "$repo_root/_build/lcnf-c-wasm/emscripten/RuntimeSmoke.mjs"
 test -s "$repo_root/_build/lcnf-c-wasm/emscripten/RuntimeSmoke.wasm"
+test -s "$repo_root/_build/lcnf-c-wasm/emscripten/RuntimeSmoke.manifest.json"
 
 python3 "$lane_dir/serve-browser.py" "$port" "$repo_root" \
   >/dev/null 2>&1 &

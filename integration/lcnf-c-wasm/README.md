@@ -68,7 +68,18 @@ generated module initializer instead of guessing its encoded C name, links
 the pinned full runtime/Init/Std cone, and exports
 `fir_lcnf_c_initialize` as the mandatory host entry point. Requested exports
 must be valid C identifiers present in the generated code; misspellings fail
-the build before linking.
+the build before linking. Every build emits an ES module, a Wasm module, and a
+deterministic manifest. The manifest contains no timestamp or absolute host
+path; it records relative sources, pinned toolchains, normalized compile/link
+flags, runtime requirements, the admitted ABI, byte lengths, and SHA-256
+digests.
+
+`emscripten-loader.mjs` consumes that manifest in Node or a browser. It
+validates the schema and ABI, verifies both artifact lengths and digests before
+loading code, supplies the verified Wasm bytes to Emscripten, initializes the
+Lean runtime/module/start action exactly once, and returns only the declared
+exports. Threaded browser artifacts fail early unless the page is
+cross-origin isolated.
 
 The WASI artifact is intentionally a Preview 1 core-module reactor. It links
 the heap, core, and scalar fixtures against ABI 3 of a single-threaded subset
@@ -170,12 +181,25 @@ bash integration/lcnf-c-wasm/build-emscripten.sh \
   integration/lcnf-c-wasm/RuntimeSmoke.lean
 ```
 
-Import the emitted ES module, instantiate it, and call
-`module._fir_lcnf_c_initialize()` once before any requested export. A nonzero
-result reports module-initialization or start-action failure. The public
-exports use their declared Lean C ABI; scalar `@[export]` functions are the
-simplest host boundary. Use `--extra-source` for local generated modules that
-must be linked with the entry module.
+Load the emitted artifacts through the shared manifest loader:
+
+```js
+import { loadEmscriptenModule } from
+  "./integration/lcnf-c-wasm/emscripten-loader.mjs";
+
+const loaded = await loadEmscriptenModule(
+  new URL("./_build/my-module/RuntimeSmoke.manifest.json", import.meta.url),
+);
+const checksum =
+  loaded.exports.fir_lcnf_c_runtime_checksum(1000n, 17n);
+```
+
+The loader calls `fir_lcnf_c_initialize` before returning. A nonzero result
+reports module-initialization or start-action failure. The public exports use
+their declared Lean C ABI; scalar `@[export]` functions are the simplest host
+boundary. Use `--extra-source` for local generated modules that must be linked
+with the entry module. Deploy the `.manifest.json`, `.mjs`, and `.wasm` files
+together; the manifest filenames are relative to its own URL.
 
 ## Running the experimental WASI profile
 

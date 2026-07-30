@@ -149,7 +149,7 @@ if [[ -z "$out_dir" ]]; then
   out_dir="$repo_root/_build/lcnf-c-wasm/build/$artifact_name"
 fi
 
-for tool in git grep lake sed sha256sum; do
+for tool in git grep lake node sed sha256sum; do
   if ! command -v "$tool" >/dev/null 2>&1; then
     die "required build tool not found: $tool"
   fi
@@ -301,7 +301,39 @@ em++ \
 
 test -s "$module"
 test -s "$artifact"
+manifest="$out_dir/$artifact_name.manifest.json"
+manifest_args=(
+  --out "$manifest"
+  --module "$module"
+  --wasm "$artifact"
+  --name "$artifact_name"
+  --root "$lean_root"
+  --entry "$entry_source"
+  --initializer "$module_initializer"
+  --lean-version "$FIR_LCNF_C_LEAN_VERSION"
+  --lean-commit "$FIR_LCNF_C_LEAN_COMMIT"
+  --emscripten-version "$FIR_LCNF_C_EMSDK_VERSION"
+  --emscripten-commit "$FIR_LCNF_C_EMSDK_COMMIT"
+)
+for source in "${extra_sources[@]}"; do
+  manifest_args+=(--extra-source "$source")
+done
+for symbol in "${exported_symbols[@]}"; do
+  manifest_args+=(--export "$symbol")
+done
+if [[ -n "$start_symbol" ]]; then
+  manifest_args+=(--start "$start_symbol")
+fi
+for flag in "${compile_flags[@]}"; do
+  manifest_flag="${flag//"$lean_build"/<lean-emscripten>}"
+  manifest_args+=(--compile-flag "$manifest_flag")
+done
+for flag in "${link_flags[@]}"; do
+  manifest_args+=(--link-flag "$flag")
+done
+node "$lane_dir/emit-emscripten-manifest.mjs" "${manifest_args[@]}"
+test -s "$manifest"
 printf 'Built optimized Emscripten module %s with initializer %s\n' \
   "$artifact" \
   "$module_initializer"
-sha256sum "$module" "$artifact"
+sha256sum "$module" "$artifact" "$manifest"

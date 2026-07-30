@@ -3,54 +3,62 @@ import { resolve } from "node:path";
 import { pathToFileURL } from "node:url";
 import { performance } from "node:perf_hooks";
 
+import { loadEmscriptenModule } from "./emscripten-loader.mjs";
 import {
   asUInt64,
   expectedHeapChecksum,
   expectedRuntimeChecksum,
 } from "./reference.mjs";
 
-const modulePath = process.argv[2];
-const wasmPath = process.argv[3];
-const nativeResultsPath = process.argv[4];
-if (
-  modulePath === undefined ||
-  wasmPath === undefined ||
-  nativeResultsPath === undefined
-) {
+const manifestPath = process.argv[2];
+const nativeResultsPath = process.argv[3];
+if (manifestPath === undefined || nativeResultsPath === undefined) {
   throw new Error(
-    "usage: node check-emscripten.mjs <RuntimeSmoke.mjs> <RuntimeSmoke.wasm> <RuntimeSmoke.native.txt>",
+    "usage: node check-emscripten.mjs <RuntimeSmoke.manifest.json> <RuntimeSmoke.native.txt>",
   );
 }
 
-const [{ default: createModule }, bytes, nativeResults] = await Promise.all([
-  import(pathToFileURL(resolve(modulePath))),
-  readFile(wasmPath),
+const resolvedManifestPath = resolve(manifestPath);
+const manifestURL = pathToFileURL(resolvedManifestPath);
+const [manifestText, nativeResults] = await Promise.all([
+  readFile(resolvedManifestPath, "utf8"),
   readFile(nativeResultsPath, "utf8"),
 ]);
+const parsedManifest = JSON.parse(manifestText);
+
+async function requireDigestRejection(artifact, label) {
+  const tamperedManifest = structuredClone(parsedManifest);
+  tamperedManifest.artifacts[artifact].sha256 = "0".repeat(64);
+  let rejected = false;
+  try {
+    await loadEmscriptenModule(tamperedManifest, {
+      baseURL: new URL(".", manifestURL),
+    });
+  } catch (error) {
+    if (String(error).includes(`${label} digest mismatch`)) {
+      rejected = true;
+    } else {
+      throw error;
+    }
+  }
+  if (!rejected) {
+    throw new Error(`loader accepted a false ${label} digest`);
+  }
+}
+
+await Promise.all([
+  requireDigestRejection("module", "JavaScript module"),
+  requireDigestRejection("wasm", "Wasm"),
+]);
+
 const stderr = [];
-const module = await createModule({
-  printErr: (line) => stderr.push(String(line)),
+const loaded = await loadEmscriptenModule(manifestURL, {
+  moduleOptions: {
+    printErr: (line) => stderr.push(String(line)),
+  },
 });
-const heapChecksum = module._fir_lcnf_c_heap_checksum;
-const runtimeChecksum = module._fir_lcnf_c_runtime_checksum;
-const runtimeInitialize = module._fir_lcnf_c_initialize;
-
-if (typeof heapChecksum !== "function") {
-  throw new Error("expected fir_lcnf_c_heap_checksum export");
-}
-if (typeof runtimeChecksum !== "function") {
-  throw new Error("expected fir_lcnf_c_runtime_checksum export");
-}
-if (typeof runtimeInitialize !== "function") {
-  throw new Error("expected fir_lcnf_c_initialize export");
-}
-
-const initializationCode = runtimeInitialize();
-if (initializationCode !== 0) {
-  throw new Error(
-    `runtime initialization failed with ${initializationCode}: ${JSON.stringify(stderr)}`,
-  );
-}
+const heapChecksum = loaded.exports.fir_lcnf_c_heap_checksum;
+const runtimeChecksum = loaded.exports.fir_lcnf_c_runtime_checksum;
 if (!stderr.includes("fir-lcnf-c:init-std")) {
   throw new Error(
     `full Init IO probe did not reach stderr: ${JSON.stringify(stderr)}`,
@@ -126,9 +134,11 @@ console.log(
   JSON.stringify(
     {
       profile: "emscripten",
-      module: modulePath,
-      wasm: wasmPath,
-      wasmByteLength: bytes.byteLength,
+      manifest: manifestPath,
+      module: loaded.manifest.artifacts.module.file,
+      wasm: loaded.manifest.artifacts.wasm.file,
+      wasmByteLength: loaded.wasmByteLength,
+      verifiedDigests: true,
       benchmarkRounds: benchmarkRounds.toString(),
       elapsedMs,
       logicalElementsPerSecond:
