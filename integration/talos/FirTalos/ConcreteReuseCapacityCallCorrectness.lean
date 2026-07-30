@@ -76,7 +76,9 @@ structure BudgetedCapacityPreservingSuccessfulDeclaration
     (resultKind : AbiKind)
     (resultValue : Value)
     (physical : Wasm.Value)
-    (stepCost : Nat) : Prop where
+    (stepCost : Nat) : Prop
+    extends ClosureTablesTransport initial afterCall initialWitness
+      resultWitness where
   capacityPreserving :
     CapacityPreservingSuccessfulDeclaration context sourceModule sourceFunction
       module hostEnv sourceExternals sourceRuntime resultRuntime sourceEnv
@@ -86,10 +88,6 @@ structure BudgetedCapacityPreservingSuccessfulDeclaration
     OrdinaryPersistenceTransport sourceRuntime resultRuntime
   externalsPreserved :
     afterCall.host.externals = initial.host.externals
-  hostDescriptorsPreserved :
-    afterCall.host.closureDescriptors = initial.host.closureDescriptors
-  witnessDescriptorsPreserved :
-    resultWitness.closureDescriptors = initialWitness.closureDescriptors
   residualBudget :
     ∀ {remainingBytes : Nat},
       stepCost ≤ remainingBytes →

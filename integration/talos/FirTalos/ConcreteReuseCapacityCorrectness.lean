@@ -3616,6 +3616,7 @@ theorem reuseStep_none_of_capacityEvidence
           (.i32 (UInt32.ofNat word.value)) sourceValue ∧
         ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
           resultKind (.word32 word) sourceValue ∧
+        nextWitness.closureDispatch = witness.closureDispatch ∧
         nextWitness.closureDescriptors = witness.closureDescriptors ∧
         HeaderCapacityTransport initial.host.runtime.heap heap witness := by
   by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
@@ -3637,7 +3638,7 @@ theorem reuseStep_none_of_capacityEvidence
       nextRuntimeRelated, physicalRelated,
       ReuseCapacityValueRel.taggedObject_afterReuse
         (evidence := evidence) empty valueRelated,
-      extension.closureDescriptors,
+      extension.closureDispatch, extension.closureDescriptors,
       capacityTransport⟩
   · obtain ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
         physicalRelated, capacityValue, capacityTransport, semanticExpected⟩ :=
@@ -3661,7 +3662,8 @@ theorem reuseStep_none_of_capacityEvidence
     exact ⟨nextWitness, concreteStep, WitnessTransport.ofExtension extension,
       nextRuntimeRelated, physicalRelated, by
         simpa [evidenceEq] using capacityValue,
-      extension.closureDescriptors, capacityTransport⟩
+      extension.closureDispatch, extension.closureDescriptors,
+      capacityTransport⟩
 
 /--
 The central W6.6dg bridge: static fitting evidence and its dynamic header
@@ -3863,6 +3865,7 @@ theorem reuseStep_of_capacityEvidence
           (.i32 (UInt32.ofNat word.value)) sourceValue ∧
         ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
           resultKind (.word32 word) sourceValue ∧
+        nextWitness.closureDispatch = witness.closureDispatch ∧
         nextWitness.closureDescriptors = witness.closureDescriptors ∧
         HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
         heap.AddressSpaceBudget
@@ -3876,7 +3879,7 @@ theorem reuseStep_of_capacityEvidence
       subst sourceToken
       obtain ⟨heap, word, reused, remainingBudget⟩ := freshAllocated rfl
       obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
-          physicalRelated, nextCapacity, witnessDescriptors,
+          physicalRelated, nextCapacity, witnessDispatch, witnessDescriptors,
           capacityTransport⟩ :=
         reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
           arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
@@ -3884,7 +3887,8 @@ theorem reuseStep_of_capacityEvidence
           reused semanticStep
       exact ⟨heap, word, nextWitness, concreteStep, transport,
         nextRuntimeRelated, physicalRelated, nextCapacity,
-        witnessDescriptors, capacityTransport, remainingBudget⟩
+        witnessDispatch, witnessDescriptors, capacityTransport,
+        remainingBudget⟩
   | retainedAtLeast available =>
       rcases capacityRelated.retainedToken_cases with zero | retained
       · obtain ⟨tokenWordEq, sourceTokenEq⟩ := zero
@@ -3893,7 +3897,8 @@ theorem reuseStep_of_capacityEvidence
         subst sourceToken
         obtain ⟨heap, word, reused, remainingBudget⟩ := freshAllocated rfl
         obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
-            physicalRelated, nextCapacity, witnessDescriptors,
+            physicalRelated, nextCapacity, witnessDispatch,
+            witnessDescriptors,
             capacityTransport⟩ :=
           reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
             arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
@@ -3901,7 +3906,8 @@ theorem reuseStep_of_capacityEvidence
             reused semanticStep
         exact ⟨heap, word, nextWitness, concreteStep, transport,
           nextRuntimeRelated, physicalRelated, nextCapacity,
-          witnessDescriptors, capacityTransport, remainingBudget⟩
+          witnessDispatch, witnessDescriptors, capacityTransport,
+          remainingBudget⟩
       · obtain ⟨location, address, header, tokenWordEq, sourceTokenEq,
             tokenRelated, _rawHeaderRead, _headerOwned, _minimum⟩ :=
           retained
@@ -3963,6 +3969,9 @@ theorem reuseStep_of_capacityEvidence
                       (constructorAllocationBytes info))) cursor
                 exact ⟨heap, address, nextWitness, concreteStep, transport,
                   nextRuntimeRelated, physicalRelated, nextCapacity, by
+                    simp [nextWitness,
+                      RefinementWitness.rebindConstructor],
+                  by
                     simp [nextWitness,
                       RefinementWitness.rebindConstructor],
                   capacityTransport, remainingBudget⟩

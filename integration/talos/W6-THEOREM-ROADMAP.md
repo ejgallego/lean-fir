@@ -1057,13 +1057,17 @@ acceptance tests pass.
    nonmatching-prefix/selected/suffix split from one semantic
    function/arity/fixed-count coverage fact. This removes matcher bits and
    first-match order as independent induction assumptions.
-   The canonical cache frame currently drops host/witness closure-dispatch
-   equality even though it preserves closure descriptors; see
-   `FIR-BUG-wasm-none-closure-dispatch-frame-agreement`. Next thread both
-   immutable closure tables through every entry and operation transport, then
-   prove candidate coverage directly from
-   `compileClosureCandidatesForTarget` and resolver/declaration facts.
-   After that, construct
+   `ClosureTablesAgree` and `ClosureTablesTransport` now retain both immutable
+   closure tables through the canonical cache frame and every direct,
+   external, effect, call, lazy, hereditary-declaration, and fixed-entry
+   transport. The frame's `resolveClosureMatcher` and
+   `closureCandidates_exists_first_match` accessors consume that agreement
+   directly, fixing
+   `FIR-BUG-wasm-none-closure-dispatch-frame-agreement`; no call site supplies
+   table equations or matcher bits separately.
+   Next prove semantic candidate coverage directly from
+   `compileClosureCandidatesForTarget` and resolver/declaration facts, then
+   construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment. Do not reintroduce a
    `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site

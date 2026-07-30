@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-closure-dispatch-frame-agreement
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 791f2ac1c0ae89237e279df32cddeabd4a3c5722
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-07-30
 reproduction: integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean
-regression: none
+regression: integration/talos/FirTalos/ConcreteCompilerCorrectnessContract.lean
 ---
 
 # Summary
@@ -92,8 +92,16 @@ none
 
 ## Resolution and regression
 
-Unresolved. Add dispatch-table agreement to the canonical frame and transport
-it through direct operations, effects, calls, lazy-cache paths, and hereditary
-declaration results. The regression should construct the generated
-first-matching saturated closure candidate without a caller-supplied target
-matcher execution.
+Fixed by introducing `ClosureTablesAgree` and `ClosureTablesTransport`.
+The canonical cache frame now retains host/witness agreement for dispatch and
+descriptor tables, and every direct, external, effect, call, lazy,
+hereditary-declaration, and fixed-entry transport preserves both.
+
+`ConcreteReuseCapacityCacheFrame.resolveClosureMatcher` constructs the exact
+physical local/address and executable matcher result without caller-supplied
+table equations or target execution.
+`ConcreteReuseCapacityCacheFrame.closureCandidates_exists_first_match`
+derives the first nonzero generated candidate from semantic identity coverage
+without accepting matcher bits separately. Both public boundaries are
+exercised by contract examples in
+`ConcreteCompilerCorrectnessContract.lean`.

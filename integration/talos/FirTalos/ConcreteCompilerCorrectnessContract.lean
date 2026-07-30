@@ -3933,6 +3933,106 @@ example
     closureFound closureKindAt cellFound cellLive cellObjectEq
 
 /--
+The canonical cache-aware frame now supplies both closure-table equations;
+cached declaration bodies do not restate them at each saturated call site.
+-/
+example
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {closureKind : AbiKind}
+    {location : Location}
+    {cell : HeapCell}
+    {function expectedFunction : Name}
+    {arity expectedArity expectedFixed : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (sourceLookup :
+      lookup sourceEnv closureId = some (.object (.heap location)))
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureKindAt :
+      (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
+        some closureKind)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures) :
+    ∃ address : Word32,
+      locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        closureMatchesStep expectedFunction expectedArity expectedFixed initial
+            [.i32 (UInt32.ofNat address.value)] =
+          .Return [
+            .i32 (if function == expectedFunction && arity == expectedArity &&
+              captures.size == expectedFixed then 1 else 0)]
+            (FirTalos.Concrete.clearFailure initial) ∧
+        closureData sourceRuntime (.object (.heap location)) =
+          .ok (function, arity, captures) :=
+  invariant.resolveClosureMatcher sourceLookup closureFound closureKindAt
+    cellFound cellLive cellObjectEq
+
+/--
+The same canonical frame derives the first executable matcher from semantic
+candidate coverage, without accepting matcher bits or table agreement as
+separate call-site premises.
+-/
+example
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {function : Name}
+    {arity : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address))
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures)
+    (containsMatch :
+      ∃ candidate ∈ candidates,
+        (function == candidate.function && arity == candidate.arity &&
+          captures.size == candidate.fixed) = true) :
+    ∃ before selected suffix,
+      candidates = before ++ selected :: suffix ∧
+        (∀ candidate, candidate ∈ before →
+          candidate.matched = (0 : UInt32)) ∧
+          (selected.matched != 0) = true :=
+  invariant.closureCandidates_exists_first_match candidates mapped cellFound
+    cellLive cellObjectEq containsMatch
+
+/--
 First-match selection is a theorem over the executable matcher bits, not an
 extra candidate-order certificate.
 -/

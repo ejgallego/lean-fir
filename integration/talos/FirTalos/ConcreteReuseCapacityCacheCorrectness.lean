@@ -1939,7 +1939,9 @@ structure BudgetedCapacityPreservingLazyStep
     (resultIndex : Nat)
     (initialWitness nextWitness : RefinementWitness)
     (physical : Wasm.Value)
-    (stepCost : Nat) : Prop where
+    (stepCost : Nat) : Prop
+    extends ClosureTablesTransport initial nextStore initialWitness
+      nextWitness where
   simulates :
     LazyLetStepSimulates path context sourceFunction module hostEnv
       sourceExternals decl continuation targetValue sourceRuntime nextRuntime
@@ -1957,12 +1959,6 @@ structure BudgetedCapacityPreservingLazyStep
       nextStore.host.runtime.heap initialWitness
   externalsPreserved :
     nextStore.host.externals = initial.host.externals
-  hostDescriptorsPreserved :
-    nextStore.host.closureDescriptors =
-      initial.host.closureDescriptors
-  witnessDescriptorsPreserved :
-    nextWitness.closureDescriptors =
-      initialWitness.closureDescriptors
   residualBudget :
     ∀ remainingBytes,
       stepCost ≤ remainingBytes →
@@ -2445,6 +2441,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit
     rw [initialRelated.clearFailure] at bound
     exact bound
   refine {
+    hostDispatchPreserved := rfl
+    witnessDispatchPreserved := rfl
     simulates := lazyLetStepSimulates_hit sourceStep initialRelated
       flagPublished valuePublished targetSet rfl nextRelated
     targetSet
@@ -2802,6 +2800,12 @@ theorem BudgetedCapacityPreservingLazyStep.miss
         nextStore.host.runtime.heap initialWitness)
     (externalsPreserved :
       nextStore.host.externals = initial.host.externals)
+    (hostDispatchPreserved :
+      nextStore.host.closureDispatch =
+        initial.host.closureDispatch)
+    (witnessDispatchPreserved :
+      nextWitness.closureDispatch =
+        initialWitness.closureDispatch)
     (hostDescriptorsPreserved :
       nextStore.host.closureDescriptors =
         initial.host.closureDescriptors)
@@ -2818,6 +2822,8 @@ theorem BudgetedCapacityPreservingLazyStep.miss
       hostEnv sourceExternals decl continuation targetValue sourceRuntime
       nextRuntime sourceEnv sourceValue initial nextStore locals nextLocals
       resultIndex initialWitness nextWitness physical stepCost := {
+  hostDispatchPreserved
+  witnessDispatchPreserved
   simulates
   targetSet
   ordinaryFrame
@@ -2926,6 +2932,12 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
     (externalsPreserved :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.externals =
         initial.host.externals)
+    (hostDispatchPreserved :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDispatch =
+        initial.host.closureDispatch)
+    (witnessDispatchPreserved :
+      nextWitness.closureDispatch =
+        initialWitness.closureDispatch)
     (hostDescriptorsPreserved :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
         initial.host.closureDescriptors)
@@ -2988,7 +3000,8 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
     lazyLetStepSimulates_miss sourceStep initialRelated flagEmpty missBody
       nextRelated
   exact .miss simulates targetSet ordinaryFrame witnessTransport
-    capacityTransport externalsPreserved hostDescriptorsPreserved
+    capacityTransport externalsPreserved hostDispatchPreserved
+    witnessDispatchPreserved hostDescriptorsPreserved
     witnessDescriptorsPreserved residualBudget
 
 /--
@@ -3098,6 +3111,9 @@ theorem
     (publicationExternals :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.externals =
         afterCall.host.externals)
+    (publicationDispatch :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDispatch =
+        afterCall.host.closureDispatch)
     (publicationDescriptors :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
         afterCall.host.closureDescriptors)
@@ -3158,6 +3174,9 @@ theorem
           callee.capacityPreserving.successful.valueRelated)
         cacheFound cacheKindEq cacheDescriptorsEq operation
   · exact publicationExternals.trans callee.externalsPreserved
+  · exact
+      publicationDispatch.trans callee.hostDispatchPreserved
+  · exact callee.witnessDispatchPreserved
   · exact publicationDescriptors.trans callee.hostDescriptorsPreserved
   · exact callee.witnessDescriptorsPreserved
   · intro remainingBytes stepFits budget
@@ -3390,6 +3409,10 @@ theorem
     (publicationExternals :
       (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)).host.externals =
         afterCall.host.externals)
+    (publicationDispatch :
+      (writeWasmGlobal valueStore (2 * cacheIndex)
+          (.i32 1)).host.closureDispatch =
+        afterCall.host.closureDispatch)
     (publicationDescriptors :
       (writeWasmGlobal valueStore (2 * cacheIndex)
           (.i32 1)).host.closureDescriptors =
@@ -3439,7 +3462,7 @@ theorem
       parameterCount resultCount operation valueGlobal valueStoreEq flagGlobal
       (by omega) resultFound resultKindAt targetSet publicationOrdinary
       resultKindEq cacheFound cacheKindEq cacheDescriptorsEq
-      publicationExternals publicationDescriptors
+      publicationExternals publicationDispatch publicationDescriptors
   exact step.withCacheSetPublishedTable callee.cacheTable operation
     initializerFound signature publicationRuntimeEq
     (by simpa [resultKindEq] using
@@ -3552,9 +3575,10 @@ theorem
 Canonical W6 program frame with generated lazy-cache state.
 
 This is the existing reuse-capacity, pure-external, and ownership frame plus
-the whole source/Wasm cache-table relation. Keeping the cache relation as the
-last conjunct lets non-cache operations use its ordinary transport theorem,
-while hit/miss operations supply their path-specific table transition.
+the whole source/Wasm cache-table relation and explicit agreement of both
+immutable closure tables. Non-cache operations transport the cache table and
+closure tables independently; hit/miss operations additionally supply their
+path-specific cache transition.
 -/
 def ConcreteReuseCapacityCacheFrame
     (sourceModule : Fir.Wasm.Module)
@@ -3570,7 +3594,116 @@ def ConcreteReuseCapacityCacheFrame
   ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals
       facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
       witness ∧
-    LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore
+    LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore ∧
+    ClosureTablesAgree targetStore witness
+
+/--
+The canonical cache frame resolves an exact generated closure matcher without
+an additional host/witness table premise.
+
+This is the direct regression boundary for closure dispatch inside a cached
+declaration body: the ordinary state relation supplies the local/address
+mapping and the frame supplies both immutable table equations.
+-/
+theorem ConcreteReuseCapacityCacheFrame.resolveClosureMatcher
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {closureKind : AbiKind}
+    {location : Location}
+    {cell : HeapCell}
+    {function expectedFunction : Name}
+    {arity expectedArity expectedFixed : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (sourceLookup :
+      lookup sourceEnv closureId = some (.object (.heap location)))
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureKindAt :
+      (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
+        some closureKind)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures) :
+    ∃ address : Word32,
+      locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        closureMatchesStep expectedFunction expectedArity expectedFixed initial
+            [.i32 (UInt32.ofNat address.value)] =
+          .Return [
+            .i32 (if function == expectedFunction && arity == expectedArity &&
+              captures.size == expectedFixed then 1 else 0)]
+            (clearFailure initial) ∧
+        closureData sourceRuntime (.object (.heap location)) =
+          .ok (function, arity, captures) :=
+  invariant.1.1.1.1.stateRelated.resolveClosureMatcher
+    invariant.2.2.dispatch invariant.2.2.descriptors.symm sourceLookup
+    closureFound closureKindAt cellFound cellLive cellObjectEq
+
+/--
+The canonical cache frame also supplies the complete first-matching split for
+a generated candidate family from one semantic identity-coverage fact. No
+matcher bit or closure-table equation is a caller premise.
+-/
+theorem
+    ConcreteReuseCapacityCacheFrame.closureCandidates_exists_first_match
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {location : Location}
+    {cell : HeapCell}
+    {function : Name}
+    {arity : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address))
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures)
+    (containsMatch :
+      ∃ candidate ∈ candidates,
+        (function == candidate.function && arity == candidate.arity &&
+          captures.size == candidate.fixed) = true) :
+    ∃ before selected suffix,
+      candidates = before ++ selected :: suffix ∧
+        (∀ candidate, candidate ∈ before →
+          candidate.matched = (0 : UInt32)) ∧
+          (selected.matched != 0) = true :=
+  closureCandidates_exists_first_match_of_refines candidates
+    invariant.1.1.1.1.stateRelated.1 invariant.2.2.dispatch
+    invariant.2.2.descriptors.symm mapped cellFound cellLive cellObjectEq
+    containsMatch
 
 /--
 Lift a transport-strengthened direct-operation family through both the
@@ -3609,7 +3742,8 @@ theorem
     targetValue targetStore targetLocals resultIndex remainingBytes witness
     supported stepFits invariant sourceStep valueCompiled valueAdapted
     resultFound
-  rcases invariant with ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+  rcases invariant with
+    ⟨⟨baseInvariant, cacheTable, closureTables⟩, entryTransports⟩
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, transports, factsTransfer,
@@ -3620,15 +3754,19 @@ theorem
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
     cacheTable.transport transports.witnessTransport transports.sourceGlobals
       transports.wasmGlobals transports.hostStaticLayout
+  have nextClosureTables :
+      ClosureTablesAgree nextStore nextWitness :=
+    transports.toClosureTablesTransport.agree closureTables
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
     entryTransports.step transports.witnessTransport transports.capacity
-      transports.ordinary externalsPreserved hostDescriptorsPreserved
-      witnessDescriptorsPreserved
+      transports.ordinary externalsPreserved
+      transports.toClosureTablesTransport
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
-    transports, factsTransfer, ⟨⟨nextBaseInvariant, nextCache⟩, nextEntry⟩⟩
+    transports, factsTransfer,
+    ⟨⟨nextBaseInvariant, nextCache, nextClosureTables⟩, nextEntry⟩⟩
 
 /--
 The production direct fragment instantiates the entry-relative whole-cache
@@ -3718,11 +3856,11 @@ theorem
   rcases invariant with
     ⟨⟨⟨⟨⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩,
           integerImplementation, naturalImplementation,
-          scalarImplementation⟩, descriptorAgreement⟩, cacheTable⟩,
+          scalarImplementation⟩, descriptorAgreement⟩, cacheTable,
+        initialClosureTables⟩,
       entryTransports⟩
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
-      externalsPreserved, hostDescriptorsPreserved,
-      witnessDescriptorsPreserved, localUpdate, witnessTransport,
+      externalsPreserved, closureTables, localUpdate, witnessTransport,
       capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
       hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
@@ -3747,8 +3885,9 @@ theorem
   have nextDescriptorAgreement :
       nextStore.host.closureDescriptors =
         nextWitness.closureDescriptors :=
-    hostDescriptorsPreserved.trans
-      (descriptorAgreement.trans witnessDescriptorsPreserved.symm)
+    closureTables.hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans
+        closureTables.witnessDescriptorsPreserved.symm)
   have nextCache :
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
     cacheTable.transport witnessTransport runtimeGlobals storeGlobals
@@ -3757,14 +3896,18 @@ theorem
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
     entryTransports.step witnessTransport capacityTransport ordinaryTransport
-      externalsPreserved hostDescriptorsPreserved
-      witnessDescriptorsPreserved
+      externalsPreserved closureTables
+  have nextClosureTables :
+      ClosureTablesAgree nextStore nextWitness :=
+    closureTables.agree initialClosureTables
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
-    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    externalsPreserved, closureTables.hostDescriptorsPreserved,
+    closureTables.witnessDescriptorsPreserved,
     factsTransfer supported,
     ⟨⟨⟨⟨nextCapacity, nextOrdinary, nextFrameAligned, nextBudget⟩,
           nextIntegerImplementation, nextNaturalImplementation,
-          nextScalarImplementation⟩, nextDescriptorAgreement⟩, nextCache⟩,
+          nextScalarImplementation⟩, nextDescriptorAgreement⟩, nextCache,
+        nextClosureTables⟩,
       nextEntry⟩
 
 /--
@@ -3840,7 +3983,7 @@ theorem
     targetLocals remainingBytes witness supported sourceStep stateRelated
     invariant adapted
   rcases invariant with
-    ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+    ⟨⟨baseInvariant, cacheTable, closureTables⟩, entryTransports⟩
   obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
       externalsPreserved, transports, nextBaseInvariant⟩ :=
     runtimeRefines supported sourceStep stateRelated baseInvariant adapted
@@ -3848,15 +3991,18 @@ theorem
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
     cacheTable.transport transports.witnessTransport transports.sourceGlobals
       transports.wasmGlobals transports.hostStaticLayout
+  have nextClosureTables :
+      ClosureTablesAgree nextStore nextWitness :=
+    transports.toClosureTablesTransport.agree closureTables
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
     entryTransports.step transports.witnessTransport transports.capacity
-      transports.ordinary externalsPreserved transports.hostDescriptors
-      transports.witnessDescriptors
+      transports.ordinary externalsPreserved
+      transports.toClosureTablesTransport
   exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
     externalsPreserved,
-    ⟨⟨nextBaseInvariant, nextCache⟩, nextEntry⟩⟩
+    ⟨⟨nextBaseInvariant, nextCache, nextClosureTables⟩, nextEntry⟩⟩
 
 /--
 The complete production no-result family instantiates the entry-relative
@@ -4013,12 +4159,15 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
       callee.declaration.capacityPreserving.capacityTransport
       callee.declaration.ordinaryTransport
       callee.declaration.externalsPreserved
-      callee.declaration.hostDescriptorsPreserved
-      callee.declaration.witnessDescriptorsPreserved
+      callee.declaration.toClosureTablesTransport
+  have nextClosureTables :
+      ClosureTablesAgree afterCall resultWitness :=
+    callee.declaration.toClosureTablesTransport.agree cacheInvariant.2.2
   exact ⟨afterCall, updated, resultWitness,
     eraseReuseCapacityFact facts decl.fvarId, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
-    nextTransfer, ⟨⟨nextBaseInvariant, callee.cacheTable⟩, nextEntry⟩⟩
+    nextTransfer,
+    ⟨⟨nextBaseInvariant, callee.cacheTable, nextClosureTables⟩, nextEntry⟩⟩
 
 /--
 Source/static admission for one saturated internal named call.
@@ -4326,9 +4475,12 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
       witnessDescriptorsPreserved, nextTransfer, nextBaseInvariant⟩ :=
     invariant.1.ofBudgetedCallStepExact stepFits capacityStep
       callee.declaration targetSet transfer
+  have nextClosureTables :
+      ClosureTablesAgree afterCall resultWitness :=
+    callee.declaration.toClosureTablesTransport.agree invariant.2.2
   exact ⟨step, externalsPreserved, hostDescriptorsPreserved,
     witnessDescriptorsPreserved, nextTransfer,
-    ⟨nextBaseInvariant, callee.cacheTable⟩⟩
+    ⟨nextBaseInvariant, callee.cacheTable, nextClosureTables⟩⟩
 
 /--
 Uniform cache-aware implementation condition for saturated generated closure
@@ -4483,8 +4635,7 @@ theorem
       callee.declaration.capacityPreserving.capacityTransport
       callee.declaration.ordinaryTransport
       callee.declaration.externalsPreserved
-      callee.declaration.hostDescriptorsPreserved
-      callee.declaration.witnessDescriptorsPreserved
+      callee.declaration.toClosureTablesTransport
   exact ⟨afterCall, updated, resultWitness,
     eraseReuseCapacityFact facts decl.fvarId, step, externalsPreserved,
     hostDescriptorsPreserved, witnessDescriptorsPreserved, nextTransfer,
@@ -4731,14 +4882,19 @@ theorem ConcreteReuseCapacityCacheFrame.adaptedInitial
         (initialStore sourceModule targetModule.wasmModule concreteExternals)
         locals witness)
     (checked : LazyCacheValidationFacts sourceModule)
-    (adapted : FirTalos.adapt sourceModule = .ok targetModule) :
+    (adapted : FirTalos.adapt sourceModule = .ok targetModule)
+    (closureTables :
+      ClosureTablesAgree
+        (initialStore sourceModule targetModule.wasmModule concreteExternals)
+        witness) :
     ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
       sourceExternals facts remainingBytes ({} : RuntimeState) sourceEnv
       (initialStore sourceModule targetModule.wasmModule concreteExternals)
       locals witness := by
   exact ⟨core,
     LazyCacheGlobalsRel.adaptedInitial checked adapted witness
-      concreteExternals⟩
+      concreteExternals,
+    closureTables⟩
 
 /--
 Exact lazy-result reconstruction for the cache-augmented canonical frame.
@@ -4807,7 +4963,7 @@ theorem ConcreteReuseCapacityCacheFrame.ofLazyCacheResult
   rcases invariant with
     ⟨⟨⟨⟨initialRelated, ordinaryTokens, frameAligned, budget⟩,
       integerImplementation, naturalImplementation, scalarImplementation⟩,
-      descriptorAgreement⟩, initialCache⟩
+      descriptorAgreement⟩, initialCache, initialClosureTables⟩
   have nextRelated :
       ReuseCapacityStateRelated
         (eraseReuseCapacityFact facts decl.fvarId) sourceFunction nextRuntime
@@ -4838,13 +4994,16 @@ theorem ConcreteReuseCapacityCacheFrame.ofLazyCacheResult
   have nextCache :
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
     cacheTransport initialCache
+  have nextClosureTables :
+      ClosureTablesAgree nextStore nextWitness :=
+    step.toClosureTablesTransport.agree initialClosureTables
   exact ⟨step.simulates, step.externalsPreserved,
     step.hostDescriptorsPreserved, step.witnessDescriptorsPreserved, transfer,
     ⟨⟨⟨⟨nextRelated, nextOrdinary, nextFrameAligned, nextBudget⟩,
       by rw [step.externalsPreserved]; exact integerImplementation,
       by rw [step.externalsPreserved]; exact naturalImplementation,
       by rw [step.externalsPreserved]; exact scalarImplementation⟩,
-      nextDescriptorAgreement⟩, nextCache⟩⟩
+      nextDescriptorAgreement⟩, nextCache, nextClosureTables⟩⟩
 
 /--
 Frame-driven generated lazy miss.
@@ -4946,7 +5105,7 @@ theorem
         LazyCacheGlobalsRel callWitness sourceModule nextRuntime nextStore := by
   rcases invariant with
     ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩,
-      descriptorAgreement⟩, initialCache⟩
+      descriptorAgreement⟩, initialCache, _initialClosureTables⟩
   obtain ⟨initializerFound, signature⟩ :=
     generated.select kindEq declarationFound
       (by simp [declarationParams]) cacheEq
@@ -5006,6 +5165,11 @@ theorem
         afterCall.host.closureDescriptors := by
     simp [nextStore, valueStore, afterCache, writeWasmGlobal, replaceRuntime,
       clearFailure]
+  have publicationDispatch :
+      nextStore.host.closureDispatch =
+        afterCall.host.closureDispatch := by
+    simp [nextStore, valueStore, afterCache, writeWasmGlobal, replaceRuntime,
+      clearFailure]
   obtain ⟨step, nextCache⟩ :=
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
       sourceStep declValue initialRelated.1 initialCache generated kindEq cacheEq
@@ -5014,7 +5178,7 @@ theorem
       operationEq valueAfterCache valueStoreEq flagAfterValue resultFound
       resultKindAt targetSet publicationOrdinary resultKindEq cacheFound
       cacheKindEq cacheDescriptorsEq publicationExternals
-      publicationDescriptors
+      publicationDispatch publicationDescriptors
   exact ⟨nextStore, nextLocals, step, nextCache⟩
 
 /--
@@ -5558,7 +5722,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
   injection alignedResultFound with resultIndexEq
   subst alignedResultIndex
   rcases invariant with
-    ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩, _⟩, cacheTable⟩
+    ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩, _⟩,
+      cacheTable, _closureTables⟩
   obtain ⟨initializerFound, signature⟩ :=
     generated.select kindEq targetEq paramsEq cacheEq
   obtain ⟨physical, slot⟩ :=
@@ -6081,8 +6246,7 @@ theorem
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
     entryTransports.step step.witnessTransport step.capacityTransport ordinary
-      step.externalsPreserved step.hostDescriptorsPreserved
-      step.witnessDescriptorsPreserved
+      step.externalsPreserved step.toClosureTablesTransport
   exact ⟨nextStore, nextLocals, nextWitness,
     eraseReuseCapacityFact facts decl.fvarId, simulates, externalsPreserved,
     hostDescriptorsPreserved, witnessDescriptorsPreserved, nextTransfer,

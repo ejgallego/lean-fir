@@ -5328,9 +5328,9 @@ and source-structural completeness still follow those lifts.
 W6.6h closes the complete current no-result effect family over the
 entry-relative cache frame. `RuntimeStepTransports` is now the common
 cache-neutral representation package shared by direct and effect operations.
-`EffectStepTransports` extends it with exact host- and witness-descriptor
-preservation, and `EffectRuntimeRefinesWithTransports` retains that package
-through source-family union, handler-table invariants, and equivalent frame
+`EffectStepTransports` inherits its exact immutable-table preservation, and
+`EffectRuntimeRefinesWithTransports` retains that package through
+source-family union, handler-table invariants, and equivalent frame
 presentations.
 
 Every production effect leaf constructs the strengthened result:
@@ -5445,6 +5445,28 @@ lazy, entry-relative, and hereditary transports. The next closure slice is
 that invariant lift, followed by a production candidate-coverage theorem from
 `compileClosureCandidatesForTarget` and resolver facts. Matcher outcomes must
 not be postulated through `ClosureCandidateCase.operation` as a workaround.
+
+W6.6hd closes that immutable-table invariant gap.
+`ClosureTablesAgree` names agreement between the concrete host and
+refinement witness for both closure dispatch and closure descriptors, while
+`ClosureTablesTransport` packages preservation of both tables on the host and
+witness sides across one step. `RuntimeStepTransports`, effect transports,
+budgeted hereditary declarations, lazy hit/miss steps, and fixed-entry
+transports all carry the common package. Direct operations, pure externals,
+effects, named and saturated calls, and cache publication reconstruct the
+agreement with one shared composition theorem.
+
+`ConcreteReuseCapacityCacheFrame` now carries that paired agreement beside
+`LazyCacheGlobalsRel`. Its canonical matcher accessor derives the exact local
+address and executable `closureMatchesStep` without separate table premises,
+and its first-match accessor derives the nonmatching-prefix/selected split
+from semantic identity coverage. Contract guards exercise both boundaries.
+`FIR-BUG-wasm-none-closure-dispatch-frame-agreement` is fixed. The remaining
+saturated-selection task is purely static/source-facing: derive semantic
+candidate coverage from `compileClosureCandidatesForTarget` and declaration
+resolution, then feed it to this canonical accessor. After that, construct
+`LazyCacheInternalHereditaryDeclarationInduction` recursively for the
+generated declaration environment.
 
 ## Parallel agent packages
 
