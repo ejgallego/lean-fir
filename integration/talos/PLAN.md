@@ -4417,6 +4417,35 @@ whole-export endpoint now admits arbitrary interleaving of successful reset
 without a per-program or branch certificate. No FIR semantic contract,
 concrete layout, executable ABI, or W7 helper signature changed.
 
+W6.6fy closes the corresponding branch-independent *operation* boundary for
+successful reuse. `reuseStep_of_capacityEvidence` consumes the authoritative
+static fitting-capacity result and its dynamic `ReuseCapacityValueRel`, then
+derives whether the runtime token is zero or names a retained allocation. It
+selects fresh tagged allocation, fresh heap allocation, or checked in-place
+reuse internally and returns the exact `afterReuse` fact, witness transport,
+runtime/value refinement, closure-descriptor preservation, and retained-header
+transport. The theorem contains no target instruction sequence, numeric
+import/local index, or per-program simulation certificate.
+
+This slice also corrects the dynamic retained-evidence relation: a retained
+object may be represented by a tagged result because the retained claim
+constrains only a later *nonzero* reset token. The missing case is recorded and
+closed by `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`.
+
+Three honest boundaries remain before reuse joins the certificate-free
+whole-export family. First, zero-token reuse needs a constructive
+representation-sensitive allocation theorem and path budget, rather than an
+assumed successful `reuseObject`. Second, the compiler-facing state relation
+must carry or derive that a nonzero token obtained from reset denotes an
+ordinary source cell, matching the concrete in-place update. Third, retained
+provenance is representation-polymorphic for an empty replacement: the zero
+branch returns a tagged object and the nonzero branch returns a heap address,
+so the result ABI kind must be `.tobject`. The current shared validator does
+not combine provenance with result kind; this supported-domain gap is recorded
+as `FIR-BUG-wasm-none-reuse-retained-result-kind`. Until that coordinated
+contract change lands, the lower theorem exposes the compatibility condition
+explicitly instead of weakening the value relation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

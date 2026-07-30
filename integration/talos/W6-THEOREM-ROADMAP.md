@@ -624,6 +624,18 @@ acceptance tests pass.
    Exact frontier preservation retains the indexed budget, and the mixed
    whole-export theorem admits all integer setters. Float setters remain an
    explicit unsupported runtime fragment.
+   The successful reuse operation boundary is now branch-independent:
+   `reuseStep_of_capacityEvidence` derives zero versus retained execution from
+   fitting static capacity evidence and its dynamic relation, selects all
+   three concrete representations internally, and returns the exact post fact
+   plus witness/runtime/header transport. The retained-zero empty-layout
+   relation hole is fixed by
+   `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`. Before reuse joins
+   the structural direct family, derive its fresh zero-token allocation from a
+   representation-sensitive path budget, carry ordinary retained-token
+   provenance in the compiler state relation, and coordinate the
+   provenance-sensitive `.tobject` validator condition tracked by
+   `FIR-BUG-wasm-none-reuse-retained-result-kind`.
    Reuse the
    existing W6 operation lemmas for later effect families, but do not expose
    `ConcreteCodeSimulation` or `ReuseCapacityCodeSimulation` as premises.
@@ -652,6 +664,10 @@ acceptance tests pass.
    the ordinary call simulation plus its destination-local update, witness
    transport, and retained-header transport. The remaining syntax work is to
    consume these contracts in the direct operation and callee cases.
+   Successful reuse no longer requires a caller-selected representation
+   branch at the operation layer. Its remaining structural obligations are
+   constructive allocation headroom, ordinary-token provenance, and the
+   shared result-kind gate, not an execution certificate.
    Structured unreachability remains the shared-contract blocker.
 7. Add a target relational execution/adequacy layer and prove finite-prefix
    preservation, divergence preservation, and then weak simulation or weak

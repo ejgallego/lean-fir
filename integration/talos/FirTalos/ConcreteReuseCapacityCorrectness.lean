@@ -370,6 +370,12 @@ inductive ReuseCapacityValueRel
       (minimum : available ≤ header.allocationBytes.toNat) :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available) kind
         (.word32 address) (.object (.heap location))
+  | retainedTaggedObject
+      (related :
+        ValueRel witness kind (.word32 word)
+          (.object (.tagged payload))) :
+      ReuseCapacityValueRel heap witness (.retainedAtLeast available) kind
+        (.word32 word) (.object (.tagged payload))
   | retainedEmptyToken :
       ReuseCapacityValueRel heap witness (.retainedAtLeast available)
         .reuseToken (.word32 Word32.zero) (.reuseToken none)
@@ -406,6 +412,8 @@ theorem ReuseCapacityValueRel.transport
           headerOwned
       exact .retainedObject (witnessTransport valueRelated) nextHeaderRead
         nextHeaderOwned (by simpa [sameExtent] using minimum)
+  | retainedTaggedObject valueRelated =>
+      exact .retainedTaggedObject (witnessTransport valueRelated)
   | retainedEmptyToken => exact .retainedEmptyToken
   | retainedToken valueRelated headerRead headerOwned minimum =>
       obtain ⟨nextHeader, nextHeaderRead, sameExtent, nextHeaderOwned⟩ :=
@@ -428,6 +436,7 @@ theorem ReuseCapacityValueRel.valueRelated
   | emptyObject valueRelated => exact valueRelated
   | emptyToken => exact .reuseNone
   | retainedObject valueRelated _ _ _ => exact valueRelated
+  | retainedTaggedObject valueRelated => exact valueRelated
   | retainedEmptyToken => exact .reuseNone
   | retainedToken valueRelated _ _ _ => exact valueRelated
 
@@ -2030,6 +2039,7 @@ theorem ReuseCapacityValueRel.retainedToken_cases
         available ≤ header.allocationBytes.toNat := by
   cases related with
   | retainedObject valueRelated _ _ _ => cases valueRelated
+  | retainedTaggedObject valueRelated => cases valueRelated
   | retainedEmptyToken => exact .inl ⟨rfl, rfl⟩
   | retainedToken valueRelated headerRead headerOwned minimum =>
       exact .inr
@@ -2106,6 +2116,150 @@ theorem ReuseCapacityValueRel.object_afterReuse
   | retainedAtLeast available =>
       exact tokenRelated.retainedObject_afterReuse fitting capacityTransport
         resultRelated
+
+/--
+A successful zero-token reuse of an empty-layout constructor may return a
+tagged object even when the token carried retained provenance.  Retained
+evidence constrains only a later *nonzero* reset token, so the tagged result
+satisfies that postcondition vacuously.
+-/
+theorem ReuseCapacityValueRel.taggedObject_afterReuse
+    {info : LCNF.CtorInfo} {evidence : ReuseCapacityEvidence}
+    {heap : MemoryState} {witness : RefinementWitness}
+    {kind : AbiKind} {word : Word32} {payload : UInt64}
+    (empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)
+    (resultRelated :
+      ValueRel witness kind (.word32 word) (.object (.tagged payload))) :
+    ReuseCapacityValueRel heap witness (evidence.afterReuse info) kind
+      (.word32 word) (.object (.tagged payload)) := by
+  cases evidence with
+  | emptyToken =>
+      have evidenceEq :
+          constructorReuseCapacityEvidence info = .emptyToken := by
+        simp [constructorReuseCapacityEvidence, constructorAllocatesHeap,
+          empty.1.1, empty.1.2, empty.2]
+      simpa [ReuseCapacityEvidence.afterReuse, evidenceEq] using
+        (ReuseCapacityValueRel.emptyObject (heap := heap) resultRelated)
+  | retainedAtLeast available =>
+      simpa [ReuseCapacityEvidence.afterReuse] using
+        (ReuseCapacityValueRel.retainedTaggedObject
+          (available := (ConstructorLayout.ofInfo info).allocationBytes)
+          (heap := heap) resultRelated)
+
+/--
+For a nonempty replacement, `afterReuse` selects the exact fresh constructor
+extent independently of whether the zero token was definitely empty or was a
+fallback from retained provenance.
+-/
+theorem ReuseCapacityEvidence.afterReuse_eq_emptyToken_of_nonempty
+    (evidence : ReuseCapacityEvidence) (info : LCNF.CtorInfo)
+    (nonempty : ¬ ((info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0)) :
+    evidence.afterReuse info =
+      ReuseCapacityEvidence.emptyToken.afterReuse info := by
+  have allocates : constructorAllocatesHeap info = true := by
+    simp [constructorAllocatesHeap]
+    tauto
+  cases evidence <;>
+    simp [ReuseCapacityEvidence.afterReuse,
+      constructorReuseCapacityEvidence, allocates]
+
+/--
+Branch-independent successful zero-token reuse refinement.
+
+The empty/nonempty constructor representation is reconstructed internally.
+The theorem returns the exact validator-selected post fact for either
+definitely-empty or retained fallback provenance; no representation branch is
+part of its interface.
+-/
+theorem reuseStep_none_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {info : LCNF.CtorInfo}
+    {updateHeader : Bool} {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value} {sourceValue : Value}
+    {heap : MemoryState} {word : Word32}
+    {evidence : ReuseCapacityEvidence}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (Word32.zero, fields))
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ field, fields.toArray[index]? = some field ∧
+        ValueRel witness kind (.word32 field) value)
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (reused :
+      reuseObject initial.host.runtime.heap Word32.zero info updateHeader
+        fields.toArray = .ok (heap, word))
+    (semanticStep :
+      reuse runtime (.reuseToken none) info updateHeader semanticFields =
+        .ok (nextRuntime, sourceValue)) :
+    ∃ nextWitness,
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+          .Return [.i32 (UInt32.ofNat word.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        PhysicalValueRel nextWitness resultKind
+          (.i32 (UInt32.ofNat word.value)) sourceValue ∧
+        ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
+          resultKind (.word32 word) sourceValue ∧
+        nextWitness.closureDescriptors = witness.closureDescriptors ∧
+        HeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · obtain ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+        valueRelated, physicalRelated, capacityValue, capacityTransport,
+        semanticExpected⟩ :=
+      reuseStep_none_empty_of_capacityEvidence runtimeRelated argsLength
+        decoded arity semanticArity empty tagFits resultRefines reused
+    rw [semanticStep] at semanticExpected
+    have resultEq := Except.ok.inj semanticExpected
+    have runtimeEq : nextRuntime = runtime :=
+      congrArg Prod.fst resultEq
+    have valueEq :
+        sourceValue = .object (.tagged (UInt64.ofNat info.cidx)) :=
+      congrArg Prod.snd resultEq
+    subst nextRuntime
+    subst sourceValue
+    exact ⟨nextWitness, concreteStep, WitnessTransport.ofExtension extension,
+      nextRuntimeRelated, physicalRelated,
+      ReuseCapacityValueRel.taggedObject_afterReuse
+        (evidence := evidence) empty valueRelated,
+      extension.closureDescriptors,
+      capacityTransport⟩
+  · obtain ⟨nextWitness, extension, concreteStep, nextRuntimeRelated,
+        physicalRelated, capacityValue, capacityTransport, semanticExpected⟩ :=
+      reuseStep_none_nonempty_of_capacityEvidence runtimeRelated argsLength
+        decoded arity semanticArity fieldKindsSize fieldKindsValid
+        fieldRelated empty tagFits objectFieldsFit usizeFieldsFit
+        scalarBytesFit resultRefines reused
+    rw [semanticStep] at semanticExpected
+    have resultEq := Except.ok.inj semanticExpected
+    have runtimeEq :
+        nextRuntime = semanticConstructorResult runtime info semanticFields :=
+      congrArg Prod.fst resultEq
+    have valueEq :
+        sourceValue = .object (.heap runtime.nextLocation) :=
+      congrArg Prod.snd resultEq
+    subst nextRuntime
+    subst sourceValue
+    have evidenceEq :=
+      FirTalos.Concrete.ReuseCapacityEvidence.afterReuse_eq_emptyToken_of_nonempty
+        evidence info empty
+    exact ⟨nextWitness, concreteStep, WitnessTransport.ofExtension extension,
+      nextRuntimeRelated, physicalRelated, by
+        simpa [evidenceEq] using capacityValue,
+      extension.closureDescriptors, capacityTransport⟩
 
 /--
 The central W6.6dg bridge: static fitting evidence and its dynamic header
@@ -2229,5 +2383,234 @@ theorem reuseStep_some_of_capacityEvidence
   exact ⟨heap, nextRuntime, concreteStep, witnessTransport,
     nextRuntimeRelated, physicalRelated, resultCapacity, capacityTransport,
     semanticStep⟩
+
+/--
+Certificate-free successful reuse refinement across all runtime branches.
+
+Static fitting evidence and its dynamic value interpretation determine whether
+the physical token is zero or names a retained allocation.  The theorem then
+selects fresh tagged allocation, fresh heap allocation, or checked in-place
+reuse internally.  The caller supplies only the constructive fresh-allocation
+boundary, the source ordinary-token invariant, and the provenance-sensitive
+result-kind condition; none of those premises contains target instructions,
+numeric import indices, or a per-program simulation derivation.
+-/
+theorem reuseStep_of_capacityEvidence
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState}
+    {sourceToken sourceValue : Value} {tokenWord : Word32}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {fieldKinds : Array AbiKind} {resultKind : AbiKind}
+    {physicalArgs : List Wasm.Value} {fields : List Word32}
+    {semanticFields : Array Value}
+    {facts : ReuseCapacityFacts} {tokenId : FVarId}
+    {evidence : ReuseCapacityEvidence}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (argsLength : physicalArgs.length = fieldKinds.size + 1)
+    (decoded : decodeReuseWords physicalArgs = .ok (tokenWord, fields))
+    (capacityRelated :
+      ReuseCapacityValueRel initial.host.runtime.heap witness evidence
+        .reuseToken (.word32 tokenWord) sourceToken)
+    (capacityFitting :
+      findFittingReuseCapacityEvidence? facts tokenId info = some evidence)
+    (arity : fields.toArray.size = info.size)
+    (semanticArity : semanticFields.size = info.size)
+    (fieldKindsSize : fieldKinds.size = info.size)
+    (fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true)
+    (fieldRelated : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+      fieldKinds[index]? = some kind →
+      semanticFields[index]? = some value →
+      ∃ field, fields.toArray[index]? = some field ∧
+        ValueRel witness kind (.word32 field) value)
+    (tagFits : info.cidx < UInt32.size)
+    (objectFieldsFit : info.size < UInt32.size)
+    (usizeFieldsFit : info.usize < UInt32.size)
+    (scalarBytesFit : info.ssize < UInt32.size)
+    (resultRefines : (constructorKind info).refines resultKind = true)
+    (resultCompatible :
+      evidence = .emptyToken ∨ resultKind = .tobject)
+    (freshAllocated :
+      sourceToken = .reuseToken none →
+        ∃ heap word,
+          reuseObject initial.host.runtime.heap Word32.zero info updateHeader
+            fields.toArray = .ok (heap, word))
+    (tokenOrdinary :
+      ∀ (location : Location) (cell : HeapCell),
+        sourceToken = .reuseToken (some location) →
+        findCell? runtime.heap location = some cell →
+        cell.persistent = false)
+    (semanticStep :
+      reuse runtime sourceToken info updateHeader semanticFields =
+        .ok (nextRuntime, sourceValue)) :
+    ∃ heap word nextWitness,
+      reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
+          .Return [.i32 (UInt32.ofNat word.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        PhysicalValueRel nextWitness resultKind
+          (.i32 (UInt32.ofNat word.value)) sourceValue ∧
+        ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
+          resultKind (.word32 word) sourceValue ∧
+        nextWitness.closureDescriptors = witness.closureDescriptors ∧
+        HeaderCapacityTransport initial.host.runtime.heap heap witness := by
+  cases evidence with
+  | emptyToken =>
+      obtain ⟨tokenWordEq, sourceTokenEq⟩ :=
+        capacityRelated.emptyToken_eq
+      injection tokenWordEq with tokenWordEq
+      subst tokenWord
+      subst sourceToken
+      obtain ⟨heap, word, reused⟩ := freshAllocated rfl
+      obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
+          physicalRelated, nextCapacity, witnessDescriptors,
+          capacityTransport⟩ :=
+        reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
+          arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
+          tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
+          reused semanticStep
+      exact ⟨heap, word, nextWitness, concreteStep, transport,
+        nextRuntimeRelated, physicalRelated, nextCapacity,
+        witnessDescriptors, capacityTransport⟩
+  | retainedAtLeast available =>
+      rcases capacityRelated.retainedToken_cases with zero | retained
+      · obtain ⟨tokenWordEq, sourceTokenEq⟩ := zero
+        injection tokenWordEq with tokenWordEq
+        subst tokenWord
+        subst sourceToken
+        obtain ⟨heap, word, reused⟩ := freshAllocated rfl
+        obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
+            physicalRelated, nextCapacity, witnessDescriptors,
+            capacityTransport⟩ :=
+          reuseStep_none_of_capacityEvidence runtimeRelated argsLength decoded
+            arity semanticArity fieldKindsSize fieldKindsValid fieldRelated
+            tagFits objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines
+            reused semanticStep
+        exact ⟨heap, word, nextWitness, concreteStep, transport,
+          nextRuntimeRelated, physicalRelated, nextCapacity,
+          witnessDescriptors, capacityTransport⟩
+      · obtain ⟨location, address, header, tokenWordEq, sourceTokenEq,
+            tokenRelated, _rawHeaderRead, _headerOwned, _minimum⟩ :=
+          retained
+        injection tokenWordEq with tokenWordEq
+        subst tokenWord
+        subst sourceToken
+        have resultKindEq : resultKind = .tobject := by
+          rcases resultCompatible with impossible | resultKindEq
+          · contradiction
+          · exact resultKindEq
+        have mapped := valueRel_reuseToken_some_mapped tokenRelated
+        obtain ⟨cell, found, cellRelated⟩ :=
+          runtimeRelated.heap.concreteToSemantic location address mapped
+        have live : cell.live = true := by
+          by_contra notLive
+          have dead : cell.live = false :=
+            Bool.eq_false_of_not_eq_true notLive
+          have impossible := semanticStep
+          simp [reuse, getLiveCell, found, dead, semanticArity, Bind.bind,
+            Except.bind] at impossible
+        have ordinary : cell.persistent = false :=
+          tokenOrdinary location cell rfl found
+        cases objectEq : cell.object with
+        | ctor old =>
+            have liveRelated := cellRelated.live_of_eq_true live
+            cases liveRelated with
+            | @constructor oldInfo oldFieldKinds semantic oldHeader _
+                descriptor relatedObjectEq objectRelated headerRead headerKind
+                refCount persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                injection relatedObjectEq with semanticEq
+                subst semantic
+                obtain ⟨heap, actualRuntime, concreteStep, transport,
+                    nextRuntimeRelated, physicalRelated, nextCapacity,
+                    capacityTransport, semanticExpected⟩ :=
+                  reuseStep_some_of_capacityEvidence runtimeRelated argsLength
+                    decoded capacityRelated capacityFitting mapped found
+                    descriptor objectEq objectRelated headerRead headerKind
+                    refCount persistent ordinary cellLive arity semanticArity
+                    fieldKindsSize fieldKindsValid fieldRelated tagFits
+                    objectFieldsFit usizeFieldsFit scalarBytesFit
+                    (.inr resultKindEq)
+                rw [semanticStep] at semanticExpected
+                have resultEq := Except.ok.inj semanticExpected
+                have runtimeEq : nextRuntime = actualRuntime :=
+                  congrArg Prod.fst resultEq
+                have valueEq :
+                    sourceValue = .object (.heap location) :=
+                  congrArg Prod.snd resultEq
+                subst actualRuntime
+                subst sourceValue
+                let nextWitness :=
+                  witness.rebindConstructor address info fieldKinds
+                exact ⟨heap, address, nextWitness, concreteStep, transport,
+                  nextRuntimeRelated, physicalRelated, nextCapacity, by
+                    simp [nextWitness,
+                      RefinementWitness.rebindConstructor],
+                  capacityTransport⟩
+            | boxed descriptor relatedObjectEq objectRelated refCount
+                persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                contradiction
+            | natural descriptor relatedObjectEq headerRead headerKind marker
+                extent limbsFit naturalRead refCount persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                contradiction
+            | integer descriptor relatedObjectEq objectRelated refCount
+                persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                contradiction
+            | string descriptor relatedObjectEq objectRelated refCount
+                persistent cellLive =>
+                rw [objectEq] at relatedObjectEq
+                contradiction
+            | closure closureRelated =>
+                obtain ⟨function, arity, captures, relatedObjectEq⟩ :=
+                  closureRelated.objectEq
+                rw [objectEq] at relatedObjectEq
+                contradiction
+        | boxed type value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | natural value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | integer value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | string value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | byteArray value =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | closure function arity fixed =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
+        | «opaque» typeName =>
+            have impossible := semanticStep
+            simp [reuse, getLiveCell, found, live, semanticArity] at impossible
+            simp only [Bind.bind, Except.bind] at impossible
+            rw [objectEq] at impossible
+            contradiction
 
 end FirTalos.Concrete
