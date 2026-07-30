@@ -1308,9 +1308,22 @@ missing-token branch delegates to allocation. The combined carrier now
 survives both runtime replacement and the compiler's following `let` binding.
 The failed-token fixture exercises the exact non-leaf transition: it allocates
 source-only garbage, binds the fresh result under the dead source local, and
-enters the retained continuation without widening target liveness. Remaining
-work is to lift the carrier through checked control and frames, then combine it
-with the source-only closure certificate in the general dispatcher.
+enters the retained continuation without widening target liveness.
+
+The machine-frame ownership bridge lands at `15092e7c`.
+`BindFrameEnvironmentsBelowFrontier` remembers the complete environment saved
+by every source bind frame, and `SourceMachineOwnershipBelowFrontier` combines
+those bounds with the current source environment and heap. The carrier is
+stable under frontier growth, result binding, bind-frame push/restoration, and
+apply-frame restoration. Control values and apply arguments are deliberately
+not duplicated in this carrier: the exact `ShadowRuntimeRel` already publishes
+them as runtime roots. Strengthened hereditary yielded-bind and yielded-apply
+theorems now preserve both the exact compiler relation and this ownership
+carrier. The failed-token fixture retains its source-only allocation while
+restoring a saved environment containing target-dead locals. Remaining work is
+to preserve the carrier through cache-frame persistence and lift the three
+yielded-frame cases into the checked dispatcher before combining it with the
+source-only closure certificate.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1405,6 +1418,9 @@ reset while covering the heap results of allocation and reuse.
 `fd4f531f` adds monotone-frontier/returned-value laws for allocation and both
 reuse modes, preserves the full carrier through result binding, and checks the
 post-reuse retained-continuation state.
+`15092e7c` extends that local carrier to complete environments suspended in
+bind frames, preserves it through exact hereditary bind/apply restoration, and
+checks the source-only failed-reuse heap across an exact yielded-bind step.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1470,11 +1486,14 @@ the existing nullary-`.fap` semantic discrepancy.
    set, and the combined local environment/heap carrier survives object writes
    and reset. Allocation and both reuse modes now return a value below a
    monotone result frontier, so the carrier also survives their following
-   source `let` bindings. Next carry it and the compositional closure
-   certificate through checked control, bind/apply frames, and the general
-   dispatcher. Arbitrary checked entries must still initialize and preserve
-   these compiler typing/ownership facts without finite execution-graph
-   enumeration.
+   source `let` bindings. The machine carrier now covers the current
+   environment, heap, and every complete environment suspended in bind frames;
+   exact hereditary yielded-bind and yielded-apply restoration preserve it.
+   Next prove cache-frame persistence preserves heap ownership, assemble the
+   three yielded-frame arms under the checked dispatcher, and then carry the
+   compositional closure certificate through the general dispatcher.
+   Arbitrary checked entries must still initialize and preserve these compiler
+   typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
