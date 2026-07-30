@@ -321,7 +321,14 @@ function fixedWidthExternalFamily(typeName, width, codec) {
   };
 }
 
-function floatCodec(scalarKind, width, fromBits, toBits, round) {
+function floatCodec(
+  scalarKind,
+  width,
+  fromBits,
+  toBits,
+  round,
+  canonicalNaNBits,
+) {
   return {
     decodeBits: (value, context) =>
       fixedWidthScalar(value, scalarKind, width, context),
@@ -334,15 +341,19 @@ function floatCodec(scalarKind, width, fromBits, toBits, round) {
       return fromBits(this.decodeBits(value, context));
     },
     encode(value) {
+      if (Number.isNaN(value)) {
+        return this.encodeBits(canonicalNaNBits);
+      }
       return this.encodeBits(toBits(round(value)));
     },
   };
 }
 
 const float32Codec = floatCodec(
-  "float32", 32, float32FromBits, float32ToBits, Math.fround);
+  "float32", 32, float32FromBits, float32ToBits, Math.fround, 0x7fc00000n);
 const float64Codec = floatCodec(
-  "float", 64, float64FromBits, float64ToBits, value => value);
+  "float", 64, float64FromBits, float64ToBits, value => value,
+  0x7ff8000000000000n);
 
 function floatBinary(declaration, codec, operation) {
   return ({ args, world }) => {
@@ -382,7 +393,12 @@ function floatOfBits(declaration, bitsCodec, floatCodec) {
   return ({ args, world }) => {
     assert.equal(args.length, 1, `${declaration} external arity mismatch`);
     const bits = bitsCodec.decode(args[0], `${declaration} operand`);
-    return { value: floatCodec.encodeBits(bits), world };
+    const semantic = floatCodec.encodeBits(bits);
+    return {
+      value: floatCodec.encode(
+        floatCodec.decode(semantic, `${declaration} result`)),
+      world,
+    };
   };
 }
 

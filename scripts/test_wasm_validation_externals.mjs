@@ -407,7 +407,13 @@ function fixedWidthScalarValue(scalarKind, value) {
   );
   assert.deepStrictEqual(
     invokeFloat("Float32.ofBits", [fixedWidthScalarValue("uint32", 0x7fc12345n)]),
-    float32,
+    fixedWidthScalarValue("float32", 0x7fc00000n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float.ofBits", [
+      fixedWidthScalarValue("uint64", 0x7ff8123456789abcn),
+    ]),
+    fixedWidthScalarValue("float", 0x7ff8000000000000n),
   );
   assert.deepStrictEqual(
     invokeFloat("Float.toBits", [float64]),
@@ -422,6 +428,20 @@ function fixedWidthScalarValue(scalarKind, value) {
       fixedWidthScalarValue("float", 0x7ff0000000000000n),
     ]),
     fixedWidthScalarValue("uint8", 0n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float32.div", [
+      fixedWidthScalarValue("float32", 0n),
+      fixedWidthScalarValue("float32", 0n),
+    ]),
+    fixedWidthScalarValue("float32", 0x7fc00000n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float.div", [
+      fixedWidthScalarValue("float", 0n),
+      fixedWidthScalarValue("float", 0n),
+    ]),
+    fixedWidthScalarValue("float", 0x7ff8000000000000n),
   );
   assert.throws(() =>
     invokeFloat("Float32.add", [
