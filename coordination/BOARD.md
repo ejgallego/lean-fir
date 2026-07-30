@@ -13,6 +13,64 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Current landing gate
+
+This section is authoritative after the lane-4 rebase; older candidate hashes
+in the lane and contract tables remain historical provenance until the stack
+lands and must not be used as the current feature-branch identity.
+
+- Validation's validated pre-record coordination head is `3ae6c37d`, with
+  functional head `96eec154` on semantic base `fff91175`. Current `main` is the
+  later proof/documentation checkpoint `50bd4a3c`, so validation is four
+  commits behind and one hundred twelve commits ahead.
+- Rebased native/LCNF run
+  `92b727e4a1d82ccfb3a9f419e28f9afd880ccd43ca1b1f0b985dcaa0874e19cb`
+  passes 1,008/1,008. Immutable evidence
+  `30ffef11f503b580bedcebcbb5e3f1a9e1d018931beeacdcff769c1402c077cc`
+  verifies offline and produces native-to-LCNF attestation evidence
+  `d5f45f4be4a2dfb82696ab8f479b48726b5a10465565ba3c8c105b6d17f4b529`
+  under unchanged semantic contract
+  `4b22ce16a4d906ebae0a68a2fb7e76f7edaee085df36e7451ebb6387e4c681cd`.
+  Direct run
+  `181d002006e4fe4d2e32c9f228cb917b8c181e547b113095c121f7f44d0e5ab9`
+  passes 9/9. Coverage identity
+  `a69c8067b69038d096e58393ea2784ba32e2063249d595885afc37d91c48dc25`
+  retains all 1,017 comparisons, 9,939 steps, 193 tag floors, 152 semantic
+  domains, and every ownership floor with zero findings.
+- Main checkpoint `41f40efd` independently passes its complete 581-case
+  native/LCNF/V8 baseline at run
+  `6b0adcc9d017167bc42be2841ae86cdffad70737724c51cd39bcf7ae3f9581e2`,
+  evidence
+  `4b8368999394c1b74855d68dcae7eba915b34c6e6d36c8c5d2b380a2db4892e2`.
+  All three edges are equal, all 1,162 compiler-product reads are confirmed by
+  `strace`, and the 581 native-to-V8 cases exceed the 413-case global oracle
+  floor. The retained 67-case protocol-v4 float/mixed triangle is an additive
+  frontier, not the total real-engine baseline. The later proof-only main
+  checkpoint `50bd4a3c` also passes the full Lean build and examples. The
+  current protocol-v4 attestor correctly rejects the protocol-v3 baseline
+  evidence as an unsupported version, so it is strong runtime evidence but not
+  a current global oracle attestation; that v4 claim still waits for W7.
+- The first rebased lane-4 commit, `7053d748`, passes the full Lean build,
+  examples, harness tests, native/LCNF baseline, and direct tier in isolation.
+  Its only `make check` stop is the W7-owned exhaustive match at
+  `Fir/Wasm/Emit/Manifest.lean:149,255,280`, before V8 executes. Therefore no
+  nonempty lane-4 prefix is currently landable by itself; the first integration
+  slice is the float scalar contract plus W7's manifest handoff.
+- The whole lane-4 stack is not landable on green `main` until the proof lane
+  checks the successive shared-contract boundaries and repairs exactly
+  `AlphaEqvCode.lean:2209,2358,2360,2616` plus
+  `SimpCaseRelation.lean:427,1248,1250,1317,1319`. The proof branch's committed
+  head is `50bd4a3c`; its active-code and named-invocation ownership carriers are
+  complete. The proof lane is now actively editing its owned
+  `ElimDeadExamples.lean` and `ElimDeadMachineRel.lean` consumers, with no new
+  handoff yet.
+- W6 is active at committed head `4f1646e5`, one hundred twenty-eight commits
+  ahead and zero behind current `main`, with an uncommitted change in its owned
+  `ConcreteCompilerCorrectness.lean` and no formal handoff yet. W7 is clean at
+  `621b8552`, eighteen commits ahead and six behind `main`; it contains the
+  generation-owned float manifest arms needed by the full V8 plan and must
+  rebase and hand them off before lane 4 reruns the whole-corpus triangle.
+
 ## Lane snapshot
 
 Lane rows name their own landed commits; the board intentionally has no
