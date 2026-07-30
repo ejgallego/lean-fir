@@ -43,6 +43,7 @@ from validation_harness import (
     corpus_artifact_bytes,
     external_adapter_from_config,
     external_product_provider_from_config,
+    evidence_comparison_equivalent,
     manifest_from_output as parse_manifest_from_output,
     product_receipt_findings,
     product_receipt_value,
@@ -326,6 +327,14 @@ def main() -> int:
         action="store_true",
         help="emit --compare-evidence as stable JSON",
     )
+    parser.add_argument(
+        "--require-evidence-equivalence",
+        choices=("portable", "exact"),
+        help=(
+            "with --compare-evidence, fail unless the portable validation "
+            "claim or exact retained evidence is equal"
+        ),
+    )
     args = parser.parse_args()
 
     evidence_modes = sum(
@@ -336,6 +345,13 @@ def main() -> int:
             args.compare_evidence,
         )
     )
+    if (
+        args.require_evidence_equivalence is not None
+        and args.compare_evidence is None
+    ):
+        raise ValidationError(
+            "--require-evidence-equivalence requires --compare-evidence"
+        )
     if evidence_modes:
         if (
             evidence_modes != 1
@@ -367,6 +383,13 @@ def main() -> int:
             else:
                 for line in render_evidence_comparison(comparison):
                     print(line)
+            if (
+                args.require_evidence_equivalence is not None
+                and not evidence_comparison_equivalent(
+                    comparison, args.require_evidence_equivalence
+                )
+            ):
+                return 1
         elif args.verify_matrix is not None:
             matrix = verify_matrix_artifact(args.verify_matrix)
             print(

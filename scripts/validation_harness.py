@@ -9329,15 +9329,26 @@ def compare_verified_evidence(
         }
         for name, delta in inventories.items()
     }
+    run_changed = (
+        before.manifest["identity"]["run"]
+        != after.manifest["identity"]["run"]
+    )
+    evidence_changed = (
+        before.manifest["identity"]["evidence"]
+        != after.manifest["identity"]["evidence"]
+    )
+    portable_claim_changed = (
+        run_changed
+        or contract_changed
+        or bool(semantic_results)
+        or coverage_claim_changed
+        or findings_changed
+        or receipt_bindings_changed
+        or comparisons_changed
+    )
     classification = {
-        "runChanged": (
-            before.manifest["identity"]["run"]
-            != after.manifest["identity"]["run"]
-        ),
-        "evidenceChanged": (
-            before.manifest["identity"]["evidence"]
-            != after.manifest["identity"]["evidence"]
-        ),
+        "runChanged": run_changed,
+        "evidenceChanged": evidence_changed,
         "contractChanged": contract_changed,
         "semanticResultsChanged": bool(semantic_results),
         "semanticObservationsChanged": any(
@@ -9350,6 +9361,7 @@ def compare_verified_evidence(
         "receiptBindingsChanged": receipt_bindings_changed,
         "artifactsChanged": artifacts_changed,
         "comparisonsChanged": comparisons_changed,
+        "portableClaimChanged": portable_claim_changed,
     }
     return {
         "version": PROTOCOL_VERSION,
@@ -9364,6 +9376,10 @@ def compare_verified_evidence(
             "matrix": after.manifest["matrix"]["sha256"],
         },
         "classification": classification,
+        "equivalence": {
+            "portable": not portable_claim_changed,
+            "exact": not evidence_changed,
+        },
         "summary": {
             "semanticResultAddedCount": result_counts["added"],
             "semanticResultRemovedCount": result_counts["removed"],
@@ -9391,6 +9407,17 @@ def compare_verified_evidence(
     }
 
 
+def evidence_comparison_equivalent(
+    comparison: dict, level: str
+) -> bool:
+    """Check a verified comparison at one declared equivalence level."""
+    if level == "portable":
+        return not comparison["classification"]["portableClaimChanged"]
+    if level == "exact":
+        return not comparison["classification"]["evidenceChanged"]
+    raise ValidationError(f"unknown evidence equivalence level: {level}")
+
+
 def render_evidence_comparison(comparison: dict) -> list[str]:
     """Render the stable evidence comparison report for humans."""
     before = comparison["before"]
@@ -9402,6 +9429,9 @@ def render_evidence_comparison(comparison: dict) -> list[str]:
 
     lines = [
         f"evidence comparison: {before['evidence']} -> {after['evidence']}",
+        "equivalence: "
+        f"portable {'same' if comparison['equivalence']['portable'] else 'changed'}, "
+        f"exact {'same' if comparison['equivalence']['exact'] else 'changed'}",
         "classification: "
         f"contract {state('contractChanged')}, "
         f"semantic results {state('semanticResultsChanged')}, "

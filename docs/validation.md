@@ -196,10 +196,26 @@ python3 scripts/validate_interpreters.py \
 
 python3 scripts/validate_interpreters.py \
   --compare-evidence <before-evidence.json> <after-evidence.json> --json
+
+python3 scripts/validate_interpreters.py \
+  --compare-evidence <before-evidence.json> <after-evidence.json> \
+  --require-evidence-equivalence portable
+
+python3 scripts/validate_interpreters.py \
+  --compare-evidence <before-evidence.json> <after-evidence.json> \
+  --require-evidence-equivalence exact
 ```
 
 The human report is concise; `--json` emits the stable versioned comparison
-object for CI and downstream analysis. The comparator distinguishes:
+object for CI and downstream analysis. Plain comparison reports differences
+without failing. The optional equivalence gate makes the same verified
+comparison actionable: `portable` requires the run contract, semantic results,
+portable coverage claim, findings, product-receipt bindings, and pair
+comparisons to agree while tolerating raw diagnostic-artifact or operational
+trace-count drift; `exact` additionally requires the immutable evidence
+identity to agree byte-for-byte. Native panic backtraces can therefore vary
+under ASLR without weakening either retained raw evidence or the portable
+semantic gate. The comparator distinguishes:
 
 - contract drift in selection/backend/pair graphs, retained inputs, products,
   tools, build inputs, provider bundles, and consumer assignments;
@@ -215,7 +231,9 @@ Inventory changes retain their logical identity and before/after records.
 Paths to the two manifests are deliberately absent from the comparison object,
 so relocating an evidence tree produces an all-`same` comparison. Differences
 are reported data and do not by themselves make the comparison command fail;
-failure means that one of the two evidence graphs was structurally invalid.
+without an equivalence gate, failure means that one of the two evidence graphs
+was structurally invalid. With a gate, a verified but nonequivalent comparison
+returns a failing status at the requested level.
 
 `make validate` performs this verification immediately after the normal
 native–LCNF matrix run. `make validate-direct-lcnf` verifies its direct

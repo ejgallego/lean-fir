@@ -5661,11 +5661,98 @@ class HarnessTests(unittest.TestCase):
                 core.verify_evidence_snapshot(moved_evidence),
             )
             self.assertFalse(any(same_comparison["classification"].values()))
+            self.assertEqual(
+                same_comparison["equivalence"],
+                {"portable": True, "exact": True},
+            )
             self.assertEqual(same_comparison["semanticResults"], [])
             self.assertIn(
                 "contract same",
                 "\n".join(core.render_evidence_comparison(same_comparison)),
             )
+
+            diagnostic_matrix = json.loads(json.dumps(matrix))
+            diagnostic_item = next(
+                item
+                for item in diagnostic_matrix["artifacts"]
+                if item["kind"] == "process-stderr"
+                and item["name"] == "v8/stderr.log"
+            )
+            diagnostic_content = (
+                out_dir / diagnostic_item["artifact"]
+            ).read_bytes() + b"ASLR-only raw address: 0x12345678\n"
+            diagnostic_sha256 = harness.sha256_bytes(diagnostic_content)
+            diagnostic_item.update(
+                {
+                    "sha256": diagnostic_sha256,
+                    "artifact": core.retain_evidence_blob(
+                        out_dir,
+                        "artifacts",
+                        diagnostic_sha256,
+                        diagnostic_content,
+                    ),
+                }
+            )
+            diagnostic_matrix_content = (
+                json.dumps(diagnostic_matrix, indent=2, sort_keys=True) + "\n"
+            ).encode("utf-8")
+            diagnostic_evidence_path = core.write_evidence_manifest(
+                out_dir,
+                diagnostic_matrix_content,
+                matrix["identity"]["run"],
+            )
+            diagnostic_comparison = core.compare_verified_evidence(
+                core.verify_evidence_snapshot(evidence_path),
+                core.verify_evidence_snapshot(diagnostic_evidence_path),
+            )
+            self.assertTrue(
+                diagnostic_comparison["classification"]["evidenceChanged"]
+            )
+            self.assertTrue(
+                diagnostic_comparison["classification"]["artifactsChanged"]
+            )
+            self.assertFalse(
+                diagnostic_comparison["classification"][
+                    "portableClaimChanged"
+                ]
+            )
+            self.assertEqual(
+                diagnostic_comparison["equivalence"],
+                {"portable": True, "exact": False},
+            )
+            self.assertTrue(
+                core.evidence_comparison_equivalent(
+                    diagnostic_comparison, "portable"
+                )
+            )
+            self.assertFalse(
+                core.evidence_comparison_equivalent(
+                    diagnostic_comparison, "exact"
+                )
+            )
+            self.assertIn(
+                "equivalence: portable same, exact changed",
+                "\n".join(
+                    core.render_evidence_comparison(diagnostic_comparison)
+                ),
+            )
+            for level, expected_status in (("portable", 0), ("exact", 1)):
+                with (
+                    mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "validate_interpreters.py",
+                            "--compare-evidence",
+                            str(evidence_path),
+                            str(diagnostic_evidence_path),
+                            "--require-evidence-equivalence",
+                            level,
+                        ],
+                    ),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(harness.main(), expected_status)
 
             native_value["value"] = 43
             with (
@@ -5721,6 +5808,13 @@ class HarnessTests(unittest.TestCase):
             self.assertTrue(
                 semantic_comparison["classification"]["findingsChanged"]
             )
+            self.assertTrue(
+                semantic_comparison["classification"]["portableClaimChanged"]
+            )
+            self.assertEqual(
+                semantic_comparison["equivalence"],
+                {"portable": False, "exact": False},
+            )
             self.assertEqual(
                 [
                     (
@@ -5752,6 +5846,26 @@ class HarnessTests(unittest.TestCase):
                 cli_comparison["classification"],
                 semantic_comparison["classification"],
             )
+            self.assertEqual(
+                cli_comparison["equivalence"],
+                semantic_comparison["equivalence"],
+            )
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "validate_interpreters.py",
+                        "--compare-evidence",
+                        str(evidence_path),
+                        str(changed_evidence_path),
+                        "--require-evidence-equivalence",
+                        "portable",
+                    ],
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(harness.main(), 1)
             matrix_path.write_bytes(original_matrix_bytes)
             native_value["value"] = 42
 
