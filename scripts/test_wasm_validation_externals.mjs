@@ -1,7 +1,12 @@
 import assert from "node:assert/strict";
 
 import { formatExternalRegistry } from "./wasm_format_externals.mjs";
-import { SemanticHost } from "./wasm_semantic_host.mjs";
+import {
+  manifestValue,
+  SemanticHost,
+} from "./wasm_semantic_host.mjs";
+import { semanticDatum } from "./wasm_validation_case.mjs";
+import * as validationExternals from "./wasm_validation_externals.mjs";
 import {
   integerValue,
   naturalValue,
@@ -214,6 +219,154 @@ function character(codePoint) {
 
 function fixedWidthScalarValue(scalarKind, value) {
   return { kind: "scalar", scalarKind, value: BigInt(value) };
+}
+
+{
+  const float32 = fixedWidthScalarValue("float32", 0x7fc12345n);
+  const float64 = fixedWidthScalarValue("float", 0x7ff8123456789abcn);
+  assert.deepStrictEqual(manifestValue({
+    kind: "scalar",
+    scalarKind: "float32",
+    value: "2143363909",
+  }), float32);
+  assert.deepStrictEqual(manifestValue({
+    kind: "scalar",
+    scalarKind: "float",
+    value: "9221140253039434428",
+  }), float64);
+  for (const value of [
+    0,
+    -1,
+    "-1",
+    "+1",
+    "01",
+    "0x1",
+    "1.0",
+    "4294967296",
+  ]) {
+    assert.throws(() => manifestValue({
+      kind: "scalar",
+      scalarKind: "float32",
+      value,
+    }));
+  }
+  assert.throws(() => manifestValue({
+    kind: "scalar",
+    scalarKind: "float",
+    value: "18446744073709551616",
+  }));
+  assert.throws(() => manifestValue({
+    kind: "scalar",
+    scalarKind: "float64",
+    value: "0",
+  }));
+
+  const host = new SemanticHost();
+  for (const [kind, bits] of [
+    ["float32", 0x00000000n],
+    ["float32", 0x80000000n],
+    ["float32", 0x7f800000n],
+    ["float32", 0xff800000n],
+    ["float32", 0x7fc12345n],
+    ["float", 0x0000000000000000n],
+    ["float", 0x8000000000000000n],
+    ["float", 0x7ff0000000000000n],
+    ["float", 0xfff0000000000000n],
+    ["float", 0x7ff8123456789abcn],
+  ]) {
+    const semantic = fixedWidthScalarValue(kind, bits);
+    assert.deepStrictEqual(
+      host.decode(kind, host.encode(kind, semantic)),
+      semantic,
+      `${kind} physical lane changed raw bits ${bits}`,
+    );
+  }
+
+  for (const [kind, bits] of [
+    ["float32", 0n],
+    ["float32", 0x7fc12345n],
+    ["float", 0n],
+    ["float", 0x7ff8123456789abcn],
+  ]) {
+    const semantic = fixedWidthScalarValue(kind, bits);
+    const boxed = host.importFunction({
+      kind: "box",
+      scalar: kind,
+      result: "object",
+    })(host.encode(kind, semantic));
+    const reference = host.decode("object", boxed);
+    assert.equal(reference.kind, "heap", `${kind} box used a tagged representation`);
+    assert.deepStrictEqual(
+      host.decode(
+        kind,
+        host.importFunction({ kind: "unbox", scalar: kind })(boxed),
+      ),
+      semantic,
+      `${kind} box/unbox changed raw bits`,
+    );
+  }
+  const immediate = host.encode("tobject", { kind: "tagged", payload: 0n });
+  assert.throws(() =>
+    host.importFunction({ kind: "unbox", scalar: "float32" })(immediate));
+  assert.throws(() =>
+    host.importFunction({ kind: "unbox", scalar: "float" })(immediate));
+
+  assert.deepStrictEqual(
+    semanticDatum("float32", float32, host, "Float32 test", validationExternals),
+    { bits: { width: 32, value: "2143363909" } },
+  );
+  assert.deepStrictEqual(
+    semanticDatum("float64", float64, host, "Float test", validationExternals),
+    { bits: { width: 64, value: "9221140253039434428" } },
+  );
+  assert.throws(() =>
+    semanticDatum("float64", float32, host, "cross-width Float test",
+      validationExternals));
+  assert.throws(() =>
+    semanticDatum("float32", float64, host, "cross-width Float32 test",
+      validationExternals));
+  assert.throws(() =>
+    semanticDatum(
+      "float32",
+      fixedWidthScalarValue("float32", 0x100000000n),
+      host,
+      "out-of-range Float32 test",
+      validationExternals,
+    ));
+
+  const invokeFloat = (name, args) =>
+    invoke(validationExternalRegistry[name], host, args);
+  assert.deepStrictEqual(
+    invokeFloat("Float32.neg", [fixedWidthScalarValue("float32", 0n)]),
+    fixedWidthScalarValue("float32", 0x80000000n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float.neg", [fixedWidthScalarValue("float", 0n)]),
+    fixedWidthScalarValue("float", 0x8000000000000000n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float32.ofBits", [fixedWidthScalarValue("uint32", 0x7fc12345n)]),
+    float32,
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float.toBits", [float64]),
+    fixedWidthScalarValue("uint64", 0x7ff8123456789abcn),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float32.isNaN", [float32]),
+    fixedWidthScalarValue("uint8", 1n),
+  );
+  assert.deepStrictEqual(
+    invokeFloat("Float.isFinite", [
+      fixedWidthScalarValue("float", 0x7ff0000000000000n),
+    ]),
+    fixedWidthScalarValue("uint8", 0n),
+  );
+  assert.throws(() =>
+    invokeFloat("Float32.add", [
+      fixedWidthScalarValue("float", 0n),
+      fixedWidthScalarValue("float32", 0n),
+    ]));
 }
 
 for (const { typeName, width, decode, encode, wrongValue } of fixedWidthFamilies) {

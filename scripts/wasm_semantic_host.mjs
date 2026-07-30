@@ -2,10 +2,63 @@ import assert from "./wasm_assert.mjs";
 
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
-const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
+const SCALAR_WIDTHS = new Map([
+  ["uint8", 8],
+  ["uint16", 16],
+  ["uint32", 32],
+  ["uint64", 64],
+  ["float32", 32],
+  ["float", 64],
+]);
+const SCALAR_KINDS = new Set(SCALAR_WIDTHS.keys());
+const FLOAT_KINDS = new Set(["float32", "float"]);
+const SCALAR_TYPE_NAMES = new Map([
+  ["usize", "USize"],
+  ["uint8", "UInt8"],
+  ["uint16", "UInt16"],
+  ["uint32", "UInt32"],
+  ["uint64", "UInt64"],
+  ["float32", "Float32"],
+  ["float", "Float"],
+]);
+const FLOAT_BYTES = new ArrayBuffer(8);
+const FLOAT_VIEW = new DataView(FLOAT_BYTES);
 const BIT_EXACT_FLOAT_TRANSPORT_FIELDS =
   ["encoding", "entry", "params", "result", "version"];
 const BIT_EXACT_FLOAT_TRANSPORT_ENCODING = "wasm-reinterpret-i32-i64";
+
+function scalarBits(kind, value, context) {
+  const width = SCALAR_WIDTHS.get(kind);
+  assert.ok(width, `${context} uses unsupported scalar kind: ${kind}`);
+  assert.equal(typeof value, "string", `${context} must use a decimal string`);
+  assert.ok(/^(0|[1-9][0-9]*)$/.test(value),
+    `${context} must use a canonical unsigned decimal string`);
+  const bits = BigInt(value);
+  assert.ok(bits < (1n << BigInt(width)), `${context} is out of ${kind} range`);
+  return bits;
+}
+
+export function float32FromBits(bits) {
+  FLOAT_VIEW.setUint32(0, Number(BigInt.asUintN(32, bits)));
+  return FLOAT_VIEW.getFloat32(0);
+}
+
+export function float32ToBits(value) {
+  assert.equal(typeof value, "number", "Float32 lane must be a number");
+  FLOAT_VIEW.setFloat32(0, value);
+  return BigInt(FLOAT_VIEW.getUint32(0));
+}
+
+export function float64FromBits(bits) {
+  FLOAT_VIEW.setBigUint64(0, BigInt.asUintN(64, bits));
+  return FLOAT_VIEW.getFloat64(0);
+}
+
+export function float64ToBits(value) {
+  assert.equal(typeof value, "number", "Float lane must be a number");
+  FLOAT_VIEW.setFloat64(0, value);
+  return FLOAT_VIEW.getBigUint64(0);
+}
 
 function transportKind(kind) {
   if (kind === "float32") return "uint32";
@@ -144,17 +197,7 @@ export function observeManifestResult(host, manifest, physicalResult) {
 }
 
 function scalarTypeRepr(kind) {
-  const typeName = kind === "usize"
-    ? "USize"
-    : kind === "uint8"
-      ? "UInt8"
-      : kind === "uint16"
-        ? "UInt16"
-        : kind === "uint32"
-          ? "UInt32"
-          : kind === "uint64"
-            ? "UInt64"
-            : undefined;
+  const typeName = SCALAR_TYPE_NAMES.get(kind);
   assert.ok(typeName, `unsupported boxed scalar kind: ${kind}`);
   return `Lean.Expr.const \`${typeName} []`;
 }
@@ -179,7 +222,11 @@ export function manifestValue(argument) {
       return {
         kind: "scalar",
         scalarKind: argument.scalarKind,
-        value: BigInt(argument.value),
+        value: scalarBits(
+          argument.scalarKind,
+          argument.value,
+          `manifest ${argument.scalarKind} scalar`,
+        ),
       };
     case "erased":
       return { kind: "erased" };
@@ -200,7 +247,10 @@ export function manifestValue(argument) {
 function runtimeScalarValue(value) {
   assert.ok(value && typeof value === "object", "runtime scalar value must be an object");
   assert.ok(SCALAR_KINDS.has(value.kind), `unsupported runtime scalar kind: ${value.kind}`);
-  return { scalarKind: value.kind, value: BigInt(value.value) };
+  return {
+    scalarKind: value.kind,
+    value: scalarBits(value.kind, value.value, `runtime ${value.kind} scalar`),
+  };
 }
 
 function runtimeValue(value) {
@@ -371,6 +421,19 @@ export class SemanticHost {
         assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
           `uint64 argument is out of range: ${value.value}`);
         return BigInt.asIntN(64, value.value);
+      case "float32":
+        assert.equal(value.kind, "scalar", "float32 requires a scalar value");
+        assert.equal(value.scalarKind, "float32",
+          `${value.scalarKind} does not refine float32`);
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffn,
+          `float32 argument is out of range: ${value.value}`);
+        return float32FromBits(value.value);
+      case "float":
+        assert.equal(value.kind, "scalar", "float requires a scalar value");
+        assert.equal(value.scalarKind, "float", `${value.scalarKind} does not refine float`);
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
+          `float argument is out of range: ${value.value}`);
+        return float64FromBits(value.value);
       case "usize":
         assert.equal(value.kind, "usize", "usize requires a usize value");
         assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
@@ -416,6 +479,20 @@ export class SemanticHost {
           kind: "scalar",
           scalarKind: "uint64",
           value: BigInt.asUintN(64, physical),
+        };
+      case "float32":
+        assert.equal(typeof physical, "number", "float32 must use the WebAssembly f32 lane");
+        return {
+          kind: "scalar",
+          scalarKind: "float32",
+          value: float32ToBits(physical),
+        };
+      case "float":
+        assert.equal(typeof physical, "number", "float must use the WebAssembly f64 lane");
+        return {
+          kind: "scalar",
+          scalarKind: "float",
+          value: float64ToBits(physical),
         };
       case "usize":
         assert.equal(typeof physical, "bigint", "usize must use the WebAssembly i64 lane");
@@ -745,7 +822,7 @@ export class SemanticHost {
     assert.ok(scalar.kind === "scalar" || scalar.kind === "usize",
       "box expected a scalar value");
     const payload = scalar.value;
-    const value = payload <= MAX_TAGGED_PAYLOAD
+    const value = !FLOAT_KINDS.has(operation.scalar) && payload <= MAX_TAGGED_PAYLOAD
       ? { kind: "tagged", payload }
       : this.alloc({ kind: "boxed", scalarKind: operation.scalar, value: scalar });
     return this.encode(operation.result, value);
@@ -756,6 +833,9 @@ export class SemanticHost {
     const source = this.decode("tobject", physicalArgs[0]);
     let value;
     if (source.kind === "tagged") {
+      if (FLOAT_KINDS.has(operation.scalar)) {
+        throw new SemanticFault({ kind: "expectedScalar" });
+      }
       value = operation.scalar === "usize"
         ? { kind: "usize", value: source.payload }
         : { kind: "scalar", scalarKind: operation.scalar, value: source.payload };

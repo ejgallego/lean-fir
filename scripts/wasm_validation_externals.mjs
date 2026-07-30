@@ -1,5 +1,11 @@
 import assert from "./wasm_assert.mjs";
 import {
+  float32FromBits,
+  float32ToBits,
+  float64FromBits,
+  float64ToBits,
+} from "./wasm_semantic_host.mjs";
+import {
   stringAppend,
   stringCompare,
   stringExtract,
@@ -70,6 +76,14 @@ export function scalarUInt32(value, context) {
 
 export function scalarUInt64(value, context) {
   return fixedWidthScalar(value, "uint64", 64, context);
+}
+
+export function scalarFloat32Bits(value, context) {
+  return fixedWidthScalar(value, "float32", 32, context);
+}
+
+export function scalarFloat64Bits(value, context) {
+  return fixedWidthScalar(value, "float", 64, context);
 }
 
 export function semanticUSize(value, context) {
@@ -304,6 +318,112 @@ function fixedWidthExternalFamily(typeName, width, codec) {
       "decEq", (left, right) => left === right),
     [declaration("decLt")]: decision("decLt", (left, right) => left < right),
     [declaration("decLe")]: decision("decLe", (left, right) => left <= right),
+  };
+}
+
+function floatCodec(scalarKind, width, fromBits, toBits, round) {
+  return {
+    decodeBits: (value, context) =>
+      fixedWidthScalar(value, scalarKind, width, context),
+    encodeBits: bits => ({
+      kind: "scalar",
+      scalarKind,
+      value: BigInt.asUintN(width, bits),
+    }),
+    decode(value, context) {
+      return fromBits(this.decodeBits(value, context));
+    },
+    encode(value) {
+      return this.encodeBits(toBits(round(value)));
+    },
+  };
+}
+
+const float32Codec = floatCodec(
+  "float32", 32, float32FromBits, float32ToBits, Math.fround);
+const float64Codec = floatCodec(
+  "float", 64, float64FromBits, float64ToBits, value => value);
+
+function floatBinary(declaration, codec, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = codec.decode(args[0], `${declaration} left operand`);
+    const right = codec.decode(args[1], `${declaration} right operand`);
+    return { value: codec.encode(operation(left, right)), world };
+  };
+}
+
+function floatDecision(declaration, codec, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 2, `${declaration} external arity mismatch`);
+    const left = codec.decode(args[0], `${declaration} left operand`);
+    const right = codec.decode(args[1], `${declaration} right operand`);
+    return { value: boolResult(operation(left, right)), world };
+  };
+}
+
+function floatPredicate(declaration, codec, operation) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = codec.decode(args[0], `${declaration} operand`);
+    return { value: boolResult(operation(value)), world };
+  };
+}
+
+function floatNeg(declaration, codec, signMask) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const bits = codec.decodeBits(args[0], `${declaration} operand`);
+    return { value: codec.encodeBits(bits ^ signMask), world };
+  };
+}
+
+function floatOfBits(declaration, bitsCodec, floatCodec) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const bits = bitsCodec.decode(args[0], `${declaration} operand`);
+    return { value: floatCodec.encodeBits(bits), world };
+  };
+}
+
+function floatToBits(declaration, floatCodec, bitsCodec) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const bits = floatCodec.decodeBits(args[0], `${declaration} operand`);
+    return { value: bitsCodec.encode(bits), world };
+  };
+}
+
+function floatConversion(declaration, sourceCodec, targetCodec) {
+  return ({ args, world }) => {
+    assert.equal(args.length, 1, `${declaration} external arity mismatch`);
+    const value = sourceCodec.decode(args[0], `${declaration} operand`);
+    return { value: targetCodec.encode(value), world };
+  };
+}
+
+function floatExternalFamily(typeName, codec, signMask) {
+  const declaration = suffix => `${typeName}.${suffix}`;
+  const binary = (suffix, operation) =>
+    floatBinary(declaration(suffix), codec, operation);
+  const decision = (suffix, operation) =>
+    floatDecision(declaration(suffix), codec, operation);
+  const predicate = (suffix, operation) =>
+    floatPredicate(declaration(suffix), codec, operation);
+  return {
+    [declaration("add")]: binary("add", (left, right) => left + right),
+    [declaration("sub")]: binary("sub", (left, right) => left - right),
+    [declaration("mul")]: binary("mul", (left, right) => left * right),
+    [declaration("div")]: binary("div", (left, right) => left / right),
+    [declaration("neg")]: floatNeg(declaration("neg"), codec, signMask),
+    [declaration("beq")]: decision("beq", (left, right) => left === right),
+    [declaration("decLt")]: decision("decLt", (left, right) => left < right),
+    [declaration("decLe")]: decision("decLe", (left, right) => left <= right),
+    [declaration("isNaN")]: predicate("isNaN", Number.isNaN),
+    [declaration("isInf")]: predicate(
+      "isInf", value => value === Number.POSITIVE_INFINITY ||
+        value === Number.NEGATIVE_INFINITY),
+    [declaration("isFinite")]: predicate("isFinite", Number.isFinite),
   };
 }
 
@@ -603,6 +723,20 @@ export const validationExternalRegistry = {
   "USize.ofNat": naturalToFixedWidth("USize.ofNat", usizeFixedWidthCodec),
   "USize.toNat": fixedWidthToNatural("USize.toNat", usizeFixedWidthCodec),
   ...fixedWidthConversionFamily("USize"),
+  ...floatExternalFamily("Float32", float32Codec, 0x80000000n),
+  "Float32.ofBits": floatOfBits(
+    "Float32.ofBits", fixedWidthCodecs.UInt32, float32Codec),
+  "Float32.toBits": floatToBits(
+    "Float32.toBits", float32Codec, fixedWidthCodecs.UInt32),
+  "Float32.toFloat": floatConversion(
+    "Float32.toFloat", float32Codec, float64Codec),
+  ...floatExternalFamily("Float", float64Codec, 0x8000000000000000n),
+  "Float.ofBits": floatOfBits(
+    "Float.ofBits", fixedWidthCodecs.UInt64, float64Codec),
+  "Float.toBits": floatToBits(
+    "Float.toBits", float64Codec, fixedWidthCodecs.UInt64),
+  "Float.toFloat32": floatConversion(
+    "Float.toFloat32", float64Codec, float32Codec),
   "ByteArray.size": ({ args, host, world }) => {
     assert.equal(args.length, 1, "ByteArray.size external arity mismatch");
     const bytes = byteArrayValue(host, args[0], "ByteArray.size operand");

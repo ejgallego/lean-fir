@@ -73,6 +73,20 @@ export function semanticDatum(schema, value, host, context, validationExternals)
       case "usize":
         assert.equal(value.kind, "usize", `${context} must be a usize value`);
         return { usize: { value: value.value.toString() } };
+      case "float32":
+        assert.equal(value.kind, "scalar", `${context} must be a Float32 scalar`);
+        assert.equal(value.scalarKind, "float32",
+          `${context} Float32 scalar kind mismatch`);
+        assert.ok(value.value >= 0n && value.value < (1n << 32n),
+          `${context} Float32 bits are out of range`);
+        return { bits: { width: 32, value: value.value.toString() } };
+      case "float64":
+        assert.equal(value.kind, "scalar", `${context} must be a Float scalar`);
+        assert.equal(value.scalarKind, "float",
+          `${context} Float scalar kind mismatch`);
+        assert.ok(value.value >= 0n && value.value < (1n << 64n),
+          `${context} Float bits are out of range`);
+        return { bits: { width: 64, value: value.value.toString() } };
       default:
         throw new Error(`${context} uses unsupported validation schema ${schema}`);
     }
