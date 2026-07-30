@@ -157,6 +157,29 @@ theorem RelationalStutteringSimulation.evaluatesState
         NonLockstep.evaluatesState_of_reaches targetPath targetEvaluation,
         observations⟩
 
+/-- The relational-terminal variant has the same finite-path closure as an
+ordinary stuttering simulation: terminal observations are irrelevant while
+transporting a nonterminal source prefix. -/
+theorem RelationalStutteringSimulation.reaches
+    (simulation : RelationalStutteringSimulation externals observationRel
+      relation)
+    (related : relation sourceBefore targetBefore)
+    (path : NonLockstep.Reaches externals sourceBefore sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals targetBefore targetAfter ∧
+      relation sourceAfter targetAfter := by
+  rcases path with ⟨count, execution⟩
+  induction execution generalizing targetBefore with
+  | refl state =>
+      exact ⟨targetBefore,
+        NonLockstep.reaches_refl targetBefore, related⟩
+  | step head tail ih =>
+      rcases simulation.advance related head with
+        ⟨targetSecond, targetHead, secondRelated⟩
+      rcases ih secondRelated with
+        ⟨targetAfter, targetTail, finalRelated⟩
+      exact ⟨targetAfter, targetHead.trans targetTail, finalRelated⟩
+
 /-- A pair of immediate related-fault results discharges the relational
 terminal contract from the reachable runtime invariant.  Address-bearing
 faults may differ syntactically when their locations follow `rho`. -/
@@ -19716,6 +19739,44 @@ theorem BinderReadyReachableMachineRelatedWith.ready
     BinderReadyReachableMachineReadyAt fuel source target :=
   related.sourceRuntime.ready related.structural
 
+/-- Source-owned strong simulation package. It combines the exact hereditary
+compiler-readiness contract with the concrete source heap/environment/frame
+ownership carrier. The latter is intentionally a current-state fact: the
+operational dispatcher transports it constructively across each source step,
+including foreign responses. -/
+structure SourceOwnedBinderReadyReachableMachineRelatedWith
+    (externals : ExternalSpec) (fuel : Nat)
+    (source target : MachineState) : Prop where
+  structural :
+    SomeBinderReadyReachableMachineRelated fuel source target
+  sourceRuntime :
+    BinderReadyExactRuntimeOwnershipInvariant
+      externals fuel source target
+  sourceOwnership :
+    SourceMachineOwnershipBelowFrontier source
+
+/-- The source-owned package has the same exact current-state readiness as
+the existing strong package; concrete ownership is an additional maintained
+fact, not a replacement for operation-specific compiler readiness. -/
+theorem SourceOwnedBinderReadyReachableMachineRelatedWith.ready
+    (related :
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel source target) :
+    BinderReadyReachableMachineReadyAt fuel source target :=
+  related.sourceRuntime.ready related.structural
+
+/-- Forget concrete source ownership when a consumer only needs the
+established hereditary strong simulation interface. -/
+theorem SourceOwnedBinderReadyReachableMachineRelatedWith.strong
+    (related :
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel source target) :
+    BinderReadyReachableMachineRelatedWith
+      externals fuel source target := {
+  structural := related.structural
+  sourceRuntime := related.sourceRuntime
+}
+
 /-- Ledger-retaining strong simulation package.  The structural witness owns
 the exact target allocation history, while the hereditary entry contract
 supplies aligned readiness at every matched future pair. -/
@@ -19849,6 +19910,20 @@ theorem initialState_ledgerBinderReadyReachableMachineReadyAt
         BinderReadyReachableFramesRelated
           fuel emptyAddressRenaming [] [] [] [])
   · simpa [initialState] using emptyRuntime_shadowRelated_of_roots arguments
+
+/-- Every canonical entry starts with the empty runtime, environment, and
+frame stack, so its concrete source ownership carrier is unconditional. Entry
+arguments live in the invocation control roots and are handled separately by
+the structural value relation. -/
+theorem initialState_sourceMachineOwnershipBelowFrontier
+    (program : ImpureProgram) (entry : Name) (arguments : Array Value) :
+    SourceMachineOwnershipBelowFrontier
+      (initialState program entry arguments) := by
+  refine ⟨?_, ?_, ?_⟩
+  · simpa [initialState] using HeapOwnershipBelowFrontier.empty
+  · intro fvarId value found
+    simp [initialState, lookup] at found
+  · simp [initialState, BindFrameEnvironmentsBelowFrontier]
 
 /-- Structural reachability plus a separately maintained semantic invariant.
 The invariant will supply active readiness and be preserved across the
@@ -44340,6 +44415,36 @@ theorem
       exact related.matchExternalStep_of_ready_withOwnership
         compatible sourceCompatible ready ownership transition externalProof
 
+/-- One arbitrary source step advances the source-owned strong package. Exact
+hereditary readiness follows the selected source/target prefixes, while the
+operational ownership proof constructs the concrete successor carrier rather
+than assuming it in a future-state invariant. -/
+theorem SourceOwnedBinderReadyReachableMachineRelatedWith.advance
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (related :
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel source target)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel sourceAfter targetAfter := by
+  rcases related.structural.matchStep_of_ready_withOwnership
+      compatible sourceCompatible related.ready
+      related.sourceOwnership step with
+    ⟨targetAfter, targetPath, afterStructural, afterOwnership⟩
+  have sourcePath : NonLockstep.Reaches externals source sourceAfter :=
+    NonLockstep.reaches_of_step step
+  exact ⟨targetAfter, targetPath, {
+    structural := afterStructural
+    sourceRuntime :=
+      related.sourceRuntime.stable sourcePath targetPath
+    sourceOwnership := afterOwnership
+  }⟩
+
 /-- Every external source step is matched once compiler readiness and the
 foreign-response contract are separated.  Invocation controls expose paired
 requests; code and yielded controls delegate to their general step
@@ -46908,6 +47013,42 @@ theorem BinderReadyReachableMachineRelatedWith.simulation
     BinderReadyReachableMachineRelatedWith.advance
       compatible related step
 
+/-- The source-owned strong package is itself an observation-relational
+stuttering simulation. It has the same terminal proof as the existing exact
+package, while advance additionally consumes the source foreign-ownership law
+and retains the concrete ownership carrier. -/
+theorem SourceOwnedBinderReadyReachableMachineRelatedWith.simulation
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    RelationalStutteringSimulation externals ObservationRel
+      (SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel) where
+  terminal related done :=
+    related.structural.related.terminal related.ready.readyAt done
+  advance related step :=
+    SourceOwnedBinderReadyReachableMachineRelatedWith.advance
+      compatible sourceCompatible related step
+
+/-- Every finite source prefix has a finite matching target prefix that
+retains exact compiler provenance and concrete source ownership. -/
+theorem SourceOwnedBinderReadyReachableMachineRelatedWith.reaches
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (related :
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel source target)
+    (path : NonLockstep.Reaches externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SourceOwnedBinderReadyReachableMachineRelatedWith
+        externals fuel sourceAfter targetAfter :=
+  (SourceOwnedBinderReadyReachableMachineRelatedWith.simulation
+    compatible sourceCompatible).reaches related path
+
 /-- The ledger-retaining strong package is an observation-relational
 stuttering simulation.  Terminal behavior forgets only proof-relevant
 allocation history; advancing uses the unified ledger dispatcher directly. -/
@@ -47026,6 +47167,51 @@ theorem binderReadyProgram_loweringCorrect_exactRuntimeOwnership
     (BinderReadyReachableMachineRelatedWith.simulation
       compatible).evaluatesState initialRelated sourceEvaluation
 
+/-- Source-owned whole-program correctness. Besides relational foreign
+compatibility, the foreign implementation exposes its source heap/frontier
+law. Canonical entries supply concrete ownership automatically, and the
+source-owned strong simulation preserves it across the complete evaluation.
+This endpoint therefore makes the heap invariant used by operational proofs
+an explicit maintained theorem rather than an implicit client convention. -/
+theorem
+    binderReadyProgram_loweringCorrect_sourceOwnedExactRuntimeOwnership
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (initialRuntime : ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  intro entry member sourceArguments targetArguments arguments
+    sourceObservation sourceEvaluation
+  have initialStructural :
+      SomeBinderReadyReachableMachineRelated fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) :=
+    (initialState_binderReadyReachableMachineReadyAt
+      programs arguments).related
+  have initialRelated :
+      SourceOwnedBinderReadyReachableMachineRelatedWith externals fuel
+        (initialState source entry sourceArguments)
+        (initialState target entry targetArguments) := {
+    structural := initialStructural
+    sourceRuntime :=
+      initialRuntime entry member sourceArguments
+        targetArguments arguments
+    sourceOwnership :=
+      initialState_sourceMachineOwnershipBelowFrontier
+        source entry sourceArguments
+  }
+  exact
+    (SourceOwnedBinderReadyReachableMachineRelatedWith.simulation
+      compatible sourceCompatible).evaluatesState
+        initialRelated sourceEvaluation
+
 /-- The source-oriented universal contract is a sufficient condition for the
 exact-provenance whole-program endpoint. -/
 theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
@@ -47041,6 +47227,31 @@ theorem binderReadyProgram_loweringCorrect_sourceRuntimeOwnership
       (reachablePhaseSimulation externals) source target entries := by
   apply binderReadyProgram_loweringCorrect_exactRuntimeOwnership
     programs compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialSourceRuntime entry member sourceArguments
+      targetArguments arguments).exact
+
+/-- Source-oriented convenience form of the source-owned endpoint. The
+universal source runtime contract is projected to exact provenance, while
+concrete machine ownership is initialized and advanced by the simulation. -/
+theorem
+    binderReadyProgram_loweringCorrect_sourceOwnedRuntimeOwnership
+    (programs : ProgramRelated
+      (BinderReadyShadowCodeRelated fuel) source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (initialSourceRuntime : ReachableInitialInvariantOn
+      (BinderReadySourceRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply
+    binderReadyProgram_loweringCorrect_sourceOwnedExactRuntimeOwnership
+      programs compatible sourceCompatible
   intro entry member sourceArguments targetArguments arguments
   exact
     (initialSourceRuntime entry member sourceArguments
@@ -47191,6 +47402,26 @@ theorem shadowProgram_loweringCorrect_exactRuntimeOwnership
     (shadowProgram_binderReadyShadowRelated wellFormed run)
     compatible initialRuntime
 
+/-- Checked compiler-run endpoint retaining concrete source ownership across
+the complete non-lockstep simulation. The extra foreign premise is precisely
+the source heap/frontier law required by response replacement. -/
+theorem shadowProgram_loweringCorrect_sourceOwnedExactRuntimeOwnership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (run : shadowProgram? fuel source = some target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (initialRuntime : ReachableInitialInvariantOn
+      (BinderReadyExactRuntimeOwnershipInvariant externals fuel)
+      source target entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries :=
+  binderReadyProgram_loweringCorrect_sourceOwnedExactRuntimeOwnership
+    (shadowProgram_binderReadyShadowRelated wellFormed run)
+    compatible sourceCompatible initialRuntime
+
 /-- Checked compiler-run endpoint using the canonical strong simulation.
 After a successful transparent traversal, the only compiler-client premise
 is hereditary source runtime/ownership readiness; external resumptions use
@@ -47227,6 +47458,30 @@ theorem shadowProgram_loweringCorrect_sourceMachineInvariant
       (reachablePhaseSimulation externals) source target entries := by
   apply shadowProgram_loweringCorrect_sourceRuntimeOwnership
     wellFormed run compatible
+  intro entry member sourceArguments targetArguments arguments
+  exact
+    (initialSourceRuntime entry member sourceArguments).binderReady
+
+/-- Source-owned form of the one-machine compiler endpoint. The client keeps
+its existing source runtime/readiness invariant; the proof initializes and
+maintains concrete machine ownership independently. -/
+theorem shadowProgram_loweringCorrect_sourceOwnedMachineInvariant
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (run : shadowProgram? fuel source = some target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (initialSourceRuntime :
+      SourceRuntimeOwnershipInitialInvariantOn
+        externals fuel source entries) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals) source target entries := by
+  apply
+    binderReadyProgram_loweringCorrect_sourceOwnedRuntimeOwnership
+      (shadowProgram_binderReadyShadowRelated wellFormed run)
+      compatible sourceCompatible
   intro entry member sourceArguments targetArguments arguments
   exact
     (initialSourceRuntime entry member sourceArguments).binderReady
@@ -47567,6 +47822,32 @@ theorem ElimDeadSemanticallyAdmissibleRun.loweringCorrect
         admissible.wellFormed admissible.transformed
         compatible initial
 
+/-- Source-owned semantic endpoint. It preserves the same corrected
+lowering result while additionally maintaining the concrete source
+heap/environment/frame invariant across the matched execution. -/
+theorem ElimDeadSemanticallyAdmissibleRun.loweringCorrect_sourceOwned
+    (admissible :
+      ElimDeadSemanticallyAdmissibleRun
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries := by
+  cases admissible.runtime with
+  | exact initial =>
+      exact
+        shadowProgram_loweringCorrect_sourceOwnedExactRuntimeOwnership
+          admissible.wellFormed admissible.transformed
+          compatible sourceCompatible initial
+  | source initial =>
+      exact shadowProgram_loweringCorrect_sourceOwnedMachineInvariant
+        admissible.wellFormed admissible.transformed
+        compatible sourceCompatible initial
+
 /-! ## Conservative compiler-facing contract -/
 
 /-- Upstream-facing contract for FIR's current impure semantics.  The exact
@@ -47650,6 +47931,23 @@ theorem ElimDeadCompilerAdmissibleRun.loweringCorrect
       source target entries :=
   admissible.toSemanticallyAdmissibleRun.loweringCorrect compatible
 
+/-- Conservative compiler endpoint retaining the concrete source ownership
+carrier under an explicit foreign heap/frontier law. -/
+theorem ElimDeadCompilerAdmissibleRun.loweringCorrect_sourceOwned
+    (admissible :
+      ElimDeadCompilerAdmissibleRun
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries :=
+  admissible.toSemanticallyAdmissibleRun.loweringCorrect_sourceOwned
+    compatible sourceCompatible
+
 /-- Direct checked-pass endpoint for compiler clients. A single successful
 fail-closed traversal replaces the previously separate transparent-result and
 nullary-policy premises; runtime ownership and foreign compatibility remain
@@ -47687,5 +47985,27 @@ theorem nullarySafeShadowProgram_loweringCorrect_of_ownership
       source target entries :=
   (ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
     wellFormed checked ownership).loweringCorrect compatible
+
+/-- Direct fail-closed checked-pass endpoint that carries concrete source
+ownership through arbitrary internal and external execution steps. -/
+theorem
+    nullarySafeShadowProgram_loweringCorrect_sourceOwned_of_ownership
+    (wellFormed : ProgramElimDeadWellFormed source)
+    (checked :
+      nullarySafeShadowProgram? fuel source = some target)
+    (ownership :
+      ElimDeadOwnershipContract
+        externals fuel source target entries)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      source target entries :=
+  (ElimDeadCompilerAdmissibleRun.ofCheckedOwnership
+    wellFormed checked ownership).loweringCorrect_sourceOwned
+      compatible sourceCompatible
 
 end Fir.LeanIR.Passes.ElimDead

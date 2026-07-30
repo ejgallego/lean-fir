@@ -1998,6 +1998,26 @@ theorem neutralProgramLoweringCorrect
       (neutralSourceOwnershipContract externals))
     compatible
 
+/-- The neutral checked-pass fixture also exercises the source-owned
+whole-program endpoint. The existing compiler/runtime certificate is reused;
+only the explicit foreign heap/frontier law is added. -/
+theorem neutralProgramLoweringCorrect_sourceOwned
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 3)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      neutralBeforeProgram neutralAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_sourceOwned_of_ownership
+    neutralBeforeProgramElimDeadWellFormed
+    neutralCheckedProgramRun
+    (ElimDeadOwnershipContract.ofSource
+      (neutralSourceOwnershipContract externals))
+    compatible sourceCompatible
+
 def liveEnv : Env :=
   bind [] live .erased
 
