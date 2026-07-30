@@ -870,6 +870,15 @@ acceptance tests pass.
    source lookup/parameter/body equations. The budgeted generated miss now
    derives its publication runtime equation instead of accepting it, while
    permitting unrelated nested cache evolution.
+   Empty whole-table slots now retain physical presence of the unconstrained
+   value lane as well as the zero flag. `slotLanesPresent` derives both
+   generated write bounds from the invariant, and `publish` overwrites either
+   an empty slot or one populated by nested execution. The concrete host
+   cache write preserves physical Wasm globals; `afterCacheSet` transports the
+   evolved pre-publication table across that host step, and
+   `withCacheSetPublishedTable` constructs the exact successor table after the
+   generated value/flag suffix without assuming the selected slot stayed
+   empty.
    Next derive those static declaration equations and resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by

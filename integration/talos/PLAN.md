@@ -5006,6 +5006,27 @@ environment (or coordinate alias-invalidating validator transfer), then use
 the same alignment result to construct the successor whole-cache table in the
 uniform implementation.
 
+W6.6gzm makes that successor-table construction stable under nested cache
+execution. An empty `LazyCacheSlotRel` now retains physical presence of its
+unconstrained value lane in addition to the zero flag; validation-derived
+layout and the production initial store establish both lanes, and pointwise
+transport preserves them. `LazyCacheGlobalsRel.slotLanesPresent` consequently
+provides the exact in-bounds facts needed by generated `global.set`
+instructions without treating the unpublished zero value as semantic data.
+
+`LazyCacheGlobalsRel.publish` no longer requires the selected slot to remain
+semantically empty at the callee's final runtime. It replaces either an empty
+slot or a slot populated by nested execution while preserving every distinct
+slot through initializer uniqueness and paired-index separation.
+`cacheSetStep_preserves_wasmGlobals` and
+`LazyCacheGlobalsRel.afterCacheSet` transport the evolved table across the
+host-owned persistence update.
+`withCacheSetPublishedTable` then composes the host write and the two generated
+physical writes into the exact successor table. The remaining uniform
+implementation obligations are static generated-declaration selection,
+callee-table production, and retained-token publication disjointness (or a
+shared validator transfer that invalidates unsafe facts).
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

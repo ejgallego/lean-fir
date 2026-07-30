@@ -219,6 +219,33 @@ theorem cacheSetStep_preserves_heapCursor
           simpa [replaceRuntime, clearFailure] using
             ConcreteRuntimeState.writeGlobal_preserves_heapCursor published
 
+/-- The concrete cache host call changes only host-owned runtime state.
+Physical Wasm globals are left for the generated `global.set` suffix. -/
+theorem cacheSetStep_preserves_wasmGlobals
+    {declaration : Name} {kind : AbiKind}
+    {initial after : Wasm.Store Host} {physical : Wasm.Value}
+    (operation :
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] after) :
+    after.globals.globals = initial.globals.globals := by
+  unfold cacheSetStep at operation
+  cases decoded : decodePhysicalLane kind physical with
+  | error failure =>
+      simp [decoded, trap] at operation
+  | ok lane =>
+      cases published :
+          (clearFailure initial).host.runtime.writeGlobal declaration kind lane
+            (clearFailure initial).host.closureDescriptors with
+      | error failure =>
+          simp [decoded, published, trap] at operation
+      | ok runtime =>
+          simp only [decoded, published] at operation
+          have storeEq :
+              replaceRuntime (clearFailure initial) runtime = after := by
+            injection operation
+          subst after
+          rfl
+
 /-- The complete cache-publication suffix preserves every residual address
 space budget. The host cache write preserves the heap cursor, while both
 generated Wasm global writes preserve the host definitionally. -/
@@ -791,10 +818,12 @@ theorem listAllUnique_eq_true_iff_nodup
 One generated lazy-cache slot is either unpublished on both sides or
 populated on both sides.
 
-The unpublished case intentionally does not relate the value global: Wasm
-initializes that lane to zero, but the generated code cannot observe it while
-the flag is zero. The populated case carries the full semantic/physical value
-relation needed by the hit theorem.
+The unpublished value lane is semantically unconstrained, but it must be
+physically present. This is exactly the fact needed to justify the generated
+`global.set` when a declaration body has evolved unrelated cache slots—or has
+recursively populated the same slot—before the outer publication suffix.
+The populated case carries the full semantic/physical value relation needed
+by the hit theorem.
 -/
 inductive LazyCacheSlotRel
     (witness : RefinementWitness)
@@ -808,6 +837,9 @@ inductive LazyCacheSlotRel
         findGlobal? runtime.globals declaration = none)
       (flagEmpty :
         store.globals.globals[flagIndex]? = some (.i32 0))
+      (valuePresent :
+        ∃ physical,
+          store.globals.globals[valueIndex]? = some physical)
   | populated
       {sourceValue : Value} {physical : Wasm.Value}
       (related :
@@ -873,9 +905,35 @@ theorem initialStore_cacheFlag_zero
       FirTalos.valueType, Fir.Wasm.AbiKind.valueType]
   · simpa using (List.getElem?_eq_some_iff.mp flagKindList).1
 
-/-- Empty semantic globals and zero generated flags establish the complete
-table relation, independently of resident globals appended after the cache
-prefix. -/
+/-- Every checked value lane is physically present in Talos's initial store.
+Its zero representation is deliberately not related to a semantic value until
+the paired publication flag is set. -/
+theorem initialStore_cacheValue_present
+    {source : Fir.Wasm.Module}
+    {target : Wasm.Module}
+    {index : Nat}
+    {kind : AbiKind}
+    (targetGlobals : target.globals = FirTalos.globalDecls source)
+    (valueKind :
+      source.cacheGlobalKinds[2 * index + 1]? = some kind) :
+    ∃ value,
+      (initialStore source target).globals.globals[2 * index + 1]? =
+        some value := by
+  have valueKindList :
+      source.cacheGlobalKinds.toList[2 * index + 1]? = some kind := by
+    simpa using valueKind
+  refine ⟨FirTalos.zeroValue kind, ?_⟩
+  change (target.globals.map (·.init))[2 * index + 1]? =
+    some (FirTalos.zeroValue kind)
+  rw [targetGlobals]
+  simp only [FirTalos.globalDecls, List.map_append, List.map_map]
+  rw [List.getElem?_append_left]
+  · simp [valueKindList]
+  · simpa using (List.getElem?_eq_some_iff.mp valueKindList).1
+
+/-- Empty semantic globals and physically allocated generated lanes establish
+the complete table relation, independently of resident globals appended after
+the cache prefix. -/
 theorem LazyCacheGlobalsRel.empty
     {witness : RefinementWitness}
     {source : Fir.Wasm.Module}
@@ -886,7 +944,12 @@ theorem LazyCacheGlobalsRel.empty
     (flagsEmpty :
       ∀ {index : Nat} {declaration : Name},
         source.initializers[index]? = some declaration →
-          store.globals.globals[2 * index]? = some (.i32 0)) :
+          store.globals.globals[2 * index]? = some (.i32 0))
+    (valuesPresent :
+      ∀ {index : Nat} {declaration : Name},
+        source.initializers[index]? = some declaration →
+          ∃ physical,
+            store.globals.globals[2 * index + 1]? = some physical) :
     LazyCacheGlobalsRel witness source runtime store := by
   refine {
     checked
@@ -898,7 +961,7 @@ theorem LazyCacheGlobalsRel.empty
   · intro index declaration found
     obtain ⟨kind, signature, _, _⟩ := checked.layout.slot found
     exact ⟨kind, signature, .empty (by simp [runtimeEmpty, findGlobal?])
-      (flagsEmpty found)⟩
+      (flagsEmpty found) (valuesPresent found)⟩
 
 /--
 Whole-table empty relation for the actual adapter and Talos initial-store
@@ -921,9 +984,12 @@ theorem LazyCacheGlobalsRel.adaptedInitial
       target.wasmModule.globals = FirTalos.globalDecls source := by
     rw [targetEq]
   apply LazyCacheGlobalsRel.empty checked rfl
-  intro index declaration found
-  obtain ⟨kind, _, flagKind, _⟩ := checked.layout.slot found
-  exact initialStore_cacheFlag_zero targetGlobals flagKind
+  · intro index declaration found
+    obtain ⟨kind, _, flagKind, _⟩ := checked.layout.slot found
+    exact initialStore_cacheFlag_zero targetGlobals flagKind
+  · intro index declaration found
+    obtain ⟨kind, _, _, valueKind⟩ := checked.layout.slot found
+    exact initialStore_cacheValue_present targetGlobals valueKind
 
 /-- Pointwise transport for one cache slot. This is the form used when a
 publication changes one pair of globals but preserves the two indices owned
@@ -951,9 +1017,12 @@ theorem LazyCacheSlotRel.transportAt
     LazyCacheSlotRel afterWitness afterRuntime afterStore declaration
       kind flagIndex valueIndex := by
   cases related with
-  | empty semanticEmpty flagEmpty =>
+  | empty semanticEmpty flagEmpty valuePresent =>
       exact .empty (semanticLookup.trans semanticEmpty)
         (flagLookup.trans flagEmpty)
+        (by
+          obtain ⟨physical, found⟩ := valuePresent
+          exact ⟨physical, valueLookup.trans found⟩)
   | populated related =>
       exact .populated {
         semanticFound := semanticLookup.trans related.semanticFound
@@ -1015,6 +1084,26 @@ theorem LazyCacheGlobalsRel.transport
     exact ⟨kind, signature,
       slot.transport witnessTransport runtimeGlobals storeGlobals⟩
 
+/-- A successful concrete-host cache write preserves the physical Wasm cache
+table. The semantic publication and physical value/flag writes are accounted
+for by the subsequent generated suffix. -/
+theorem LazyCacheGlobalsRel.afterCacheSet
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {beforeStore afterStore : Wasm.Store Host}
+    {declaration : Name}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    (related :
+      LazyCacheGlobalsRel witness source runtime beforeStore)
+    (operation :
+      cacheSetStep declaration kind beforeStore [physical] =
+        .Return [physical] afterStore) :
+    LazyCacheGlobalsRel witness source runtime afterStore :=
+  related.transport (WitnessTransport.refl witness) rfl
+    (cacheSetStep_preserves_wasmGlobals operation)
+
 /-- A semantic cache hit forces the corresponding whole-table slot into its
 populated branch and recovers the exact physical lane required by generated
 hit code. -/
@@ -1045,7 +1134,7 @@ theorem LazyCacheGlobalsRel.populatedSlot
     exact Option.some.inj slotSignature.symm
   subst slotKind
   cases slot with
-  | empty semanticEmpty _ =>
+  | empty semanticEmpty _ _ =>
       rw [semanticFound] at semanticEmpty
       contradiction
   | populated slotRelated =>
@@ -1080,11 +1169,44 @@ theorem LazyCacheGlobalsRel.emptySlot
     exact Option.some.inj slotSignature.symm
   subst slotKind
   cases slot with
-  | empty _ flagEmpty =>
+  | empty _ flagEmpty _ =>
       exact flagEmpty
   | populated slotRelated =>
       rw [slotRelated.semanticFound] at semanticEmpty
       contradiction
+
+/-- Both physical lanes of every generated cache slot remain allocated,
+independently of whether the semantic slot is empty or populated. -/
+theorem LazyCacheGlobalsRel.slotLanesPresent
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    {index : Nat}
+    {declaration : Name}
+    {kind : AbiKind}
+    (related : LazyCacheGlobalsRel witness source runtime store)
+    (initializerFound :
+      source.initializers[index]? = some declaration)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind) :
+    ∃ oldFlag oldValue,
+      store.globals.globals[2 * index]? = some oldFlag ∧
+        store.globals.globals[2 * index + 1]? = some oldValue := by
+  obtain ⟨slotKind, slotSignature, slot⟩ :=
+    related.slots initializerFound
+  have kindEq : slotKind = kind := by
+    rw [signature] at slotSignature
+    exact Option.some.inj slotSignature.symm
+  subst slotKind
+  cases slot with
+  | empty _ flagEmpty valuePresent =>
+      obtain ⟨oldValue, valueFound⟩ := valuePresent
+      exact ⟨.i32 0, oldValue, flagEmpty, valueFound⟩
+  | populated slotRelated =>
+      exact ⟨.i32 1, _, slotRelated.flagPublished,
+        slotRelated.valuePublished⟩
 
 /--
 Publishing one generated lazy-cache miss updates exactly one whole-table slot.
@@ -1093,7 +1215,9 @@ The semantic `setGlobal` and the two physical `global.set`s establish the
 published slot through `PopulatedLazyCacheSlotRel.ofPublication`. Initializer
 uniqueness makes every other declaration name distinct, while the even/odd
 pair layout makes both of its physical indices distinct from the two writes.
-Thus every other empty or populated slot transports unchanged.
+Thus every other empty or populated slot transports unchanged. The selected
+slot may itself have become populated during a nested declaration execution;
+the outer publication soundly overwrites either state.
 -/
 theorem LazyCacheGlobalsRel.publish
     {witness : RefinementWitness}
@@ -1104,7 +1228,7 @@ theorem LazyCacheGlobalsRel.publish
     {declaration : Name}
     {kind : AbiKind}
     {sourceValue : Value}
-    {physical oldValue : Wasm.Value}
+    {physical : Wasm.Value}
     (related :
       LazyCacheGlobalsRel witness source beforeRuntime beforeStore)
     (initializerFound :
@@ -1112,26 +1236,21 @@ theorem LazyCacheGlobalsRel.publish
     (signature :
       (source.callSignature? (.declaration declaration)).bind
           (·.results[0]?) = some kind)
-    (semanticEmpty :
-      findGlobal? beforeRuntime.globals declaration = none)
     (runtimeEq :
       nextRuntime = beforeRuntime.setGlobal declaration sourceValue)
     (valueRelated :
       PhysicalValueRel witness kind physical sourceValue)
-    (valueGlobal :
-      beforeStore.globals.globals[2 * index + 1]? = some oldValue)
     (valueStoreEq :
       valueStore =
         writeWasmGlobal beforeStore (2 * index + 1) physical) :
     LazyCacheGlobalsRel witness source nextRuntime
       (writeWasmGlobal valueStore (2 * index) (.i32 1)) := by
-  have flagBefore :
-      beforeStore.globals.globals[2 * index]? = some (.i32 0) :=
-    related.emptySlot initializerFound signature semanticEmpty
+  obtain ⟨oldFlag, oldValue, flagBefore, valueGlobal⟩ :=
+    related.slotLanesPresent initializerFound signature
   have valueFlagDistinct : 2 * index + 1 ≠ 2 * index := by
     omega
   have flagAfterValue :
-      valueStore.globals.globals[2 * index]? = some (.i32 0) := by
+      valueStore.globals.globals[2 * index]? = some oldFlag := by
     rw [valueStoreEq]
     exact (writeWasmGlobal_get_ne valueFlagDistinct).trans flagBefore
   have published :
@@ -2448,7 +2567,7 @@ theorem
     {initialWitness nextWitness : RefinementWitness}
     {declaration : Name}
     {kind : AbiKind}
-    {physical oldValue : Wasm.Value}
+    {physical : Wasm.Value}
     (step :
       BudgetedCapacityPreservingLazyStep .miss facts context sourceFunction
         module hostEnv sourceExternals decl continuation targetValue
@@ -2462,14 +2581,10 @@ theorem
     (signature :
       (sourceModule.callSignature? (.declaration declaration)).bind
           (·.results[0]?) = some kind)
-    (semanticEmpty :
-      findGlobal? callRuntime.globals declaration = none)
     (runtimeEq :
       nextRuntime = callRuntime.setGlobal declaration sourceValue)
     (valueRelated :
       PhysicalValueRel nextWitness kind physical sourceValue)
-    (valueGlobal :
-      afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue)
     (valueStoreEq :
       valueStore =
         writeWasmGlobal afterCache (2 * cacheIndex + 1) physical) :
@@ -2481,7 +2596,71 @@ theorem
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime
         (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) := by
   exact ⟨step, cacheTable.publish initializerFound signature
-    semanticEmpty runtimeEq valueRelated valueGlobal valueStoreEq⟩
+    runtimeEq valueRelated valueStoreEq⟩
+
+/--
+Compose the concrete-host cache write and the generated physical publication
+suffix into the successor whole-cache relation.
+
+The pre-host table may already contain nested cache evolution. Host
+publication preserves its Wasm lanes; the final value/flag writes then replace
+the selected slot without requiring it to remain semantically empty.
+-/
+theorem
+    BudgetedCapacityPreservingLazyStep.withCacheSetPublishedTable
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial afterCall afterCache valueStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {resultIndex stepCost cacheIndex : Nat}
+    {initialWitness nextWitness : RefinementWitness}
+    {declaration : Name}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    (step :
+      BudgetedCapacityPreservingLazyStep .miss facts context sourceFunction
+        module hostEnv sourceExternals decl continuation targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue initial
+        (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) locals
+        nextLocals resultIndex initialWitness nextWitness physical stepCost)
+    (cacheTable :
+      LazyCacheGlobalsRel nextWitness sourceModule callRuntime afterCall)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (initializerFound :
+      sourceModule.initializers[cacheIndex]? = some declaration)
+    (signature :
+      (sourceModule.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (runtimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue)
+    (valueRelated :
+      PhysicalValueRel nextWitness kind physical sourceValue)
+    (valueStoreEq :
+      valueStore =
+        writeWasmGlobal afterCache (2 * cacheIndex + 1) physical) :
+    BudgetedCapacityPreservingLazyStep .miss facts context sourceFunction
+          module hostEnv sourceExternals decl continuation targetValue
+          sourceRuntime nextRuntime sourceEnv sourceValue initial
+          (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) locals
+          nextLocals resultIndex initialWitness nextWitness physical stepCost ∧
+      LazyCacheGlobalsRel nextWitness sourceModule nextRuntime
+        (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) := by
+  exact step.withPublishedCacheTable
+    (cacheTable.afterCacheSet operation) initializerFound signature runtimeEq
+    valueRelated valueStoreEq
 
 /--
 A budgeted lazy result re-establishes the canonical mixed facts-indexed

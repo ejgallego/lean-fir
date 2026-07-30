@@ -3623,4 +3623,61 @@ example
   FirTalos.Concrete.SourceLazyLetResult.miss_cacheFacts_of_callee valueEq
     declarationFound targetParams targetBody sourceStep calleeResult
 
+/--
+Every related generated cache slot retains two physically allocated lanes,
+even while an unpublished value lane remains semantically unconstrained.
+-/
+example
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    {index : Nat}
+    {declaration : Name}
+    {kind : AbiKind}
+    (related : LazyCacheGlobalsRel witness source runtime store)
+    (initializerFound :
+      source.initializers[index]? = some declaration)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind) :
+    ∃ oldFlag oldValue,
+      store.globals.globals[2 * index]? = some oldFlag ∧
+        store.globals.globals[2 * index + 1]? = some oldValue :=
+  related.slotLanesPresent initializerFound signature
+
+/--
+Whole-table publication overwrites either an empty slot or a slot populated
+by nested execution. It therefore needs no pre-publication semantic-absence
+premise at the callee's final runtime.
+-/
+example
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {beforeRuntime nextRuntime : RuntimeState}
+    {beforeStore valueStore : Wasm.Store Host}
+    {index : Nat}
+    {declaration : Name}
+    {kind : AbiKind}
+    {sourceValue : Value}
+    {physical : Wasm.Value}
+    (related :
+      LazyCacheGlobalsRel witness source beforeRuntime beforeStore)
+    (initializerFound :
+      source.initializers[index]? = some declaration)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind)
+    (runtimeEq :
+      nextRuntime = beforeRuntime.setGlobal declaration sourceValue)
+    (valueRelated :
+      PhysicalValueRel witness kind physical sourceValue)
+    (valueStoreEq :
+      valueStore =
+        writeWasmGlobal beforeStore (2 * index + 1) physical) :
+    LazyCacheGlobalsRel witness source nextRuntime
+      (writeWasmGlobal valueStore (2 * index) (.i32 1)) :=
+  related.publish initializerFound signature runtimeEq valueRelated
+    valueStoreEq
+
 end FirTalos.Concrete.CompilerCorrectnessContract
