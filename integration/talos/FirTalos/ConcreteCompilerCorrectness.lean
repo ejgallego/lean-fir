@@ -13137,6 +13137,64 @@ def ConcreteReuseCapacityOwnershipFrame
     targetStore.host.closureDescriptors = witness.closureDescriptors
 
 /--
+Thread the ownership-strengthened reuse frame across a same-witness heap
+effect.
+
+Operation-specific proofs supply the executable simulation, mapped-header
+capacity transport, source ordinary-persistence transport, and unchanged
+heap frontier. This theorem performs the common invariant reconstruction for
+ownership and constructor-mutation helpers.
+-/
+theorem ConcreteReuseCapacityOwnershipFrame.ofReplaceHeapEffectStep
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {code continuation : LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    {initial : Wasm.Store Host} {heap : MemoryState}
+    {targetLocals : Wasm.Locals} {witness : RefinementWitness}
+    {remainingBytes : Nat}
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+        sourceRuntime sourceEnv initial targetLocals witness)
+    (step :
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+        targetRest initial (replaceHeap initial heap) targetLocals witness
+        witness)
+    (capacity :
+      HeaderCapacityTransport initial.host.runtime.heap heap witness)
+    (ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (cursor : heap.heapCursor = initial.host.runtime.heap.heapCursor) :
+    ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+      nextRuntime sourceEnv (replaceHeap initial heap) targetLocals witness := by
+  rcases invariant with
+    ⟨⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩, agreement⟩
+  have nextCapacity :
+      ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+        (replaceHeap initial heap) targetLocals witness :=
+    capacityRelated.ofReplaceHeapEffectStep step capacity
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
+    ordinaryTokens.transport ordinaryTransport
+  have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+    constructor
+    · simpa [cursor] using budget.cursorPositive
+    · simpa [cursor] using budget.endWithinAddressSpace
+  have nextAgreement :
+      (replaceHeap initial heap).host.closureDescriptors =
+        witness.closureDescriptors := by
+    simpa [replaceHeap, clearFailure] using agreement
+  exact ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
+    change heap.AddressSpaceBudget remainingBytes
+    exact nextBudget⟩, nextAgreement⟩
+
+/--
 Uniform facts-indexed direct-`let` law for successful reuse.
 
 Unlike the older program-specific reuse simulation, this interface contains
@@ -16211,6 +16269,58 @@ theorem
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
 
+/--
+Constructor-tag mutation preserves the ownership-strengthened reuse frame.
+
+The concrete header write transports mapped allocation capacity without
+moving the heap frontier. The source constructor rewrite retains the target
+cell's persistence bit, so every tracked ordinary reuse token remains valid.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_constructorTag_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ConstructorTagEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | setTag sourceRuntime nextRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.setTag_eq supportedExport.localsAligned objectCompiled
+          adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.setTagCall callFound
+      obtain ⟨heap, step, capacity, cursor⟩ :=
+        effectStepSimulates_setTag_with_capacity objectLookup updated
+          stateRelated objectCompiled objectFound kindAt callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results found live objectEq tagFits
+      have nextInvariant :
+          ConcreteReuseCapacityOwnershipFrame sourceFunction facts
+            remainingBytes nextRuntime sourceEnv
+            (replaceHeap targetStore heap) targetLocals witness :=
+        invariant.ofReplaceHeapEffectStep step capacity
+          (setTag_ordinaryPersistenceTransport updated) cursor
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
 /-- The ownership prefix proved for facts-indexed reuse: compiler-erased
 persistent operations, ordinary increment, and recursive decrement. -/
 abbrev ReuseOwnershipThroughDecrementEffectSupported
@@ -16272,6 +16382,30 @@ theorem ConcreteSupportedExport.effectRuntimeRefines_reuseOwnership
       · exact
           spec.effectRuntimeRefines_ordinaryDecrement_reuseCapacityOwnership
       · exact spec.effectRuntimeRefines_ordinaryDelete_reuseCapacityOwnership
+
+/--
+One facts-indexed runtime law for the complete ownership family plus
+constructor-tag mutation.
+-/
+theorem ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipAndTag
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OwnershipAndTagEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefines.or
+  · exact spec.effectRuntimeRefines_reuseOwnership
+  · exact spec.effectRuntimeRefines_constructorTag_reuseCapacityOwnership
 
 /--
 The complete facts-indexed direct family may interleave with compiler-erased
@@ -16482,6 +16616,58 @@ theorem ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipCode
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     (fun _ => spec.effectRuntimeRefines_reuseOwnership)
+    parameterCount
+
+/--
+Finite whole-export partial correctness for every facts-indexed direct/reuse
+operation interleaved with the complete ownership family and successful
+constructor-tag mutation.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipAndTagCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (OwnershipAndTagEffectSupported context) directLetAllocationCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipAndTag)
     parameterCount
 
 /--

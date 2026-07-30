@@ -1217,6 +1217,57 @@ theorem setCell_ordinaryPersistenceTransport
         rw [beforeFound] at afterFound
         contradiction
 
+/--
+Every successful constructor-payload rewrite preserves ordinaryness.
+
+`modifyConstructor` changes exactly the decoded live cell and retains all of
+its ownership metadata. This source-runtime lemma is the common persistence
+boundary for tag, object-field, `USize`, and packed-scalar mutations.
+-/
+theorem modifyConstructor_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    {modify : ConstructorObject → Except RuntimeFault ConstructorObject}
+    (operation :
+      modifyConstructor before value modify = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  unfold modifyConstructor at operation
+  cases decoded : getConstructor before value with
+  | error failure =>
+      simp only [decoded, Bind.bind, Except.bind] at operation
+      contradiction
+  | ok result =>
+      rcases result with ⟨location, cell, object⟩
+      simp only [decoded, Bind.bind, Except.bind] at operation
+      cases changed : modify object with
+      | error failure =>
+          rw [changed] at operation
+          contradiction
+      | ok replacement =>
+          rw [changed] at operation
+          have targetFound :
+              findCell? before.heap location = some cell :=
+            by
+              cases value with
+              | object reference =>
+                  cases reference with
+                  | tagged payload => simp [getConstructor] at decoded
+                  | heap target =>
+                      obtain ⟨rfl, found, _live, _objectEq⟩ :=
+                        Fir.LeanIR.Passes.ElimDead.getConstructor_heap_spec
+                          decoded
+                      exact found
+              | scalar scalar | usize value | erased | reuseToken value =>
+                  simp [getConstructor] at decoded
+          exact setCell_ordinaryPersistenceTransport targetFound
+            (by rfl) operation
+
+/-- Constructor-tag mutation is a constructor-payload rewrite. -/
+theorem setTag_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value} {tag : Nat}
+    (operation : setTag before value tag = .ok after) :
+    OrdinaryPersistenceTransport before after :=
+  modifyConstructor_ordinaryPersistenceTransport operation
+
 /-- A successful semantic reference-count increment never changes a cell's
 persistence bit and never allocates a new cell. -/
 theorem incValue_ordinaryPersistenceTransport

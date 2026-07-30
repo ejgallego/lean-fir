@@ -684,8 +684,14 @@ acceptance tests pass.
    `correctReuseBudgetedDirectOwnershipThroughDecrementCode` adds recursive
    decrement under the ownership-strengthened reuse frame.
    `correctReuseBudgetedDirectOwnershipCode` adds explicit deletion and now
-   covers the complete `OwnershipEffectSupported` family. Constructor/tag and
-   field mutation are the next effect obligations.
+   covers the complete `OwnershipEffectSupported` family.
+   `modifyConstructor_ordinaryPersistenceTransport` and
+   `ConcreteReuseCapacityOwnershipFrame.ofReplaceHeapEffectStep` isolate the
+   reusable source and target transport boundaries for constructor mutation.
+   `correctReuseBudgetedDirectOwnershipAndTagCode` instantiates them for
+   successful tag writes, extending the facts-indexed whole-export theorem
+   through `OwnershipAndTagEffectSupported`. Object-field mutation is the
+   next effect obligation.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

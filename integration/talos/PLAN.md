@@ -4612,6 +4612,21 @@ correctness for arbitrary interleavings of every direct/reuse operation with
 all persistent and ordinary ownership effects. Constructor/tag and field
 mutation are the next effect families.
 
+W6.6gm adds constructor-tag mutation to that facts-indexed endpoint.
+`modifyConstructor_ordinaryPersistenceTransport` is the common source
+boundary for successful constructor-payload rewrites: the decoded live cell
+is replaced while its ownership metadata, including persistence, is retained.
+`ConcreteReuseCapacityOwnershipFrame.ofReplaceHeapEffectStep` packages the
+matching target-side invariant reconstruction from an executable effect step,
+mapped-header capacity transport, source ordinary-persistence transport, and
+unchanged frontier. The tag instance combines these generic boundaries with
+the existing production compiler inversion and concrete header writer.
+`correctReuseBudgetedDirectOwnershipAndTagCode` now proves finite whole-export
+partial correctness for arbitrary interleavings of every direct/reuse
+operation, the complete ownership family, and successful tag mutation.
+Object-field mutation is next and can reuse the same two generic transport
+boundaries.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

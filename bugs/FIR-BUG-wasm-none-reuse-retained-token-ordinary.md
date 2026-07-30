@@ -94,9 +94,12 @@ recursive decrement composes through the fuel-indexed
 `decLocationFuel_ordinaryPersistenceTransport`, including releases of owned
 constructor fields and closure captures. Explicit deletion composes through
 `deleteValue_ordinaryPersistenceTransport`; its erased sentinel is an identity
-and its ordinary branch preserves the deleted cell's persistence bit. This bug
-still blocks validator-wide admission of effects that can create persistent
-aliases or otherwise fail that transport.
+and its ordinary branch preserves the deleted cell's persistence bit.
+Constructor-tag mutation composes through the generic
+`modifyConstructor_ordinaryPersistenceTransport`, which covers any successful
+constructor-payload rewrite that retains the decoded cell's ownership
+metadata. This bug still blocks validator-wide admission of effects that can
+create persistent aliases or otherwise fail that transport.
 
 ## Classification and triage
 
