@@ -21,3 +21,7 @@ FIR_WASM_CONST uint64_t lean_uint64_sub(uint64_t lhs, uint64_t rhs) {
 FIR_WASM_CONST uint64_t lean_uint64_mul(uint64_t lhs, uint64_t rhs) {
     return lhs * rhs;
 }
+
+FIR_WASM_CONST uint64_t lean_uint64_xor(uint64_t lhs, uint64_t rhs) {
+    return lhs ^ rhs;
+}

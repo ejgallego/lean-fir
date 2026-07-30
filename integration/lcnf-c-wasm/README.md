@@ -24,14 +24,16 @@ second compiler:
 | --- | --- | --- |
 | `freestanding` | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
 | `emscripten` | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd` | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
-| `wasi` | single-threaded Lean constructor core in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, exact reference-count reclamation, scalar C, and a real monotonic-clock import |
+| `wasi` | single-threaded Lean core-object runtime in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, object arrays, strings, captured unary closures, exact reclamation, scalar C, and a real monotonic-clock import |
 
 `Smoke.lean` exports two raw `UInt64` functions. One is a scalar expression;
 the other is a compiler-lowered tail loop. `HeapSmoke.lean` dynamically
 allocates boxed `UInt64` values and list constructors, consumes the list, and
-returns an exact checksum. `RuntimeSmoke.lean` widens that coverage to a
-captured-closure pipeline, mutable arrays, strings, success/error `Except`
-branches, and a `Std.HashMap`, then exposes a real `Init` I/O probe.
+returns an exact checksum. `WasiCoreSmoke.lean` adds an Init-only captured
+closure pipeline over ordinary object arrays and dynamically appended UTF-8
+strings. `RuntimeSmoke.lean` widens the full-runtime coverage to mutable
+arrays, success/error `Except` branches, and a `Std.HashMap`, then exposes a
+real `Init` I/O probe.
 
 The freestanding runtime is deliberately narrow. It implements only the
 primitive operations referenced by `Smoke.lean`; it must not silently grow a
@@ -52,21 +54,26 @@ with cross-origin-isolation headers and runs the same Init/Std surface in a
 headless browser.
 
 The WASI artifact is intentionally a Preview 1 core-module reactor. It links
-`HeapSmoke.c` against a single-threaded constructor subset of the pinned Lean
-C ABI. The subset uses the official `lean.h` object layout and calling
-convention, wasi-libc allocation, and stack-safe reference-count reclamation.
-Acceptance checks require exactly two allocations and two deallocations per
-logical list element, zero live objects after every call, equality with the
-native Lean runtime, and equality with an independent JavaScript oracle.
+the heap and core fixtures against ABI 2 of a single-threaded subset of the
+pinned Lean C ABI. The subset uses the official `lean.h` object layout and
+calling convention, wasi-libc allocation, stack-safe reference-count
+reclamation, ordinary object-array copy-on-write growth, UTF-8 string append,
+and full `apply_1` calls for closures of arity one or two. Acceptance compares
+five fixed cases with both the native Lean runtime and an independent
+JavaScript oracle. It also requires exact list allocation counts, balanced
+allocation totals, zero live objects after every call, exactly two reclaimed
+captured closures and one reclaimed dynamic string per core call, and complete
+per-object-kind deallocation dispatch.
 
-This core profile fails closed on closures, arrays, strings, tasks, external
+This core profile still fails closed on partial or higher-arity closure
+application, scalar/structure arrays, tasks, thunks, references, external
 objects, and multi-threaded reference counts. It does not provide partial
-replacements for Init, Std, libuv, OpenSSL, process, filesystem, or thread
-services; those remain covered by the full Emscripten profile until a genuine
-WASI implementation is linked. The artifact imports `clock_time_get` (and
-wasi-libc reactor startup imports `random_get`), so the check cannot pass by
-relabeling the freestanding artifact. WASI 0.2/0.3 component packaging belongs
-above this core module as an adapter/WIT layer.
+replacements for the Init or Std libraries, libuv, OpenSSL, process,
+filesystem, or thread services; those remain covered by the full Emscripten
+profile until genuine WASI implementations are linked. The artifact imports
+`clock_time_get` (and wasi-libc reactor startup imports `random_get`), so the
+check cannot pass by relabeling the freestanding artifact. WASI 0.2/0.3
+component packaging belongs above this core module as an adapter/WIT layer.
 
 ## Performance profile
 
@@ -145,5 +152,6 @@ bash integration/lcnf-c-wasm/check-all.sh
 Generated C, JavaScript glue, and Wasm artifacts are written under
 `_build/lcnf-c-wasm/`. `FIR_WASM_BENCH_ROUNDS` changes scalar non-gating
 throughput samples; `FIR_WASM_HEAP_BENCH_ROUNDS` changes the Emscripten and
-WASI heap samples. Correctness is checked independently with fixed exact
-cases.
+WASI heap samples; and `FIR_WASM_CORE_BENCH_ROUNDS` changes the WASI
+array/string/closure sample. Correctness is checked independently with fixed
+exact cases.

@@ -77,6 +77,13 @@ export function expectedHeapChecksum(rounds, seed) {
   ) & mask;
 }
 
+export function expectedWasiCoreChecksum(rounds, seed) {
+  const arraySum = expectedHeapChecksum(rounds, seed);
+  const closureValue = ((arraySum + seed) & mask) ^ rounds;
+  const labelByteLength = rounds === 0n ? 11n : 14n;
+  return (closureValue + labelByteLength) & mask;
+}
+
 export function expectedRuntimeChecksum(rounds, seed) {
   let remaining = rounds;
   let next = seed;
