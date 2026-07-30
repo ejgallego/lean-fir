@@ -1364,6 +1364,19 @@ thread these operation-specific theorems through the exact active-code
 dispatcher, and then handle retained result bindings and invocation/frame
 pushes.
 
+The remaining deleted-write ownership laws land at `8bde8037`, with concrete
+semantic-step regressions at `475451b9`. Successful absolute-slot `USize` and
+packed-scalar writes preserve the heap ownership graph and allocation
+frontier; local environment and complete-machine lifts carry that fact through
+every suspended bind environment. Their core and non-lockstep semantic
+matchers now return exact hereditary provenance and post-step source ownership
+together. Branch-local exact matchers expose the ownership result for deleted
+object, `USize`, and scalar writes, and concrete suffix fixtures check both
+unboxed source-only mutations while the target stutters. The global exact
+active-code dispatcher is intentionally not strengthened yet: doing so next
+requires ownership preservation for every retained active-code and
+invocation/frame-push branch, not just the three deleted-write cases.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1469,6 +1482,10 @@ token branches, and checks the semantic missing-token transition.
 `1cef5df2` preserves the same carrier across deleted constructor allocation,
 object-field replacement, and reset, including reset's dead token binding;
 `23898302` checks all three concrete semantic edges.
+`8bde8037` adds fixed-frontier ownership laws for `USize` and packed-scalar
+writes, strengthens their deleted core/semantic matchers, and exposes
+ownership-aware exact matchers for all three deleted-write branches;
+`475451b9` checks the two remaining concrete semantic edges.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1545,12 +1562,14 @@ the existing nullary-`.fap` semantic discrepancy.
    branches and its semantic wrapper is checked by the failed-token fixture.
    Deleted constructor allocation, object-field replacement, and reset now
    have the same ownership-strengthened core and semantic matchers, with
-   concrete regressions for each. Next extend the pattern to unboxed word and
-   scalar writes, expose all of these operation-specific results through the
-   exact active-code dispatcher, and preserve the carrier across retained
-   result bindings, invocation/control changes, and pushed frames before
-   carrying the compositional closure certificate through the general
-   dispatcher.
+   concrete regressions for each. Absolute-slot `USize` and packed-scalar
+   writes now also preserve the heap, local-environment, and complete-machine
+   carriers; their deleted core and semantic matchers have concrete
+   regressions, and all three deleted-write views expose branch-local exact
+   ownership matchers. Next preserve the carrier across retained active-code
+   result bindings, invocation/control changes, and pushed frames, then
+   strengthen the global exact active-code dispatcher and carry the
+   compositional closure certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
