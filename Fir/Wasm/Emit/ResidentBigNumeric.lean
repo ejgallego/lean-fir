@@ -16,9 +16,9 @@ from compiler-generated functions are redirected to this layer; the stable
 one-limb exports remain available for W6's current proof work.
 
 The implementation accepts canonical immediate, promoted-tag, and
-arbitrary-limb Natural/Integer values. Limb walkers are recursive until the
-shared symbolic loop contract lands; replacing their control shape does not
-change the public helper signatures or the W6 numeric layout.
+arbitrary-limb Natural/Integer values. Structured loops keep the stack usage of
+every limb walker independent of the represented magnitude without changing
+the public helper signatures or the W6 numeric layout.
 -/
 
 inductive LinkError where
@@ -76,6 +76,13 @@ private def rightSignLocal : FVarId := ⟨`rightSign⟩
 private def resultSignLocal : FVarId := ⟨`resultSign⟩
 private def minuendLocal : FVarId := ⟨`minuend⟩
 private def subtrahendLocal : FVarId := ⟨`subtrahend⟩
+
+private def compareAtLoop : FVarId := ⟨`compareAtLoop⟩
+private def copyFromLoop : FVarId := ⟨`copyFromLoop⟩
+private def sumCarryFromLoop : FVarId := ⟨`sumCarryFromLoop⟩
+private def writeSumFromLoop : FVarId := ⟨`writeSumFromLoop⟩
+private def differenceScanFromLoop : FVarId := ⟨`differenceScanFromLoop⟩
+private def writeDifferenceFromLoop : FVarId := ⟨`writeDifferenceFromLoop⟩
 
 def validateCommonName : Name := `fir_big_numeric_validate_common
 def validateNaturalName : Name := `fir_big_numeric_validate_natural
@@ -621,45 +628,42 @@ def compareAtFunction : Function := {
     (leftHighLocal, .uint32),
     (rightLowLocal, .uint32),
     (rightHighLocal, .uint32)]
-  body :=
-    loadMagnitude leftParam leftFlavorParam indexParam
-      leftLowLocal leftHighLocal ++
-    loadMagnitude rightParam rightFlavorParam indexParam
-      rightLowLocal rightHighLocal ++ [
-      .localGet leftHighLocal,
-      .localGet rightHighLocal,
-      .i32Eq,
-      .ifElse
-        [.localGet leftLowLocal,
-          .localGet rightLowLocal,
-          .i32Eq,
-          .ifElse
-            [.localGet indexParam,
-              .i32Const .uint32 0,
-              .i32Eq,
-              .ifElse
-                [.i32Const .uint32 0, .ret]
-                [.localGet leftParam,
-                  .localGet leftFlavorParam,
-                  .localGet rightParam,
-                  .localGet rightFlavorParam,
-                  .localGet indexParam,
-                  .i32Const .uint32 1,
-                  .i32Sub,
-                  .call (.declaration compareAtName),
-                  .ret]]
-            [.localGet leftLowLocal,
-              .localGet rightLowLocal,
-              .i32LtU,
-              .ifElse
-                [.i32Const .uint32 1, .ret]
-                [.i32Const .uint32 2, .ret]]]
-        [.localGet leftHighLocal,
-          .localGet rightHighLocal,
-          .i32LtU,
-          .ifElse
-            [.i32Const .uint32 1, .ret]
-            [.i32Const .uint32 2, .ret]]] }
+  body := [
+    .loop compareAtLoop <|
+      loadMagnitude leftParam leftFlavorParam indexParam
+          leftLowLocal leftHighLocal ++
+      loadMagnitude rightParam rightFlavorParam indexParam
+          rightLowLocal rightHighLocal ++ [
+        .localGet leftHighLocal,
+        .localGet rightHighLocal,
+        .i32Eq,
+        .ifElse
+          [.localGet leftLowLocal,
+            .localGet rightLowLocal,
+            .i32Eq,
+            .ifElse
+              [.localGet indexParam,
+                .i32Const .uint32 0,
+                .i32Eq,
+                .ifElse
+                  [.i32Const .uint32 0, .ret]
+                  [.localGet indexParam,
+                    .i32Const .uint32 1,
+                    .i32Sub,
+                    .localSet indexParam,
+                    .br compareAtLoop]]
+              [.localGet leftLowLocal,
+                .localGet rightLowLocal,
+                .i32LtU,
+                .ifElse
+                  [.i32Const .uint32 1, .ret]
+                  [.i32Const .uint32 2, .ret]]]
+          [.localGet leftHighLocal,
+            .localGet rightHighLocal,
+            .i32LtU,
+            .ifElse
+              [.i32Const .uint32 1, .ret]
+              [.i32Const .uint32 2, .ret]]]] }
 
 def compareFunction : Function := {
   name := compareName
@@ -715,22 +719,19 @@ def copyFromFunction : Function := {
     (highLocal, .uint32),
     (scaledLocal, .uint32)]
   body := [
-    .localGet indexParam,
-    .localGet countParam,
-    .i32Eq,
-    .ifElse [.ret] []] ++
-    loadMagnitude valueParam flavorParam indexParam lowLocal highLocal ++
-    dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
-    dynamicLimbStore resultParam indexParam scaledLocal highLocal 4 ++ [
-      .localGet valueParam,
-      .localGet flavorParam,
-      .localGet resultParam,
+    .loop copyFromLoop <| [
       .localGet indexParam,
-      .i32Const .uint32 1,
-      .i32Add,
       .localGet countParam,
-      .call (.declaration copyFromName),
-      .ret] }
+      .i32Eq,
+      .ifElse [.ret] []] ++
+      loadMagnitude valueParam flavorParam indexParam lowLocal highLocal ++
+      dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
+      dynamicLimbStore resultParam indexParam scaledLocal highLocal 4 ++ [
+        .localGet indexParam,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet indexParam,
+        .br copyFromLoop]] }
 
 private def sumStep : List Instruction :=
   loadMagnitude leftParam leftFlavorParam indexParam
@@ -802,22 +803,19 @@ def sumCarryFromFunction : Function := {
   results := #[.uint32]
   locals := arithmeticLocals
   body := [
-    .localGet indexParam,
-    .localGet countParam,
-    .i32Eq,
-    .ifElse [.localGet carryParam, .ret] []] ++
-    sumStep ++ [
-      .localGet leftParam,
-      .localGet leftFlavorParam,
-      .localGet rightParam,
-      .localGet rightFlavorParam,
+    .loop sumCarryFromLoop <| [
       .localGet indexParam,
-      .i32Const .uint32 1,
-      .i32Add,
       .localGet countParam,
-      .localGet carryLocal,
-      .call (.declaration sumCarryFromName),
-      .ret] }
+      .i32Eq,
+      .ifElse [.localGet carryParam, .ret] []] ++
+      sumStep ++ [
+        .localGet carryLocal,
+        .localSet carryParam,
+        .localGet indexParam,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet indexParam,
+        .br sumCarryFromLoop]] }
 
 def writeSumFromFunction : Function := {
   name := writeSumFromName
@@ -833,25 +831,21 @@ def writeSumFromFunction : Function := {
   results := #[.uint32]
   locals := arithmeticLocals
   body := [
-    .localGet indexParam,
-    .localGet countParam,
-    .i32Eq,
-    .ifElse [.localGet carryParam, .ret] []] ++
-    sumStep ++
-    dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
-    dynamicLimbStore resultParam indexParam scaledLocal highLocal 4 ++ [
-      .localGet leftParam,
-      .localGet leftFlavorParam,
-      .localGet rightParam,
-      .localGet rightFlavorParam,
-      .localGet resultParam,
+    .loop writeSumFromLoop <| [
       .localGet indexParam,
-      .i32Const .uint32 1,
-      .i32Add,
       .localGet countParam,
-      .localGet carryLocal,
-      .call (.declaration writeSumFromName),
-      .ret] }
+      .i32Eq,
+      .ifElse [.localGet carryParam, .ret] []] ++
+      sumStep ++
+      dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
+      dynamicLimbStore resultParam indexParam scaledLocal highLocal 4 ++ [
+        .localGet carryLocal,
+        .localSet carryParam,
+        .localGet indexParam,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet indexParam,
+        .br writeSumFromLoop]] }
 
 private def differenceStep : List Instruction :=
   loadMagnitude leftParam leftFlavorParam indexParam
@@ -919,39 +913,37 @@ def differenceScanFromFunction : Function := {
   results := #[.uint32]
   locals := differenceLocals
   body := [
-    .localGet indexParam,
-    .localGet countParam,
-    .i32Eq,
-    .ifElse
-      (trapWhenTrue [.localGet borrowParam] ++
-        [.localGet lastParam, .ret])
-      []] ++
-    differenceStep ++ [
-      .localGet lowLocal,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .localGet highLocal,
-      .i32Const .uint32 0,
-      .i32Eq,
-      .i32And,
-      .ifElse
-        [.localGet lastParam, .localSet nextLastLocal]
-        [.localGet indexParam,
-          .i32Const .uint32 1,
-          .i32Add,
-          .localSet nextLastLocal],
-      .localGet leftParam,
-      .localGet leftFlavorParam,
-      .localGet rightParam,
-      .localGet rightFlavorParam,
+    .loop differenceScanFromLoop <| [
       .localGet indexParam,
-      .i32Const .uint32 1,
-      .i32Add,
       .localGet countParam,
-      .localGet borrowLocal,
-      .localGet nextLastLocal,
-      .call (.declaration differenceScanFromName),
-      .ret] }
+      .i32Eq,
+      .ifElse
+        (trapWhenTrue [.localGet borrowParam] ++
+          [.localGet lastParam, .ret])
+        []] ++
+      differenceStep ++ [
+        .localGet lowLocal,
+        .i32Const .uint32 0,
+        .i32Eq,
+        .localGet highLocal,
+        .i32Const .uint32 0,
+        .i32Eq,
+        .i32And,
+        .ifElse
+          [.localGet lastParam, .localSet nextLastLocal]
+          [.localGet indexParam,
+            .i32Const .uint32 1,
+            .i32Add,
+            .localSet nextLastLocal],
+        .localGet nextLastLocal,
+        .localSet lastParam,
+        .localGet borrowLocal,
+        .localSet borrowParam,
+        .localGet indexParam,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet indexParam,
+        .br differenceScanFromLoop]] }
 
 def writeDifferenceFromFunction : Function := {
   name := writeDifferenceFromName
@@ -968,31 +960,26 @@ def writeDifferenceFromFunction : Function := {
   results := #[]
   locals := differenceLocals
   body := [
-    .localGet indexParam,
-    .localGet countParam,
-    .i32Eq,
-    .ifElse (trapWhenTrue [.localGet borrowParam] ++ [.ret]) []] ++
-    differenceStep ++ [
+    .loop writeDifferenceFromLoop <| [
       .localGet indexParam,
-      .localGet storeCountParam,
-      .i32LtU,
-      .ifElse
-        (dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
-          dynamicLimbStore resultParam indexParam scaledLocal highLocal 4)
-        [],
-      .localGet leftParam,
-      .localGet leftFlavorParam,
-      .localGet rightParam,
-      .localGet rightFlavorParam,
-      .localGet resultParam,
-      .localGet indexParam,
-      .i32Const .uint32 1,
-      .i32Add,
       .localGet countParam,
-      .localGet storeCountParam,
-      .localGet borrowLocal,
-      .call (.declaration writeDifferenceFromName),
-      .ret] }
+      .i32Eq,
+      .ifElse (trapWhenTrue [.localGet borrowParam] ++ [.ret]) []] ++
+      differenceStep ++ [
+        .localGet indexParam,
+        .localGet storeCountParam,
+        .i32LtU,
+        .ifElse
+          (dynamicLimbStore resultParam indexParam scaledLocal lowLocal 0 ++
+            dynamicLimbStore resultParam indexParam scaledLocal highLocal 4)
+          [],
+        .localGet borrowLocal,
+        .localSet borrowParam,
+        .localGet indexParam,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet indexParam,
+        .br writeDifferenceFromLoop]] }
 
 def differenceLowFunction : Function := {
   name := differenceLowName
@@ -1733,6 +1720,8 @@ private partial def rewriteInstruction : Instruction → Instruction
       | none => .call (.declaration name)
   | .block label body =>
       .block label (body.map rewriteInstruction)
+  | .loop label body =>
+      .loop label (body.map rewriteInstruction)
   | .ifElse thenBody elseBody =>
       .ifElse
         (thenBody.map rewriteInstruction)
@@ -1783,7 +1772,7 @@ def manifest : Json :=
     ("imports", Json.arr #[]),
     ("numericLimbBits", 64),
     ("multiLimbPolicy", "canonical-arbitrary-precision"),
-    ("walkerControl", "recursive-pending-symbolic-loop-release"),
+    ("walkerControl", "structured-loop"),
     ("status", "generation-only; W6 arbitrary-precision contract proofs pending")]
 
 #guard match residentExampleModule with

@@ -53,6 +53,33 @@ function integerValue(host, physical) {
   return host.readInteger(word, header);
 }
 
+function checkStackSafeWalkers(host, {
+  intOfNat,
+  natAdd,
+  natDecEq,
+  natSub,
+}) {
+  const limbCount = 8192n;
+  const highBit = 1n << (64n * limbCount);
+  const allLowerLimbs = highBit - 1n;
+
+  assert.equal(natDecEq(
+    naturalInput(host, highBit + 9n),
+    naturalInput(host, highBit + 9n),
+  ), 1);
+  assert.equal(naturalValue(host, natAdd(
+    naturalInput(host, allLowerLimbs),
+    naturalInput(host, 1n),
+  )), highBit);
+  assert.equal(naturalValue(host, natSub(
+    naturalInput(host, highBit),
+    naturalInput(host, 1n),
+  )), allLowerLimbs);
+  assert.equal(integerValue(host, intOfNat(
+    naturalInput(host, highBit),
+  )), highBit);
+}
+
 export async function checkResidentBigNumeric({ bytes, manifest }) {
   const host = new ConcreteHost(
     manifest.imports,
@@ -119,7 +146,18 @@ export async function checkResidentBigNumeric({ bytes, manifest }) {
   assert.equal(intDecLt(integerInput(host, n384),
     integerInput(host, -n384)), 0);
 
-  return "PASS Wasm-resident arbitrary-precision Nat/Int prettyM operations";
+  if (manifest.walkerControl !== undefined) {
+    assert.equal(manifest.walkerControl, "structured-loop",
+      "arbitrary-precision numeric walker control changed");
+    checkStackSafeWalkers(host, {
+      intOfNat,
+      natAdd,
+      natDecEq,
+      natSub,
+    });
+  }
+
+  return "PASS stack-safe Wasm-resident arbitrary-precision Nat/Int prettyM operations";
 }
 
 export async function checkFetchedResidentBigNumeric(artifactUrl) {

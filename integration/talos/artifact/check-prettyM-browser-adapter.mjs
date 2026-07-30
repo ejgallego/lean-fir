@@ -83,19 +83,20 @@ const coverageEvents = [
 ];
 
 const hugeNumeric = (1n << 130n) + 17n;
+const walkerStressNumeric = (1n << (64n * 8192n)) + 17n;
 
-function numericCoverageFormat() {
+function numericCoverageFormat(value = hugeNumeric) {
   return F.append(
-    F.tag(hugeNumeric, F.text("tag")),
+    F.tag(value, F.text("tag")),
     F.append(
-      F.nest(hugeNumeric, F.text("+")),
-      F.nest(-hugeNumeric, F.text("-")),
+      F.nest(value, F.text("+")),
+      F.nest(-value, F.text("-")),
     ),
   );
 }
 
-const numericCoverageEvents = [
-  event(2, "", hugeNumeric),
+const numericCoverageEvents = (value) => [
+  event(2, "", value),
   event(0, "tag"),
   event(3, "", 1n),
   event(0, "+"),
@@ -137,16 +138,18 @@ function checkResult(result, previous) {
   }
 }
 
-function checkNumericResult(result, previous) {
+function checkNumericResult(result, previous, value = hugeNumeric,
+    label = "arbitrary-precision numeric coverage") {
   requireCondition(result.trace.text === "tag+-",
-    "arbitrary-precision numeric text projection changed");
-  requireCondition(equalEvents(result.trace.events, numericCoverageEvents),
-    "arbitrary-precision styled event sequence changed");
+    `${label} text projection changed`);
+  requireCondition(equalEvents(result.trace.events, numericCoverageEvents(value)),
+    `${label} styled event sequence changed`);
+  checkTimings(result);
   requireCondition(result.memory.residentAllocationCalls === 1,
-    "numeric coverage did not use one bulk resident allocation");
+    `${label} did not use one bulk resident allocation`);
   requireCondition(result.memory.frontierBefore >=
     previous.memory.frontierAfterDecode,
-  "numeric coverage did not synchronize the resident frontier");
+  `${label} did not synchronize the resident frontier`);
 }
 
 function checkTaggedResult(result, text, tag, previous, label) {
@@ -215,13 +218,19 @@ export async function checkPrettyMBrowserAdapter({
     width: 80,
   });
   checkNumericResult(numeric, second);
+  const numericStress = adapter.render({
+    format: numericCoverageFormat(walkerStressNumeric),
+    width: walkerStressNumeric,
+  });
+  checkNumericResult(numericStress, numeric, walkerStressNumeric,
+    "8,192-limb numeric walker coverage");
   expectFailure(() => adapter.execute(prepared), "already been consumed");
   expectFailure(() => adapter.decode(executed), "already been decoded");
   const cyclic = { kind: "group", body: undefined };
   cyclic.body = cyclic;
   expectFailure(() => adapter.prepare({ format: cyclic, width: 80 }),
     "contains a cycle");
-  exerciseStress(adapter, numeric);
+  exerciseStress(adapter, numericStress);
   return "PASS production browser prettyM adapter with stack-safe stress";
 }
 
@@ -240,6 +249,12 @@ export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
     width: 80,
   });
   checkNumericResult(numeric, second);
-  exerciseStress(adapter, numeric);
+  const numericStress = adapter.render({
+    format: numericCoverageFormat(walkerStressNumeric),
+    width: walkerStressNumeric,
+  });
+  checkNumericResult(numericStress, numeric, walkerStressNumeric,
+    "8,192-limb numeric walker coverage");
+  exerciseStress(adapter, numericStress);
   return "PASS fetched production browser prettyM adapter with stack-safe stress";
 }

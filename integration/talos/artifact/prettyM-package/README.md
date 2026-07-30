@@ -163,8 +163,10 @@ Wasm while the compiler-generated module globals continue to own the cached
 physical lanes. The ten Nat/Int operations reachable from `prettyM` are
 resident for canonical immediate, promoted one-limb, and arbitrary multi-limb
 values, including signed representation transitions and carry/borrow across
-limbs. All eight UTF-8 String operations reachable from `prettyM` and its four
-String literals are resident as well. The two failure-only
+limbs. Their six limb walkers use structured Wasm loops, keeping native call
+stack usage independent of the magnitude. All eight UTF-8 String operations
+reachable from `prettyM` and its four String literals are resident as well. The
+two failure-only
 panic/inhabited fallbacks are resident unconditional traps, preserving the
 previous fail-closed behavior without a host import.
 
@@ -174,11 +176,11 @@ check both rendered text and exact tag boundaries against an event oracle also
 guarded by native Lean 4.32. The browser-adapter smoke reuses the same compact
 input, checks multi-limb Nat/Int values, verifies one resident bulk allocation
 per input, and checks frontier synchronization. Its stack-safety stress case
-additionally covers 1 MiB of UTF-8 text, memory growth, exact styling, and 32
-repeated calls. Keeping this package separate provides a coherent integration
-snapshot while allocation families move behind the resident boundary; only
-the explicitly versioned adapter capabilities are intended for consumer
-negotiation.
+additionally covers 8,192-limb Nat/Int inputs, 1 MiB of UTF-8 text, memory
+growth, exact styling, and 32 repeated calls. Keeping this package separate
+provides a coherent integration snapshot while allocation families move
+behind the resident boundary; only the explicitly versioned adapter
+capabilities are intended for consumer negotiation.
 
 The module descriptor also carries the retained `closureDispatch` and
 `closureDescriptors` tables. They assign the target and capture-layout IDs

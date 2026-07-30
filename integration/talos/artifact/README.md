@@ -666,6 +666,14 @@ standalone, linked plain/styled, two-import String, and final zero-import
 artifacts. This is a capability expansion at the same 14-import frontier and
 does not alter final LCNF or closure metadata.
 
+The arbitrary-precision limb walkers now use structured Wasm loops rather
+than recursive helper calls. Their stack usage is therefore independent of
+the represented magnitude while the helper signatures and W6 layouts remain
+unchanged. The standalone acceptance corpus exercises equality, carry growth,
+borrow propagation, and Nat-to-Int copying at 8,192 limbs; the production
+Node/Chrome adapter renders a tagged and nested Format using Nat/Int values at
+the same limb depth and checks the exact styled trace.
+
 The next checkpoint internalizes all eight UTF-8 String declarations reachable
 from `prettyM` and then its four String literals. The helpers consume and
 produce the concrete W6 String layout directly; Natural byte positions and
