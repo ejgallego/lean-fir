@@ -1008,6 +1008,18 @@ the ownership-certified transition only on the source. Together with the
 existing failed-token and concrete-token reuse matchers, this closes the
 general reset/reuse ledger family at `89d3bfbd`.
 
+A retained-prefix reset/reuse regression now exercises that family with a
+genuinely nonempty target ledger at `5a42dff6`. Target/source location zero is
+a retained natural owned by ledger entry `0 ↦ 0`; source-only location one is
+the deleted constructor selected by reset and concrete-token reuse. The
+runtime theorem derives source-only freshness from the paired allocation
+frontier, proves that reset preserves the retained owner, and carries the
+unchanged owner table into reuse readiness. Exact machine-readiness and
+unified-dispatcher regressions lift both source steps through the actual
+transparent reset/reuse compiler edges. This closes the local nonempty-ledger
+edge proof; the checked whole-program contract remains the next client
+instantiation.
+
 Allocation-capable foreign responses now have an explicit ledger contract.
 `LedgerBinderReadyReachableExternalSpecCompatible` requires the post-response
 renaming to extend the suspended one and requires the resumed pair to carry
@@ -1134,8 +1146,10 @@ retained/deleted reset/reuse, and allocation-capable external response
 resumption. Those families are now assembled into the unified non-lockstep
 dispatcher and the closed write fixture now discharges its aligned entry
 contract. The remaining compiler-client work is to exercise nonempty ledgers
-end to end for reset/reuse and then replace finite fixture enumeration with
-general static preservation lemmas.
+through a checked retained-prefix reset/reuse program and then replace finite
+fixture enumeration with general static preservation lemmas. The local
+runtime, exact-machine, and unified-dispatcher obligations for that nonempty
+ledger shape are discharged at `5a42dff6`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1176,10 +1190,10 @@ the existing nullary-`.fap` semantic discrepancy.
 
 ## Immediate proof queue
 
-1. Instantiate `ElimDeadLedgerExactOwnershipContract` for the concrete
-   reset/reuse owned-child fixture, where the target ledger is nonempty, and
-   derive every selected source-only address from that carried owner table
-   plus the existing local reset/reuse shapes.
+1. Instantiate `ElimDeadLedgerExactOwnershipContract` for a checked
+   retained-prefix reset/reuse fixture, carrying the nonempty target ledger
+   through entry execution and reusing the local runtime/machine regressions
+   at `5a42dff6`.
 2. Factor the resulting write/reset/reuse arguments into reusable static
    compiler typing, heap-shape, and owner-preservation laws so arbitrary
    checked entries no longer require finite execution-graph enumeration.
