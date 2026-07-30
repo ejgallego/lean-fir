@@ -4853,6 +4853,29 @@ reachability-disjointness condition for the facts it retains. W6 can now state
 and prove that semantic boundary without weakening the concrete runtime or
 assuming an invalid all-location theorem.
 
+W6.6gzd proves the reachability-disjoint branch of that boundary.
+`markPersistentLocationFuel_findCell_eq_of_not_reachable` follows the exact
+recursive metadata write and owned-field fold and proves that every cell
+outside the published root's original `Reachable` closure is unchanged. It
+uses the existing ownership-graph frame to transport child reachability
+through earlier visits, so cycles and shared subgraphs are covered.
+`ReuseTokenPublicationDisjoint` applies this result to precisely the nonzero
+tokens selected by the authoritative fact map and environment;
+`ReuseTokenOrdinaryRel.markPersistent_of_publicationDisjoint` then preserves
+their ordinaryness, and
+`ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint` lifts it through the
+exact semantic `setGlobal` and result binding. Empty fact maps and non-heap
+cache values have constructive adapters.
+
+The executable budgeted miss theorem no longer accepts an opaque publication
+frame. It requires the exact source post-state equation
+`nextRuntime = callRuntime.setGlobal declaration sourceValue` and the semantic
+token/graph disjointness condition, then derives the frame internally. The
+remaining generated-environment task is therefore explicit: derive that
+post-state equation from the source lazy-miss construction and prove
+disjointness for every retained fact, or coordinate a shared validator
+transfer that invalidates facts for which disjointness cannot be established.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

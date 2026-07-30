@@ -131,6 +131,13 @@ binding, so it requires ordinaryness only for retained facts that survive
 destination erasure. Existing all-location transport theorems remain
 sufficient adapters for genuinely ordinary-preserving operations; an empty
 fact map discharges the publication boundary unconditionally.
+`markPersistentLocationFuel_findCell_eq_of_not_reachable` now proves that
+recursive publication leaves every cell outside the original ownership
+closure unchanged. `ReuseTokenPublicationDisjoint` specializes that theorem
+to the tracked token locations, and the executable budgeted miss theorem
+derives its facts-aware ordinary frame from this condition and the exact
+semantic `setGlobal` post-state. Non-heap publications are disjoint
+constructively.
 
 ## Upstream tracking
 
@@ -144,4 +151,7 @@ validity invalidation/preservation to every other shared validator transfer,
 then derive the input ordinary source-cell fact compositionally in the
 certificate-free compiler state relation. Lazy cache composition no longer
 assumes the false all-location publication property; its remaining obligation
-is precisely alias invalidation or proved disjointness for each retained fact.
+is now executable and precise: generated-environment composition must prove
+the source publication equation plus reachability disjointness for each
+retained fact, or the shared validator must invalidate facts that cannot meet
+that condition.

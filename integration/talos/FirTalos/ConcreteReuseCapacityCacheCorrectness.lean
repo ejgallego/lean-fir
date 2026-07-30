@@ -271,6 +271,120 @@ theorem cacheSetStep_preserves_mappedHeaderCapacity_of_related
   simpa [replaceRuntime, clearFailure] using capacity
 
 /--
+Recursive persistence leaves every semantic cell outside the published
+root's original ownership closure unchanged.
+
+The induction follows the executable metadata write and owned-field fold.
+`HeapOwnershipFrame` transports each recursive child's reachability back
+through earlier metadata-only visits, so the theorem applies to cyclic and
+shared graphs as well as trees.
+-/
+theorem markPersistentLocationFuel_findCell_eq_of_not_reachable
+    (fuel : Nat) (heap : Heap) (root other : Location)
+    (unreachable :
+      ¬Reachable heap [.object (.heap root)] other) :
+    findCell? (markPersistentLocationFuel fuel heap root) other =
+      findCell? heap other := by
+  induction fuel generalizing heap root with
+  | zero => rfl
+  | succ fuel ih =>
+      rw [markPersistentLocationFuel]
+      cases found : findCell? heap root with
+      | none => rfl
+      | some cell =>
+          by_cases skip : !cell.live || cell.persistent
+          · simp [skip]
+          · simp only [skip, Bool.false_eq_true, if_false]
+            obtain ⟨after, post⟩ :=
+              Fir.LeanIR.Impure.replaceCell_spec_of_find heap root cell
+                { cell with rc := 0, persistent := true } found
+            simp only [post.replaced]
+            have parentFrame :
+                Fir.LeanIR.Passes.ElimDead.HeapOwnershipFrame heap after :=
+              Fir.LeanIR.Passes.ElimDead.heapOwnershipFrame_replace
+                found post.target post.frame rfl
+            have parentLookup :
+                findCell? after other = findCell? heap other := by
+              apply post.frame other
+              intro same
+              subst other
+              exact unreachable (.root (by simp))
+            have reachableTrans
+                {parent target : Location}
+                (head : Reachable heap [.object (.heap root)] parent)
+                (tail : Reachable heap [.object (.heap parent)] target) :
+                Reachable heap [.object (.heap root)] target := by
+              induction tail with
+              | @root location member =>
+                  have same : location = parent := by simpa using member
+                  subst location
+                  exact head
+              | child parentReachable childFound member reference recurse =>
+                  exact .child recurse childFound member reference
+            have foldLookup
+                (items : List Value) (start : Heap)
+                (ownership :
+                  Fir.LeanIR.Passes.ElimDead.HeapOwnershipFrame heap start)
+                (lookupFrame :
+                  findCell? start other = findCell? heap other)
+                (members : ∀ value, value ∈ items →
+                  value ∈ cell.object.ownedValues.toList) :
+                findCell?
+                    (items.foldl (init := start) fun next value =>
+                      match value with
+                      | .object (.heap child) =>
+                          markPersistentLocationFuel fuel next child
+                      | _ => next)
+                    other =
+                  findCell? heap other := by
+              induction items generalizing start with
+              | nil => exact lookupFrame
+              | cons head tail tailIH =>
+                  simp only [List.foldl]
+                  have tailMembers : ∀ value, value ∈ tail →
+                      value ∈ cell.object.ownedValues.toList := by
+                    intro value member
+                    exact members value (List.mem_cons_of_mem head member)
+                  cases head with
+                  | object reference =>
+                      cases reference with
+                      | tagged payload =>
+                          exact tailIH start ownership lookupFrame tailMembers
+                      | heap child =>
+                          have childMember :
+                              Value.object (.heap child) ∈
+                                cell.object.ownedValues.toList :=
+                            members _ List.mem_cons_self
+                          have childReachable :
+                              Reachable heap [.object (.heap root)] child :=
+                            .child (.root (by simp)) found childMember rfl
+                          have childUnreachable :
+                              ¬Reachable start [.object (.heap child)] other := by
+                            intro reachable
+                            have original := ownership.symm.reachable reachable
+                            exact unreachable
+                              (reachableTrans childReachable original)
+                          have childFrame :=
+                            Fir.LeanIR.Passes.ElimDead.heapOwnershipFrame_markPersistentLocationFuel
+                              fuel start child
+                          have childLookup := ih start child childUnreachable
+                          exact tailIH
+                            (markPersistentLocationFuel fuel start child)
+                            (ownership.trans childFrame)
+                            (childLookup.trans lookupFrame) tailMembers
+                  | usize value =>
+                      exact tailIH start ownership lookupFrame tailMembers
+                  | scalar value =>
+                      exact tailIH start ownership lookupFrame tailMembers
+                  | erased =>
+                      exact tailIH start ownership lookupFrame tailMembers
+                  | reuseToken location? =>
+                      exact tailIH start ownership lookupFrame tailMembers
+            rw [← Array.foldl_toList]
+            exact foldLookup cell.object.ownedValues.toList after parentFrame
+              parentLookup (fun _ member => member)
+
+/--
 Facts-aware ordinary-token transport for a result-binding step.
 
 Unlike `OrdinaryPersistenceTransport`, this boundary does not require every
@@ -287,6 +401,92 @@ def ReuseTokenOrdinaryBindTransport
     ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts resultId) after
       (bind sourceEnv resultId result)
 
+/--
+Semantic alias-safety condition for publishing one cache value.
+
+Every retained nonzero reuse token must point outside the ownership closure
+rooted at the value about to become persistent. This is deliberately stated
+against the authoritative source fact map and environment rather than all
+heap locations.
+-/
+def ReuseTokenPublicationDisjoint
+    (facts : ReuseCapacityFacts) (runtime : RuntimeState)
+    (sourceEnv : Env) (value : Value) : Prop :=
+  ∀ (tokenId : FVarId) (available : Nat) (location : Location),
+    findReuseCapacityEvidence? facts tokenId =
+        some (.retainedAtLeast available) →
+      lookup sourceEnv tokenId = some (.reuseToken (some location)) →
+        ¬Reachable runtime.heap [value] location
+
+/-- An empty fact map has no retained token that can alias publication. -/
+theorem ReuseTokenPublicationDisjoint.empty
+    (runtime : RuntimeState) (sourceEnv : Env) (value : Value) :
+    ReuseTokenPublicationDisjoint [] runtime sourceEnv value := by
+  intro tokenId available location tracked
+  simp [findReuseCapacityEvidence?] at tracked
+
+/-- Non-heap cache values have no semantic ownership closure, so publication
+is disjoint from every retained token. -/
+theorem ReuseTokenPublicationDisjoint.of_nonHeapReference
+    {facts : ReuseCapacityFacts} {runtime : RuntimeState}
+    {sourceEnv : Env} {value : Value}
+    (nonHeap : IsNonHeapReference value) :
+    ReuseTokenPublicationDisjoint facts runtime sourceEnv value := by
+  intro tokenId available location tracked tokenLookup reachable
+  clear tokenId available tracked tokenLookup
+  induction reachable with
+  | root member =>
+      simp only [List.mem_singleton] at member
+      subst value
+      exact nonHeap
+  | child parentReachable found member reference recurse =>
+      exact recurse
+
+/--
+Recursive persistence retains the ordinary-token relation whenever every
+tracked token is disjoint from the published ownership closure.
+-/
+theorem ReuseTokenOrdinaryRel.markPersistent_of_publicationDisjoint
+    {facts : ReuseCapacityFacts} {runtime : RuntimeState}
+    {sourceEnv : Env} {value : Value}
+    (ordinary : ReuseTokenOrdinaryRel facts runtime sourceEnv)
+    (disjoint :
+      ReuseTokenPublicationDisjoint facts runtime sourceEnv value) :
+    ReuseTokenOrdinaryRel facts (runtime.markPersistent value) sourceEnv := by
+  intro tokenId available location cell tracked tokenLookup found
+  have unreachable := disjoint tokenId available location tracked tokenLookup
+  cases value with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          exact ordinary tokenId available location cell tracked tokenLookup
+            (by simpa [RuntimeState.markPersistent] using found)
+      | heap root =>
+          have lookupFrame :=
+            markPersistentLocationFuel_findCell_eq_of_not_reachable
+              (runtime.heap.length + 1) runtime.heap root location unreachable
+          change
+            findCell?
+                (markPersistentLocationFuel (runtime.heap.length + 1)
+                  runtime.heap root)
+                location =
+              some cell at found
+          rw [lookupFrame] at found
+          exact ordinary tokenId available location cell tracked tokenLookup
+            found
+  | usize value =>
+      exact ordinary tokenId available location cell tracked tokenLookup
+        (by simpa [RuntimeState.markPersistent] using found)
+  | scalar value =>
+      exact ordinary tokenId available location cell tracked tokenLookup
+        (by simpa [RuntimeState.markPersistent] using found)
+  | erased =>
+      exact ordinary tokenId available location cell tracked tokenLookup
+        (by simpa [RuntimeState.markPersistent] using found)
+  | reuseToken location? =>
+      exact ordinary tokenId available location cell tracked tokenLookup
+        (by simpa [RuntimeState.markPersistent] using found)
+
 /-- An all-location ordinary-persistence theorem remains a sufficient, but no
 longer necessary, implementation of the facts-aware binding boundary. -/
 theorem ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
@@ -298,6 +498,29 @@ theorem ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
       result := by
   intro ordinary
   exact ordinary.eraseBind transport
+
+/--
+Reachability disjointness constructively discharges the facts-aware cache
+publication boundary for the exact semantic `setGlobal` transition.
+-/
+theorem ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {runtime : RuntimeState} {sourceEnv : Env} {result : Value}
+    (name : Name)
+    (disjoint :
+      ReuseTokenPublicationDisjoint facts runtime sourceEnv result) :
+    ReuseTokenOrdinaryBindTransport facts resultId runtime
+      (runtime.setGlobal name result) sourceEnv result := by
+  intro ordinary
+  have persisted := ordinary.markPersistent_of_publicationDisjoint disjoint
+  have published :
+      ReuseTokenOrdinaryRel facts (runtime.setGlobal name result)
+        sourceEnv := by
+    intro tokenId available location cell tracked tokenLookup found
+    apply persisted tokenId available location cell tracked tokenLookup
+    simpa [RuntimeState.setGlobal] using found
+  exact published.eraseBind
+    (OrdinaryPersistenceTransport.refl (runtime.setGlobal name result))
 
 /-- Clearing retained facts is a conservative alias-safe cache boundary:
 there is no ordinary-token obligation regardless of which graph publication
@@ -655,9 +878,11 @@ publication closes the complete lazy miss resource boundary.
 
 The declaration consumes the path's allocation cost. `cacheSet` may update
 persistence metadata and semantic globals but must preserve already mapped
-header extents. Its exact heap-frontier preservation is proved from the
-implementation, so the residual address-space budget and the two Wasm
-`global.set`s require no additional resource premise.
+header extents. The source post-state is the exact semantic publication, and
+retained reuse tokens must be disjoint from the published ownership closure.
+Its exact heap-frontier preservation is proved from the implementation, so
+the residual address-space budget and the two Wasm `global.set`s require no
+additional resource premise.
 -/
 theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
@@ -725,9 +950,10 @@ theorem
         (bind sourceEnv decl.fvarId sourceValue)
         (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
         callWitness)
-    (publicationFrame :
-      ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime nextRuntime
-        sourceEnv sourceValue)
+    (publicationRuntimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue)
+    (publicationDisjoint :
+      ReuseTokenPublicationDisjoint facts callRuntime sourceEnv sourceValue)
     (resultKindEq : resultKind = kind)
     (cacheFound :
       afterCall.host.runtime.globals.find? declaration = some cacheSlot)
@@ -753,6 +979,7 @@ theorem
       sourceRuntime nextRuntime sourceEnv sourceValue initial
       (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
       resultIndex initialWitness callWitness physical stepCost := by
+  subst nextRuntime
   apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
     initialRelated flagEmpty
     callee.capacityPreserving.successful.cachedBody
@@ -762,7 +989,8 @@ theorem
     resultCount operation valueGlobal valueStoreEq flagGlobal distinct
     targetSet nextRelated
   · intro ordinary
-    exact publicationFrame (ordinary.transport callee.ordinaryTransport)
+    exact ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration
+      publicationDisjoint (ordinary.transport callee.ordinaryTransport)
   · exact callee.capacityPreserving.witnessTransport
   · apply callee.capacityPreserving.capacityTransport.transAcross
       callee.capacityPreserving.witnessTransport

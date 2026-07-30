@@ -794,10 +794,20 @@ acceptance tests pass.
    actual authoritative fact map and asks only for ordinaryness of facts that
    survive result-destination erasure. The all-location persistence theorem is
    a sufficient adapter rather than the cache contract, and an empty fact map
-   is a proved conservative endpoint. Resolve the remaining
-   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` instance with
-   alias-invalidating fact transfer or proved graph disjointness, then close
-   the generated-environment selection conditions.
+   is a proved conservative endpoint.
+   `markPersistentLocationFuel_findCell_eq_of_not_reachable` now proves the
+   missing graph frame: a recursive persistence traversal leaves every cell
+   outside the original published ownership closure unchanged, including for
+   cyclic and shared graphs. `ReuseTokenPublicationDisjoint` specializes that
+   frame to retained tokens and yields the exact facts-aware binding transport
+   through semantic `setGlobal`; empty facts and non-heap values are immediate
+   instances. The executable miss constructor consequently asks for the exact
+   source publication equation and graph disjointness rather than an opaque
+   transport theorem. Resolve the remaining
+   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
+   deriving those facts from the generated declaration environment or by
+   coordinating alias-invalidating validator transfer, then close the
+   generated-environment selection conditions.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
