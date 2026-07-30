@@ -120,6 +120,12 @@ W6 compiler composition threads `ReuseTokenOrdinaryRel` and proves successful
 reuse preserves it. Structural composition must still preserve or invalidate
 that relation at every unrelated intervening effect until the authoritative
 supported-domain validator establishes a stable reset-token protocol.
+Lazy-cache miss publication is now a concrete additional instance: it
+recursively marks the returned graph persistent, so any retained token whose
+location is reachable from that result must be invalidated. W6 proves that
+publication preserves heap frontier and mapped allocation extents, but
+correctly does not claim all-location `OrdinaryPersistenceTransport` for this
+ownership-changing step.
 
 ## Upstream tracking
 

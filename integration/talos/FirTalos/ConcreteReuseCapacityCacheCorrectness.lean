@@ -240,6 +240,36 @@ theorem cachePublication_preserves_addressSpaceBudget
   simpa [writeWasmGlobal, valueStoreEq] using
     cacheSetStep_preserves_heapCursor operation
 
+/-- A related executable cache write preserves every allocation extent mapped
+before publication. Recursive constructor and closure persistence is supplied
+by the strengthened concrete-runtime theorem; equality of the deterministic
+host result identifies its final heap with the observed cache step. -/
+theorem cacheSetStep_preserves_mappedHeaderCapacity_of_related
+    {initial after : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {declaration : Name} {kind : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    {slot : ConcreteGlobalSlot}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (valueRelated : PhysicalValueRel witness kind physical semantic)
+    (found : initial.host.runtime.globals.find? declaration = some slot)
+    (kindEq : slot.kind = kind)
+    (descriptorsEq :
+      initial.host.closureDescriptors = witness.closureDescriptors)
+    (operation :
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] after) :
+    HeaderCapacityTransport initial.host.runtime.heap after.host.runtime.heap
+      witness := by
+  obtain ⟨runtimeAfter, implementationOperation, _, _, capacity⟩ :=
+    cacheSetStep_of_refines runtimeRelated valueRelated found kindEq
+      descriptorsEq
+  rw [operation] at implementationOperation
+  have finalEq : after = replaceRuntime initial runtimeAfter := by
+    injection implementationOperation
+  subst after
+  simpa [replaceRuntime, clearFailure] using capacity
+
 /--
 One lazy-cache result with all transports needed by the facts-indexed
 resource frame.
@@ -597,6 +627,7 @@ theorem
     {kind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
+    {cacheSlot : ConcreteGlobalSlot}
     {sourceRuntime callRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {sourceValue : Value}
@@ -646,10 +677,12 @@ theorem
         callWitness)
     (publicationOrdinary :
       OrdinaryPersistenceTransport callRuntime nextRuntime)
-    (publicationCapacity :
-      HeaderCapacityTransport afterCall.host.runtime.heap
-        (writeWasmGlobal valueStore flagIndex (.i32 1)).host.runtime.heap
-        callWitness)
+    (resultKindEq : resultKind = kind)
+    (cacheFound :
+      afterCall.host.runtime.globals.find? declaration = some cacheSlot)
+    (cacheKindEq : cacheSlot.kind = kind)
+    (cacheDescriptorsEq :
+      afterCall.host.closureDescriptors = callWitness.closureDescriptors)
     (publicationExternals :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.externals =
         afterCall.host.externals)
@@ -679,8 +712,14 @@ theorem
     targetSet nextRelated
   · exact callee.ordinaryTransport.trans publicationOrdinary
   · exact callee.capacityPreserving.witnessTransport
-  · exact callee.capacityPreserving.capacityTransport.transAcross
-      callee.capacityPreserving.witnessTransport publicationCapacity
+  · apply callee.capacityPreserving.capacityTransport.transAcross
+      callee.capacityPreserving.witnessTransport
+    simpa [writeWasmGlobal, valueStoreEq] using
+      cacheSetStep_preserves_mappedHeaderCapacity_of_related
+        callee.capacityPreserving.successful.runtimeRelated
+        (by simpa [resultKindEq] using
+          callee.capacityPreserving.successful.valueRelated)
+        cacheFound cacheKindEq cacheDescriptorsEq operation
   · exact publicationExternals.trans callee.externalsPreserved
   · exact publicationDescriptors.trans callee.hostDescriptorsPreserved
   · exact callee.witnessDescriptorsPreserved

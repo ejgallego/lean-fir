@@ -4819,6 +4819,26 @@ allocation extent. The concrete cache execution, callee recursion,
 handler/descriptor tables, local write, global publication, heap frontier,
 and residual-budget composition are no longer open.
 
+W6.6gzb closes the mapped-allocation half of that local proof.
+`LiveHeapRel.writePersistentMetadata` now returns the same-extent header
+transport established by its validated header write. The leaf,
+constructor/closure child folds, fuel-indexed graph theorem, and public
+runtime theorem compose that transport recursively.
+`CachePersistenceRefines`, concrete `writeGlobal`, and
+`cacheSetStep_of_refines` carry it through the layered runtime, and
+`miss_of_budgetedDeclaration_cacheSet` derives publication capacity from the
+callee result plus generated cache-slot kind/lookup and descriptor-table
+identity. It no longer accepts a free `publicationCapacity` premise.
+
+The last publication-side issue is not an unconditional preservation theorem:
+cacheing deliberately marks the returned graph persistent, so a retained
+reuse token aliasing that graph ceases to be ordinary. This is a concrete
+lazy-cache instance of
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary`. The next slice must make
+lazy fact transfer invalidate such aliases or require a proved reachability
+disjointness condition; it must not postulate the current all-location
+`OrdinaryPersistenceTransport`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

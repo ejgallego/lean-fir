@@ -189,7 +189,8 @@ theorem LiveHeapRel.markPersistentFuel_refines_dead
       markPersistentFuel fuel state address descriptors = .ok result ∧
       LiveHeapRel result witness {
         runtime with heap :=
-          markPersistentLocationFuel fuel runtime.heap location } := by
+          markPersistentLocationFuel fuel runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -207,9 +208,10 @@ theorem LiveHeapRel.markPersistentFuel_refines_dead
           cases closureRelated with
           | closure _ _ _ _ _ _ _ _ _ cellLive => simp_all
   | dead semanticCount semanticDead descriptor deadRelated =>
-      refine ⟨state, deadRelated.markPersistentFuel_eq fuel descriptors, ?_⟩
-      rw [markPersistentLocationFuel_eq_of_dead found dead fuel]
-      exact related
+      refine ⟨state, deadRelated.markPersistentFuel_eq fuel descriptors, ?_,
+        MappedHeaderCapacityTransport.refl _ _⟩
+      · rw [markPersistentLocationFuel_eq_of_dead found dead fuel]
+        exact related
 
 /-- Marking one represented live cell persistent rewrites only its common
 ownership metadata. The returned raw header write is the spatial input needed
@@ -410,7 +412,8 @@ theorem LiveHeapRel.writePersistentMetadata
           { header with refCount := 0, persistent := true } = .ok result ∧
       setCell runtime location { cell with rc := 0, persistent := true } =
         .ok nextRuntime ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -428,8 +431,11 @@ theorem LiveHeapRel.writePersistentMetadata
   obtain ⟨nextRuntime, semanticUpdate, finalRelated⟩ :=
     related.setCell_of_headerWrite mapped found targetDescriptorFound rawRead resultEq
       headerInBounds headerWrite (by rfl) finalValid (.live targetAfter)
+  have capacity :=
+    related.mappedHeaderCapacity_of_headerWrite targetDescriptorFound rawRead
+      resultEq headerInBounds headerWrite (by rfl)
   exact ⟨result, nextRuntime, header, headerRead, operation, semanticUpdate,
-    finalRelated⟩
+    finalRelated, capacity⟩
 
 /-- For boxes, heap naturals, and strings, the semantic persistence fold has no heap
 children, so the fuel-indexed operation is exactly the initial metadata
@@ -478,7 +484,8 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
       markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
       LiveHeapRel result witness {
         runtime with heap :=
-          markPersistentLocationFuel (fuel + 1) runtime.heap location } := by
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -486,7 +493,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
   subst mappedCell
   have targetRelated := cellRelation.live_of_eq_true live
   obtain ⟨result, nextRuntime, header, headerRead, operation, semanticUpdate,
-      finalRelated⟩ :=
+      finalRelated, capacity⟩ :=
     related.writePersistentMetadata mapped found live
   unfold setCell at semanticUpdate
   cases replacedEq : replaceCell runtime.heap location
@@ -613,7 +620,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_leaf
             · obtain ⟨value, integerEq⟩ := integerCell
               rw [closureEq] at integerEq
               contradiction
-      refine ⟨result, concreteOperation, ?_⟩
+      refine ⟨result, concreteOperation, ?_, capacity⟩
       rw [semanticHeapEq]
       exact finalRelated
 
@@ -648,13 +655,14 @@ theorem LiveHeapRel.markPersistent_refines_leaf
     ∃ result,
       markPersistent state address descriptors = .ok result ∧
       LiveHeapRel result witness
-        (runtime.markPersistent (.object (.heap location))) := by
-  obtain ⟨result, operation, finalRelated⟩ :=
+        (runtime.markPersistent (.object (.heap location))) ∧
+      MappedHeaderCapacityTransport state result witness := by
+  obtain ⟨result, operation, finalRelated, capacity⟩ :=
     related.markPersistentFuel_refines_leaf mapped found live ordinary leafCell
       (state.heapCursor / headerBytes)
   have fuelEq := markPersistentLocationFuel_leaf_fuel_independent found live ordinary
     leafCell (state.heapCursor / headerBytes) runtime.heap.length
-  refine ⟨result, ?_, ?_⟩
+  refine ⟨result, ?_, ?_, capacity⟩
   · exact operation
   · simpa [RuntimeState.markPersistent, fuelEq] using finalRelated
 
@@ -676,18 +684,18 @@ theorem CachePersistenceRefines.of_heapLeaf
   | object related =>
       cases related with
       | mapped mapped =>
-          obtain ⟨result, operation, finalRelated⟩ :=
+          obtain ⟨result, operation, finalRelated, capacity⟩ :=
             heapRelated.markPersistent_refines_leaf mapped found live ordinary leafCell
-          exact ⟨result, operation, finalRelated⟩
+          exact ⟨result, operation, finalRelated, capacity⟩
   | tobject related =>
       cases related with
       | heap related =>
           cases related with
           | mapped mapped =>
-              obtain ⟨result, operation, finalRelated⟩ :=
+              obtain ⟨result, operation, finalRelated, capacity⟩ :=
                 heapRelated.markPersistent_refines_leaf mapped found live ordinary
                   leafCell
-              exact ⟨result, operation, finalRelated⟩
+              exact ⟨result, operation, finalRelated, capacity⟩
 
 /-- Thread one semantic persistence child step through a full runtime state;
 only the heap changes. -/
@@ -881,35 +889,38 @@ theorem OwnershipValuesRel.foldlM_markPersistent_refines
       ∃ after,
         markPersistentFuel fuel before address descriptors = .ok after ∧
         LiveHeapRel after witness
-          (markPersistentValueFuel fuel semantic (.object (.heap location)))) :
+          (markPersistentValueFuel fuel semantic (.object (.heap location))) ∧
+        MappedHeaderCapacityTransport before after witness) :
     ∃ finalState,
       words.foldlM (init := state) (fun next child =>
         markPersistentFuel fuel next child descriptors) = .ok finalState ∧
       LiveHeapRel finalState witness
-        (values.foldl (init := runtime) (markPersistentValueFuel fuel)) := by
+        (values.foldl (init := runtime) (markPersistentValueFuel fuel)) ∧
+      MappedHeaderCapacityTransport state finalState witness := by
   induction related generalizing state runtime with
   | nil =>
-      exact ⟨state, rfl, heap⟩
+      exact ⟨state, rfl, heap, MappedHeaderCapacityTransport.refl _ _⟩
   | @cons word value words values head tail ih =>
       rcases head.persistenceStep heap fuel descriptors with heapStep | noOpStep
       · obtain ⟨location, valueEq, mapped⟩ := heapStep
         subst value
-        obtain ⟨nextState, concreteHead, nextHeap⟩ := recurse heap mapped bound
+        obtain ⟨nextState, concreteHead, nextHeap, headCapacity⟩ :=
+          recurse heap mapped bound
         have nextBound : ordinaryLiveCount
               (markPersistentValueFuel fuel runtime
                 (.object (.heap location))).heap ≤ fuel :=
           Nat.le_trans
             (ordinaryLiveCount_markPersistentValueFuel_le fuel runtime
               (.object (.heap location))) bound
-        obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+        obtain ⟨finalState, concreteTail, finalHeap, tailCapacity⟩ :=
           ih nextHeap nextBound
-        refine ⟨finalState, ?_, finalHeap⟩
-        simp only [List.foldlM_cons, Bind.bind, Except.bind]
-        rw [concreteHead]
-        exact concreteTail
+        refine ⟨finalState, ?_, finalHeap, headCapacity.trans tailCapacity⟩
+        · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+          rw [concreteHead]
+          exact concreteTail
       · obtain ⟨concreteHead, semanticHead⟩ := noOpStep
-        obtain ⟨finalState, concreteTail, finalHeap⟩ := ih heap bound
-        refine ⟨finalState, ?_, ?_⟩
+        obtain ⟨finalState, concreteTail, finalHeap, capacity⟩ := ih heap bound
+        refine ⟨finalState, ?_, ?_, capacity⟩
         · simp only [List.foldlM_cons, Bind.bind, Except.bind]
           rw [concreteHead]
           exact concreteTail
@@ -958,12 +969,14 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
         markPersistentFuel fuel before childAddress descriptors = .ok after ∧
         LiveHeapRel after witness
           (markPersistentValueFuel fuel semanticState
-            (.object (.heap childLocation)))) :
+            (.object (.heap childLocation))) ∧
+        MappedHeaderCapacityTransport before after witness) :
     ∃ result,
       markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
       LiveHeapRel result witness {
         runtime with heap :=
-          markPersistentLocationFuel (fuel + 1) runtime.heap location } := by
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -979,7 +992,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
       obtain ⟨words, ownedRead, ownershipRelated⟩ :=
         objectRelated.readOwnedReferences headerRead
       obtain ⟨parentState, parentRuntime, targetHeader, targetHeaderRead,
-          parentWrite, semanticUpdate, parentRelated⟩ :=
+          parentWrite, semanticUpdate, parentRelated, parentCapacity⟩ :=
         related.writePersistentMetadata mapped found live
       rw [headerRead] at targetHeaderRead
       have targetHeaderEq := Except.ok.inj targetHeaderRead
@@ -997,7 +1010,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
           have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
             replacedEq
           have parentBound : ordinaryLiveCount parentHeap ≤ fuel := by omega
-          obtain ⟨result, concreteFold, finalRelated⟩ :=
+          obtain ⟨result, concreteFold, finalRelated, foldCapacity⟩ :=
             ownershipRelated.foldlM_markPersistent_refines parentRelated parentBound
               recurse
           have rootHeapEq :
@@ -1031,9 +1044,10 @@ theorem LiveHeapRel.markPersistentFuel_refines_constructor_step
             rw [if_neg (by simp [headerOrdinary])]
             rw [ownedWithDescriptors, parentWrite]
             exact concreteFold
-          refine ⟨result, concreteOperation, ?_⟩
-          rw [foldl_markPersistentValueFuel] at finalRelated
-          simpa [rootHeapEq] using finalRelated
+          refine ⟨result, concreteOperation, ?_,
+            parentCapacity.trans foldCapacity⟩
+          · rw [foldl_markPersistentValueFuel] at finalRelated
+            simpa [rootHeapEq] using finalRelated
   | boxed descriptor storedObjectEq objectRelated refCount persistent cellLive =>
       rw [objectEq] at storedObjectEq
       contradiction
@@ -1155,12 +1169,14 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
         markPersistentFuel fuel before childAddress descriptors = .ok after ∧
         LiveHeapRel after witness
           (markPersistentValueFuel fuel semanticState
-            (.object (.heap childLocation)))) :
+            (.object (.heap childLocation))) ∧
+        MappedHeaderCapacityTransport before after witness) :
     ∃ result,
       markPersistentFuel (fuel + 1) state address descriptors = .ok result ∧
       LiveHeapRel result witness {
         runtime with heap :=
-          markPersistentLocationFuel (fuel + 1) runtime.heap location } := by
+          markPersistentLocationFuel (fuel + 1) runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
   subst descriptors
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
@@ -1205,7 +1221,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
             simpa [readOwnedReferences, headerKind, descriptorLookup,
               objectRelated.captureKindsSize, fixedCount] using closureWordsRead
           obtain ⟨parentState, parentRuntime, targetHeader, targetHeaderRead,
-              parentWrite, semanticUpdate, parentRelated⟩ :=
+              parentWrite, semanticUpdate, parentRelated, parentCapacity⟩ :=
             related.writePersistentMetadata mapped found live
           rw [headerRead] at targetHeaderRead
           have targetHeaderEq := Except.ok.inj targetHeaderRead
@@ -1223,7 +1239,7 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
               have parentDrop := ordinaryLiveCount_replace_persistent found live ordinary
                 replacedEq
               have parentBound : ordinaryLiveCount parentHeap ≤ fuel := by omega
-              obtain ⟨result, concreteFold, filteredRelated⟩ :=
+              obtain ⟨result, concreteFold, filteredRelated, foldCapacity⟩ :=
                 ownershipRelated.foldlM_markPersistent_refines parentRelated parentBound
                   recurse
               have foldEq := objectRelated.foldl_markPersistent_closureOwnedValues fuel
@@ -1258,9 +1274,10 @@ theorem LiveHeapRel.markPersistentFuel_refines_closure_step
                 rw [if_neg (by simp [headerOrdinary])]
                 rw [ownedRead, parentWrite]
                 exact concreteFold
-              refine ⟨result, concreteOperation, ?_⟩
-              rw [foldl_markPersistentValueFuel] at filteredRelated
-              simpa [rootHeapEq] using filteredRelated
+              refine ⟨result, concreteOperation, ?_,
+                parentCapacity.trans foldCapacity⟩
+              · rw [foldl_markPersistentValueFuel] at filteredRelated
+                simpa [rootHeapEq] using filteredRelated
 
 /-- A semantic cell already carrying the persistent bit is an exact no-op at
 every fuel budget, including zero. -/
@@ -1288,7 +1305,8 @@ theorem LiveHeapRel.markPersistentFuel_refines
       markPersistentFuel fuel state address witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness {
         runtime with heap :=
-          markPersistentLocationFuel fuel runtime.heap location } := by
+          markPersistentLocationFuel fuel runtime.heap location } ∧
+      MappedHeaderCapacityTransport state result witness := by
   induction fuel generalizing state runtime location address with
   | zero =>
       obtain ⟨cell, found, cellRelation⟩ :=
@@ -1308,9 +1326,9 @@ theorem LiveHeapRel.markPersistentFuel_refines
             refine ⟨state,
               markPersistentFuel_eq_of_persistent headerRead headerPersistent 0
                 witness.closureDescriptors,
-              ?_⟩
-            rw [markPersistentLocationFuel_eq_of_persistent found persistentCase 0]
-            exact related
+              ?_, MappedHeaderCapacityTransport.refl _ _⟩
+            · rw [markPersistentLocationFuel_eq_of_persistent found persistentCase 0]
+              exact related
           · have ordinary : cell.persistent = false := by
               cases persistentEq : cell.persistent <;> simp_all
             obtain ⟨after, post⟩ := replaceCell_spec_of_find runtime.heap location cell
@@ -1336,10 +1354,10 @@ theorem LiveHeapRel.markPersistentFuel_refines
             refine ⟨state,
               markPersistentFuel_eq_of_persistent headerRead headerPersistent (fuel + 1)
                 witness.closureDescriptors,
-              ?_⟩
-            rw [markPersistentLocationFuel_eq_of_persistent found persistentCase
-              (fuel + 1)]
-            exact related
+              ?_, MappedHeaderCapacityTransport.refl _ _⟩
+            · rw [markPersistentLocationFuel_eq_of_persistent found persistentCase
+                (fuel + 1)]
+              exact related
           · have ordinary : cell.persistent = false := by
               cases persistentEq : cell.persistent <;> simp_all
             have recurse : ∀ {before : MemoryState}
@@ -1353,7 +1371,8 @@ theorem LiveHeapRel.markPersistentFuel_refines
                       witness.closureDescriptors = .ok after ∧
                   LiveHeapRel after witness
                     (markPersistentValueFuel fuel semanticState
-                      (.object (.heap childLocation))) := by
+                      (.object (.heap childLocation))) ∧
+                  MappedHeaderCapacityTransport before after witness := by
               intro before semanticState childLocation childAddress childRelated
                 childMapped childBound
               exact ih childRelated childMapped childBound
@@ -1402,14 +1421,15 @@ theorem LiveHeapRel.markPersistent_refines
     ∃ result,
       markPersistent state address witness.closureDescriptors = .ok result ∧
       LiveHeapRel result witness
-        (runtime.markPersistent (.object (.heap location))) := by
+        (runtime.markPersistent (.object (.heap location))) ∧
+      MappedHeaderCapacityTransport state result witness := by
   have countBound : ordinaryLiveCount runtime.heap ≤ runtime.heap.length + 1 :=
     Nat.le_trans (ordinaryLiveCount_le_length runtime.heap) (Nat.le_succ _)
-  obtain ⟨result, semanticFuelOperation, finalRelated⟩ :=
+  obtain ⟨result, semanticFuelOperation, finalRelated, capacity⟩ :=
     related.markPersistentFuel_refines mapped countBound
   have publicOperation := markPersistentFuel_ok_mono
     related.semanticFuel_le_concreteFuel semanticFuelOperation
-  refine ⟨result, ?_, ?_⟩
+  refine ⟨result, ?_, ?_, capacity⟩
   · exact publicOperation
   · simpa [RuntimeState.markPersistent] using finalRelated
 
@@ -1428,17 +1448,17 @@ theorem CachePersistenceRefines.of_heapReference
   | object related =>
       cases related with
       | mapped mapped =>
-          obtain ⟨result, operation, finalRelated⟩ :=
+          obtain ⟨result, operation, finalRelated, capacity⟩ :=
             heapRelated.markPersistent_refines mapped
-          exact ⟨result, operation, finalRelated⟩
+          exact ⟨result, operation, finalRelated, capacity⟩
   | tobject related =>
       cases related with
       | heap related =>
           cases related with
           | mapped mapped =>
-              obtain ⟨result, operation, finalRelated⟩ :=
+              obtain ⟨result, operation, finalRelated, capacity⟩ :=
                 heapRelated.markPersistent_refines mapped
-              exact ⟨result, operation, finalRelated⟩
+              exact ⟨result, operation, finalRelated, capacity⟩
 
 /-- Syntactic classification used by cache composition: only a semantic heap
 reference requires the recursive persistence simulation. -/
@@ -1463,7 +1483,7 @@ theorem CachePersistenceRefines.of_nonHeapReference
   | tagged related =>
       cases related with
       | immediate payload fits =>
-          refine ⟨concrete, ?_, ?_⟩
+          refine ⟨concrete, ?_, ?_, MappedHeaderCapacityTransport.refl _ _⟩
           · simp [persistGlobalValue, markPersistent, markPersistentFuel,
               Word32.classify_encodeImmediate]
             rfl
@@ -1471,7 +1491,7 @@ theorem CachePersistenceRefines.of_nonHeapReference
       | promoted found =>
           obtain ⟨header, headerRead, _, persistent, _, _, _, _⟩ :=
             (heapRelated.promoted _ _ found).header
-          refine ⟨concrete, ?_, ?_⟩
+          refine ⟨concrete, ?_, ?_, MappedHeaderCapacityTransport.refl _ _⟩
           · simp only [persistGlobalValue]
             exact markPersistent_eq_of_persistent headerRead persistent descriptors
           · simpa [RuntimeState.markPersistent] using heapRelated
@@ -1481,7 +1501,8 @@ theorem CachePersistenceRefines.of_nonHeapReference
       | tagged related =>
           cases related with
           | immediate payload fits =>
-              refine ⟨concrete, ?_, ?_⟩
+              refine ⟨concrete, ?_, ?_,
+                MappedHeaderCapacityTransport.refl _ _⟩
               · simp [persistGlobalValue, markPersistent, markPersistentFuel,
                   Word32.classify_encodeImmediate]
                 rfl
@@ -1489,34 +1510,43 @@ theorem CachePersistenceRefines.of_nonHeapReference
           | promoted found =>
               obtain ⟨header, headerRead, _, persistent, _, _, _, _⟩ :=
                 (heapRelated.promoted _ _ found).header
-              refine ⟨concrete, ?_, ?_⟩
+              refine ⟨concrete, ?_, ?_,
+                MappedHeaderCapacityTransport.refl _ _⟩
               · simp only [persistGlobalValue]
                 exact markPersistent_eq_of_persistent headerRead persistent descriptors
               · simpa [RuntimeState.markPersistent] using heapRelated
   | erased =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | reuseNone =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | reuseSome related =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | uint8 encoded =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | uint16 encoded =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | uint32 encoded =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | uint64 =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
   | usize =>
       exact ⟨concrete, by simp [persistGlobalValue]; rfl,
-        by simpa [RuntimeState.markPersistent] using heapRelated⟩
+        by simpa [RuntimeState.markPersistent] using heapRelated,
+        MappedHeaderCapacityTransport.refl _ _⟩
 
 /--
 Every represented cache value constructively refines recursive persistence.
@@ -1569,7 +1599,8 @@ theorem ConcreteRuntimeRel.writeGlobal_of_related
     (descriptorsEq : descriptors = witness.closureDescriptors) :
     ∃ after,
       concrete.writeGlobal name kind lane descriptors = .ok after ∧
-        ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
+        ConcreteRuntimeRel after witness (semantic.setGlobal name value) ∧
+        MappedHeaderCapacityTransport concrete.heap after.heap witness := by
   exact related.writeGlobal found kindEq valueRelated
     (.of_related related.heap valueRelated descriptorsEq)
 
@@ -1587,7 +1618,8 @@ theorem ConcreteRuntimeRel.writeGlobal_nonHeapReference
     (nonHeap : IsNonHeapReference value) :
     ∃ after,
       concrete.writeGlobal name kind lane descriptors = .ok after ∧
-        ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
+        ConcreteRuntimeRel after witness (semantic.setGlobal name value) ∧
+        MappedHeaderCapacityTransport concrete.heap after.heap witness := by
   exact related.writeGlobal found kindEq valueRelated
     (.of_nonHeapReference related.heap valueRelated nonHeap)
 
@@ -1609,7 +1641,8 @@ theorem ConcreteRuntimeRel.writeGlobal_heapLeaf
     ∃ after,
       concrete.writeGlobal name kind lane descriptors = .ok after ∧
         ConcreteRuntimeRel after witness
-          (semantic.setGlobal name (.object (.heap location))) := by
+          (semantic.setGlobal name (.object (.heap location))) ∧
+        MappedHeaderCapacityTransport concrete.heap after.heap witness := by
   exact related.writeGlobal globalFound kindEq valueRelated
     (.of_heapLeaf related.heap valueRelated cellFound live ordinary leafCell)
 
@@ -1628,7 +1661,8 @@ theorem ConcreteRuntimeRel.writeGlobal_heapReference
     ∃ after,
       concrete.writeGlobal name kind lane witness.closureDescriptors = .ok after ∧
         ConcreteRuntimeRel after witness
-          (semantic.setGlobal name (.object (.heap location))) := by
+          (semantic.setGlobal name (.object (.heap location))) ∧
+        MappedHeaderCapacityTransport concrete.heap after.heap witness := by
   exact related.writeGlobal globalFound kindEq valueRelated
     (.of_heapReference related.heap valueRelated)
 

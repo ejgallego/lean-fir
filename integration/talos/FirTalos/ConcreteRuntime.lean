@@ -3462,13 +3462,15 @@ theorem cacheSetStep_of_refines
         .Return [physical] (replaceRuntime initial after) ∧
       ConcreteRuntimeRel (replaceRuntime initial after).host.runtime witness
         (runtime.setGlobal declaration semantic) ∧
-      PhysicalValueRel witness kind physical semantic := by
+      PhysicalValueRel witness kind physical semantic ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap after.heap
+        witness := by
   obtain ⟨lane, decoded, laneRelated⟩ :=
     decodePhysicalLane_of_related valueRelated
-  obtain ⟨after, operation, nextRuntimeRelated⟩ :=
+  obtain ⟨after, operation, nextRuntimeRelated, capacity⟩ :=
     Fir.Wasm.Concrete.ConcreteRuntimeRel.writeGlobal_of_related runtimeRelated
       found kindEq laneRelated descriptorsEq
-  refine ⟨after, ?_, ?_, valueRelated⟩
+  refine ⟨after, ?_, ?_, valueRelated, capacity⟩
   · simp [cacheSetStep, clearFailure, decoded, operation, replaceRuntime]
   · simpa [replaceRuntime, clearFailure] using nextRuntimeRelated
 

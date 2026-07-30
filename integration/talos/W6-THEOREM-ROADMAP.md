@@ -782,10 +782,17 @@ acceptance tests pass.
    `markPersistentFuel_preserves_heapCursor` and its concrete-global/Talos
    adapters now prove exact frontier preservation through recursive cache
    publication, so the miss theorem derives residual-budget preservation
-   internally. The remaining miss-local theorem is recursive persistence
-   preservation for unrelated ordinary facts and mapped header extents.
-   Proving those transports and the two generated-environment selection
-   conditions is the next interprocedural task.
+   internally.
+   Recursive persistence now also composes mapped-header capacity through
+   every metadata write and child fold; the concrete global and Talos cache
+   boundaries expose that theorem, so the miss constructor derives its
+   publication-capacity transport from generated cache-slot facts.
+   The remaining ordinary-token question is provenance-sensitive rather than
+   an unconditional runtime invariant: a token aliasing the cached graph is
+   invalidated when publication marks that graph persistent. Resolve that
+   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` instance with
+   alias-invalidating fact transfer or proved graph disjointness, then close
+   the generated-environment selection conditions.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

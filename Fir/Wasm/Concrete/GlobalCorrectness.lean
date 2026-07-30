@@ -461,6 +461,7 @@ inductive CachePersistenceRefines (concrete : MemoryState)
   | intro (after : MemoryState)
       (operation : persistGlobalValue concrete kind lane descriptors = .ok after)
       (heap : LiveHeapRel after witness (semantic.markPersistent value))
+      (capacity : MappedHeaderCapacityTransport concrete after witness)
 
 /-- A successful concrete cache write and FIR `setGlobal` remain related at
 the full runtime-state boundary. -/
@@ -477,13 +478,15 @@ theorem ConcreteRuntimeRel.writeGlobal
       kind lane value descriptors) :
     ∃ after,
       concrete.writeGlobal name kind lane descriptors = .ok after ∧
-        ConcreteRuntimeRel after witness (semantic.setGlobal name value) := by
-  obtain ⟨persistentHeap, persistenceOperation, persistentRelated⟩ := persistence
+        ConcreteRuntimeRel after witness (semantic.setGlobal name value) ∧
+        MappedHeaderCapacityTransport concrete.heap after.heap witness := by
+  obtain ⟨persistentHeap, persistenceOperation, persistentRelated,
+      persistenceCapacity⟩ := persistence
   obtain ⟨globals, operation, globalsRelated⟩ :=
     related.globals.write found kindEq valueRelated
   let after : ConcreteRuntimeState := {
     concrete with heap := persistentHeap, globals }
-  refine ⟨after, ?_, ?_⟩
+  refine ⟨after, ?_, ?_, persistenceCapacity⟩
   · unfold ConcreteRuntimeState.writeGlobal
     rw [persistenceOperation]
     rw [operation]
