@@ -178,3 +178,9 @@ The cache table now lives in `ConcreteReuseCapacityCacheFrame`, and the
 uniform lazy implementation returns its successor together with the budgeted
 step. This closes invariant threading at the generic runtime-law boundary;
 it does not discharge the bug-specific publication/disjointness fact above.
+The cache invariant also now carries `LazyCacheValidationFacts`: checked
+initializer uniqueness is therefore available to every publication step, and
+singleton initializer signatures construct the exact physical cache layout.
+The remaining validator coordination is one accessor from successful module
+validation to that two-field bundle; it does not alter this bug's
+reachability-disjointness obligation.

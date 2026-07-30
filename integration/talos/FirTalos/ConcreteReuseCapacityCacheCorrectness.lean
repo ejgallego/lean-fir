@@ -617,6 +617,165 @@ structure LazyCacheTableLayout (source : Fir.Wasm.Module) : Prop where
             source.cacheGlobalKinds[2 * index]? = some .uint32 ∧
             source.cacheGlobalKinds[2 * index + 1]? = some kind
 
+/-- The two global kinds contributed by one well-formed lazy initializer. -/
+private def lazyCacheEntryKinds
+    (source : Fir.Wasm.Module) (declaration : Name) : List AbiKind :=
+  match
+      (source.callSignature? (.declaration declaration)).bind
+        (·.results[0]?) with
+  | some kind => [.uint32, kind]
+  | none => []
+
+/--
+The source-facing initializer condition needed to derive physical cache
+layout. Successful validation is expected to expose this condition; all
+offset arithmetic remains a W6 theorem over the executable layout function.
+-/
+def LazyCacheInitializerSignatures (source : Fir.Wasm.Module) : Prop :=
+  ∀ {declaration : Name},
+    declaration ∈ source.initializers.toList →
+      ∃ kind,
+        (source.callSignature? (.declaration declaration)).bind
+            (·.results[0]?) = some kind
+
+/-- The executable cache-global fold is a concatenation of the initializer
+entries. This algebraic form is the basis for all physical index proofs. -/
+private theorem lazyCacheKindsFold_toList
+    (source : Fir.Wasm.Module)
+    (names : List Name)
+    (initial : Array AbiKind) :
+    (names.foldl (init := initial) fun kinds declaration =>
+      match source.callSignature? (.declaration declaration) with
+      | some signature =>
+          match signature.results[0]? with
+          | some kind => (kinds.push .uint32).push kind
+          | none => kinds
+      | none => kinds).toList =
+        initial.toList ++ names.flatMap (lazyCacheEntryKinds source) := by
+  induction names generalizing initial with
+  | nil =>
+      simp
+  | cons declaration rest ih =>
+      simp only [List.foldl_cons, List.flatMap_cons]
+      cases signature : source.callSignature? (.declaration declaration) with
+      | none =>
+          simp [signature, lazyCacheEntryKinds, ih]
+      | some found =>
+          cases result : found.results[0]? with
+          | none =>
+              simp [signature, result, lazyCacheEntryKinds, ih]
+          | some kind =>
+              simp [signature, result, lazyCacheEntryKinds, ih]
+
+/-- A list view of the executable global-layout fold. -/
+private theorem cacheGlobalKinds_toList
+    (source : Fir.Wasm.Module) :
+    source.cacheGlobalKinds.toList =
+      source.initializers.toList.flatMap (lazyCacheEntryKinds source) := by
+  unfold Fir.Wasm.Module.cacheGlobalKinds
+  rw [← Array.foldl_toList]
+  convert
+    (lazyCacheKindsFold_toList source source.initializers.toList #[]) using 1
+  · congr 1
+  · simp
+
+/-- Every well-formed initializer contributes exactly its even flag and odd
+value lane to the concatenated cache-global table. -/
+private theorem lazyCacheEntryKinds_flatMap_get?
+    (source : Fir.Wasm.Module)
+    {names : List Name}
+    (signatures :
+      ∀ {declaration : Name},
+        declaration ∈ names →
+          ∃ kind,
+            (source.callSignature? (.declaration declaration)).bind
+                (·.results[0]?) = some kind)
+    {index : Nat}
+    {declaration : Name}
+    (found : names[index]? = some declaration) :
+    ∃ kind,
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind ∧
+        (names.flatMap (lazyCacheEntryKinds source))[2 * index]? =
+            some .uint32 ∧
+          (names.flatMap (lazyCacheEntryKinds source))[2 * index + 1]? =
+            some kind := by
+  induction names generalizing index declaration with
+  | nil =>
+      simp at found
+  | cons head rest ih =>
+      cases index with
+      | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at found
+          subst declaration
+          obtain ⟨kind, signature⟩ :=
+            signatures (declaration := head) (by simp)
+          exact ⟨kind, signature, by
+            simp [lazyCacheEntryKinds, signature]⟩
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at found
+          obtain ⟨headKind, headSignature⟩ :=
+            signatures (declaration := head) (by simp)
+          have restSignatures :
+              ∀ {member : Name},
+                member ∈ rest →
+                  ∃ kind,
+                    (source.callSignature? (.declaration member)).bind
+                        (·.results[0]?) = some kind :=
+            fun {member} memberFound =>
+              signatures (declaration := member) (by simp [memberFound])
+          obtain ⟨kind, signature, flagKind, valueKind⟩ :=
+            ih restSignatures found
+          refine ⟨kind, signature, ?_, ?_⟩
+          · simp only [List.flatMap_cons, lazyCacheEntryKinds, headSignature]
+            simpa [Nat.mul_succ] using flagKind
+          · simp only [List.flatMap_cons, lazyCacheEntryKinds, headSignature]
+            simpa [Nat.mul_succ] using valueKind
+
+/-- Singleton initializer signatures determine the complete physical cache
+layout; no separate layout certificate is needed. -/
+theorem LazyCacheTableLayout.ofSignatures
+    {source : Fir.Wasm.Module}
+    (signatures : LazyCacheInitializerSignatures source) :
+    LazyCacheTableLayout source := by
+  refine ⟨?_⟩
+  intro index declaration found
+  have foundList :
+      source.initializers.toList[index]? = some declaration := by
+    simpa using found
+  obtain ⟨kind, signature, flagKind, valueKind⟩ :=
+    lazyCacheEntryKinds_flatMap_get? source signatures foundList
+  refine ⟨kind, signature, ?_, ?_⟩
+  · have flagKindList :
+        source.cacheGlobalKinds.toList[2 * index]? =
+          some (.uint32 : AbiKind) := by
+      rw [cacheGlobalKinds_toList]
+      exact flagKind
+    simpa using flagKindList
+  · have valueKindList :
+        source.cacheGlobalKinds.toList[2 * index + 1]? = some kind := by
+      rw [cacheGlobalKinds_toList]
+      exact valueKind
+    simpa using valueKindList
+
+/--
+The complete validation-facing boundary for generated lazy caches.
+
+The integration-owned validator only needs to expose its executable
+uniqueness result and singleton-signature loop. W6 derives all physical
+flag/value offsets from those facts and carries them through execution.
+-/
+structure LazyCacheValidationFacts (source : Fir.Wasm.Module) : Prop where
+  initializerUnique :
+    Fir.Wasm.listAllUnique source.initializers.toList = true
+  signatures : LazyCacheInitializerSignatures source
+
+theorem LazyCacheValidationFacts.layout
+    {source : Fir.Wasm.Module}
+    (checked : LazyCacheValidationFacts source) :
+    LazyCacheTableLayout source :=
+  LazyCacheTableLayout.ofSignatures checked.signatures
+
 /-- The validator's executable uniqueness check is exactly `List.Nodup` under
 the lawful Boolean equality used by module names. -/
 theorem listAllUnique_eq_true_iff_nodup
@@ -668,7 +827,7 @@ structure LazyCacheGlobalsRel
     (source : Fir.Wasm.Module)
     (runtime : RuntimeState)
     (store : Wasm.Store Host) : Prop where
-  layout : LazyCacheTableLayout source
+  checked : LazyCacheValidationFacts source
   semanticCovered :
     ∀ {declaration : Name} {value : Value},
       findGlobal? runtime.globals declaration = some value →
@@ -681,6 +840,15 @@ structure LazyCacheGlobalsRel
               (·.results[0]?) = some kind ∧
             LazyCacheSlotRel witness runtime store declaration kind
               (2 * index) (2 * index + 1)
+
+theorem LazyCacheGlobalsRel.layout
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    (related : LazyCacheGlobalsRel witness source runtime store) :
+    LazyCacheTableLayout source :=
+  related.checked.layout
 
 /-- The generated flag at a checked cache index is zero in Talos's initial
 store whenever the adapted target carries the canonical global declarations. -/
@@ -713,7 +881,7 @@ theorem LazyCacheGlobalsRel.empty
     {source : Fir.Wasm.Module}
     {runtime : RuntimeState}
     {store : Wasm.Store Host}
-    (layout : LazyCacheTableLayout source)
+    (checked : LazyCacheValidationFacts source)
     (runtimeEmpty : runtime.globals = [])
     (flagsEmpty :
       ∀ {index : Nat} {declaration : Name},
@@ -721,14 +889,14 @@ theorem LazyCacheGlobalsRel.empty
           store.globals.globals[2 * index]? = some (.i32 0)) :
     LazyCacheGlobalsRel witness source runtime store := by
   refine {
-    layout
+    checked
     semanticCovered := ?_
     slots := ?_ }
   · intro declaration value found
     rw [runtimeEmpty] at found
     simp [findGlobal?] at found
   · intro index declaration found
-    obtain ⟨kind, signature, _, _⟩ := layout.slot found
+    obtain ⟨kind, signature, _, _⟩ := checked.layout.slot found
     exact ⟨kind, signature, .empty (by simp [runtimeEmpty, findGlobal?])
       (flagsEmpty found)⟩
 
@@ -740,7 +908,7 @@ the cache indices.
 theorem LazyCacheGlobalsRel.adaptedInitial
     {source : Fir.Wasm.Module}
     {target : FirTalos.AdaptedModule}
-    (layout : LazyCacheTableLayout source)
+    (checked : LazyCacheValidationFacts source)
     (adapted : FirTalos.adapt source = .ok target)
     (witness : RefinementWitness)
     (externals : Fir.Wasm.Concrete.ConcreteExternalImpl :=
@@ -752,9 +920,9 @@ theorem LazyCacheGlobalsRel.adaptedInitial
   have targetGlobals :
       target.wasmModule.globals = FirTalos.globalDecls source := by
     rw [targetEq]
-  apply LazyCacheGlobalsRel.empty layout rfl
+  apply LazyCacheGlobalsRel.empty checked rfl
   intro index declaration found
-  obtain ⟨kind, _, flagKind, _⟩ := layout.slot found
+  obtain ⟨kind, _, flagKind, _⟩ := checked.layout.slot found
   exact initialStore_cacheFlag_zero targetGlobals flagKind
 
 /-- Pointwise transport for one cache slot. This is the form used when a
@@ -836,7 +1004,7 @@ theorem LazyCacheGlobalsRel.transport
       LazyCacheGlobalsRel beforeWitness source beforeRuntime beforeStore) :
     LazyCacheGlobalsRel afterWitness source afterRuntime afterStore := by
   refine {
-    layout := related.layout
+    checked := related.checked
     semanticCovered := ?_
     slots := ?_ }
   · intro declaration value found
@@ -939,8 +1107,6 @@ theorem LazyCacheGlobalsRel.publish
     {physical oldValue : Wasm.Value}
     (related :
       LazyCacheGlobalsRel witness source beforeRuntime beforeStore)
-    (initializerUnique :
-      Fir.Wasm.listAllUnique source.initializers.toList = true)
     (initializerFound :
       source.initializers[index]? = some declaration)
     (signature :
@@ -975,7 +1141,7 @@ theorem LazyCacheGlobalsRel.publish
     PopulatedLazyCacheSlotRel.ofPublication runtimeEq valueRelated valueGlobal
       valueStoreEq flagAfterValue valueFlagDistinct
   refine {
-    layout := related.layout
+    checked := related.checked
     semanticCovered := ?_
     slots := ?_ }
   · intro other value found
@@ -1010,7 +1176,7 @@ theorem LazyCacheGlobalsRel.publish
         simpa using otherFound
       have initializerNodup : source.initializers.toList.Nodup :=
         (listAllUnique_eq_true_iff_nodup
-          source.initializers.toList).mp initializerUnique
+          source.initializers.toList).mp related.checked.initializerUnique
       have differentDeclaration : otherDeclaration ≠ declaration := by
         intro declarationEq
         subst otherDeclaration
@@ -1874,8 +2040,6 @@ theorem
         nextLocals resultIndex initialWitness nextWitness physical stepCost)
     (cacheTable :
       LazyCacheGlobalsRel nextWitness sourceModule callRuntime afterCache)
-    (initializerUnique :
-      Fir.Wasm.listAllUnique sourceModule.initializers.toList = true)
     (initializerFound :
       sourceModule.initializers[cacheIndex]? = some declaration)
     (signature :
@@ -1899,7 +2063,7 @@ theorem
           nextLocals resultIndex initialWitness nextWitness physical stepCost ∧
       LazyCacheGlobalsRel nextWitness sourceModule nextRuntime
         (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) := by
-  exact ⟨step, cacheTable.publish initializerUnique initializerFound signature
+  exact ⟨step, cacheTable.publish initializerFound signature
     semanticEmpty runtimeEq valueRelated valueGlobal valueStoreEq⟩
 
 /--
@@ -2046,14 +2210,14 @@ theorem ConcreteReuseCapacityCacheFrame.adaptedInitial
         sourceExternals facts remainingBytes ({} : RuntimeState) sourceEnv
         (initialStore sourceModule targetModule.wasmModule concreteExternals)
         locals witness)
-    (layout : LazyCacheTableLayout sourceModule)
+    (checked : LazyCacheValidationFacts sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok targetModule) :
     ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
       sourceExternals facts remainingBytes ({} : RuntimeState) sourceEnv
       (initialStore sourceModule targetModule.wasmModule concreteExternals)
       locals witness := by
   exact ⟨core,
-    LazyCacheGlobalsRel.adaptedInitial layout adapted witness
+    LazyCacheGlobalsRel.adaptedInitial checked adapted witness
       concreteExternals⟩
 
 /--

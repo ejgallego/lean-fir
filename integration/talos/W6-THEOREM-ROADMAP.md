@@ -830,12 +830,17 @@ acceptance tests pass.
    transition, and the strengthened uniform `LazyCacheImplementation` returns
    the successor table. `adaptedInitial` establishes the augmented entry
    frame. The validator's Boolean uniqueness check is proved equivalent to
-   `List.Nodup`.
-   Coordinate an integration-owned validator proof accessor deriving
-   `LazyCacheTableLayout` and the checked uniqueness equation from successful
-   validation; then extract the semantic empty/publication facts from source
-   miss execution. Resolve the remaining
-   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
+   `List.Nodup`. `LazyCacheInitializerSignatures` isolates the validator's
+   singleton-result loop, and `LazyCacheTableLayout.ofSignatures` derives the
+   exact paired physical layout from the executable global-kind fold.
+   `LazyCacheValidationFacts` packages signatures and Boolean uniqueness
+   inside the table invariant, eliminating separate layout and uniqueness
+   premises from initial construction and publication.
+   Coordinate one integration-owned validator proof accessor constructing
+   `LazyCacheValidationFacts` from successful validation; then extract the
+   semantic empty/publication facts from source miss execution. Resolve the
+   remaining `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration
+   instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the
    generated-environment selection conditions.

@@ -4934,12 +4934,24 @@ premise.
 
 `listAllUnique_eq_true_iff_nodup` also connects the validator's executable
 initializer-uniqueness check to the exact separation fact used by publication.
-The monolithic `validateModuleShape` checker does not yet expose its
-per-initializer singleton-signature/layout facts as a reusable theorem.
-Because that validator surface is integration-owned, the next coordinated
-contract slice should export a proof accessor deriving
-`LazyCacheTableLayout` and the checked uniqueness equation from successful
-module validation; W6 should then remove those remaining restated inputs.
+
+W6.6gzi reduces and internalizes the validator boundary.
+`LazyCacheInitializerSignatures` is the direct source-facing consequence of
+the validator's singleton-result loop.
+`LazyCacheTableLayout.ofSignatures` proves, by induction over the executable
+`cacheGlobalKinds` fold, that those signatures generate the exact flag/value
+lanes at `2 * index` and `2 * index + 1`; physical layout is no longer a fact
+that integration must restate. `LazyCacheValidationFacts` pairs the remaining
+singleton-signature fact with checked Boolean uniqueness.
+`LazyCacheGlobalsRel` now carries that bundle, so initial-state construction
+derives layout and every publication reuses the stored uniqueness fact instead
+of accepting another caller premise.
+
+The monolithic integration-owned `validateModuleShape` checker does not yet
+export a proof accessor constructing `LazyCacheValidationFacts` from
+successful module validation. That two-field theorem is now the complete
+coordination boundary; no offset arithmetic or dynamic cache invariant needs
+to cross it.
 Independently, the proof lane must extract semantic cache absence, the source
 publication equation, and retained-token disjointness (or validator
 invalidation) from generated source miss execution.
