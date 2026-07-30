@@ -7557,6 +7557,20 @@ structure HeapOwnershipBelowFrontier
     Value.object (.heap child) ∈ cell.object.ownedValues.toList →
       child < runtime.nextLocation
 
+/-- No heap cell can occur at or beyond the fresh-allocation frontier of an
+ownership-bounded runtime. This is the extensional freshness fact consumed
+by reset/reuse proofs; clients no longer need to enumerate a concrete heap
+after each ownership-preserving mutation. -/
+theorem HeapOwnershipBelowFrontier.findCell?_eq_none_of_frontier_le
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (bounded : runtime.nextLocation ≤ location) :
+    findCell? runtime.heap location = none := by
+  cases found : findCell? runtime.heap location with
+  | none => rfl
+  | some cell =>
+      exact False.elim
+        ((Nat.not_lt_of_ge bounded) (wellFormed.cell_lt found))
+
 /-- Every heap address occurring in a list of values lies below the runtime's
 fresh allocation frontier. This is the value-side form consumed by
 constructor allocation, object writes, and concrete reuse. -/

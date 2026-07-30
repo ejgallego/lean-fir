@@ -13644,6 +13644,37 @@ theorem closedConcreteReuseResetReady_of_shadowRuntime
   change findCell? closedConcreteReuseResetRuntime.heap location = none
   simp [closedConcreteReuseResetRuntime, findCell?, notZero]
 
+/-- Source-owned reset readiness. The maintained machine carrier proves that
+the successful reset result has no cells at or beyond its fresh frontier, so
+the proof no longer inspects the concrete post-reset heap. -/
+theorem closedConcreteReuseResetReady_of_sourceOwnership
+    (target : MachineState)
+    (runtime :
+      ShadowRuntimeRel rho
+        (closedConcreteReuseSourceResetState arguments).runtime
+        target.runtime sourceRoots targetRoots)
+    (targetEmpty : target.runtime.nextLocation = 0)
+    (ownership :
+      SourceMachineOwnershipBelowFrontier
+        (closedConcreteReuseSourceResetState arguments)) :
+    DeletedResetReadyAt
+      (closedConcreteReuseSourceResetState arguments)
+      (runtimeRoots
+        (closedConcreteReuseSourceResetState arguments).runtime
+        sourceRoots)
+      1 resetObjectVar := by
+  apply
+    DeletedResetLocalReadyAt.deletedReadyAt_of_rightNextLocation_zero
+      closedConcreteReuseResetLocalReady runtime targetEmpty
+      rfl rfl rfl rfl
+  have afterOwnership :
+      HeapOwnershipBelowFrontier closedConcreteReuseResetRuntime := by
+    exact ownership.heap.reset
+      (closedConcreteReuseResetLocalReady
+        (arguments := arguments)).effect
+  intro location bounded
+  exact afterOwnership.findCell?_eq_none_of_frontier_le bounded
+
 /-- The exact pair supplies both the deleted reset certificate and the saved
 frame roots selected by the compiler residual. -/
 theorem closedConcreteReuseResetPairReady
@@ -13671,6 +13702,67 @@ theorem closedConcreteReuseResetPairReady
       have resetReady :=
         closedConcreteReuseResetReady_of_shadowRuntime
           target runtime targetShape.1
+      have removed :
+          DeletedLetReadyAt
+            (closedConcreteReuseSourceResetState arguments)
+            (runtimeRoots
+              (closedConcreteReuseSourceResetState arguments).runtime
+              (envRootsOn used
+                (closedConcreteReuseSourceResetState arguments).env ++
+                sourceFrameRoots))
+            closedConcreteReuseTokenDecl := by
+        unfold closedConcreteReuseTokenDecl letDecl
+        exact .reset reuseTokenVar reuseTokenVar.name objType
+          1 resetObjectVar (by simpa using resetReady)
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        programs, ?_, frames, runtime⟩
+      simpa only [sourceControl, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.let_of_ready
+              removed (by trivial)⟩
+          joins env)
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+/-- Exact reset-pair readiness through the current source ownership carrier.
+Unlike the legacy fixture proof above, post-reset heap freshness follows from
+the operationally maintained ownership invariant. -/
+theorem closedConcreteReuseResetPairReady_sourceOwned
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (ownership :
+      SourceMachineOwnershipBelowFrontier
+        (closedConcreteReuseSourceResetState arguments))
+    (related : SomeBinderReadyReachableMachineRelated 6
+      (closedConcreteReuseSourceResetState arguments) target) :
+    BinderReadyReachableMachineReadyAt 6
+      (closedConcreteReuseSourceResetState arguments) target := by
+  rcases related with
+    ⟨rho, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (closedConcreteReuseSourceResetState arguments).control =
+        .code closedConcreteReuseAfterObjectCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have resetReady :=
+        closedConcreteReuseResetReady_of_sourceOwnership
+          target runtime targetShape.1 ownership
       have removed :
           DeletedLetReadyAt
             (closedConcreteReuseSourceResetState arguments)
@@ -13950,6 +14042,64 @@ theorem closedConcreteReuseSourceReachable_pairReady
       intro sourceCode control
       simp [closedConcreteReuseSourceInvokingState] at control
 
+/-- Source-owned readiness for every state in the concrete-token execution
+graph. The reset head consumes the maintained machine ownership carrier;
+all other heads retain their existing local exact-readiness proofs. -/
+theorem closedConcreteReuseSourceReachable_pairReady_sourceOwned
+    (sourceReachable :
+      ClosedConcreteReuseSourceReachable arguments source)
+    (targetShape : ClosedConcreteReuseTargetRuntimeShape target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (related :
+      SomeBinderReadyReachableMachineRelated 6 source target) :
+    BinderReadyReachableMachineReadyAt 6 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseOuterSourceMachineReadyAt arguments)
+  | object =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseObjectSourceMachineReadyAt arguments)
+  | reset =>
+      exact closedConcreteReuseResetPairReady_sourceOwned
+        targetShape ownership related
+  | argument =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseArgSourceMachineReadyAt arguments)
+  | reuse =>
+      exact closedConcreteReusePairReady targetShape related
+  | ret =>
+      exact related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+          (closedConcreteReuseReturnSourceMachineReadyAt arguments)
+  | yielded =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceYieldedState] at control
+  | cached empty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related
+        |>.binderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [closedConcreteReuseSourceInvokingState] at control
+
 theorem closedConcreteReuseSourceReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState closedConcreteReuseBeforeProgram `main arguments)
@@ -14002,6 +14152,46 @@ def closedConcreteReuseExactOwnershipContract
       (closedConcreteReuseTargetReachable_runtimeShape
         targetReachable)
       related
+
+/-- Direct source-owned exact contract for the one-cell reset/reuse branch.
+The rectangular execution-graph invariant remains purely static; concrete
+source heap/environment/frame ownership is supplied by the operational
+simulation exactly when reset readiness needs it. -/
+def closedConcreteReuseSourceOwnedExactContract
+    (externals : ExternalSpec) :
+    ElimDeadSourceOwnedExactContract externals 6
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    ClosedConcreteReuseSourceReachable sourceArguments source ∧
+      ClosedConcreteReuseTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments _argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact ⟨.entry, .entry⟩
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨closedConcreteReuseSourceReachable_step
+      sourceReachable step, targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      closedConcreteReuseTargetReachable_step
+        targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ ownership related
+    exact closedConcreteReuseSourceReachable_pairReady_sourceOwned
+      sourceReachable
+      (closedConcreteReuseTargetReachable_runtimeShape
+        targetReachable)
+      ownership related
 
 theorem closedConcreteReuseExactRuntimeOwnershipInitialInvariant
     (externals : ExternalSpec) :
@@ -14088,6 +14278,27 @@ theorem closedConcreteReuseProgramLoweringCorrect
       closedConcreteReuseAfterProgram #[`main] :=
   (closedConcreteReuseCompilerAdmissibleRun
     externals).loweringCorrect compatible
+
+/-- Whole-program correctness for concrete reset/reuse through the direct
+source-owned exact interface. The external source-ownership law transports
+the same carrier across foreign responses; the local reset edge consumes it
+to prove post-reset heap freshness without fixture enumeration. -/
+theorem closedConcreteReuseProgramLoweringCorrect_sourceOwnedExact
+    (externals : ExternalSpec)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals 6)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      closedConcreteReuseBeforeProgram
+      closedConcreteReuseAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_sourceOwnedExact
+    closedConcreteReuseBeforeProgramElimDeadWellFormed
+    closedConcreteReuseCheckedProgramRun
+    (closedConcreteReuseSourceOwnedExactContract externals)
+    compatible sourceCompatible
 
 /-! ## Closed owned-child reset/reuse correctness -/
 
