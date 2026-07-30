@@ -1548,13 +1548,14 @@ both unreachable allocations may be omitted.
 The remaining general problem is therefore not an operational matcher, a
 missing whole-program theorem, an implicit nullary-purity assumption, an
 unauditable policy graph, a reachability-shaped client API, a missing
-ledger-aware entry contract, or an untested nonempty-ledger client. It is to
-derive the contract for arbitrary compiler-produced entry states from
-auditable static ownership facts: derive each local operation shape from
-compiler typing/ownership invariants and prove the selected source allocation
-lies outside a potentially nonempty target owner table. The ledger solves the
-address-map part without assuming an empty target, and its proof-relevant
-carrier covers the allocation primitives
+ledger-aware entry contract, an untested nonempty-ledger client, or a split
+between the source-ownership and target-ledger carriers. It is to derive the
+contract for arbitrary compiler-produced entry states from auditable static
+ownership facts: derive each local operation shape from compiler
+typing/ownership invariants and prove the selected source allocation lies
+outside a potentially nonempty target owner table. The combined source-owned
+ledger relation solves the address-map part without assuming an empty target,
+and its proof-relevant carrier covers the allocation primitives
 and the complete
 literal-, constructor-, partial-application-, box-, and failed-reuse-let
 matchers, together with concrete-token existing-address reuse and the generic
@@ -1756,16 +1757,20 @@ the existing nullary-`.fap` semantic discrepancy.
    `LoweringCorrect` through that endpoint. Reset readiness now consumes the
    source carrier: generic local-shape bridges derive post-reset freshness
    from `HeapOwnershipBelowFrontier` for both empty targets and
-   target-ledger/source-only-closure shapes.
-   The next structural gap is to combine source ownership and the exact target
-   allocation ledger in one relation and contract. The current source-owned
-   contract forgets the target ledger, while the ledger exact-ownership
-   contract does not carry source ownership. Prove source ownership
-   preservation independently over structural source steps, package both
-   carriers in one non-lockstep simulation, and exercise it on a nonempty
-   target reset/reuse client.
-   Arbitrary checked entries must still initialize and preserve these compiler
-   typing/ownership facts without finite execution-graph enumeration.
+   target-ledger/source-only-closure shapes. Commit `4e882842` closes the
+   carrier-composition gap: source ownership is preserved independently over
+   structural source steps, `SourceOwnedLedgerInvariantMachineRelatedWith`
+   combines it with the exact target allocation ledger, and the resulting
+   non-lockstep simulation and compiler-facing contract reach
+   `LoweringCorrect`. The retained-prefix reset/reuse client checks this path
+   with a genuinely nonempty target ledger and obtains reset freshness from
+   source ownership.
+   The next structural gap is static initialization and preservation:
+   arbitrary checked compiler entries must derive these local
+   typing/ownership/readiness facts without finite execution-graph
+   enumeration. Start by factoring static reset/reuse laws that imply local
+   operation success, source-only closure, and token provenance, then lift
+   those laws through reachable compiler states.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
