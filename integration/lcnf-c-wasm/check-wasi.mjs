@@ -7,27 +7,37 @@ import {
   expectedHeapChecksum,
   expectedMix,
   expectedWasiCoreChecksum,
+  expectedWasiScalarChecksum,
   mask,
 } from "./reference.mjs";
 
 const wasmPath = process.argv[2];
 const nativeHeapResultsPath = process.argv[3];
 const nativeCoreResultsPath = process.argv[4];
+const nativeScalarResultsPath = process.argv[5];
 if (
   wasmPath === undefined ||
   nativeHeapResultsPath === undefined ||
-  nativeCoreResultsPath === undefined
+  nativeCoreResultsPath === undefined ||
+  nativeScalarResultsPath === undefined
 ) {
   throw new Error(
     "usage: node check-wasi.mjs <WasiCoreSmoke.wasm> " +
-      "<HeapSmoke.native.txt> <WasiCoreSmoke.native.txt>",
+      "<HeapSmoke.native.txt> <WasiCoreSmoke.native.txt> " +
+      "<WasiScalarSmoke.native.txt>",
   );
 }
 
-const [bytes, nativeHeapResults, nativeCoreResults] = await Promise.all([
+const [
+  bytes,
+  nativeHeapResults,
+  nativeCoreResults,
+  nativeScalarResults,
+] = await Promise.all([
   readFile(wasmPath),
   readFile(nativeHeapResultsPath, "utf8"),
   readFile(nativeCoreResultsPath, "utf8"),
+  readFile(nativeScalarResultsPath, "utf8"),
 ]);
 const compiled = await WebAssembly.compile(bytes);
 const imports = WebAssembly.Module.imports(compiled);
@@ -64,6 +74,7 @@ const {
   fir_lcnf_c_wasi_monotonic_ns: monotonicNs,
   fir_lcnf_c_heap_checksum: heapChecksum,
   fir_lcnf_c_wasi_core_checksum: wasiCoreChecksum,
+  fir_lcnf_c_wasi_scalar_checksum: wasiScalarChecksum,
   fir_lcnf_c_wasi_runtime_abi: runtimeAbi,
   fir_lcnf_c_wasi_allocations: allocations,
   fir_lcnf_c_wasi_deallocations: deallocations,
@@ -72,6 +83,7 @@ const {
   fir_lcnf_c_wasi_constructor_deallocations: constructorDeallocations,
   fir_lcnf_c_wasi_closure_deallocations: closureDeallocations,
   fir_lcnf_c_wasi_array_deallocations: arrayDeallocations,
+  fir_lcnf_c_wasi_scalar_array_deallocations: scalarArrayDeallocations,
   fir_lcnf_c_wasi_string_deallocations: stringDeallocations,
 } = instance.exports;
 
@@ -81,6 +93,7 @@ if (
   typeof monotonicNs !== "function" ||
   typeof heapChecksum !== "function" ||
   typeof wasiCoreChecksum !== "function" ||
+  typeof wasiScalarChecksum !== "function" ||
   typeof runtimeAbi !== "function" ||
   typeof allocations !== "function" ||
   typeof deallocations !== "function" ||
@@ -89,13 +102,14 @@ if (
   typeof constructorDeallocations !== "function" ||
   typeof closureDeallocations !== "function" ||
   typeof arrayDeallocations !== "function" ||
+  typeof scalarArrayDeallocations !== "function" ||
   typeof stringDeallocations !== "function"
 ) {
   throw new Error(
     "expected scalar, core-object runtime, telemetry, and WASI clock exports",
   );
 }
-if (runtimeAbi() !== 2) {
+if (runtimeAbi() !== 3) {
   throw new Error(`unsupported WASI Lean core runtime ABI: ${runtimeAbi()}`);
 }
 
@@ -207,6 +221,7 @@ for (const [rounds, seed] of coreCases) {
   const constructorBefore = asUInt64(constructorDeallocations());
   const closureBefore = asUInt64(closureDeallocations());
   const arrayBefore = asUInt64(arrayDeallocations());
+  const scalarArrayBefore = asUInt64(scalarArrayDeallocations());
   const stringBefore = asUInt64(stringDeallocations());
   const actual = asUInt64(wasiCoreChecksum(rounds, seed));
   const allocationDelta = asUInt64(allocations()) - allocationsBefore;
@@ -215,6 +230,8 @@ for (const [rounds, seed] of coreCases) {
     asUInt64(constructorDeallocations()) - constructorBefore;
   const closureDelta = asUInt64(closureDeallocations()) - closureBefore;
   const arrayDelta = asUInt64(arrayDeallocations()) - arrayBefore;
+  const scalarArrayDelta =
+    asUInt64(scalarArrayDeallocations()) - scalarArrayBefore;
   const stringDelta = asUInt64(stringDeallocations()) - stringBefore;
 
   if (actual !== native) {
@@ -233,16 +250,22 @@ for (const [rounds, seed] of coreCases) {
     constructorDelta === 0n ||
     closureDelta !== 2n ||
     arrayDelta === 0n ||
+    scalarArrayDelta !== 0n ||
     stringDelta !== 1n
   ) {
     throw new Error(
       `WASI core type reclamation mismatch for ${rounds}: ` +
         `${constructorDelta} constructors, ${closureDelta} closures, ` +
-        `${arrayDelta} arrays, ${stringDelta} strings`,
+        `${arrayDelta} arrays, ${scalarArrayDelta} scalar arrays, ` +
+        `${stringDelta} strings`,
     );
   }
   if (
-    constructorDelta + closureDelta + arrayDelta + stringDelta !==
+    constructorDelta +
+      closureDelta +
+      arrayDelta +
+      scalarArrayDelta +
+      stringDelta !==
     deallocationDelta
   ) {
     throw new Error(
@@ -251,6 +274,88 @@ for (const [rounds, seed] of coreCases) {
   }
   if (asUInt64(liveObjects()) !== 0n) {
     throw new Error(`WASI core leaked objects after ${rounds} rounds`);
+  }
+}
+
+const nativeScalarChecksums = parseNativeChecksums(nativeScalarResults);
+const scalarCases = [
+  [0n, 17n],
+  [1n, 17n],
+  [10n, 17n],
+  [1000n, 0x123456789abcdef0n],
+  [65536n, mask],
+];
+for (const [rounds, seed] of scalarCases) {
+  const expected = expectedWasiScalarChecksum(rounds, seed);
+  const native = nativeScalarChecksums.get(`${rounds}:${seed}`);
+  if (native === undefined) {
+    throw new Error(`native scalar result is missing for ${rounds}, ${seed}`);
+  }
+  if (native !== expected) {
+    throw new Error(
+      `native wasiScalarChecksum(${rounds}, ${seed}): ` +
+        `expected ${expected}, got ${native}`,
+    );
+  }
+
+  const allocationsBefore = asUInt64(allocations());
+  const deallocationsBefore = asUInt64(deallocations());
+  const constructorBefore = asUInt64(constructorDeallocations());
+  const closureBefore = asUInt64(closureDeallocations());
+  const arrayBefore = asUInt64(arrayDeallocations());
+  const scalarArrayBefore = asUInt64(scalarArrayDeallocations());
+  const stringBefore = asUInt64(stringDeallocations());
+  const actual = asUInt64(wasiScalarChecksum(rounds, seed));
+  const allocationDelta = asUInt64(allocations()) - allocationsBefore;
+  const deallocationDelta = asUInt64(deallocations()) - deallocationsBefore;
+  const constructorDelta =
+    asUInt64(constructorDeallocations()) - constructorBefore;
+  const closureDelta = asUInt64(closureDeallocations()) - closureBefore;
+  const arrayDelta = asUInt64(arrayDeallocations()) - arrayBefore;
+  const scalarArrayDelta =
+    asUInt64(scalarArrayDeallocations()) - scalarArrayBefore;
+  const stringDelta = asUInt64(stringDeallocations()) - stringBefore;
+
+  if (actual !== native) {
+    throw new Error(
+      `WASI wasiScalarChecksum(${rounds}, ${seed}): native ${native}, ` +
+        `got ${actual}`,
+    );
+  }
+  if (allocationDelta !== deallocationDelta) {
+    throw new Error(
+      `WASI scalar object accounting mismatch for ${rounds}: ` +
+        `${allocationDelta} allocations, ${deallocationDelta} deallocations`,
+    );
+  }
+  if (
+    constructorDelta === 0n ||
+    closureDelta !== 2n ||
+    arrayDelta === 0n ||
+    scalarArrayDelta === 0n ||
+    stringDelta !== 0n
+  ) {
+    throw new Error(
+      `WASI scalar type reclamation mismatch for ${rounds}: ` +
+        `${constructorDelta} constructors, ${closureDelta} closures, ` +
+        `${arrayDelta} arrays, ${scalarArrayDelta} scalar arrays, ` +
+        `${stringDelta} strings`,
+    );
+  }
+  if (
+    constructorDelta +
+      closureDelta +
+      arrayDelta +
+      scalarArrayDelta +
+      stringDelta !==
+    deallocationDelta
+  ) {
+    throw new Error(
+      `WASI scalar deallocation dispatch did not account for ${rounds}`,
+    );
+  }
+  if (asUInt64(liveObjects()) !== 0n) {
+    throw new Error(`WASI scalar leaked objects after ${rounds} rounds`);
   }
 }
 
@@ -347,6 +452,42 @@ if (asUInt64(allocations()) !== asUInt64(deallocations())) {
   throw new Error("WASI core runtime allocation totals are unbalanced");
 }
 
+const scalarBenchmarkRounds = BigInt(
+  process.env.FIR_WASM_SCALAR_ARRAY_BENCH_ROUNDS ?? "262144",
+);
+const scalarBenchmarkExpected = expectedWasiScalarChecksum(
+  scalarBenchmarkRounds,
+  benchmarkSeed,
+);
+const scalarAllocationsBefore = asUInt64(allocations());
+const scalarDeallocationsBefore = asUInt64(deallocations());
+const scalarStart = performance.now();
+const scalarActual = asUInt64(
+  wasiScalarChecksum(scalarBenchmarkRounds, benchmarkSeed),
+);
+const scalarElapsedMs = performance.now() - scalarStart;
+const scalarAllocationDelta =
+  asUInt64(allocations()) - scalarAllocationsBefore;
+const scalarDeallocationDelta =
+  asUInt64(deallocations()) - scalarDeallocationsBefore;
+if (scalarActual !== scalarBenchmarkExpected) {
+  throw new Error(
+    `scalar benchmark: expected ${scalarBenchmarkExpected}, ` +
+      `got ${scalarActual}`,
+  );
+}
+if (scalarAllocationDelta !== scalarDeallocationDelta) {
+  throw new Error(
+    "WASI scalar benchmark allocation and deallocation totals differ",
+  );
+}
+if (asUInt64(liveObjects()) !== 0n) {
+  throw new Error("WASI scalar benchmark leaked objects");
+}
+if (asUInt64(allocations()) !== asUInt64(deallocations())) {
+  throw new Error("WASI core runtime allocation totals are unbalanced");
+}
+
 console.log(
   JSON.stringify(
     {
@@ -372,6 +513,13 @@ console.log(
       coreLogicalElementsPerSecond:
         Number(coreBenchmarkRounds) / (coreElapsedMs / 1000),
       coreResult: coreActual.toString(),
+      scalarCases: scalarCases.length,
+      nativeScalarResults: nativeScalarResultsPath,
+      scalarBenchmarkRounds: scalarBenchmarkRounds.toString(),
+      scalarElapsedMs,
+      scalarLogicalElementsPerSecond:
+        Number(scalarBenchmarkRounds) / (scalarElapsedMs / 1000),
+      scalarResult: scalarActual.toString(),
       allocations: asUInt64(allocations()).toString(),
       deallocations: asUInt64(deallocations()).toString(),
       liveObjects: asUInt64(liveObjects()).toString(),
@@ -381,6 +529,8 @@ console.log(
       closureDeallocations:
         asUInt64(closureDeallocations()).toString(),
       arrayDeallocations: asUInt64(arrayDeallocations()).toString(),
+      scalarArrayDeallocations:
+        asUInt64(scalarArrayDeallocations()).toString(),
       stringDeallocations: asUInt64(stringDeallocations()).toString(),
     },
     null,

@@ -84,6 +84,21 @@ export function expectedWasiCoreChecksum(rounds, seed) {
   return (closureValue + labelByteLength) & mask;
 }
 
+export function expectedWasiScalarChecksum(rounds, seed) {
+  let remaining = rounds;
+  let state = seed;
+  let byteSum = 0n;
+
+  while (remaining !== 0n) {
+    byteSum = (byteSum + (state & 0xffn)) & mask;
+    state = (state * multiplier + increment) & mask;
+    remaining -= 1n;
+  }
+
+  const first = (byteSum + rounds + seed) & mask;
+  return ((first ^ rounds) + seed) & mask;
+}
+
 export function expectedRuntimeChecksum(rounds, seed) {
   let remaining = rounds;
   let next = seed;

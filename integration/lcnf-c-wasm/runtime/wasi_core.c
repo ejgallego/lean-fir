@@ -12,9 +12,9 @@ _Static_assert(
 This is the single-threaded core-object subset of Lean's runtime. It uses the
 object layout, allocation paths, and reference-count ABI from the pinned
 public lean.h. The admitted large objects are closures, ordinary object
-arrays, and strings. Other object kinds, partial or higher-arity application,
-and multi-threaded reference counts fail closed instead of acquiring partial
-host-service implementations.
+arrays, scalar byte arrays, and strings. Other object kinds, partial
+application, and multi-threaded reference counts fail closed instead of
+acquiring partial host-service implementations.
 */
 
 static uint64_t g_allocations;
@@ -24,6 +24,7 @@ static uint64_t g_peak_live_objects;
 static uint64_t g_constructor_deallocations;
 static uint64_t g_closure_deallocations;
 static uint64_t g_array_deallocations;
+static uint64_t g_scalar_array_deallocations;
 static uint64_t g_string_deallocations;
 
 static LEAN_NORETURN void fir_lcnf_c_wasi_runtime_abort(void) {
@@ -84,6 +85,9 @@ static void fir_lcnf_c_wasi_free_storage(lean_object *object) {
             break;
         case LeanArray:
             ++g_array_deallocations;
+            break;
+        case LeanScalarArray:
+            ++g_scalar_array_deallocations;
             break;
         case LeanString:
             ++g_string_deallocations;
@@ -155,7 +159,7 @@ LEAN_EXPORT void lean_dec_ref_cold(lean_object *object) {
         } else if (tag == LeanArray) {
             field = lean_array_cptr(object);
             end = field + lean_array_size(object);
-        } else if (tag != LeanString) {
+        } else if (tag != LeanScalarArray && tag != LeanString) {
             fir_lcnf_c_wasi_runtime_abort();
         }
 
@@ -263,6 +267,73 @@ LEAN_EXPORT lean_object *lean_array_push(
     return result;
 }
 
+LEAN_EXPORT lean_object *lean_copy_byte_array(lean_object *array) {
+    size_t size;
+    size_t capacity;
+    lean_object *result;
+
+    if (!lean_is_sarray(array) ||
+        lean_sarray_elem_size(array) != 1 ||
+        array->m_rc < 0) {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+    size = lean_sarray_size(array);
+    capacity = lean_sarray_capacity(array);
+    if (capacity < size ||
+        lean_alloc_sarray_would_overflow(1, capacity)) {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+
+    result = lean_alloc_sarray(1, size, capacity);
+    memcpy(lean_sarray_cptr(result), lean_sarray_cptr(array), size);
+    lean_dec(array);
+    return result;
+}
+
+LEAN_EXPORT lean_object *lean_byte_array_push(
+    lean_object *array,
+    uint8_t value) {
+    size_t size;
+    size_t capacity;
+    size_t minimum_capacity;
+    lean_object *result;
+
+    if (!lean_is_sarray(array) ||
+        lean_sarray_elem_size(array) != 1 ||
+        array->m_rc < 0) {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+    size = lean_sarray_size(array);
+    capacity = lean_sarray_capacity(array);
+    if (capacity < size || size == SIZE_MAX) {
+        lean_internal_panic_overflow();
+    }
+    minimum_capacity = size + 1;
+
+    if (lean_is_exclusive(array) && capacity >= minimum_capacity) {
+        result = array;
+    } else {
+        size_t new_capacity = capacity;
+
+        if (new_capacity < minimum_capacity) {
+            if (minimum_capacity > SIZE_MAX / 2) {
+                lean_internal_panic_overflow();
+            }
+            new_capacity = minimum_capacity * 2;
+        }
+        if (lean_alloc_sarray_would_overflow(1, new_capacity)) {
+            lean_internal_panic_overflow();
+        }
+        result = lean_alloc_sarray(1, size, new_capacity);
+        memcpy(lean_sarray_cptr(result), lean_sarray_cptr(array), size);
+        lean_dec(array);
+    }
+
+    lean_sarray_cptr(result)[size] = value;
+    lean_sarray_set_size(result, minimum_capacity);
+    return result;
+}
+
 static lean_object *fir_lcnf_c_wasi_ensure_string_capacity(
     lean_object *string,
     size_t extra) {
@@ -354,6 +425,10 @@ typedef lean_object *(*fir_lcnf_c_wasi_fn1)(lean_object *);
 typedef lean_object *(*fir_lcnf_c_wasi_fn2)(
     lean_object *,
     lean_object *);
+typedef lean_object *(*fir_lcnf_c_wasi_fn3)(
+    lean_object *,
+    lean_object *,
+    lean_object *);
 
 static fir_lcnf_c_wasi_fn1 fir_lcnf_c_wasi_closure_fn1(
     lean_object *closure) {
@@ -370,6 +445,18 @@ static fir_lcnf_c_wasi_fn1 fir_lcnf_c_wasi_closure_fn1(
 static fir_lcnf_c_wasi_fn2 fir_lcnf_c_wasi_closure_fn2(
     lean_object *closure) {
     fir_lcnf_c_wasi_fn2 function;
+    void *raw = lean_closure_fun(closure);
+
+    _Static_assert(
+        sizeof(function) == sizeof(raw),
+        "WASI closure code and data pointers must have the same size");
+    memcpy(&function, &raw, sizeof(function));
+    return function;
+}
+
+static fir_lcnf_c_wasi_fn3 fir_lcnf_c_wasi_closure_fn3(
+    lean_object *closure) {
+    fir_lcnf_c_wasi_fn3 function;
     void *raw = lean_closure_fun(closure);
 
     _Static_assert(
@@ -422,8 +509,56 @@ LEAN_EXPORT lean_object *lean_apply_1(
     return result;
 }
 
+LEAN_EXPORT lean_object *lean_apply_2(
+    lean_object *closure,
+    lean_object *first,
+    lean_object *second) {
+    unsigned arity;
+    unsigned fixed;
+    bool exclusive;
+    lean_object *result;
+
+    if (lean_is_scalar(closure)) {
+        lean_dec(first);
+        lean_dec(second);
+        return closure;
+    }
+    if (!lean_is_closure(closure) || closure->m_rc < 0) {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+
+    arity = lean_closure_arity(closure);
+    fixed = lean_closure_num_fixed(closure);
+    if (arity != fixed + 2) {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+    exclusive = lean_is_exclusive(closure);
+
+    if (arity == 2) {
+        result = fir_lcnf_c_wasi_closure_fn2(closure)(first, second);
+    } else if (arity == 3) {
+        lean_object *captured = lean_closure_get(closure, 0);
+        if (!exclusive) {
+            lean_inc(captured);
+        }
+        result = fir_lcnf_c_wasi_closure_fn3(closure)(
+            captured,
+            first,
+            second);
+    } else {
+        fir_lcnf_c_wasi_runtime_abort();
+    }
+
+    if (exclusive) {
+        lean_free_object(closure);
+    } else {
+        lean_dec_ref(closure);
+    }
+    return result;
+}
+
 LEAN_EXPORT uint32_t fir_lcnf_c_wasi_runtime_abi(void) {
-    return 2;
+    return 3;
 }
 
 LEAN_EXPORT uint64_t fir_lcnf_c_wasi_allocations(void) {
@@ -452,6 +587,10 @@ LEAN_EXPORT uint64_t fir_lcnf_c_wasi_closure_deallocations(void) {
 
 LEAN_EXPORT uint64_t fir_lcnf_c_wasi_array_deallocations(void) {
     return g_array_deallocations;
+}
+
+LEAN_EXPORT uint64_t fir_lcnf_c_wasi_scalar_array_deallocations(void) {
+    return g_scalar_array_deallocations;
 }
 
 LEAN_EXPORT uint64_t fir_lcnf_c_wasi_string_deallocations(void) {
