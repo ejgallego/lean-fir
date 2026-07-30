@@ -4121,6 +4121,18 @@ def retainedLargeNatState : MachineState :=
   { program := { decls := #[] }
     control := .code retainedLargeNatCode }
 
+theorem retainedLargeNatSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedLargeNatState := by
+  exact {
+    heap := by
+      simpa [retainedLargeNatState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [retainedLargeNatState, lookup] at found
+    frames := trivial
+  }
+
 /-- Compiler-facing regression for the paired branch: one concrete
 heap-backed retained literal takes one source and one target step and returns
 a post-state carrying the enlarged target-allocation ledger. -/
@@ -4176,6 +4188,55 @@ theorem retainedLargeNatExactStepLedgerPreserved
       (usedBound := UsedSubset.refl neutralUsed)
     retainedLargeNatState retainedLargeNatState programs frames joins env
       runtime step
+
+/-- The same concrete heap-backed literal allocation preserves the complete
+source ownership carrier while extending the paired address renaming. -/
+theorem retainedLargeNatExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedLargeNatState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedLargeNatState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedLargeNatState.program retainedLargeNatState.program := by
+    simpa [retainedLargeNatState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedLargeNatState.frames retainedLargeNatState.frames [] [] := by
+    simpa [retainedLargeNatState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedLargeNatState.joins retainedLargeNatState.joins := by
+    simpa [retainedLargeNatState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedLargeNatState.env retainedLargeNatState.env := by
+    simpa [retainedLargeNatState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedLargeNatState.runtime retainedLargeNatState.runtime
+        (envRootsOn neutralUsed retainedLargeNatState.env ++ [])
+        (envRootsOn neutralUsed retainedLargeNatState.env ++ []) := by
+    simpa [retainedLargeNatState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  simpa [retainedLargeNatState, retainedLargeNatCode,
+    retainedLargeNatDecl, letDecl] using
+    retainedLargeNatStepBinderReady
+      |>.match_retainedLiteralLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2)
+        (usedBound := UsedSubset.refl neutralUsed)
+        retainedLargeNatState retainedLargeNatState programs frames joins env
+        runtime retainedLargeNatSourceOwnership step
 
 /-- The exact retained object-projection fixture publishes both the returned
 binder and the object local read by the let value. -/
@@ -5050,6 +5111,18 @@ def retainedCtorState : MachineState :=
   { program := { decls := #[] }
     control := .code retainedCtorCode }
 
+theorem retainedCtorSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedCtorState := by
+  exact {
+    heap := by
+      simpa [retainedCtorState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [retainedCtorState, lookup] at found
+    frames := trivial
+  }
+
 /-- Compiler-facing regression for retained constructors: the one-field
 constructor takes one source and one target step and exposes the enlarged
 allocation ledger selected by their paired heap allocation. -/
@@ -5105,6 +5178,55 @@ theorem retainedCtorExactStepLedgerPreserved
       (usedBound := UsedSubset.refl neutralUsed)
       retainedCtorState retainedCtorState programs frames joins env runtime
       step
+
+/-- The paired retained-constructor allocation also preserves the source
+heap/environment/frame ownership carrier. -/
+theorem retainedCtorExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedCtorState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedCtorState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedCtorState.program retainedCtorState.program := by
+    simpa [retainedCtorState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedCtorState.frames retainedCtorState.frames [] [] := by
+    simpa [retainedCtorState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedCtorState.joins retainedCtorState.joins := by
+    simpa [retainedCtorState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedCtorState.env retainedCtorState.env := by
+    simpa [retainedCtorState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedCtorState.runtime retainedCtorState.runtime
+        (envRootsOn neutralUsed retainedCtorState.env ++ [])
+        (envRootsOn neutralUsed retainedCtorState.env ++ []) := by
+    simpa [retainedCtorState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  simpa [retainedCtorState, retainedCtorCode,
+    retainedCtorDecl, letDecl] using
+    retainedCtorStepBinderReady
+      |>.match_retainedCtorLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2)
+        (usedBound := UsedSubset.refl neutralUsed)
+        retainedCtorState retainedCtorState programs frames joins env runtime
+        retainedCtorSourceOwnership step
 
 /-- A nullary constructor is immediate: the ledger-aware constructor runtime
 result keeps both empty runtimes, the empty renaming, and target frontier
