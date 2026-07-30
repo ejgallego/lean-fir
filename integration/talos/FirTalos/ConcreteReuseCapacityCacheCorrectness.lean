@@ -271,6 +271,46 @@ theorem cacheSetStep_preserves_mappedHeaderCapacity_of_related
   simpa [replaceRuntime, clearFailure] using capacity
 
 /--
+Facts-aware ordinary-token transport for a result-binding step.
+
+Unlike `OrdinaryPersistenceTransport`, this boundary does not require every
+source heap location to remain ordinary. It preserves exactly the retained
+reuse-token facts that survive destination erasure. This is the right
+contract for cache publication, which intentionally makes the returned graph
+persistent and must therefore invalidate or exclude aliases into that graph.
+-/
+def ReuseTokenOrdinaryBindTransport
+    (facts : ReuseCapacityFacts) (resultId : FVarId)
+    (before after : RuntimeState)
+    (sourceEnv : Env) (result : Value) : Prop :=
+  ReuseTokenOrdinaryRel facts before sourceEnv →
+    ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts resultId) after
+      (bind sourceEnv resultId result)
+
+/-- An all-location ordinary-persistence theorem remains a sufficient, but no
+longer necessary, implementation of the facts-aware binding boundary. -/
+theorem ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {before after : RuntimeState}
+    {sourceEnv : Env} {result : Value}
+    (transport : OrdinaryPersistenceTransport before after) :
+    ReuseTokenOrdinaryBindTransport facts resultId before after sourceEnv
+      result := by
+  intro ordinary
+  exact ordinary.eraseBind transport
+
+/-- Clearing retained facts is a conservative alias-safe cache boundary:
+there is no ordinary-token obligation regardless of which graph publication
+makes persistent. -/
+theorem ReuseTokenOrdinaryBindTransport.empty
+    (resultId : FVarId) (before after : RuntimeState)
+    (sourceEnv : Env) (result : Value) :
+    ReuseTokenOrdinaryBindTransport [] resultId before after sourceEnv
+      result := by
+  intro ordinary tokenId available location cell tracked
+  simp [eraseReuseCapacityFact, findReuseCapacityEvidence?] at tracked
+
+/--
 One lazy-cache result with all transports needed by the facts-indexed
 resource frame.
 
@@ -282,6 +322,7 @@ immutable-table preservation, and residual allocation budget.
 -/
 structure BudgetedCapacityPreservingLazyStep
     (path : LazyCachePath)
+    (facts : ReuseCapacityFacts)
     (context : Fir.Wasm.Context)
     (sourceFunction : Fir.Wasm.Function)
     (module : Wasm.Module)
@@ -306,8 +347,9 @@ structure BudgetedCapacityPreservingLazyStep
       initialWitness nextWitness
   targetSet :
     locals.set? resultIndex physical = some nextLocals
-  ordinaryTransport :
-    OrdinaryPersistenceTransport sourceRuntime nextRuntime
+  ordinaryFrame :
+    ReuseTokenOrdinaryBindTransport facts decl.fvarId sourceRuntime
+      nextRuntime sourceEnv sourceValue
   witnessTransport :
     WitnessTransport initialWitness nextWitness
   capacityTransport :
@@ -336,6 +378,7 @@ value. The only target mutation is the checked caller-local write; host state,
 the heap, and the representation witness are unchanged.
 -/
 theorem BudgetedCapacityPreservingLazyStep.hit
+    {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
     {sourceFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -368,7 +411,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit
       StateRelated sourceFunction sourceRuntime
         (bind sourceEnv decl.fvarId sourceValue) initial nextLocals
         initialWitness) :
-    BudgetedCapacityPreservingLazyStep .hit context sourceFunction module
+    BudgetedCapacityPreservingLazyStep .hit facts context sourceFunction module
       hostEnv sourceExternals decl continuation
       [.globalGet flagIndex, .iff 0 0 [] missBody, .globalGet valueIndex]
       sourceRuntime sourceRuntime sourceEnv sourceValue initial initial locals
@@ -377,7 +420,9 @@ theorem BudgetedCapacityPreservingLazyStep.hit
     simulates := lazyLetStepSimulates_hit sourceStep initialRelated
       flagPublished valuePublished targetSet rfl nextRelated
     targetSet
-    ordinaryTransport := OrdinaryPersistenceTransport.refl sourceRuntime
+    ordinaryFrame :=
+      ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
+        (OrdinaryPersistenceTransport.refl sourceRuntime)
     witnessTransport := WitnessTransport.refl initialWitness
     capacityTransport :=
       HeaderCapacityTransport.refl initial.host.runtime.heap initialWitness
@@ -396,6 +441,7 @@ compiler-anchored lazy-cache theorem; this constructor centralizes the
 additional W6 frame obligations and path-dependent cost.
 -/
 theorem BudgetedCapacityPreservingLazyStep.miss
+    {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
     {sourceFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -419,8 +465,9 @@ theorem BudgetedCapacityPreservingLazyStep.miss
         initialWitness nextWitness)
     (targetSet :
       locals.set? resultIndex physical = some nextLocals)
-    (ordinaryTransport :
-      OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (ordinaryFrame :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId sourceRuntime
+        nextRuntime sourceEnv sourceValue)
     (witnessTransport :
       WitnessTransport initialWitness nextWitness)
     (capacityTransport :
@@ -440,13 +487,13 @@ theorem BudgetedCapacityPreservingLazyStep.miss
           initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
             nextStore.host.runtime.heap.AddressSpaceBudget
               (remainingBytes - stepCost)) :
-    BudgetedCapacityPreservingLazyStep .miss context sourceFunction module
+    BudgetedCapacityPreservingLazyStep .miss facts context sourceFunction module
       hostEnv sourceExternals decl continuation targetValue sourceRuntime
       nextRuntime sourceEnv sourceValue initial nextStore locals nextLocals
       resultIndex initialWitness nextWitness physical stepCost := {
   simulates
   targetSet
-  ordinaryTransport
+  ordinaryFrame
   witnessTransport
   capacityTransport
   externalsPreserved
@@ -466,6 +513,7 @@ compiler-anchored miss-body theorem and the surrounding flag conditional
 directly.
 -/
 theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
+    {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
@@ -532,8 +580,9 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
         (bind sourceEnv decl.fvarId sourceValue)
         (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
         nextWitness)
-    (ordinaryTransport :
-      OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (ordinaryFrame :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId sourceRuntime
+        nextRuntime sourceEnv sourceValue)
     (witnessTransport :
       WitnessTransport initialWitness nextWitness)
     (capacityTransport :
@@ -556,7 +605,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
             ((writeWasmGlobal valueStore flagIndex
                 (.i32 1)).host.runtime.heap).AddressSpaceBudget
               (remainingBytes - stepCost)) :
-    BudgetedCapacityPreservingLazyStep .miss context callerFunction module
+    BudgetedCapacityPreservingLazyStep .miss facts context callerFunction module
       hostEnv sourceExternals decl continuation
       [.globalGet flagIndex,
         .iff 0 0 [] [
@@ -596,7 +645,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
         resultIndex initialWitness nextWitness :=
     lazyLetStepSimulates_miss sourceStep initialRelated flagEmpty missBody
       nextRelated
-  exact .miss simulates targetSet ordinaryTransport witnessTransport
+  exact .miss simulates targetSet ordinaryFrame witnessTransport
     capacityTransport externalsPreserved hostDescriptorsPreserved
     witnessDescriptorsPreserved residualBudget
 
@@ -612,6 +661,7 @@ implementation, so the residual address-space budget and the two Wasm
 -/
 theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
+    {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
@@ -675,8 +725,9 @@ theorem
         (bind sourceEnv decl.fvarId sourceValue)
         (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
         callWitness)
-    (publicationOrdinary :
-      OrdinaryPersistenceTransport callRuntime nextRuntime)
+    (publicationFrame :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime nextRuntime
+        sourceEnv sourceValue)
     (resultKindEq : resultKind = kind)
     (cacheFound :
       afterCall.host.runtime.globals.find? declaration = some cacheSlot)
@@ -689,7 +740,7 @@ theorem
     (publicationDescriptors :
       (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
         afterCall.host.closureDescriptors)
-    : BudgetedCapacityPreservingLazyStep .miss context callerFunction module
+    : BudgetedCapacityPreservingLazyStep .miss facts context callerFunction module
       hostEnv sourceExternals decl continuation
       [.globalGet flagIndex,
         .iff 0 0 [] [
@@ -710,7 +761,8 @@ theorem
     importFound hostSatisfies importInBounds contractFound parameterCount
     resultCount operation valueGlobal valueStoreEq flagGlobal distinct
     targetSet nextRelated
-  · exact callee.ordinaryTransport.trans publicationOrdinary
+  · intro ordinary
+    exact publicationFrame (ordinary.transport callee.ordinaryTransport)
   · exact callee.capacityPreserving.witnessTransport
   · apply callee.capacityPreserving.capacityTransport.transAcross
       callee.capacityPreserving.witnessTransport
@@ -762,10 +814,10 @@ theorem
         locals initialWitness)
     (stepFits : stepCost ≤ remainingBytes)
     (step :
-      BudgetedCapacityPreservingLazyStep path context sourceFunction module
-        hostEnv sourceExternals decl continuation targetValue sourceRuntime
-        nextRuntime sourceEnv sourceValue initial nextStore locals nextLocals
-        resultIndex initialWitness nextWitness physical stepCost)
+      BudgetedCapacityPreservingLazyStep path facts context sourceFunction
+        module hostEnv sourceExternals decl continuation targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore locals
+        nextLocals resultIndex initialWitness nextWitness physical stepCost)
     (resultFound :
       findFVar? (functionBindings sourceFunction) decl.fvarId =
         some resultIndex)
@@ -803,7 +855,7 @@ theorem
   have nextOrdinary :
       ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
         nextRuntime (bind sourceEnv decl.fvarId sourceValue) := by
-    simpa using ordinaryTokens.eraseBind step.ordinaryTransport
+    exact step.ordinaryFrame ordinaryTokens
   have lengths := FirTalos.Correctness.locals_lengths_of_set? step.targetSet
   have nextFrameAligned :
       ConcreteLocalFrameAligned sourceFunction nextRuntime
@@ -873,10 +925,10 @@ def LazyCacheImplementation
       findFVar? (functionBindings sourceFunction) decl.fvarId =
         some resultIndex →
       ∃ nextStore nextLocals nextWitness physical,
-        BudgetedCapacityPreservingLazyStep path context sourceFunction module
-            hostEnv sourceExternals decl continuation targetValue sourceRuntime
-            nextRuntime sourceEnv sourceValue initial nextStore locals
-            nextLocals resultIndex initialWitness nextWitness physical
+        BudgetedCapacityPreservingLazyStep path facts context sourceFunction
+            module hostEnv sourceExternals decl continuation targetValue
+            sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+            locals nextLocals resultIndex initialWitness nextWitness physical
             stepCost ∧
           reuseCapacityLetFacts? facts decl =
             some (eraseReuseCapacityFact facts decl.fvarId)

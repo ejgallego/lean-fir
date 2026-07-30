@@ -4834,10 +4834,24 @@ The last publication-side issue is not an unconditional preservation theorem:
 cacheing deliberately marks the returned graph persistent, so a retained
 reuse token aliasing that graph ceases to be ordinary. This is a concrete
 lazy-cache instance of
-`FIR-BUG-wasm-none-reuse-retained-token-ordinary`. The next slice must make
-lazy fact transfer invalidate such aliases or require a proved reachability
-disjointness condition; it must not postulate the current all-location
-`OrdinaryPersistenceTransport`.
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary`.
+
+W6.6gzc removes that overstrong premise from the lazy-step interface.
+`ReuseTokenOrdinaryBindTransport` is indexed by the authoritative fact map
+and preserves ordinaryness exactly for the retained facts that survive
+destination erasure. `BudgetedCapacityPreservingLazyStep`, its executable
+miss constructors, and the generic lazy-cache implementation now consume that
+facts-aware frame. The former all-location
+`OrdinaryPersistenceTransport` remains only a sufficient adapter for steps
+that genuinely preserve every ordinary cell; it is no longer required of
+cache publication. The empty-fact theorem records the conservative alias-safe
+endpoint, where publication has no retained ordinary-token obligation.
+
+The remaining validator/integration task is to invalidate facts whose token
+locations may be reachable from the published graph, or to provide a proved
+reachability-disjointness condition for the facts it retains. W6 can now state
+and prove that semantic boundary without weakening the concrete runtime or
+assuming an invalid all-location theorem.
 
 ## Parallel agent packages
 

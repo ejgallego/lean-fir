@@ -125,7 +125,12 @@ recursively marks the returned graph persistent, so any retained token whose
 location is reachable from that result must be invalidated. W6 proves that
 publication preserves heap frontier and mapped allocation extents, but
 correctly does not claim all-location `OrdinaryPersistenceTransport` for this
-ownership-changing step.
+ownership-changing step. The lazy-step boundary now uses
+`ReuseTokenOrdinaryBindTransport`, indexed by the actual fact map and result
+binding, so it requires ordinaryness only for retained facts that survive
+destination erasure. Existing all-location transport theorems remain
+sufficient adapters for genuinely ordinary-preserving operations; an empty
+fact map discharges the publication boundary unconditionally.
 
 ## Upstream tracking
 
@@ -137,4 +142,6 @@ Confirmed and narrowed. Successful reuse now has source-level ordinary-cell
 preservation and authoritative fact-insertion transfer. Add reset-token
 validity invalidation/preservation to every other shared validator transfer,
 then derive the input ordinary source-cell fact compositionally in the
-certificate-free compiler state relation.
+certificate-free compiler state relation. Lazy cache composition no longer
+assumes the false all-location publication property; its remaining obligation
+is precisely alias invalidation or proved disjointness for each retained fact.

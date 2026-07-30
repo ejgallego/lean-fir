@@ -789,7 +789,12 @@ acceptance tests pass.
    publication-capacity transport from generated cache-slot facts.
    The remaining ordinary-token question is provenance-sensitive rather than
    an unconditional runtime invariant: a token aliasing the cached graph is
-   invalidated when publication marks that graph persistent. Resolve that
+   invalidated when publication marks that graph persistent.
+   `ReuseTokenOrdinaryBindTransport` now indexes the lazy-step theorem by the
+   actual authoritative fact map and asks only for ordinaryness of facts that
+   survive result-destination erasure. The all-location persistence theorem is
+   a sufficient adapter rather than the cache contract, and an empty fact map
+   is a proved conservative endpoint. Resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` instance with
    alias-invalidating fact transfer or proved graph disjointness, then close
    the generated-environment selection conditions.
