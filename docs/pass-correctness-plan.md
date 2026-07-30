@@ -1747,8 +1747,23 @@ the existing nullary-`.fap` semantic discrepancy.
    invocation now recovers captured fixed arguments from heap ownership and
    preserves the carrier through full body entry and re-partial allocation.
    The unified internal dispatcher therefore has no remaining control-form
-   gap. Next make the source-side external-response ownership obligation
-   explicit and carry it through waiting/resumption.
+   gap. `SourceExternalSpecOwnershipCompatible` now states the source-side
+   foreign-response ownership obligation and preserves the carrier through
+   waiting/resumption. `SourceOwnedInvariantMachineRelatedWith` packages that
+   carrier with the client static invariant and the non-lockstep relation, and
+   `ElimDeadSourceOwnedExactContract` lifts it to the checked whole-program
+   endpoint. Concrete allocation-plus-write and reset/reuse clients reach
+   `LoweringCorrect` through that endpoint. Reset readiness now consumes the
+   source carrier: generic local-shape bridges derive post-reset freshness
+   from `HeapOwnershipBelowFrontier` for both empty targets and
+   target-ledger/source-only-closure shapes.
+   The next structural gap is to combine source ownership and the exact target
+   allocation ledger in one relation and contract. The current source-owned
+   contract forgets the target ledger, while the ledger exact-ownership
+   contract does not carry source ownership. Prove source ownership
+   preservation independently over structural source steps, package both
+   carriers in one non-lockstep simulation, and exercise it on a nonempty
+   target reset/reuse client.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
