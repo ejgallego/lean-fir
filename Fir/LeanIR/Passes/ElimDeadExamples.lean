@@ -8465,6 +8465,194 @@ theorem deletedObjectSetGlobalStepOwnershipPreserved
       deletedObjectSetExactMachineReadyAt rfl
       deletedObjectSetSourceMachineOwnershipBelowFrontier step
 
+/-- A one-declaration program for exercising named invocation after active
+code has transferred control to the whole-machine dispatcher. -/
+def ownershipNamedProgram : ImpureProgram :=
+  { decls := #[firstDecl] }
+
+def ownershipNamedPartialState : MachineState :=
+  { program := ownershipNamedProgram
+    control := .invokeName `first #[.erased] }
+
+def ownershipNamedPartialAfterState : MachineState :=
+  { ownershipNamedPartialState with
+    runtime :=
+      (alloc ownershipNamedPartialState.runtime
+        (.closure `first firstDecl.params.size #[.erased])).1
+    control :=
+      .yielded
+        (.object
+          (alloc ownershipNamedPartialState.runtime
+            (.closure `first firstDecl.params.size #[.erased])).2) }
+
+theorem ownershipNamedPartialStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipNamedPartialState := by
+  exact {
+    heap := by
+      simpa [ownershipNamedPartialState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [ownershipNamedPartialState, lookup] at found
+    frames := trivial
+  }
+
+theorem ownershipNamedPartialArgumentsBelowFrontier :
+    HeapLocationsBelowFrontier
+      ownershipNamedPartialState.runtime #[.erased].toList := by
+  intro location member
+  simp at member
+
+/-- The concrete under-application branch allocates a closure from the
+published named-call argument and advances the source frontier from zero to
+one. -/
+theorem ownershipNamedPartialCoreStep :
+    coreStep ownershipNamedPartialState =
+      .next ownershipNamedPartialAfterState := by
+  rfl
+
+theorem ownershipNamedPartialStepOwnershipPreserved :
+    SourceMachineOwnershipBelowFrontier
+      ownershipNamedPartialAfterState :=
+  SourceMachineOwnershipBelowFrontier.invokeNameNext
+    (name := `first) (arguments := #[.erased])
+    ownershipNamedPartialStateBelowFrontier
+    ownershipNamedPartialArgumentsBelowFrontier
+    (by simpa [ownershipNamedPartialState] using
+      ownershipNamedPartialCoreStep)
+
+def ownershipNamedFullState : MachineState :=
+  { program := ownershipNamedProgram
+    control := .invokeName `first #[.erased, .erased] }
+
+def ownershipNamedFullAfterState : MachineState :=
+  { ownershipNamedFullState with
+    env := bind (bind [] x .erased) y .erased
+    joins := []
+    control := .code (.return x) }
+
+theorem ownershipNamedFullStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipNamedFullState := by
+  exact {
+    heap := by
+      simpa [ownershipNamedFullState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [ownershipNamedFullState, lookup] at found
+    frames := trivial
+  }
+
+theorem ownershipNamedFullCoreStep :
+    coreStep ownershipNamedFullState =
+      .next ownershipNamedFullAfterState := by
+  rfl
+
+/-- The full-application branch installs both declaration parameters into a
+fresh environment without weakening the complete ownership carrier. -/
+theorem ownershipNamedFullStepOwnershipPreserved :
+    SourceMachineOwnershipBelowFrontier ownershipNamedFullAfterState :=
+  SourceMachineOwnershipBelowFrontier.invokeNameNext
+    (name := `first) (arguments := #[.erased, .erased])
+    ownershipNamedFullStateBelowFrontier
+    (by
+      intro location member
+      simp at member)
+    (by simpa [ownershipNamedFullState] using ownershipNamedFullCoreStep)
+
+theorem ownershipNamedProgramBinderReadyRelated :
+    ProgramRelated (BinderReadyShadowCodeRelated 2)
+      ownershipNamedProgram ownershipNamedProgram := by
+  have relation := deletedPapProgramBinderReadyRelated
+  unfold ProgramRelated at relation ⊢
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [firstDecl] [firstDecl]
+  change ListRel (DeclRelated (BinderReadyShadowCodeRelated 2))
+    [firstDecl, fixtureDecl `main deletedPapBefore]
+    [firstDecl, fixtureDecl `main deletedPapAfter] at relation
+  cases relation with
+  | cons head tail =>
+      exact .cons head .nil
+
+theorem ownershipNamedFullExactRelated :
+    SomeBinderReadyReachableMachineRelated 2
+      ownershipNamedFullState ownershipNamedFullState := by
+  have arguments :
+      ArrayRel (ValueRel emptyAddressRenaming)
+        #[.erased, .erased] #[.erased, .erased] := by
+    change ListRel (ValueRel emptyAddressRenaming)
+      [.erased, .erased] [.erased, .erased]
+    exact .cons .erased (.cons .erased .nil)
+  refine ⟨emptyAddressRenaming,
+    #[.erased, .erased].toList, #[.erased, .erased].toList,
+    [], [], ?_, ?_, .nil, ?_⟩
+  · simpa [ownershipNamedFullState] using
+      ownershipNamedProgramBinderReadyRelated
+  · simpa [ownershipNamedFullState] using
+      (BinderReadyReachableControlRelated.invokeName
+        (fuel := 2) `first arguments)
+  · simpa [ownershipNamedFullState] using
+      emptyRuntime_shadowRelated_of_roots arguments
+
+/-- State-level exact dispatch combines the paired internal transition with
+the concrete source ownership theorem at a genuine full named call. -/
+theorem ownershipNamedFullGlobalStepOwnershipPreserved :
+    ∃ targetAfter,
+      coreStep ownershipNamedFullState = .next targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 2
+        ownershipNamedFullAfterState targetAfter ∧
+      SourceMachineOwnershipBelowFrontier
+        ownershipNamedFullAfterState :=
+  ownershipNamedFullExactRelated.matchInvokeNameNext_withOwnership
+    ownershipNamedFullStateBelowFrontier rfl
+    ownershipNamedFullCoreStep
+
+def ownershipNamedCacheRuntime : RuntimeState :=
+  { globals := [(`ownershipNamedCached, .erased)] }
+
+def ownershipNamedCacheState : MachineState :=
+  { program := { decls := #[] }
+    runtime := ownershipNamedCacheRuntime
+    control := .invokeName `ownershipNamedCached #[] }
+
+def ownershipNamedCacheAfterState : MachineState :=
+  { ownershipNamedCacheState with control := .yielded .erased }
+
+theorem ownershipNamedCacheStateBelowFrontier :
+    SourceMachineOwnershipBelowFrontier ownershipNamedCacheState := by
+  exact {
+    heap := by
+      constructor
+      · intro location cell found
+        simp [ownershipNamedCacheState, ownershipNamedCacheRuntime,
+          findCell?] at found
+      · intro parent cell child found member
+        simp [ownershipNamedCacheState, ownershipNamedCacheRuntime,
+          findCell?] at found
+    env := by
+      intro fvarId value found
+      simp [ownershipNamedCacheState, lookup] at found
+    frames := trivial
+  }
+
+theorem ownershipNamedCacheCoreStep :
+    coreStep ownershipNamedCacheState =
+      .next ownershipNamedCacheAfterState := by
+  rfl
+
+/-- The nullary cache-hit path changes only control and remains covered by
+the same named-invocation dispatcher. -/
+theorem ownershipNamedCacheStepOwnershipPreserved :
+    SourceMachineOwnershipBelowFrontier ownershipNamedCacheAfterState :=
+  SourceMachineOwnershipBelowFrontier.invokeNameNext
+    (name := `ownershipNamedCached) (arguments := #[])
+    ownershipNamedCacheStateBelowFrontier
+    (by
+      intro location member
+      simp at member)
+    (by simpa [ownershipNamedCacheState] using
+      ownershipNamedCacheCoreStep)
+
 /-- The first mutation in the closed regression takes one source step while
 the transformed target stutters at the live return. -/
 theorem deletedObjectSetSourceOnlyMachineStep :
