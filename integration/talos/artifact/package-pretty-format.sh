@@ -77,6 +77,8 @@ for file in "${runtime_files[@]}"; do
 done
 install -m 0644 "$root/scripts/wasm_assert.mjs" \
   "$stage/runtime/scripts/wasm_assert.mjs"
+install -m 0644 "$root/scripts/wasm_semantic_host.mjs" \
+  "$stage/runtime/scripts/wasm_semantic_host.mjs"
 
 node --input-type=module - "$stage" "$root" <<'NODE'
 import { createHash } from "node:crypto";
