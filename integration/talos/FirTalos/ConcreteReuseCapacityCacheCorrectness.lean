@@ -617,6 +617,17 @@ structure LazyCacheTableLayout (source : Fir.Wasm.Module) : Prop where
             source.cacheGlobalKinds[2 * index]? = some .uint32 ∧
             source.cacheGlobalKinds[2 * index + 1]? = some kind
 
+/-- The validator's executable uniqueness check is exactly `List.Nodup` under
+the lawful Boolean equality used by module names. -/
+theorem listAllUnique_eq_true_iff_nodup
+    {α : Type} [BEq α] [LawfulBEq α] (values : List α) :
+    Fir.Wasm.listAllUnique values = true ↔ values.Nodup := by
+  induction values with
+  | nil =>
+      simp [Fir.Wasm.listAllUnique]
+  | cons value rest ih =>
+      simp [Fir.Wasm.listAllUnique, ih]
+
 /--
 One generated lazy-cache slot is either unpublished on both sides or
 populated on both sides.
@@ -928,7 +939,8 @@ theorem LazyCacheGlobalsRel.publish
     {physical oldValue : Wasm.Value}
     (related :
       LazyCacheGlobalsRel witness source beforeRuntime beforeStore)
-    (initializerUnique : source.initializers.toList.Nodup)
+    (initializerUnique :
+      Fir.Wasm.listAllUnique source.initializers.toList = true)
     (initializerFound :
       source.initializers[index]? = some declaration)
     (signature :
@@ -996,6 +1008,9 @@ theorem LazyCacheGlobalsRel.publish
           source.initializers.toList[otherIndex]? =
             some otherDeclaration := by
         simpa using otherFound
+      have initializerNodup : source.initializers.toList.Nodup :=
+        (listAllUnique_eq_true_iff_nodup
+          source.initializers.toList).mp initializerUnique
       have differentDeclaration : otherDeclaration ≠ declaration := by
         intro declarationEq
         subst otherDeclaration
@@ -1006,7 +1021,7 @@ theorem LazyCacheGlobalsRel.publish
         have indexEq : otherIndex = index :=
           (List.getElem?_inj
             (List.getElem?_eq_some_iff.mp otherFoundList).1
-            initializerUnique).mp lookupEq
+            initializerNodup).mp lookupEq
         exact sameIndex indexEq
       have semanticLookup :
           findGlobal? nextRuntime.globals otherDeclaration =
@@ -1859,7 +1874,8 @@ theorem
         nextLocals resultIndex initialWitness nextWitness physical stepCost)
     (cacheTable :
       LazyCacheGlobalsRel nextWitness sourceModule callRuntime afterCache)
-    (initializerUnique : sourceModule.initializers.toList.Nodup)
+    (initializerUnique :
+      Fir.Wasm.listAllUnique sourceModule.initializers.toList = true)
     (initializerFound :
       sourceModule.initializers[cacheIndex]? = some declaration)
     (signature :
@@ -1989,6 +2005,164 @@ theorem
       nextDescriptorAgreement⟩⟩
 
 /--
+Canonical W6 program frame with generated lazy-cache state.
+
+This is the existing reuse-capacity, pure-external, and ownership frame plus
+the whole source/Wasm cache-table relation. Keeping the cache relation as the
+last conjunct lets non-cache operations use its ordinary transport theorem,
+while hit/miss operations supply their path-specific table transition.
+-/
+def ConcreteReuseCapacityCacheFrame
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (externals : ExternalImpl)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction externals
+      facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+      witness ∧
+    LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore
+
+/-- Lift an existing canonical entry frame to the cache-augmented invariant
+for the production adapter/Talos initial store. -/
+theorem ConcreteReuseCapacityCacheFrame.adaptedInitial
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : FirTalos.AdaptedModule}
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceExternals : ExternalImpl}
+    {concreteExternals : Fir.Wasm.Concrete.ConcreteExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (core :
+      ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        sourceExternals facts remainingBytes ({} : RuntimeState) sourceEnv
+        (initialStore sourceModule targetModule.wasmModule concreteExternals)
+        locals witness)
+    (layout : LazyCacheTableLayout sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok targetModule) :
+    ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+      sourceExternals facts remainingBytes ({} : RuntimeState) sourceEnv
+      (initialStore sourceModule targetModule.wasmModule concreteExternals)
+      locals witness := by
+  exact ⟨core,
+    LazyCacheGlobalsRel.adaptedInitial layout adapted witness
+      concreteExternals⟩
+
+/--
+Exact lazy-result reconstruction for the cache-augmented canonical frame.
+
+`cacheTransport` is the only additional operation-specific obligation beyond
+the existing budgeted lazy step. Hits instantiate it with whole-table
+transport; misses instantiate it with the pointwise publication theorem.
+The result uses the actual post-store and witness rather than an existential
+execution certificate.
+-/
+theorem ConcreteReuseCapacityCacheFrame.ofLazyCacheResult
+    {path : LazyCachePath}
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial nextStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {resultIndex remainingBytes stepCost : Nat}
+    {initialWitness nextWitness : RefinementWitness}
+    {physical : Wasm.Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (stepFits : stepCost ≤ remainingBytes)
+    (step :
+      BudgetedCapacityPreservingLazyStep path facts context sourceFunction
+        module hostEnv sourceExternals decl continuation targetValue
+        sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore locals
+        nextLocals resultIndex initialWitness nextWitness physical stepCost)
+    (cacheTransport :
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial →
+        LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (transfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId)) :
+    LazyLetStepSimulates path context sourceFunction module hostEnv
+          sourceExternals decl continuation targetValue sourceRuntime
+          nextRuntime sourceEnv sourceValue initial nextStore locals nextLocals
+          resultIndex initialWitness nextWitness ∧
+      nextStore.host.externals = initial.host.externals ∧
+        nextStore.host.closureDescriptors =
+            initial.host.closureDescriptors ∧
+          nextWitness.closureDescriptors =
+              initialWitness.closureDescriptors ∧
+            reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) ∧
+              ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                sourceExternals (eraseReuseCapacityFact facts decl.fvarId)
+                (remainingBytes - stepCost) nextRuntime
+                (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+                nextWitness := by
+  rcases invariant with
+    ⟨⟨⟨⟨initialRelated, ordinaryTokens, frameAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, initialCache⟩
+  have nextRelated :
+      ReuseCapacityStateRelated
+        (eraseReuseCapacityFact facts decl.fvarId) sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness :=
+    initialRelated.eraseResult step.simulates.2.2.1 resultFound
+      (localUpdate_of_set? step.targetSet) step.witnessTransport
+      step.capacityTransport
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) :=
+    step.ordinaryFrame ordinaryTokens
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? step.targetSet
+  have nextFrameAligned :
+      ConcreteLocalFrameAligned sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness :=
+    ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+  have nextBudget :
+      nextStore.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - stepCost) :=
+    step.residualBudget remainingBytes stepFits budget
+  have nextDescriptorAgreement :
+      nextStore.host.closureDescriptors =
+        nextWitness.closureDescriptors :=
+    step.hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans step.witnessDescriptorsPreserved.symm)
+  have nextCache :
+      LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
+    cacheTransport initialCache
+  exact ⟨step.simulates, step.externalsPreserved,
+    step.hostDescriptorsPreserved, step.witnessDescriptorsPreserved, transfer,
+    ⟨⟨⟨⟨nextRelated, nextOrdinary, nextFrameAligned, nextBudget⟩,
+      by rw [step.externalsPreserved]; exact integerImplementation,
+      by rw [step.externalsPreserved]; exact naturalImplementation,
+      by rw [step.externalsPreserved]; exact scalarImplementation⟩,
+      nextDescriptorAgreement⟩, nextCache⟩⟩
+
+/--
 Uniform implementation condition for compiler-generated lazy declarations.
 
 From the source path/admission and the actual compiler/adapter outputs, the
@@ -2023,12 +2197,13 @@ def LazyCacheImplementation
       {resultIndex stepCost : Nat}
       {remainingBytes : Nat}
       {initialWitness : RefinementWitness},
-    LazySupported path sourceRuntime sourceEnv decl continuation nextRuntime
+      LazySupported path sourceRuntime sourceEnv decl continuation nextRuntime
         sourceValue stepCost →
       SourceLazyLetResult path context sourceExternals sourceRuntime sourceEnv
         decl continuation nextRuntime sourceValue →
-      ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
-        sourceRuntime sourceEnv initial locals initialWitness →
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness →
       Fir.Wasm.compileLetValue context decl = .ok valueCode →
       instructions sourceModule sourceFunction labels valueCode =
         .ok targetValue →
@@ -2041,7 +2216,8 @@ def LazyCacheImplementation
             locals nextLocals resultIndex initialWitness nextWitness physical
             stepCost ∧
           reuseCapacityLetFacts? facts decl =
-            some (eraseReuseCapacityFact facts decl.fvarId)
+              some (eraseReuseCapacityFact facts decl.fvarId) ∧
+            LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore
 
 /-- A uniform lazy-declaration implementation instantiates the generic cache
 law for the canonical mixed frame. -/
@@ -2061,15 +2237,20 @@ theorem LazyCacheImplementation.runtimeRefines
         hostEnv sourceExternals LazySupported) :
     ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels module hostEnv sourceExternals LazySupported
-      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+      (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
         sourceExternals) := by
   intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
     sourceValue valueCode targetValue initial locals resultIndex remainingBytes
     stepCost initialWitness supported stepFits invariant sourceStep
     valueCompiled valueAdapted resultFound
-  obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer⟩ :=
-    implementation supported sourceStep invariant.1.1 valueCompiled
+  obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer,
+      nextCache⟩ :=
+    implementation supported sourceStep invariant valueCompiled
       valueAdapted resultFound
-  exact invariant.ofLazyCacheResult stepFits step resultFound transfer
+  have reconstructed :=
+    invariant.ofLazyCacheResult stepFits step (fun _ => nextCache) resultFound
+      transfer
+  exact ⟨nextStore, nextLocals, nextWitness,
+    eraseReuseCapacityFact facts decl.fvarId, reconstructed⟩
 
 end FirTalos.Concrete

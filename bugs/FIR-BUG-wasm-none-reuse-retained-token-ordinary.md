@@ -173,3 +173,8 @@ table and budgeted miss are packaged at the same post-state. The remaining
 bug-specific obligation is unchanged: generated source execution must supply
 the publication equation and prove retained-token reachability disjointness,
 or shared validation must invalidate the affected facts.
+
+The cache table now lives in `ConcreteReuseCapacityCacheFrame`, and the
+uniform lazy implementation returns its successor together with the budgeted
+step. This closes invariant threading at the generic runtime-law boundary;
+it does not discharge the bug-specific publication/disjointness fact above.

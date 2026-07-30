@@ -824,10 +824,17 @@ acceptance tests pass.
    and the even/odd physical layout preserve every other source/target slot.
    `withPublishedCacheTable` packages the updated table with the exact
    budgeted miss result.
-   Derive `LazyCacheTableLayout` and initializer uniqueness from successful
-   generated module validation, extract the semantic empty/publication facts
-   from source miss execution, and thread the table through an augmented
-   canonical program invariant. Resolve the remaining
+   `ConcreteReuseCapacityCacheFrame` now carries the table alongside the
+   canonical reuse, pure-external, and ownership invariants.
+   Its exact lazy-result reconstruction accepts one path-specific cache
+   transition, and the strengthened uniform `LazyCacheImplementation` returns
+   the successor table. `adaptedInitial` establishes the augmented entry
+   frame. The validator's Boolean uniqueness check is proved equivalent to
+   `List.Nodup`.
+   Coordinate an integration-owned validator proof accessor deriving
+   `LazyCacheTableLayout` and the checked uniqueness equation from successful
+   validation; then extract the semantic empty/publication facts from source
+   miss execution. Resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the

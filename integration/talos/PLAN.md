@@ -4918,14 +4918,31 @@ the four required physical-index inequalities. The theorem also preserves
 entry. `withPublishedCacheTable` packages this update with the existing exact
 budgeted generated miss at one shared post-state, witness, and final store.
 
-The next generated-environment slice must carry `LazyCacheGlobalsRel` in an
-augmented canonical program frame and preserve it through declaration bodies
-that may themselves populate other cache slots. The miss side still
-separately owes extraction of semantic cache absence, the source publication
-equation, and retained-token disjointness (or validator invalidation) from the
-generated source execution. `LazyCacheTableLayout` and initializer uniqueness
-should ultimately be discharged from successful generated-module validation
-rather than restated by callers.
+W6.6gzh carries the table in the canonical program invariant.
+`ConcreteReuseCapacityCacheFrame` augments the existing reuse-capacity,
+pure-external, and ownership frame with `LazyCacheGlobalsRel`.
+`adaptedInitial` builds that frame over the production adapter/Talos entry
+store. `ofLazyCacheResult` reconstructs the exact successor frame from a
+budgeted lazy step plus one path-specific cache transition; it does not
+introduce an execution certificate or existential target state. The uniform
+`LazyCacheImplementation` law is correspondingly strengthened: an
+implementation now consumes the augmented frame and produces the successor
+cache table, and `runtimeRefines` targets the same augmented invariant.
+Declaration bodies that populate nested cache slots can therefore return
+their evolved table instead of being forced through an unchanged-globals
+premise.
+
+`listAllUnique_eq_true_iff_nodup` also connects the validator's executable
+initializer-uniqueness check to the exact separation fact used by publication.
+The monolithic `validateModuleShape` checker does not yet expose its
+per-initializer singleton-signature/layout facts as a reusable theorem.
+Because that validator surface is integration-owned, the next coordinated
+contract slice should export a proof accessor deriving
+`LazyCacheTableLayout` and the checked uniqueness equation from successful
+module validation; W6 should then remove those remaining restated inputs.
+Independently, the proof lane must extract semantic cache absence, the source
+publication equation, and retained-token disjointness (or validator
+invalidation) from generated source miss execution.
 
 ## Parallel agent packages
 
