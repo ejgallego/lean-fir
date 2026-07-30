@@ -47,6 +47,8 @@ async function artifactRecord(manifestPath, artifactPath) {
 const options = {
   exports: [],
   extraSources: [],
+  extraCSources: [],
+  runtimeMethods: [],
   compileFlags: [],
   linkFlags: [],
 };
@@ -78,11 +80,17 @@ for (let index = 0; index < args.length; index += 1) {
     case "--extra-source":
       options.extraSources.push(value);
       break;
+    case "--extra-c-source":
+      options.extraCSources.push(value);
+      break;
     case "--initializer":
       options.initializer = value;
       break;
     case "--export":
       options.exports.push(value);
+      break;
+    case "--runtime-method":
+      options.runtimeMethods.push(value);
       break;
     case "--start":
       options.start = value;
@@ -134,6 +142,7 @@ const wasmPath = resolve(options.wasm);
 const root = resolve(options.root);
 const entry = resolve(options.entry);
 const extraSources = options.extraSources.map((source) => resolve(source));
+const extraCSources = options.extraCSources.map((source) => resolve(source));
 const [moduleArtifact, wasmArtifact] = await Promise.all([
   artifactRecord(out, modulePath),
   artifactRecord(out, wasmPath),
@@ -147,6 +156,7 @@ const manifest = {
   sources: {
     entry: sourceId(root, entry),
     additional: extraSources.map((source) => sourceId(root, source)),
+    c: extraCSources.map((source) => sourceId(root, source)),
   },
   toolchain: {
     lean: {
@@ -174,6 +184,7 @@ const manifest = {
     initialize: "fir_lcnf_c_initialize",
     moduleInitializer: options.initializer,
     exports: options.exports,
+    runtimeMethods: options.runtimeMethods,
     start: options.start ?? null,
   },
   artifacts: {

@@ -58,6 +58,38 @@ The Emscripten build emits a deterministic manifest beside its `.mjs` and
 `emscripten-loader.mjs`, which verifies artifact lengths and SHA-256 digests
 before initialization.
 
+## One logical `prettyM` API, two packages
+
+Both paths now package a `Std.Format.prettyM` facade. The packages remain
+independent at the artifact boundary:
+
+| | FIR-native package | C/Emscripten package |
+| --- | --- | --- |
+| Adapter | `prettyM-browser-adapter.mjs` | `prettyM-emscripten-adapter.mjs` |
+| Physical input | Raw Lean objects built in module-owned memory | One private binary request copied through Emscripten `HEAPU8` |
+| Runtime | Zero-import resident runtime | Pinned full Lean runtime/Init/Std |
+| Loader | Direct `WebAssembly` package metadata | Verified Emscripten manifest loader |
+| Lifetime | Monotone module-owned arena | C-owned request/result buffers plus Lean runtime allocations |
+
+At the JavaScript level both adapters accept
+`lean-4.32-Std.Format.compact/v1` and return
+`{ trace: { text, events }, timings, memory }`. This is the common client
+surface; it does not imply a common raw Wasm ABI or interchangeable manifests.
+
+Build the C/Emscripten package and run the exact two-engine trace comparison:
+
+```sh
+integration/lcnf-c-wasm/package-prettyM-emscripten.sh
+```
+
+The check covers Unicode, line flattening, fill groups, alignment, signed
+nesting, arbitrary-precision tags and widths, nonzero starting columns, and
+repeated calls. See the
+[C/Emscripten package guide](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md)
+and the
+[FIR-native package guide](../integration/talos/artifact/prettyM-package/README.md)
+for client examples.
+
 ## What the common checkpoint does and does not guarantee
 
 Both paths consume final impure LCNF after Lean has made representation,
@@ -91,6 +123,9 @@ bash integration/talos/artifact/check.sh
 
 # Compiler-native freestanding and Emscripten profiles
 bash integration/lcnf-c-wasm/check-primary.sh
+
+# Exact prettyM comparison through both package facades
+bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 
 # Frozen optional WASI boundary
 bash integration/lcnf-c-wasm/check-wasi.sh

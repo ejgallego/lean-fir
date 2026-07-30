@@ -19,6 +19,9 @@ Options:
   --export <symbol>       Export a C identifier declared with @[export].
                          May be repeated.
   --extra-source <file>  Compile and link another Lean module. May be repeated.
+  --extra-c-source <file>
+                         Compile and link a C bridge. May be repeated.
+  --heap-view             Expose Module.HEAPU8 for bulk bridge transfers.
   --start <symbol>        Run a zero-argument IO UInt32 export after module init.
   --root <directory>      Lean source root (default: repository root).
   --out-dir <directory>  Artifact directory.
@@ -61,13 +64,28 @@ resolve_file() {
   printf '%s/%s\n' "$directory" "$(basename "$path")"
 }
 
+resolve_c_file() {
+  local path="$1"
+  local directory
+  if [[ ! -f "$path" ]]; then
+    die "C source does not exist: $path"
+  fi
+  if [[ "$path" != *.c ]]; then
+    die "C source must have a .c extension: $path"
+  fi
+  directory="$(cd "$(dirname "$path")" && pwd)"
+  printf '%s/%s\n' "$directory" "$(basename "$path")"
+}
+
 entry_source=""
 lean_root="$repo_root"
 out_dir=""
 artifact_name=""
 start_symbol=""
+heap_view=0
 declare -a exported_symbols=()
 declare -a extra_sources=()
+declare -a extra_c_sources=()
 declare -A seen_exports=()
 
 while (($# > 0)); do
@@ -86,6 +104,15 @@ while (($# > 0)); do
       require_option_value "$1" "$#"
       extra_sources+=("$2")
       shift 2
+      ;;
+    --extra-c-source)
+      require_option_value "$1" "$#"
+      extra_c_sources+=("$2")
+      shift 2
+      ;;
+    --heap-view)
+      heap_view=1
+      shift
       ;;
     --start)
       require_option_value "$1" "$#"
@@ -133,6 +160,9 @@ fi
 entry_source="$(resolve_file "$entry_source")"
 for index in "${!extra_sources[@]}"; do
   extra_sources[index]="$(resolve_file "${extra_sources[index]}")"
+done
+for index in "${!extra_c_sources[@]}"; do
+  extra_c_sources[index]="$(resolve_c_file "${extra_c_sources[index]}")"
 done
 if [[ ! -d "$lean_root" ]]; then
   die "Lean source root does not exist: $lean_root"
@@ -207,6 +237,7 @@ compile_flags=(
 declare -a sources=("$entry_source" "${extra_sources[@]}")
 declare -a generated_sources=()
 declare -a generated_objects=()
+declare -a extra_c_objects=()
 declare -A used_stems=()
 
 for source in "${sources[@]}"; do
@@ -226,6 +257,13 @@ for source in "${sources[@]}"; do
   generated_objects+=("$generated_o")
 done
 
+for index in "${!extra_c_sources[@]}"; do
+  source="${extra_c_sources[index]}"
+  object="$out_dir/$artifact_name.bridge.$index.o"
+  emcc "${compile_flags[@]}" -c "$source" -o "$object"
+  extra_c_objects+=("$object")
+done
+
 entry_generated_c="${generated_sources[0]}"
 mapfile -t module_initializers < <(
   sed -nE \
@@ -241,8 +279,8 @@ validate_c_identifier "module initializer" "$module_initializer"
 for symbol in "${exported_symbols[@]}"; do
   if ! grep -E -q \
     "^LEAN_EXPORT .*[[:space:]*]${symbol}\\(" \
-    "${generated_sources[@]}"; then
-    die "generated C does not declare requested symbol: $symbol"
+    "${generated_sources[@]}" "${extra_c_sources[@]}"; then
+    die "generated Lean/C sources do not declare requested symbol: $symbol"
   fi
 done
 if [[ -n "$start_symbol" ]] && ! grep -E -q \
@@ -287,9 +325,13 @@ link_flags=(
   -sWASM_BIGINT=1
   "-sEXPORTED_FUNCTIONS=$exported_functions"
 )
+if ((heap_view)); then
+  link_flags+=("-sEXPORTED_RUNTIME_METHODS=HEAPU8")
+fi
 
 em++ \
   "${generated_objects[@]}" \
+  "${extra_c_objects[@]}" \
   "$host_o" \
   "-Wl,--start-group" \
   "$lean_std" \
@@ -318,9 +360,15 @@ manifest_args=(
 for source in "${extra_sources[@]}"; do
   manifest_args+=(--extra-source "$source")
 done
+for source in "${extra_c_sources[@]}"; do
+  manifest_args+=(--extra-c-source "$source")
+done
 for symbol in "${exported_symbols[@]}"; do
   manifest_args+=(--export "$symbol")
 done
+if ((heap_view)); then
+  manifest_args+=(--runtime-method HEAPU8)
+fi
 if [[ -n "$start_symbol" ]]; then
   manifest_args+=(--start "$start_symbol")
 fi

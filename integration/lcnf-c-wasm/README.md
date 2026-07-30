@@ -71,8 +71,9 @@ with cross-origin-isolation headers and runs the same Init/Std surface in a
 headless browser.
 
 `build-emscripten.sh` is the reusable form of that pipeline. It accepts an
-entry Lean module, zero or more additional source modules, explicit C exports,
-and an optional zero-argument `IO UInt32` start action. It discovers the
+entry Lean module, zero or more additional Lean or C source modules, explicit
+C exports, an optional `HEAPU8` bulk-transfer view, and an optional
+zero-argument `IO UInt32` start action. It discovers the
 generated module initializer instead of guessing its encoded C name, links
 the pinned full runtime/Init/Std cone, and exports
 `fir_lcnf_c_initialize` as the mandatory host entry point. Requested exports
@@ -209,6 +210,54 @@ their declared Lean C ABI; scalar `@[export]` functions are the simplest host
 boundary. Use `--extra-source` for local generated modules that must be linked
 with the entry module. Deploy the `.manifest.json`, `.mjs`, and `.wasm` files
 together; the manifest filenames are relative to its own URL.
+
+## `prettyM` facade
+
+The C/Emscripten route has its own packaged `Std.Format.prettyM` facade:
+
+```sh
+integration/lcnf-c-wasm/package-prettyM-emscripten.sh
+```
+
+This does not merge the two Wasm packages. The C package keeps its verified
+Emscripten ES module, threaded full Lean runtime, manifest, and loader. The
+FIR-native package keeps its zero-import module-owned-memory ABI and resident
+runtime. Their JavaScript adapters intentionally accept the same compact
+`lean-4.32-Std.Format.compact/v1` objects and expose the same logical call:
+
+```js
+import {
+  loadEmscriptenPrettyMAdapter,
+  PrettyFormat as F,
+} from "./integration/lcnf-c-wasm/_build/prettyM-emscripten-current/prettyM-emscripten-adapter.mjs";
+
+const prettyM = await loadEmscriptenPrettyMAdapter(
+  new URL(
+    "./integration/lcnf-c-wasm/_build/prettyM-emscripten-current/prettyM.manifest.json",
+    import.meta.url,
+  ),
+);
+const result = prettyM.render({
+  format: F.group(F.append(F.text("hello"), F.line())),
+  width: 80,
+});
+console.log(result.trace.text);
+console.log(result.trace.events);
+prettyM.dispose();
+```
+
+The adapter uses one versioned binary request and response per render. A small
+C bridge owns the transfer buffers; the Lean entry reconstructs an ordinary
+`Std.Format`, calls the real monomorphic `Std.Format.prettyM`, and records its
+exact output/newline/tag event protocol. Clients do not handle raw Lean
+objects or addresses.
+
+Packaging runs `check-prettyM-differential.mjs` against the independent
+FIR-native `prettyM` package. The check sends both adapters identical Unicode,
+grouping, nesting, tag, arbitrary-precision, initial-column, and repeated-call
+requests and requires exact trace equality. The detailed client and ownership
+contract is in
+[`prettyM-emscripten-package/README.md`](prettyM-emscripten-package/README.md).
 
 ## Measuring native versus Emscripten
 
