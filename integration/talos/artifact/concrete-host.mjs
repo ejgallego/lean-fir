@@ -1,4 +1,10 @@
 import assert from "../../../scripts/wasm_assert.mjs";
+import {
+  float32FromBits,
+  float32ToBits,
+  float64FromBits,
+  float64ToBits,
+} from "../../../scripts/wasm_semantic_host.mjs";
 
 const PAGE_BYTES = 65536;
 const HEAP_BASE = 1024;
@@ -10,7 +16,25 @@ const STRING_UTF8_MARKER = 1;
 const INTEGER_SIGN_MAGNITUDE_MARKER = 1;
 
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
-const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
+const SCALAR_WIDTHS = new Map([
+  ["uint8", 8],
+  ["uint16", 16],
+  ["uint32", 32],
+  ["uint64", 64],
+  ["float32", 32],
+  ["float", 64],
+]);
+const SCALAR_KINDS = new Set(SCALAR_WIDTHS.keys());
+const FLOAT_KINDS = new Set(["float32", "float"]);
+const SCALAR_TYPE_NAMES = new Map([
+  ["usize", "USize"],
+  ["uint8", "UInt8"],
+  ["uint16", "UInt16"],
+  ["uint32", "UInt32"],
+  ["uint64", "UInt64"],
+  ["float32", "Float32"],
+  ["float", "Float"],
+]);
 const OBJECT_FIELD_KINDS = new Set(["object", "tagged", "tobject", "erased"]);
 
 const KIND = Object.freeze({
@@ -47,18 +71,19 @@ function sameKinds(left, right) {
   return left.length === right.length && left.every((kind, index) => kind === right[index]);
 }
 
+function scalarBits(kind, value, context) {
+  const width = SCALAR_WIDTHS.get(kind);
+  assert.ok(width, `${context} uses unsupported scalar kind: ${kind}`);
+  assert.equal(typeof value, "string", `${context} must use a decimal string`);
+  assert.ok(/^(0|[1-9][0-9]*)$/.test(value),
+    `${context} must use a canonical unsigned decimal string`);
+  const bits = BigInt(value);
+  assert.ok(bits < (1n << BigInt(width)), `${context} is out of ${kind} range`);
+  return bits;
+}
+
 function scalarTypeRepr(kind) {
-  const typeName = kind === "usize"
-    ? "USize"
-    : kind === "uint8"
-      ? "UInt8"
-      : kind === "uint16"
-        ? "UInt16"
-        : kind === "uint32"
-          ? "UInt32"
-          : kind === "uint64"
-            ? "UInt64"
-            : undefined;
+  const typeName = SCALAR_TYPE_NAMES.get(kind);
   assert.ok(typeName, `unsupported boxed scalar kind: ${kind}`);
   return `Lean.Expr.const \`${typeName} []`;
 }
@@ -83,7 +108,11 @@ export function concreteManifestValue(argument) {
       return {
         kind: "scalar",
         scalarKind: argument.scalarKind,
-        value: BigInt(argument.value),
+        value: scalarBits(
+          argument.scalarKind,
+          argument.value,
+          `manifest ${argument.scalarKind} scalar`,
+        ),
       };
     case "erased":
       return { kind: "erased" };
@@ -285,9 +314,11 @@ export class ConcreteHost {
       "initial constructor scalar value must be an object");
     const kind = field.value.kind;
     const bytes = this.scalarByteWidth(kind);
-    const value = BigInt(field.value.value);
-    assert.ok(value >= 0n && value < (1n << BigInt(8 * bytes)),
-      `initial constructor ${kind} value is out of range`);
+    const value = scalarBits(
+      kind,
+      field.value.value,
+      `initial constructor ${kind} scalar`,
+    );
     const end = field.offset + bytes;
     assert.ok(Number.isSafeInteger(end) && end <= 0xffffffff,
       "initial constructor packed scalar extent must fit UInt32");
@@ -434,6 +465,12 @@ export class ConcreteHost {
       case "uint64":
         this.view.setBigUint64(fieldAddress, field.value, true);
         return;
+      case "float32":
+        this.view.setUint32(fieldAddress, Number(field.value), true);
+        return;
+      case "float":
+        this.view.setBigUint64(fieldAddress, field.value, true);
+        return;
       default:
         throw new Error(`unsupported concrete initial scalar kind: ${field.kind}`);
     }
@@ -447,6 +484,8 @@ export class ConcreteHost {
       case "uint16": return BigInt(this.view.getUint16(fieldAddress, true));
       case "uint32": return BigInt(this.view.getUint32(fieldAddress, true));
       case "uint64": return this.view.getBigUint64(fieldAddress, true);
+      case "float32": return BigInt(this.view.getUint32(fieldAddress, true));
+      case "float": return this.view.getBigUint64(fieldAddress, true);
       default:
         throw new Error(`unsupported concrete initial scalar kind: ${field.kind}`);
     }
@@ -817,6 +856,19 @@ export class ConcreteHost {
         assert.equal(value.kind, "scalar", "uint64 requires a scalar value");
         assert.equal(value.scalarKind, "uint64", `${value.scalarKind} does not refine uint64`);
         return BigInt.asIntN(64, value.value);
+      case "float32":
+        assert.equal(value.kind, "scalar", "float32 requires a scalar value");
+        assert.equal(value.scalarKind, "float32",
+          `${value.scalarKind} does not refine float32`);
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffn,
+          `float32 argument is out of range: ${value.value}`);
+        return float32FromBits(value.value);
+      case "float":
+        assert.equal(value.kind, "scalar", "float requires a scalar value");
+        assert.equal(value.scalarKind, "float", `${value.scalarKind} does not refine float`);
+        assert.ok(value.value >= 0n && value.value <= 0xffffffffffffffffn,
+          `float argument is out of range: ${value.value}`);
+        return float64FromBits(value.value);
       case "usize":
         assert.equal(value.kind, "usize", "usize requires a usize value");
         return BigInt.asIntN(64, value.value);
@@ -857,6 +909,20 @@ export class ConcreteHost {
       case "uint64":
         assert.equal(typeof physical, "bigint", "uint64 must use the WebAssembly i64 lane");
         return { kind: "scalar", scalarKind: "uint64", value: BigInt.asUintN(64, physical) };
+      case "float32":
+        assert.equal(typeof physical, "number", "float32 must use the WebAssembly f32 lane");
+        return {
+          kind: "scalar",
+          scalarKind: "float32",
+          value: float32ToBits(physical),
+        };
+      case "float":
+        assert.equal(typeof physical, "number", "float must use the WebAssembly f64 lane");
+        return {
+          kind: "scalar",
+          scalarKind: "float",
+          value: float64ToBits(physical),
+        };
       case "usize":
         assert.equal(typeof physical, "bigint", "usize must use the WebAssembly i64 lane");
         return { kind: "usize", value: BigInt.asUintN(64, physical) };
@@ -1003,6 +1069,8 @@ export class ConcreteHost {
       case "uint16": return 2;
       case "uint32": return 4;
       case "uint64": return 8;
+      case "float32": return 4;
+      case "float": return 8;
       default: throw new Error(`unsupported concrete packed scalar kind: ${kind}`);
     }
   }
@@ -1029,6 +1097,8 @@ export class ConcreteHost {
       case "uint16": return this.view.getUint16(fieldAddress, true);
       case "uint32": return signed32(this.readU32(fieldAddress));
       case "uint64": return BigInt.asIntN(64, this.readU64(fieldAddress));
+      case "float32": return this.view.getFloat32(fieldAddress, true);
+      case "float": return this.view.getFloat64(fieldAddress, true);
       default: throw new Error(`unsupported concrete packed scalar kind: ${operation.result}`);
     }
   }
@@ -1050,6 +1120,14 @@ export class ConcreteHost {
       case "uint64":
         assert.equal(typeof args[1], "bigint", "uint64 mutation must use i64");
         this.writeU64(fieldAddress, args[1]);
+        return;
+      case "float32":
+        assert.equal(typeof args[1], "number", "float32 mutation must use f32");
+        this.view.setFloat32(fieldAddress, args[1], true);
+        return;
+      case "float":
+        assert.equal(typeof args[1], "number", "float mutation must use f64");
+        this.view.setFloat64(fieldAddress, args[1], true);
         return;
       default:
         throw new Error(`unsupported concrete packed scalar kind: ${operation.field}`);
@@ -1077,9 +1155,20 @@ export class ConcreteHost {
   }
 
   writeCapture(address, kind, physical) {
-    if (["uint64", "usize", "float"].includes(kind)) {
+    if (["uint64", "usize"].includes(kind)) {
       assert.equal(typeof physical, "bigint", `${kind} closure capture must use i64`);
       this.writeU64(address, physical);
+      return;
+    }
+    if (kind === "float32") {
+      assert.equal(typeof physical, "number", "float32 closure capture must use f32");
+      this.view.setFloat32(address, physical, true);
+      this.writeU32(address + 4, 0);
+      return;
+    }
+    if (kind === "float") {
+      assert.equal(typeof physical, "number", "float closure capture must use f64");
+      this.view.setFloat64(address, physical, true);
       return;
     }
     assert.equal(typeof physical, "number", `${kind} closure capture must use i32`);
@@ -1087,8 +1176,16 @@ export class ConcreteHost {
   }
 
   readCapture(address, kind) {
-    if (["uint64", "usize", "float"].includes(kind)) {
+    if (["uint64", "usize"].includes(kind)) {
       return BigInt.asIntN(64, this.readU64(address));
+    }
+    if (kind === "float32") {
+      assert.equal(this.readU32(address + 4), 0,
+        `nonzero concrete Float32 capture padding at ${address + 4}`);
+      return this.view.getFloat32(address, true);
+    }
+    if (kind === "float") {
+      return this.view.getFloat64(address, true);
     }
     return signed32(this.readWordSlot(address));
   }
@@ -1184,11 +1281,19 @@ export class ConcreteHost {
       case "uint32": return 3;
       case "uint64": return 4;
       case "usize": return 5;
+      case "float32": return 6;
+      case "float": return 7;
       default: throw new Error(`unsupported concrete boxed scalar kind: ${kind}`);
     }
   }
 
   boxedScalarPayload(kind, physical) {
+    if (kind === "float32") {
+      return float32ToBits(physical);
+    }
+    if (kind === "float") {
+      return float64ToBits(physical);
+    }
     if (["uint8", "uint16", "uint32"].includes(kind)) {
       assert.equal(typeof physical, "number", `${kind} box operand must use i32`);
       return BigInt(unsigned32(physical));
@@ -1198,6 +1303,12 @@ export class ConcreteHost {
   }
 
   physicalScalar(kind, payload) {
+    if (kind === "float32") {
+      return float32FromBits(payload);
+    }
+    if (kind === "float") {
+      return float64FromBits(payload);
+    }
     return ["uint64", "usize"].includes(kind)
       ? BigInt.asIntN(64, payload)
       : signed32(payload);
@@ -1206,10 +1317,10 @@ export class ConcreteHost {
   box(operation, args) {
     assert.equal(args.length, 1, "box host arity mismatch");
     const payload = this.boxedScalarPayload(operation.scalar, args[0]);
-    if (payload <= MAX_TAGGED_PAYLOAD) {
+    if (!FLOAT_KINDS.has(operation.scalar) && payload <= MAX_TAGGED_PAYLOAD) {
       return signed32(this.encodeTagged(payload));
     }
-    const payloadBytes = ["uint64", "usize"].includes(operation.scalar) ? 8 : 4;
+    const payloadBytes = ["uint64", "usize", "float"].includes(operation.scalar) ? 8 : 4;
     const address = this.allocate(KIND.boxed, SLOT_BYTES, {
       aux0: this.boxedScalarCode(operation.scalar),
       aux1: payloadBytes,
@@ -1224,6 +1335,9 @@ export class ConcreteHost {
     const word = this.checkedWord("tobject", args[0]);
     const classification = this.classify(word);
     if (classification === "immediate" || this.isPromotedTag(this.readHeader(word))) {
+      if (FLOAT_KINDS.has(operation.scalar)) {
+        throw new ConcreteFault({ kind: "expectedScalar" });
+      }
       return this.physicalScalar(operation.scalar, this.taggedPayload(word));
     }
     const header = this.readHeader(word);

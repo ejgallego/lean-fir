@@ -48,4 +48,65 @@ assert.throws(
   /must not contain duplicates/,
 );
 
+const float32Bits = 0x7fc01234n;
+const floatBits = 0x8000000000000000n;
+const floatPartialApply = Object.freeze({
+  kind: "partialApply",
+  function: "float-callee",
+  arity: 3,
+  fixed: 2,
+  fields: Object.freeze(["float32", "float"]),
+  result: "tobject",
+});
+const floatHost = new ConcreteHost(
+  [{ operation: floatPartialApply }],
+  undefined,
+  undefined,
+  ["float-callee"],
+  [["float32", "float"]],
+);
+const floatClosure = floatHost.partialApply(floatPartialApply, [
+  floatHost.encode("float32", {
+    kind: "scalar",
+    scalarKind: "float32",
+    value: float32Bits,
+  }),
+  floatHost.encode("float", {
+    kind: "scalar",
+    scalarKind: "float",
+    value: floatBits,
+  }),
+]);
+for (const [index, kind, bits] of [
+  [0, "float32", float32Bits],
+  [1, "float", floatBits],
+]) {
+  const physical = floatHost.closureProj({
+    kind: "closureProj",
+    function: "float-callee",
+    arity: 3,
+    fixed: 2,
+    index,
+    result: kind,
+  }, [floatClosure]);
+  assert.deepStrictEqual(floatHost.decode(kind, physical), {
+    kind: "scalar",
+    scalarKind: kind,
+    value: bits,
+  });
+}
+assert.deepStrictEqual(
+  floatHost.objectJson(floatClosure, floatHost.readHeader(floatClosure)).fixed,
+  [
+    {
+      kind: "scalar",
+      scalar: { kind: "float32", value: float32Bits.toString() },
+    },
+    {
+      kind: "scalar",
+      scalar: { kind: "float", value: floatBits.toString() },
+    },
+  ],
+);
+
 console.log("PASS retained concrete closure dispatch and descriptor metadata");

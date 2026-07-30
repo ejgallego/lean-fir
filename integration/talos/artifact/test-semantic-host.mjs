@@ -293,11 +293,11 @@ function ctorRuntime() {
     result: "tobject",
   })(captured);
   assert.equal(host.importFunction({
-    kind: "closureMatches", function: "callee", arity: 2, fixed: 1,
-  })(closurePhysical), 1);
-  assert.equal(host.importFunction({
     kind: "closureMatches", function: "other", arity: 2, fixed: 1,
   })(closurePhysical), 0);
+  assert.equal(host.importFunction({
+    kind: "closureMatches", function: "callee", arity: 2, fixed: 1,
+  })(closurePhysical), 1);
   const projected = host.importFunction({
     kind: "closureProj",
     function: "callee",
@@ -308,15 +308,10 @@ function ctorRuntime() {
   })(closurePhysical);
   assert.deepStrictEqual(host.decode("tobject", projected), tagged(21));
   const closure = host.decode("tobject", closurePhysical);
-  assert.deepStrictEqual(host.objectJson(host.liveCell(closure.location).object), {
-    kind: "closure",
-    function: "callee",
-    arity: 2,
-    fixed: [{
-      kind: "object",
-      reference: { kind: "tagged", payload: "21" },
-    }],
-  });
+  assert.throws(
+    () => host.liveCell(closure.location),
+    (error) => error instanceof SemanticFault && error.fault.kind === "deadObject",
+  );
 }
 
 {

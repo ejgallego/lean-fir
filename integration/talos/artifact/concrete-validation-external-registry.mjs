@@ -2,8 +2,16 @@ import assert from "../../../scripts/wasm_assert.mjs";
 import {
   stringCompare,
 } from "../../../scripts/wasm_format_external_algorithms.mjs";
+import {
+  validationExternalRegistry,
+} from "../../../scripts/wasm_validation_externals.mjs";
 
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
+
+const concreteFloatExternalRegistry = Object.fromEntries(
+  Object.entries(validationExternalRegistry)
+    .filter(([declaration]) => declaration.startsWith("Float")),
+);
 
 function naturalValue(host, value, context) {
   if (value.kind === "tagged") return value.payload;
@@ -401,6 +409,7 @@ function recordEffect(host, operation, argument, result) {
  */
 export const concreteValidationExternalRegistry = Object.freeze({
   ...concreteArtifactExternalRegistry,
+  ...concreteFloatExternalRegistry,
   "Nat.mul": naturalBinary("Nat.mul", (left, right) => left * right),
   "Nat.div": naturalBinary("Nat.div", naturalDivision),
   "Nat.mod": naturalBinary("Nat.mod", naturalRemainder),
