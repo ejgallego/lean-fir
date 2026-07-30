@@ -525,6 +525,209 @@ theorem countedNullaryExternalImplements :
     countedNullaryExternal.Implements countedNullaryExternalSpec :=
   fun _ _ _ response => response
 
+/-- A deterministic foreign fixture that explicitly requires an owned input
+heap, returns that heap unchanged, and advances only the observable world.
+The premise makes its source ownership law total even on arbitrary runtime
+inputs, rather than silently assuming every caller is well formed. -/
+def ownershipEchoExternalSpec : ExternalSpec :=
+  fun _ runtime response =>
+    HeapOwnershipBelowFrontier runtime ∧
+      response = {
+        value := .erased
+        heap := runtime.heap
+        nextLocation := runtime.nextLocation
+        world := runtime.world + 1 }
+
+theorem ownershipEchoExternalSpec_sourceCompatible :
+    SourceExternalSpecOwnershipCompatible ownershipEchoExternalSpec := by
+  intro request waiting response external
+  rcases external with ⟨owned, rfl⟩
+  refine ⟨Nat.le_refl _, ?_⟩
+  constructor
+  · intro location cell found
+    apply owned.cell_lt
+    simpa [resumeExternal, MachineState.withValue] using found
+  · intro parent cell child found member
+    apply owned.owned_lt
+    · simpa [resumeExternal, MachineState.withValue] using found
+    · exact member
+
+def ownershipNamedExternalRequest : ExternalRequest := {
+  name := `deadNullaryExternal
+  paramTypes := #[]
+  resultType := objType
+  args := #[]
+}
+
+def ownershipNamedExternalState : MachineState :=
+  initialState retainedNullaryFapProgram `deadNullaryExternal #[]
+
+def ownershipNamedExternalWaiting : MachineState := {
+  ownershipNamedExternalState with
+  frames := [.cache `deadNullaryExternal]
+}
+
+def ownershipNamedExternalResponse : ExternalResponse := {
+  value := .erased
+  heap := ownershipNamedExternalState.runtime.heap
+  nextLocation := ownershipNamedExternalState.runtime.nextLocation
+  world := ownershipNamedExternalState.runtime.world + 1
+}
+
+theorem ownershipNamedExternalTransition :
+    coreStep ownershipNamedExternalState =
+      .external ownershipNamedExternalRequest
+        ownershipNamedExternalWaiting := by
+  simp [ownershipNamedExternalState, initialState, coreStep,
+    retainedNullaryFapProgram, deadNullaryExternalDecl, fixtureDecl, decl,
+    Program.findDecl?, findGlobal?, invokeDecl, bindParams,
+    ownershipNamedExternalRequest, ownershipNamedExternalWaiting]
+
+theorem ownershipNamedExternalState_owned :
+    SourceMachineOwnershipBelowFrontier ownershipNamedExternalState := by
+  refine ⟨?_, ?_, ?_⟩
+  · simpa [ownershipNamedExternalState, initialState] using
+      HeapOwnershipBelowFrontier.empty
+  · intro fvarId value found
+    simp [ownershipNamedExternalState, initialState, lookup] at found
+  · simp [ownershipNamedExternalState, initialState,
+      BindFrameEnvironmentsBelowFrontier]
+
+/-- Concrete named-control regression: suspension and the echoed response
+both retain the complete source ownership carrier. -/
+theorem ownershipNamedExternalFixture :
+    SourceMachineOwnershipBelowFrontier ownershipNamedExternalWaiting ∧
+    SourceMachineOwnershipBelowFrontier
+      (resumeExternal ownershipNamedExternalRequest
+        ownershipNamedExternalWaiting ownershipNamedExternalResponse) := by
+  have argumentsBelow :
+      HeapLocationsBelowFrontier
+        ownershipNamedExternalState.runtime (#[] : Array Value).toList := by
+    simp [HeapLocationsBelowFrontier]
+  have waiting :=
+    ownershipNamedExternalState_owned.invokeNameExternalWaiting
+      (name := `deadNullaryExternal) (arguments := #[])
+      argumentsBelow ownershipNamedExternalTransition
+  have waitingRuntime :
+      ownershipNamedExternalWaiting.runtime =
+        ownershipNamedExternalState.runtime :=
+    coreStep_invokeName_external_runtime_eq
+      (step := ownershipNamedExternalTransition)
+  have external :
+      ownershipEchoExternalSpec ownershipNamedExternalRequest
+        ownershipNamedExternalWaiting.runtime
+        ownershipNamedExternalResponse := by
+    rw [waitingRuntime]
+    exact ⟨ownershipNamedExternalState_owned.heap, rfl⟩
+  exact ⟨waiting,
+    waiting.resumeExternal
+      ownershipEchoExternalSpec_sourceCompatible external⟩
+
+def ownershipExternalArgument : FVarId := ⟨`ownershipExternalArgument⟩
+
+def ownershipUnaryExternalDecl : LCNF.Decl .impure :=
+  decl `ownershipUnaryExternal #[param ownershipExternalArgument]
+    objType (.extern { entries := [] })
+
+def ownershipUnaryExternalProgram : ImpureProgram :=
+  { decls := #[ownershipUnaryExternalDecl] }
+
+def ownershipExternalClosureRuntime : RuntimeState :=
+  (alloc ({} : RuntimeState)
+    (.closure `ownershipUnaryExternal 1 #[.erased])).1
+
+def ownershipValueExternalState : MachineState := {
+  program := ownershipUnaryExternalProgram
+  control := .invokeValue (.object (.heap 0)) #[]
+  runtime := ownershipExternalClosureRuntime
+}
+
+def ownershipValueExternalRequest : ExternalRequest := {
+  name := `ownershipUnaryExternal
+  paramTypes := #[objType]
+  resultType := objType
+  args := #[.erased]
+}
+
+def ownershipValueExternalWaiting : MachineState := {
+  ownershipValueExternalState with
+  env := bind [] ownershipExternalArgument .erased
+}
+
+def ownershipValueExternalResponse : ExternalResponse := {
+  value := .erased
+  heap := ownershipValueExternalState.runtime.heap
+  nextLocation := ownershipValueExternalState.runtime.nextLocation
+  world := ownershipValueExternalState.runtime.world + 1
+}
+
+theorem ownershipValueExternalTransition :
+    coreStep ownershipValueExternalState =
+      .external ownershipValueExternalRequest
+        ownershipValueExternalWaiting := by
+  simp [ownershipValueExternalState, ownershipExternalClosureRuntime,
+    coreStep, invokeClosure, getLiveCell, findCell?,
+    ownershipUnaryExternalProgram, ownershipUnaryExternalDecl,
+    Program.findDecl?, invokeDecl, bindParams, decl, param,
+    ownershipExternalArgument, ownershipValueExternalRequest,
+    ownershipValueExternalWaiting, Fir.LeanIR.Impure.alloc]
+
+theorem ownershipValueExternalState_owned :
+    SourceMachineOwnershipBelowFrontier ownershipValueExternalState := by
+  let base : MachineState := {
+    program := ownershipUnaryExternalProgram
+    control := .yielded .erased
+  }
+  have baseOwned : SourceMachineOwnershipBelowFrontier base := by
+    refine ⟨?_, ?_, ?_⟩
+    · simpa [base] using HeapOwnershipBelowFrontier.empty
+    · intro fvarId value found
+      simp [base, lookup] at found
+    · simp [base, BindFrameEnvironmentsBelowFrontier]
+  have fixedBelow :
+      HeapLocationsBelowFrontier
+        base.runtime (#[.erased] : Array Value).toList := by
+    simp [HeapLocationsBelowFrontier]
+  have allocated :=
+    baseOwned.allocClosureRuntime
+      (arguments := #[.erased]) fixedBelow
+      `ownershipUnaryExternal 1
+  have controlled :=
+    allocated.withControlAndJoins
+      (.invokeValue (.object (.heap 0)) #[]) []
+  simpa [base, ownershipValueExternalState,
+    ownershipExternalClosureRuntime] using controlled
+
+/-- Concrete closure-control regression: the fixed erased argument is owned
+by the closure cell, and both suspension and response preserve ownership. -/
+theorem ownershipValueExternalFixture :
+    SourceMachineOwnershipBelowFrontier ownershipValueExternalWaiting ∧
+    SourceMachineOwnershipBelowFrontier
+      (resumeExternal ownershipValueExternalRequest
+        ownershipValueExternalWaiting ownershipValueExternalResponse) := by
+  have argumentsBelow :
+      HeapLocationsBelowFrontier
+        ownershipValueExternalState.runtime (#[] : Array Value).toList := by
+    simp [HeapLocationsBelowFrontier]
+  have waiting :=
+    ownershipValueExternalState_owned.invokeValueExternalWaiting
+      (function := .object (.heap 0)) (arguments := #[])
+      argumentsBelow ownershipValueExternalTransition
+  have waitingRuntime :
+      ownershipValueExternalWaiting.runtime =
+        ownershipValueExternalState.runtime :=
+    coreStep_invokeValue_external_runtime_eq
+      (step := ownershipValueExternalTransition)
+  have external :
+      ownershipEchoExternalSpec ownershipValueExternalRequest
+        ownershipValueExternalWaiting.runtime
+        ownershipValueExternalResponse := by
+    rw [waitingRuntime]
+    exact ⟨ownershipValueExternalState_owned.heap, rfl⟩
+  exact ⟨waiting,
+    waiting.resumeExternal
+      ownershipEchoExternalSpec_sourceCompatible external⟩
+
 def deadNullaryFapSourceObservation : Observation :=
   match runMain deadNullaryFapBeforeProgram countedNullaryExternal with
   | .done observation => observation

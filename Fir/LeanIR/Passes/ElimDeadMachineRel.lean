@@ -11985,6 +11985,41 @@ theorem SourceMachineOwnershipBelowFrontier.invokeNameNext
               (.invokeName name arguments) state.joins)
               |>.invokeDeclNext argumentsBelow invocation
 
+/-- A named-control external suspension can only come from a fully applied
+external declaration. Cache hits are internal successors, so both cache-miss
+and nonempty call paths reduce to the generic declaration waiting theorem. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeNameExternalWaiting
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      coreStep { state with control := .invokeName name arguments } =
+        .external request waiting) :
+    SourceMachineOwnershipBelowFrontier waiting := by
+  cases empty : arguments.isEmpty with
+  | false =>
+      have invocation :
+          invokeDecl { state with control := .invokeName name arguments }
+              name arguments = .external request waiting := by
+        simpa [coreStep, empty] using transition
+      exact
+        (bounded.withControlAndJoins
+          (.invokeName name arguments) state.joins)
+          |>.invokeDeclExternalWaiting argumentsBelow invocation
+  | true =>
+      cases found : findGlobal? state.runtime.globals name with
+      | some value =>
+          simp [coreStep, empty, found] at transition
+      | none =>
+          have invocation :
+              invokeDecl { state with control := .invokeName name arguments }
+                  name arguments = .external request waiting := by
+            simpa [coreStep, empty, found] using transition
+          exact
+            (bounded.withControlAndJoins
+              (.invokeName name arguments) state.joins)
+              |>.invokeDeclExternalWaiting argumentsBelow invocation
+
 /-- A successful value invocation must read a live closure. The closure's
 fixed arguments are owned heap fields and therefore bounded by the heap
 carrier; appending the already bounded dynamic arguments reduces the step to
@@ -12058,6 +12093,90 @@ theorem SourceMachineOwnershipBelowFrontier.invokeValueNext
                       (.invokeValue (.object (.heap location)) arguments)
                       state.joins)
                       |>.invokeDeclNext callArgumentsBelow invocation
+  | usize value =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | scalar value =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | erased =>
+      simp [coreStep, invokeClosure, fail] at transition
+  | reuseToken location? =>
+      cases location? <;>
+        simp [coreStep, invokeClosure, fail] at transition
+
+/-- External closure invocation has the same ownership argument as an
+internal closure call up to declaration dispatch: the live closure bounds its
+fixed arguments, the control relation bounds the dynamic suffix, and the
+generic declaration theorem owns the suspended external state. -/
+theorem SourceMachineOwnershipBelowFrontier.invokeValueExternalWaiting
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier state.runtime arguments.toList)
+    (transition :
+      coreStep
+          { state with
+            control := .invokeValue function arguments } =
+        .external request waiting) :
+    SourceMachineOwnershipBelowFrontier waiting := by
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [coreStep, invokeClosure, fail] at transition
+      | heap location =>
+          cases read : getLiveCell state.runtime location with
+          | error fault =>
+              simp [coreStep, invokeClosure, read, fail] at transition
+          | ok cell =>
+              cases object : cell.object with
+              | ctor object =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | boxed type value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | string value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | natural value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | integer value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | byteArray value =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | «opaque» typeName =>
+                  simp [coreStep, invokeClosure, read, object, fail]
+                    at transition
+              | closure name arity fixed =>
+                  have fixedBelow :
+                      HeapLocationsBelowFrontier
+                        state.runtime fixed.toList := by
+                    intro child member
+                    apply bounded.heap.owned_lt
+                      (getLiveCell_shape_of_ok read).1
+                    simpa [object, HeapObject.ownedValues] using member
+                  have callArgumentsBelow :
+                      HeapLocationsBelowFrontier state.runtime
+                        (fixed ++ arguments).toList :=
+                    HeapLocationsBelowFrontier.append
+                      fixed arguments fixedBelow argumentsBelow
+                  have invocation :
+                      invokeDecl
+                          { state with
+                            control := .invokeValue
+                              (.object (.heap location)) arguments }
+                          name (fixed ++ arguments) =
+                        .external request waiting := by
+                    simpa [coreStep, invokeClosure, read, object] using
+                      transition
+                  exact
+                    (bounded.withControlAndJoins
+                      (.invokeValue (.object (.heap location)) arguments)
+                      state.joins)
+                      |>.invokeDeclExternalWaiting
+                        callArgumentsBelow invocation
   | usize value =>
       simp [coreStep, invokeClosure, fail] at transition
   | scalar value =>
@@ -34893,6 +35012,51 @@ theorem
               ownership argumentsBelow
               (by simpa only [sourceSame] using sourceTransition)
 
+/-- The same named-call control roots own a suspended external declaration
+state. This is the pre-response half of foreign ownership transport. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.sourceOwnership_matchInvokeNameExternalWaiting
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeName name sourceArguments)
+    (sourceTransition :
+      coreStep source = .external request waiting) :
+    SourceMachineOwnershipBelowFrontier waiting := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeName name arguments =>
+          have sourceSame : { source with
+              control := .invokeName name sourceArguments } = source := by
+            cases source
+            simp_all
+          have argumentsBelow :
+              HeapLocationsBelowFrontier source.runtime
+                sourceArguments.toList := by
+            intro location member
+            apply runtime.leftRuntimeRootsBelowFrontier
+            apply extra_subset_runtimeRoots
+            exact List.mem_append_left sourceFrameRoots member
+          exact
+            SourceMachineOwnershipBelowFrontier.invokeNameExternalWaiting
+              (name := name) (arguments := sourceArguments)
+              ownership argumentsBelow
+              (by simpa only [sourceSame] using sourceTransition)
+
 /-- Internal named-call dispatch now returns the exact non-lockstep successor
 relation and the complete successor source ownership carrier together. -/
 theorem
@@ -35997,6 +36161,54 @@ theorem
               (List.mem_cons_of_mem sourceFunction member)
           exact
             SourceMachineOwnershipBelowFrontier.invokeValueNext
+              (function := sourceFunction)
+              (arguments := sourceArguments)
+              ownership argumentsBelow
+              (by simpa only [sourceSame] using sourceTransition)
+
+/-- Dynamic closure-call roots, together with closure-owned fixed arguments,
+own the machine suspended at a fully applied external declaration. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.sourceOwnership_matchInvokeValueExternalWaiting
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control =
+      .invokeValue sourceFunction sourceArguments)
+    (sourceTransition :
+      coreStep source = .external request waiting) :
+    SourceMachineOwnershipBelowFrontier waiting := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | invokeValue function arguments =>
+          have sourceSame : { source with
+              control :=
+                .invokeValue sourceFunction sourceArguments } = source := by
+            cases source
+            simp_all
+          have argumentsBelow :
+              HeapLocationsBelowFrontier source.runtime
+                sourceArguments.toList := by
+            intro location member
+            apply runtime.leftRuntimeRootsBelowFrontier
+            apply extra_subset_runtimeRoots
+            exact List.mem_append_left sourceFrameRoots
+              (List.mem_cons_of_mem sourceFunction member)
+          exact
+            SourceMachineOwnershipBelowFrontier.invokeValueExternalWaiting
               (function := sourceFunction)
               (arguments := sourceArguments)
               ownership argumentsBelow
@@ -44002,6 +44214,131 @@ theorem
       exact ⟨targetAfter,
         NonLockstep.reaches_of_step (.internal targetTransition),
         afterRelated, afterOwnership⟩
+
+/-- Every external source transition preserves the structural simulation and
+the complete source ownership carrier. The relational foreign contract
+matches responses across the compiler renaming; the independent source law
+owns the replacement heap and transports saved environments across its
+monotone frontier. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.matchExternalStep_of_ready_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (transition : coreStep source = .external request waiting)
+    (externalProof : externals request source.runtime response) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        (resumeExternal request waiting response) targetAfter ∧
+      SourceMachineOwnershipBelowFrontier
+        (resumeExternal request waiting response) := by
+  cases sourceControl : source.control with
+  | code sourceCode =>
+      exact related.matchCodeStep_of_ready_withOwnership
+        ready sourceControl ownership
+        (.external transition externalProof)
+  | yielded sourceValue =>
+      exact related.matchYieldedStep_withOwnership
+        ownership sourceControl (.external transition externalProof)
+  | invokeName name sourceArguments =>
+      have waitingOwnership :=
+        related.sourceOwnership_matchInvokeNameExternalWaiting
+          ownership sourceControl transition
+      have sourceSame :
+          { source with
+            control := .invokeName name sourceArguments } = source := by
+        cases source
+        simp_all
+      have waitingRuntime :
+          waiting.runtime = source.runtime :=
+        coreStep_invokeName_external_runtime_eq
+          (state := source) (waiting := waiting)
+          (name := name) (arguments := sourceArguments)
+          (request := request)
+          (step := by simpa only [sourceSame] using transition)
+      have waitingExternal :
+          externals request waiting.runtime response := by
+        rw [waitingRuntime]
+        exact externalProof
+      have afterOwnership :=
+        waitingOwnership.resumeExternal sourceCompatible waitingExternal
+      rcases related.matchInvokeNameExternal sourceControl transition with
+        ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+          waitingRelated⟩
+      rcases compatible requests transition targetTransition waitingRelated
+          externalProof with
+        ⟨targetResponse, targetExternal, resumedRelated⟩
+      exact ⟨resumeExternal targetRequest targetWaiting targetResponse,
+        NonLockstep.reaches_of_step
+          (.external targetTransition targetExternal),
+        resumedRelated, afterOwnership⟩
+  | invokeValue sourceFunction sourceArguments =>
+      have waitingOwnership :=
+        related.sourceOwnership_matchInvokeValueExternalWaiting
+          ownership sourceControl transition
+      have sourceSame :
+          { source with
+            control :=
+              .invokeValue sourceFunction sourceArguments } = source := by
+        cases source
+        simp_all
+      have waitingRuntime :
+          waiting.runtime = source.runtime :=
+        coreStep_invokeValue_external_runtime_eq
+          (state := source) (waiting := waiting)
+          (function := sourceFunction) (arguments := sourceArguments)
+          (request := request)
+          (step := by simpa only [sourceSame] using transition)
+      have waitingExternal :
+          externals request waiting.runtime response := by
+        rw [waitingRuntime]
+        exact externalProof
+      have afterOwnership :=
+        waitingOwnership.resumeExternal sourceCompatible waitingExternal
+      rcases related.matchInvokeValueExternal sourceControl transition with
+        ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
+          waitingRelated⟩
+      rcases compatible requests transition targetTransition waitingRelated
+          externalProof with
+        ⟨targetResponse, targetExternal, resumedRelated⟩
+      exact ⟨resumeExternal targetRequest targetWaiting targetResponse,
+        NonLockstep.reaches_of_step
+          (.external targetTransition targetExternal),
+        resumedRelated, afterOwnership⟩
+
+/-- Unified ownership-preserving non-lockstep dispatcher for an arbitrary
+source semantic step. Compiler readiness handles internal execution; external
+execution additionally consumes the relational and source-heap response
+contracts. -/
+theorem
+    SomeBinderReadyReachableMachineRelated.matchStep_of_ready_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (compatible :
+      BinderReadyReachableExternalSpecCompatible externals fuel)
+    (sourceCompatible :
+      SourceExternalSpecOwnershipCompatible externals)
+    (ready : BinderReadyReachableMachineReadyAt fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  cases step with
+  | internal transition =>
+      exact related.matchNextStep_of_ready_withOwnership
+        ready ownership transition
+  | @external waiting request response transition externalProof =>
+      exact related.matchExternalStep_of_ready_withOwnership
+        compatible sourceCompatible ready ownership transition externalProof
 
 /-- Every external source step is matched once compiler readiness and the
 foreign-response contract are separated.  Invocation controls expose paired
