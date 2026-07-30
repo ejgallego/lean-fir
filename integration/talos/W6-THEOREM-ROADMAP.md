@@ -1067,14 +1067,20 @@ acceptance tests pass.
    table equations or matcher bits separately.
    Exact saturated-call resolution now proves semantic candidate membership
    directly in `compileClosureCandidatesForTarget`, transports it through the
-   adapted candidate enumeration, and uses the canonical cache frame to
-   derive the actual address and first executable match.
+   adapted candidate enumeration at the mapped address, and uses the canonical
+   cache frame to derive the actual address before executable candidate
+   construction and then the first match.
    `SaturatedClosureCandidateResolutionInduction` therefore asks only for the
    implementation of a compiler candidate carrying that proved source
    identity; `ofInternalCompilerResolved` exposes the resulting production
    call law. This fixes
    `FIR-BUG-wasm-none-saturated-closure-site-shape` without a target execution
    certificate and keeps underapplication in its distinct allocation family.
+   The boundary also now avoids quantifying executable candidates over every
+   wasm32 word: `resolveClosureAddress` derives the one represented word first,
+   and candidate construction is instantiated there. This fixes
+   `FIR-BUG-wasm-none-saturated-candidate-arbitrary-address`; arbitrary
+   unmapped words no longer require impossible successful matcher executions.
    Next construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment, including the recursive candidate

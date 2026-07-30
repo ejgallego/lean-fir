@@ -4918,23 +4918,18 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
   simp [functionEq, arityEq, fixedEq]
 
 /--
-The canonical cache frame and an exact source resolution jointly determine
-the physical closure address and the first matching compiler candidate.
+The canonical cache frame resolves the one concrete address represented by an
+exact source closure site.
 
-The candidate resolver is address-parametric because matcher operations are
-concrete-store statements. Once the source/local relation reveals the actual
-address, static enumeration coverage and the cache frame's immutable-table
-agreement derive the nonmatching prefix and selected nonzero matcher.
+This theorem deliberately precedes executable candidate construction:
+`closureMatches` can run successfully at the mapped live closure address, not
+at an arbitrary wasm32 word.
 -/
-theorem
-    ConcreteReuseCapacityCacheFrame.closureCandidates_exists_first_match_of_resolution
+theorem ConcreteReuseCapacityCacheFrame.resolveClosureAddress
     {context : Fir.Wasm.Context}
     {decl : LCNF.LetDecl .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List FVarId}
-    {module : Wasm.Module}
-    {spec : Wasm.HostSpec Host}
     {externals : ExternalImpl}
     {facts : ReuseCapacityFacts}
     {remainingBytes : Nat}
@@ -4956,34 +4951,11 @@ theorem
         some closureIndex)
     (closureKindAt :
       (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
-        some closureKind)
-    (candidates : ∀ address : Word32, List
-      (ClosureCandidateCase sourceModule sourceFunction labels module spec
-        initial site.closureId closureIndex address))
-    (candidatesEq : ∀ address,
-      context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
-          site.resultKind site.argumentCode site.argumentKinds target) =
-        (candidates address).map (·.source)) :
-    ∃ (address : Word32)
-        (before : List
-          (ClosureCandidateCase sourceModule sourceFunction labels module spec
-            initial site.closureId closureIndex address))
-        (selected :
-          ClosureCandidateCase sourceModule sourceFunction labels module spec
-            initial site.closureId closureIndex address)
-        (suffix : List
-          (ClosureCandidateCase sourceModule sourceFunction labels module spec
-            initial site.closureId closureIndex address)),
-      candidates address = before ++ selected :: suffix ∧
-        locals.get closureIndex =
+        some closureKind) :
+    ∃ address : Word32,
+      locals.get closureIndex =
           some (.i32 (UInt32.ofNat address.value)) ∧
-        (∀ candidate, candidate ∈ before →
-          candidate.matched = (0 : UInt32)) ∧
-        (selected.matched != 0) = true ∧
-        (resolution.function == selected.function &&
-          resolution.arity == selected.arity &&
-          resolution.captures.size == selected.fixed) = true := by
+        witness.locations.lookup? resolution.location = some address := by
   have sourceLookup :
       lookup sourceEnv site.closureId =
         some (.object (.heap resolution.location)) := by
@@ -4994,12 +4966,77 @@ theorem
       closureKindAt
   obtain ⟨address, physicalEq, mapped⟩ := physicalRelated.heapAddress
   subst physical
+  exact ⟨address, localFound, mapped⟩
+
+/--
+At the mapped closure address, exact source resolution and compiler
+enumeration determine the first executable matching candidate.
+
+The physical address and local equation are inputs derived by
+`resolveClosureAddress`; executable candidate cases are never quantified over
+unmapped words.
+-/
+theorem
+    ConcreteReuseCapacityCacheFrame.closureCandidates_exists_first_match_of_resolution
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureIndex : Nat}
+    {address : Word32}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution :
+      SaturatedClosureCallResolution context sourceRuntime site)
+    (closureLocal :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (mapped :
+      witness.locations.lookup? resolution.location = some address)
+    (candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial site.closureId closureIndex address))
+    (candidatesEq :
+      context.program.decls.toList.flatMap (fun target =>
+        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
+          site.resultKind site.argumentCode site.argumentKinds target) =
+        candidates.map (·.source)) :
+    ∃ (before : List
+          (ClosureCandidateCase sourceModule sourceFunction labels module spec
+            initial site.closureId closureIndex address))
+        (selected :
+          ClosureCandidateCase sourceModule sourceFunction labels module spec
+            initial site.closureId closureIndex address)
+        (suffix : List
+          (ClosureCandidateCase sourceModule sourceFunction labels module spec
+            initial site.closureId closureIndex address)),
+      candidates = before ++ selected :: suffix ∧
+        locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        (∀ candidate, candidate ∈ before →
+          candidate.matched = (0 : UInt32)) ∧
+        (selected.matched != 0) = true ∧
+        (resolution.function == selected.function &&
+          resolution.arity == selected.arity &&
+          resolution.captures.size == selected.fixed) = true := by
   have containsMatch :=
-    resolution.containsCandidateIdentity site (candidates address)
-      (candidatesEq address)
+    resolution.containsCandidateIdentity site candidates candidatesEq
   obtain ⟨before, selected, suffix, candidatesSplit, beforeNonmatching,
       selectedMatches⟩ :=
-    invariant.closureCandidates_exists_first_match (candidates address) mapped
+    invariant.closureCandidates_exists_first_match candidates mapped
       resolution.cellFound resolution.cellLive resolution.cellObjectEq
       containsMatch
   have selectedIdentity :
@@ -5012,7 +5049,7 @@ theorem
         resolution.cellFound resolution.cellLive resolution.cellObjectEq
     rw [classified] at selectedMatches
     simpa [and_assoc] using selectedMatches
-  exact ⟨address, before, selected, suffix, candidatesSplit, localFound,
+  exact ⟨before, selected, suffix, candidatesSplit, closureLocal,
     beforeNonmatching, selectedMatches, selectedIdentity⟩
 
 /-- Source-facing family of admitted saturated closure applications. -/
@@ -5122,11 +5159,12 @@ def SaturatedClosureDispatchSelectionInduction
 Static resolver and hereditary-body induction for saturated closure dispatch,
 with dynamic first-match selection factored out.
 
-The induction constructs the exact adapter/resolver candidate family for
-every possible concrete closure address. For the candidate whose metadata
-matches the resolved source closure it supplies argument assembly and the
-hereditary declaration theorem. The canonical cache frame later chooses the
-actual address and first matching candidate; neither fact is a premise here.
+The canonical cache frame first derives the actual mapped closure address.
+At that address the induction constructs the exact adapter/resolver candidate
+list. For the candidate whose metadata matches the resolved source closure it
+supplies argument assembly and the hereditary declaration theorem. First-match
+selection remains a theorem derived from the executable list; it is not a
+premise supplied by the caller.
 -/
 def SaturatedClosureCandidateResolutionInduction
     (context : Fir.Wasm.Context)
@@ -5149,7 +5187,8 @@ def SaturatedClosureCandidateResolutionInduction
       (site : SaturatedClosureCallSite context decl sourceEnv)
       (resolution :
         SaturatedClosureCallResolution context sourceRuntime site)
-      {closureIndex resultIndex : Nat},
+      {closureIndex resultIndex : Nat}
+      {address : Word32},
     SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
           continuation nextRuntime sourceValue →
       ConcreteReuseCapacityCacheFrame sourceModule callerFunction
@@ -5159,22 +5198,24 @@ def SaturatedClosureCandidateResolutionInduction
             some closureIndex →
           findFVar? (functionBindings callerFunction) decl.fvarId =
               some resultIndex →
-            ∃ candidates : ∀ address : Word32, List
+            locals.get closureIndex =
+                some (.i32 (UInt32.ofNat address.value)) →
+              initialWitness.locations.lookup? resolution.location =
+                  some address →
+                ∃ candidates : List
                 (ClosureCandidateCase sourceModule callerFunction labels
                   targetModule.wasmModule hosts.spec initial site.closureId
                   closureIndex address),
-              (∀ address,
-                context.program.decls.toList.flatMap (fun target =>
-                    compileClosureCandidatesForTarget decl.fvarId
-                      site.closureId site.resultKind site.argumentCode
-                      site.argumentKinds target) =
-                  (candidates address).map (·.source)) ∧
-              ∀ {address : Word32}
-                  (candidate :
+                  context.program.decls.toList.flatMap (fun target =>
+                      compileClosureCandidatesForTarget decl.fvarId
+                        site.closureId site.resultKind site.argumentCode
+                        site.argumentKinds target) =
+                    candidates.map (·.source) ∧
+                ∀ (candidate :
                     ClosureCandidateCase sourceModule callerFunction labels
                       targetModule.wasmModule hosts.spec initial site.closureId
                       closureIndex address),
-                candidate ∈ candidates address →
+                candidate ∈ candidates →
                   (resolution.function == candidate.function &&
                     resolution.arity == candidate.arity &&
                     resolution.captures.size == candidate.fixed) = true →
@@ -5230,20 +5271,23 @@ theorem SaturatedClosureCandidateResolutionInduction.toSelection
   rw [closureFound] at alignedClosureFound
   injection alignedClosureFound with closureIndexEq
   subst alignedClosureIndex
+  obtain ⟨address, hClosure, mapped⟩ :=
+    invariant.resolveClosureAddress site resolution closureFound closureKindAt
   obtain ⟨candidates, candidatesEq, selectedImplementation⟩ :=
     induction site resolution sourceStep invariant closureFound resultFound
-  obtain ⟨address, before, selected, suffix, candidatesSplit, hClosure,
+      hClosure mapped
+  obtain ⟨before, selected, suffix, candidatesSplit, _,
       beforeNonmatching, selectedMatches, selectedIdentity⟩ :=
     invariant.closureCandidates_exists_first_match_of_resolution site
-      resolution closureFound closureKindAt candidates candidatesEq
-  have selectedMem : selected ∈ candidates address := by
+      resolution hClosure mapped candidates candidatesEq
+  have selectedMem : selected ∈ candidates := by
     rw [candidatesSplit]
     simp
   obtain ⟨calleeFunction, targetFunction, functionIndex, argumentTarget,
       afterCall, updated, resultWitness, physicalArgs, physical, assembled,
       selectedBodyEq, callee, targetSet⟩ :=
     selectedImplementation selected selectedMem selectedIdentity
-  have generatedEq := candidatesEq address
+  have generatedEq := candidatesEq
   rw [candidatesSplit] at generatedEq
   exact
     ⟨address, before, selected, suffix, calleeFunction,

@@ -5476,8 +5476,9 @@ argument refinement, result kind, code body, and source parameter binding.
 From those facts, `candidateSource_exists` proves membership in the real
 `compileClosureCandidatesForTarget` enumeration, and
 `containsCandidateIdentity` transfers that membership to any exact adapted
-candidate family. The canonical cache frame then recovers the concrete
-address and executable first match without a target certificate.
+candidate list at the mapped address. The canonical cache frame recovers that
+address before executable candidate construction and then derives the first
+match without a target certificate.
 
 `SaturatedClosureCandidateResolutionInduction` is the new production-facing
 hereditary boundary: it supplies an implementation only for a compiler
@@ -5488,6 +5489,18 @@ discharges enumeration, address recovery, and selection, and
 must construct this induction recursively from the generated declaration
 environment (and ultimately derive source resolution from closure-flow
 well-formedness); it must not reintroduce target execution evidence.
+
+W6.6hf corrects the constructive order at that boundary.
+`ClosureCandidateCase` contains a successful concrete matcher execution, so a
+family indexed by every wasm32 word was uninhabited at unmapped or non-closure
+addresses. `ConcreteReuseCapacityCacheFrame.resolveClosureAddress` now derives
+the unique mapped word from source resolution and the ordinary state relation
+first. `SaturatedClosureCandidateResolutionInduction` constructs candidates
+only at that address; `toSelection` then derives semantic coverage and the
+first executable match. This fixes
+`FIR-BUG-wasm-none-saturated-candidate-arbitrary-address` without weakening
+decoding or adding a target execution certificate. Recursive hereditary
+declaration construction remains the next call slice.
 
 ## Parallel agent packages
 

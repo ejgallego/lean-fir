@@ -3908,6 +3908,45 @@ example
     induction
 
 /--
+The saturated closure address is recovered canonically from source resolution,
+local-layout alignment, and the ordinary concrete state relation. Executable
+candidate construction therefore starts only after the mapped address is
+known.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureIndex : Nat}
+    {closureKind : AbiKind}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution :
+      SaturatedClosureCallResolution context sourceRuntime site)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) site.closureId =
+        some closureIndex)
+    (closureKindAt :
+      (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
+        some closureKind) :
+    ∃ address : Word32,
+      locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        witness.locations.lookup? resolution.location = some address :=
+  invariant.resolveClosureAddress site resolution closureFound closureKindAt
+
+/--
 The constructive saturated-dispatch boundary resolves the concrete closure
 address and exact matcher result from the ordinary state relation plus both
 immutable closure-table equations. No physical address or matcher execution
