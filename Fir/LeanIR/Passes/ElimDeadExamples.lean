@@ -12825,27 +12825,23 @@ theorem retainedPrefixReuseOwnerZero
       TargetAllocationLedger rho
         nonemptyLedgerTargetRuntime.nextLocation) :
     ledger.owner 0 = 0 := by
-  have ledgerMapped :=
-    ledger.reverseMapped 0 (by
-      simp [nonemptyLedgerTargetRuntime,
-        nonemptyLedgerPairedRuntime, alloc])
-  have inverse := rho.leftInverse mapping
-  rw [inverse] at ledgerMapped
-  exact (Option.some.inj ledgerMapped).symm
+  exact ledger.owner_eq_of_forward mapping (by
+    simp [nonemptyLedgerTargetRuntime,
+      nonemptyLedgerPairedRuntime, alloc])
 
 theorem retainedPrefixReuseSourceOnlyAtOne
     (ledger :
       TargetAllocationLedger rho nonemptyLedgerTargetRuntime.nextLocation)
     (ownerZero : ledger.owner 0 = 0) :
     SourceOnlyUnderTargetLedger ledger 1 := by
+  apply ledger.sourceOnly_of_owner_lt
   intro rightLocation bounded
   have rightZero : rightLocation = 0 := by
     change rightLocation < 1 at bounded
     exact Nat.le_antisymm
       (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
   subst rightLocation
-  rw [ownerZero]
-  decide
+  simpa [ownerZero]
 
 theorem retainedPrefixReuseResetOwnerFrame
     (ledger :
@@ -12857,14 +12853,21 @@ theorem retainedPrefixReuseResetOwnerFrame
           (ledger.owner rightLocation) =
         findCell? nonemptyLedgerSourceRuntime.heap
           (ledger.owner rightLocation) := by
-  intro rightLocation bounded
-  have rightZero : rightLocation = 0 := by
-    change rightLocation < 1 at bounded
-    exact Nat.le_antisymm
-      (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
-  subst rightLocation
-  rw [ownerZero]
-  rfl
+  apply ledger.ownerFrame_of_owner_lt (leftFrontier := 1)
+  · intro rightLocation bounded
+    have rightZero : rightLocation = 0 := by
+      change rightLocation < 1 at bounded
+      exact Nat.le_antisymm
+        (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
+    subst rightLocation
+    simpa [ownerZero]
+  · intro leftLocation bounded
+    have leftZero : leftLocation = 0 := by
+      change leftLocation < 1 at bounded
+      exact Nat.le_antisymm
+        (Nat.le_of_lt_succ bounded) (Nat.zero_le leftLocation)
+    subst leftLocation
+    rfl
 
 theorem retainedPrefixReuseResetFresh :
     ∀ location,
@@ -12919,35 +12922,31 @@ theorem retainedPrefixReuseResetPairReady_ledger
           | letE valueCovered continuationCovered =>
             cases continuationCovered with
             | ret liveMember =>
-              have values := env live liveMember
-              simp [retainedPrefixReuseSourceResetState,
-                retainedPrefixReuseTargetOuterState,
-                nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-                Impure.bind, lookup, live, resetObjectVar] at values
-              cases values
+              obtain ⟨targetValue, targetFound, values⟩ :=
+                env.right_lookup_exists
+                  (leftValue := .object (.heap 0)) liveMember (by
+                  simp [retainedPrefixReuseSourceResetState,
+                    nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+                    Impure.bind, lookup, live, resetObjectVar])
+              simp [retainedPrefixReuseTargetOuterState,
+                lookup] at targetFound
       | ret =>
           have codeEq : targetCode = .return live :=
             Control.code.inj targetControl.symm
           subst targetCode
           cases covered with
           | ret liveMember =>
-            have values := env live liveMember
             have mapping : rho.forward 0 = some 0 := by
-              simp [retainedPrefixReuseSourceResetState,
-                retainedPrefixReuseTargetReturnState,
-                nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-                Impure.bind, lookup, live, resetObjectVar] at values
-              cases values with
-              | some related =>
-                  cases related with
-                  | heap mapping => exact mapping
+              apply env.heap_mapping liveMember
+              · simp [retainedPrefixReuseSourceResetState,
+                  nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+                  Impure.bind, lookup, live, resetObjectVar]
+              · simp [retainedPrefixReuseTargetReturnState,
+                  nonemptyLedgerRetainedEnv,
+                  Impure.bind, lookup, live]
             have ownerZero : ledger.owner 0 = 0 :=
               retainedPrefixReuseOwnerZero mapping (by
                 simpa [retainedPrefixReuseTargetReturnState] using ledger)
-            have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
-              retainedPrefixReuseSourceOnlyAtOne (by
-                simpa [retainedPrefixReuseTargetReturnState] using ledger)
-                ownerZero
             have ownerFrame :
                 ∀ rightLocation,
                   rightLocation <
@@ -12962,17 +12961,6 @@ theorem retainedPrefixReuseResetPairReady_ledger
                   (by
                     simpa [retainedPrefixReuseTargetReturnState] using ledger)
                   ownerZero
-            have frame :
-                RuntimeReachableFrame nonemptyLedgerSourceRuntime
-                  nonemptyLedgerResetRuntime
-                  (runtimeRoots nonemptyLedgerSourceRuntime
-                    (envRootsOn used
-                      (retainedPrefixReuseSourceResetState
-                        sourceArguments).env ++
-                      sourceFrameRoots)) :=
-              runtime.leftRuntimeReachableFrame_of_targetAllocationLedger
-                ledger rfl rfl rfl rfl ownerFrame
-                  retainedPrefixReuseResetFresh
             have resetReady :
                 DeletedResetReadyAt
                   (retainedPrefixReuseSourceResetState sourceArguments)
@@ -12985,15 +12973,16 @@ theorem retainedPrefixReuseResetPairReady_ledger
                       sourceFrameRoots))
                   1 resetObjectVar :=
               by
-                apply (retainedPrefixReuseResetLocalReady sourceArguments)
-                  |>.deletedReadyAt
-                change RuntimeReachableFrame
-                  nonemptyLedgerSourceRuntime
-                  nonemptyLedgerResetRuntime
-                  (runtimeRoots nonemptyLedgerSourceRuntime
-                    (envRootsOn used nonemptyLedgerResetEnv ++
-                      sourceFrameRoots))
-                exact frame
+                apply
+                  (retainedPrefixReuseResetLocalReady sourceArguments)
+                    |>.deletedReadyAt_of_targetAllocationLedger
+                      runtime ledger
+                · rfl
+                · rfl
+                · rfl
+                · rfl
+                · exact ownerFrame
+                · exact retainedPrefixReuseResetFresh
             have removed :
                 DeletedLetReadyAt
                   (retainedPrefixReuseSourceResetState sourceArguments)
@@ -13070,30 +13059,30 @@ theorem retainedPrefixReusePairReady_ledger
           | letE valueCovered continuationCovered =>
             cases continuationCovered with
             | ret liveMember =>
-              have values := env live liveMember
-              simp [retainedPrefixReuseSourceReuseState,
-                retainedPrefixReuseTargetOuterState,
-                nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
-                nonemptyLedgerRetainedEnv, Impure.bind, lookup,
-                live, resetObjectVar, reuseTokenVar, reuseArgVar] at values
-              cases values
+              obtain ⟨targetValue, targetFound, values⟩ :=
+                env.right_lookup_exists
+                  (leftValue := .object (.heap 0)) liveMember (by
+                  simp [retainedPrefixReuseSourceReuseState,
+                    nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
+                    nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+                    live, resetObjectVar, reuseTokenVar, reuseArgVar])
+              simp [retainedPrefixReuseTargetOuterState,
+                lookup] at targetFound
       | ret =>
           have codeEq : targetCode = .return live :=
             Control.code.inj targetControl.symm
           subst targetCode
           cases covered with
           | ret liveMember =>
-            have values := env live liveMember
             have mapping : rho.forward 0 = some 0 := by
-              simp [retainedPrefixReuseSourceReuseState,
-                retainedPrefixReuseTargetReturnState,
-                nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
-                nonemptyLedgerRetainedEnv, Impure.bind, lookup,
-                live, resetObjectVar, reuseTokenVar, reuseArgVar] at values
-              cases values with
-              | some related =>
-                  cases related with
-                  | heap mapping => exact mapping
+              apply env.heap_mapping liveMember
+              · simp [retainedPrefixReuseSourceReuseState,
+                  nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
+                  nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+                  live, resetObjectVar, reuseTokenVar, reuseArgVar]
+              · simp [retainedPrefixReuseTargetReturnState,
+                  nonemptyLedgerRetainedEnv,
+                  Impure.bind, lookup, live]
             have ownerZero : ledger.owner 0 = 0 :=
               retainedPrefixReuseOwnerZero mapping (by
                 simpa [retainedPrefixReuseTargetReturnState] using ledger)

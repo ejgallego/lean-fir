@@ -2057,6 +2057,52 @@ theorem EnvRelOn.empty (rho : AddressRenaming) (used : UsedLocals) :
   intro fvarId member
   exact .none
 
+/-- Related live-environment lookups expose their underlying value
+relation without making clients destruct `OptionalRel` manually. -/
+theorem EnvRelOn.valueRel_of_lookup_eq_some
+    (related : EnvRelOn rho used left right)
+    (member : used.contains fvarId = true)
+    (leftFound : lookup left fvarId = some leftValue)
+    (rightFound : lookup right fvarId = some rightValue) :
+    ValueRel rho leftValue rightValue := by
+  have values := related fvarId member
+  rw [leftFound, rightFound] at values
+  cases values with
+  | some values => exact values
+
+/-- A successful live lookup on the source has a related successful target
+lookup. -/
+theorem EnvRelOn.right_lookup_exists
+    (related : EnvRelOn rho used left right)
+    (member : used.contains fvarId = true)
+    (leftFound : lookup left fvarId = some leftValue) :
+    ∃ rightValue,
+      lookup right fvarId = some rightValue ∧
+        ValueRel rho leftValue rightValue := by
+  cases rightFound : lookup right fvarId with
+  | none =>
+      have values := related fvarId member
+      rw [leftFound, rightFound] at values
+      cases values
+  | some rightValue =>
+      exact ⟨rightValue, rfl,
+        related.valueRel_of_lookup_eq_some
+          member leftFound rightFound⟩
+
+/-- Heap-valued live lookups expose the exact forward address mapping. -/
+theorem EnvRelOn.heap_mapping
+    (related : EnvRelOn rho used left right)
+    (member : used.contains fvarId = true)
+    (leftFound :
+      lookup left fvarId = some (.object (.heap leftLocation)))
+    (rightFound :
+      lookup right fvarId = some (.object (.heap rightLocation))) :
+    rho.forward leftLocation = some rightLocation := by
+  have values := related.valueRel_of_lookup_eq_some
+    member leftFound rightFound
+  cases values with
+  | heap mapping => exact mapping
+
 /-- Canonical runtime roots contributed by the live portion of an
 environment.  `filterMap` drops malformed/missing live lookups symmetrically. -/
 def envRootsOn (used : UsedLocals) (env : Env) : List Value :=

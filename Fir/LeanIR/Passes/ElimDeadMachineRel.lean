@@ -7475,6 +7475,19 @@ structure TargetAllocationLedger (rho : AddressRenaming)
   reverseMapped : ∀ rightLocation, rightLocation < rightFrontier →
     rho.reverse rightLocation = some (owner rightLocation)
 
+/-- A forward mapping into the allocated target prefix uniquely identifies
+the ledger owner of that target address. This packages the recurring
+left-inverse/reverse-ledger calculation used by concrete compiler clients. -/
+theorem TargetAllocationLedger.owner_eq_of_forward
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (bounded : rightLocation < rightFrontier) :
+    ledger.owner rightLocation = leftLocation := by
+  have inverse := rho.leftInverse mapping
+  have recorded := ledger.reverseMapped rightLocation bounded
+  rw [inverse] at recorded
+  exact (Option.some.inj recorded).symm
+
 /-- A source location is compiler-only with respect to a target allocation
 ledger when it is distinct from the source owner of every allocated target
 address. This is a static allocation-provenance criterion, not a reachability
@@ -7484,6 +7497,33 @@ def SourceOnlyUnderTargetLedger
     (location : Location) : Prop :=
   ∀ rightLocation, rightLocation < rightFrontier →
     ledger.owner rightLocation ≠ location
+
+/-- Allocation-order clients may prove source-only provenance by showing that
+every paired target owner was allocated strictly before the selected source
+location. -/
+theorem TargetAllocationLedger.sourceOnly_of_owner_lt
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (earlier : ∀ rightLocation, rightLocation < rightFrontier →
+      ledger.owner rightLocation < location) :
+    SourceOnlyUnderTargetLedger ledger location := by
+  intro rightLocation bounded
+  exact Nat.ne_of_lt (earlier rightLocation bounded)
+
+/-- The same allocation-order fact transports a source heap frame over every
+owner named by the target ledger. Clients can prove a simple prefix frame on
+the source heap instead of reasoning again about target addresses. -/
+theorem TargetAllocationLedger.ownerFrame_of_owner_lt
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (earlier : ∀ rightLocation, rightLocation < rightFrontier →
+      ledger.owner rightLocation < leftFrontier)
+    (preserved : ∀ leftLocation, leftLocation < leftFrontier →
+      findCell? afterHeap leftLocation = findCell? beforeHeap leftLocation) :
+    ∀ rightLocation, rightLocation < rightFrontier →
+      findCell? afterHeap (ledger.owner rightLocation) =
+        findCell? beforeHeap (ledger.owner rightLocation) := by
+  intro rightLocation bounded
+  exact preserved (ledger.owner rightLocation)
+    (earlier rightLocation bounded)
 
 /-- The empty target has a vacuous allocation ledger. -/
 def TargetAllocationLedger.empty (rho : AddressRenaming) :
