@@ -1,4 +1,5 @@
 import Fir.Validation.LCNF
+import Fir.Wasm.Emit.BitExactFloat
 import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.WellFormed
 
@@ -66,6 +67,10 @@ def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
     | .ok module => pure module
     | .error error => return .error (.lowering error)
   let module := { module with exports := #[source.entry] }
+  let module ←
+    match Fir.Wasm.Emit.BitExactFloat.install module source.entry with
+    | .ok module => pure module
+    | .error message => return .error (.manifest message)
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes

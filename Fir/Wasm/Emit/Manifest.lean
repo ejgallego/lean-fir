@@ -1,5 +1,6 @@
 import Fir.LeanIR.Runtime
 import Fir.Wasm.Emit.Binary
+import Fir.Wasm.Emit.BitExactFloat
 import Fir.Wasm.Handle
 
 namespace Fir.Wasm.Emit.Manifest
@@ -324,13 +325,24 @@ private def closureDescriptorsJson (module : Fir.Wasm.Module) : Json :=
   Json.arr <| module.closureDescriptors.map fun descriptor =>
     Json.arr <| descriptor.map fun kind => (abiKindName kind : Json)
 
+private def bitExactFloatTransportField (module : Fir.Wasm.Module) (entry : Name) :
+    Except String (List (String × Json)) := do
+  let some descriptor ← Fir.Wasm.Emit.BitExactFloat.descriptor? module entry
+    | return []
+  return [("bitExactFloatTransport", Json.mkObj [
+    ("version", 1),
+    ("encoding", "wasm-reinterpret-i32-i64"),
+    ("entry", descriptor.entry.toString),
+    ("result", abiKindName descriptor.result),
+    ("params", abiKindsJson descriptor.params)])]
+
 /-- Describe a reusable module without attaching any particular invocation. -/
 def moduleJson (sourceEntry entry : Name) (module : Fir.Wasm.Module) : Except String Json := do
   let function ← entryFunction module entry
   let result ← entryResultKind entry function
   let params := function.params.map (·.snd)
   let imports ← module.imports.toList.mapM importJson
-  return Json.mkObj [
+  let fields : List (String × Json) := [
     ("sourceEntry", sourceEntry.toString),
     ("entry", entry.toString),
     ("result", abiKindName result),
@@ -338,6 +350,7 @@ def moduleJson (sourceEntry entry : Name) (module : Fir.Wasm.Module) : Except St
     ("closureDispatch", closureDispatchJson module),
     ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray)]
+  return Json.mkObj <| fields ++ (← bitExactFloatTransportField module entry)
 
 def artifactJson (artifactName : String) (sourceEntry entry : Name)
     (module : Fir.Wasm.Module) (args : Array Value) : Except String Json := do
@@ -349,7 +362,7 @@ def artifactJson (artifactName : String) (sourceEntry entry : Name)
   let arguments ← (params.toList.zip args.toList).mapM fun (kind, value) =>
     argumentJson kind value
   let imports ← module.imports.toList.mapM importJson
-  return Json.mkObj [
+  let fields : List (String × Json) := [
     ("fixture", artifactName),
     ("sourceEntry", sourceEntry.toString),
     ("entry", entry.toString),
@@ -359,6 +372,7 @@ def artifactJson (artifactName : String) (sourceEntry entry : Name)
     ("closureDispatch", closureDispatchJson module),
     ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray)]
+  return Json.mkObj <| fields ++ (← bitExactFloatTransportField module entry)
 
 def artifactJsonWithRuntime (artifactName : String) (sourceEntry entry : Name)
     (module : Fir.Wasm.Module) (runtime : RuntimeState) (args : Array Value) : Except String Json := do
@@ -371,7 +385,7 @@ def artifactJsonWithRuntime (artifactName : String) (sourceEntry entry : Name)
     argumentJsonWithRuntime runtime kind value
   let imports ← module.imports.toList.mapM importJson
   let initialRuntime ← runtimeJson runtime
-  return Json.mkObj [
+  let fields : List (String × Json) := [
     ("fixture", artifactName),
     ("sourceEntry", sourceEntry.toString),
     ("entry", entry.toString),
@@ -382,5 +396,6 @@ def artifactJsonWithRuntime (artifactName : String) (sourceEntry entry : Name)
     ("closureDescriptors", closureDescriptorsJson module),
     ("imports", Json.arr imports.toArray),
     ("initialRuntime", initialRuntime)]
+  return Json.mkObj <| fields ++ (← bitExactFloatTransportField module entry)
 
 end Fir.Wasm.Emit.Manifest

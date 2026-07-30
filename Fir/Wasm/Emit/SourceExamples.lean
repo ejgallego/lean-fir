@@ -9,6 +9,10 @@ namespace Fir.Wasm.Emit.SourceExamples
 open Lean Elab Command
 open Fir.Wasm.Emit.Source
 
+def idFloat32Fixture (value : Float32) : Float32 := value
+
+def idFloatFixture (value : Float) : Float := value
+
 #guard validationSchemaAcceptsAbiKind .float32 .float32
 #guard validationSchemaAcceptsAbiKind .float64 .float
 #guard !validationSchemaAcceptsAbiKind .float32 .float
@@ -136,6 +140,48 @@ run_cmd do
     throwError "source UInt64 literal export mismatch: {repr artifact.module.exports}"
   unless artifact.bytes.size > Fir.Wasm.Emit.header.size do
     throwError "source UInt64 literal did not produce a complete Wasm module"
+
+run_cmd do
+  let result ← liftCoreM <|
+    compileModule ``idFloat32Fixture
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "Float32 source facade did not compile: {repr error}"
+  let facade := Fir.Wasm.Emit.BitExactFloat.facadeName
+    ``idFloat32Fixture
+  unless artifact.module.exports ==
+      #[``idFloat32Fixture, facade] do
+    throwError "Float32 source facade export mismatch: {repr artifact.module.exports}"
+  let descriptor ← match artifact.moduleManifest with
+    | .ok descriptor => pure descriptor
+    | .error error => throwError "Float32 module descriptor failed: {repr error}"
+  let text := descriptor.compress
+  unless text.contains "\"bitExactFloatTransport\":" &&
+      text.contains "\"encoding\":\"wasm-reinterpret-i32-i64\"" &&
+      text.contains s!"\"entry\":\"{facade}\"" &&
+      text.contains "\"params\":[\"uint32\"]" &&
+      text.contains "\"result\":\"uint32\"" do
+    throwError "Float32 module descriptor lost its exact-bit facade: {text}"
+
+run_cmd do
+  let result ← liftCoreM <|
+    compileModule ``idFloatFixture
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "Float source facade did not compile: {repr error}"
+  let facade := Fir.Wasm.Emit.BitExactFloat.facadeName
+    ``idFloatFixture
+  unless artifact.module.exports ==
+      #[``idFloatFixture, facade] do
+    throwError "Float source facade export mismatch: {repr artifact.module.exports}"
+  let descriptor ← match artifact.moduleManifest with
+    | .ok descriptor => pure descriptor
+    | .error error => throwError "Float module descriptor failed: {repr error}"
+  let text := descriptor.compress
+  unless text.contains "\"bitExactFloatTransport\":" &&
+      text.contains "\"params\":[\"uint64\"]" &&
+      text.contains "\"result\":\"uint64\"" do
+    throwError "Float module descriptor lost its exact-bit facade: {text}"
 
 run_cmd do
   let result ← liftCoreM <|
