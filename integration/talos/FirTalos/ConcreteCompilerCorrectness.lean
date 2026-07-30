@@ -16491,6 +16491,59 @@ theorem
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
+/--
+`USize` field mutation preserves the ownership-strengthened reuse frame.
+Production inversion recovers both typed locals and the installed binary
+setter; the checked constructor rewrite retains ordinary-token provenance and
+the exact heap frontier.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_usizeField_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (USizeFieldEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | uset sourceRuntime nextRuntime sourceEnv objectId fieldId index continuation
+      location cell semantic field objectCompiled fieldCompiled objectLookup
+      fieldLookup updated found live objectEq slotStart slotEnd =>
+      obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
+          objectKindAt, fieldFound, fieldKindAt, callFound,
+          continuationAdapted, targetEq⟩ :=
+        CodeAdapted.usizeSet_eq supportedExport.localsAligned objectCompiled
+          fieldCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.usizeSetCall callFound
+      obtain ⟨heap, step, capacity, cursor⟩ :=
+        effectStepSimulates_usizeSet_with_capacity objectLookup fieldLookup
+          updated stateRelated objectCompiled fieldCompiled objectFound
+          fieldFound objectKindAt fieldKindAt callFound continuationAdapted
+          imported supportedExport.hostsSatisfy inBounds contracted params
+          results found live objectEq slotStart slotEnd
+      have nextInvariant :
+          ConcreteReuseCapacityOwnershipFrame sourceFunction facts
+            remainingBytes nextRuntime sourceEnv
+            (replaceHeap targetStore heap) targetLocals witness :=
+        invariant.ofReplaceHeapEffectStep step capacity
+          (setUSizeSlot_ordinaryPersistenceTransport updated) cursor
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step, nextInvariant⟩
+
 /-- The ownership prefix proved for facts-indexed reuse: compiler-erased
 persistent operations, ordinary increment, and recursive decrement. -/
 abbrev ReuseOwnershipThroughDecrementEffectSupported
@@ -16623,6 +16676,54 @@ theorem
   apply EffectRuntimeRefines.or
   · exact spec.effectRuntimeRefines_reuseOwnershipAndTag
   · exact spec.effectRuntimeRefines_objectField_reuseCapacityOwnership
+
+/-- Object and `USize` field writes preserve the facts-indexed frame. -/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_fieldMutation_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (FieldMutationEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefines.or
+  · exact spec.effectRuntimeRefines_objectField_reuseCapacityOwnership
+  · exact spec.effectRuntimeRefines_usizeField_reuseCapacityOwnership
+
+/--
+One facts-indexed runtime law for ownership, tag mutation, object fields, and
+`USize` fields.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipTagAndFieldMutation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+        (OwnershipTagAndFieldMutationEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefines.or
+  · exact spec.effectRuntimeRefines_reuseOwnershipAndTag
+  · exact spec.effectRuntimeRefines_fieldMutation_reuseCapacityOwnership
 
 /--
 The complete facts-indexed direct family may interleave with compiler-erased
@@ -16937,6 +17038,58 @@ theorem
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndObject)
+    parameterCount
+
+/--
+Finite whole-export partial correctness for every facts-indexed direct/reuse
+operation interleaved with ownership, tag mutation, object fields, and
+`USize` fields.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipTagAndFieldMutationCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (OwnershipTagAndFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndFieldMutation)
     parameterCount
 
 /--

@@ -4639,6 +4639,16 @@ arbitrary finite interleavings of the complete direct/reuse family with
 ownership, tag mutation, and FVar or erased object-slot writes. `USize` and
 packed-scalar mutation are the next facts-indexed effects.
 
+W6.6go adds successful `USize` slot mutation. The typed source specialization
+`setUSizeSlot_ordinaryPersistenceTransport` reduces the absolute final-LCNF
+slot write to the generic constructor-payload transport. The operation law
+then reuses the existing compiler inversion, i32/i64 local resolution,
+installed concrete setter, mapped-header capacity theorem, and unchanged
+frontier. `correctReuseBudgetedDirectOwnershipTagAndFieldMutationCode` covers
+the complete direct/reuse and ownership/tag fragment plus both object-field
+forms and `USize` fields. Packed-scalar mutation is the remaining current
+constructor-field family.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -1268,6 +1268,16 @@ theorem setTag_ordinaryPersistenceTransport
     OrdinaryPersistenceTransport before after :=
   modifyConstructor_ordinaryPersistenceTransport operation
 
+/-- A typed `USize` slot write is a constructor-payload rewrite. -/
+theorem setUSizeSlot_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    {slot : Nat} {field : UInt64}
+    (operation :
+      setUSizeSlot before value slot (.usize field) = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  unfold setUSizeSlot at operation
+  exact modifyConstructor_ordinaryPersistenceTransport operation
+
 /-- A successful semantic reference-count increment never changes a cell's
 persistence bit and never allocates a new cell. -/
 theorem incValue_ordinaryPersistenceTransport

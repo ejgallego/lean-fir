@@ -99,9 +99,10 @@ Constructor-tag mutation composes through the generic
 `modifyConstructor_ordinaryPersistenceTransport`, which covers any successful
 constructor-payload rewrite that retains the decoded cell's ownership
 metadata. FVar and compiler-erased object-field writes now compose through the
-same theorem and a shared facts-indexed target-effect transport. This bug still
-blocks validator-wide admission of effects that can create persistent aliases
-or otherwise fail that transport.
+same theorem and a shared facts-indexed target-effect transport. Typed `USize`
+slot writes use the corresponding specialization and now compose as well.
+This bug still blocks validator-wide admission of effects that can create
+persistent aliases or otherwise fail that transport.
 
 ## Classification and triage
 

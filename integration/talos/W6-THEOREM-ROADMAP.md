@@ -693,8 +693,11 @@ acceptance tests pass.
    through `OwnershipAndTagEffectSupported`.
    `correctReuseBudgetedDirectOwnershipTagAndObjectCode` adds both FVar and
    compiler-erased object-field writes through the same transports and the
-   existing descriptor-indexed production simulations. `USize` and
-   packed-scalar mutation are the next effect obligations.
+   existing descriptor-indexed production simulations.
+   `setUSizeSlot_ordinaryPersistenceTransport` and
+   `correctReuseBudgetedDirectOwnershipTagAndFieldMutationCode` add the
+   absolute-slot `USize` setter through the same source/target boundaries.
+   Packed-scalar mutation is the next effect obligation.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
