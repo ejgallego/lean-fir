@@ -1172,6 +1172,22 @@ compiler-produced states must guarantee operand evaluation and mutation
 success, since a faulting source write cannot be simulated by target
 stuttering.
 
+The reuse-effect bridge lands at `8c6ea3e6`.
+`reuseNone_arity_of_ok` extracts the allocation branch's constructor arity
+from a successful interpreter effect, while
+`DeletedReuseReadyAt.none_of_effect` packages the failed-token branch without
+a separately asserted arity fact.
+`SourceOnlyReuseTokenBinding.deletedReuseSomeReadyAt_of_effect` combines an
+exact source-only token binding, argument evaluation, successful concrete
+reuse, and the runtime relation into full root-aware readiness. The
+empty-target, nonempty-ledger, owned-child, and retained-prefix clients now
+use this interface instead of fixture-local live-cell and constructor-shape
+records. The retained-prefix proof also derives its token binding from the
+preceding successful reset and preserves it across the intervening argument
+binding. The remaining reset-specific invariant must cover the reset
+operand's recursively released owned subgraph; a source-only parent binding
+alone cannot prove that paired target owners remain unchanged.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1250,7 +1266,8 @@ heap-binding/reset-token provenance lands at `0041d70c`. Successful
 deleted-write effects are converted into all three local heap shapes at
 `7ecdc33b`; `44b1c2ff` composes those shapes with source-only binding
 provenance and the target allocation ledger into the complete compiler-facing
-write-readiness contract.
+write-readiness contract. The corresponding failed- and concrete-token reuse
+effect bridges land at `8c6ea3e6`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1300,9 +1317,12 @@ the existing nullary-`.fap` semantic discrepancy.
    scalar writes, reset, and concrete reuse now expose their local operation
    shapes generically. Deleted writes additionally have a compiler-facing
    source-only binding/effect bridge to the complete root-aware readiness
-   contract. Arbitrary checked entries must still derive and preserve the
-   compiler typing/ownership facts that guarantee operand evaluations and
-   successful operations, without finite execution-graph enumeration.
+   contract; both reuse-token branches now derive their operational facts
+   from successful effects, and concrete reuse consumes reset-token
+   provenance directly. Next isolate and preserve the source-only owned
+   subgraph condition required by reset. Arbitrary checked entries must still
+   derive and preserve these compiler typing/ownership facts without finite
+   execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
