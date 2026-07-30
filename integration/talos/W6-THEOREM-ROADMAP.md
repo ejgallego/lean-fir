@@ -659,6 +659,10 @@ acceptance tests pass.
    packed-scalar projections now supply that proof as well.
    `correctReuseReadOnlyCode` covers arbitrary finite interleavings of reuse
    with the complete heap-preserving direct family.
+   Nonempty constructor allocation now supplies both the source
+   `OrdinaryPersistenceTransport` and its concrete capacity-result/header
+   transport. `correctReuseReadOnlyConstructorCode` is the first allocating
+   mixed whole-export endpoint.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

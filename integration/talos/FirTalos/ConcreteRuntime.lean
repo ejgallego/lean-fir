@@ -3405,15 +3405,20 @@ theorem allocCtorNonemptyStep_of_refines_of_budget
             (.object (.heap runtime.nextLocation)) ∧
           allocCtor runtime info semanticFields =
             .ok (semanticConstructorResult runtime info semanticFields,
-              .object (.heap runtime.nextLocation)) := by
+              .object (.heap runtime.nextLocation)) ∧
+          allocateConstructor initial.host.runtime.heap info fields.toArray =
+            .ok (heap, address) := by
   obtain ⟨heap, address, allocated, remainingBudget⟩ :=
     MemoryState.FrontierInvariant.allocateConstructor_nonempty_eq_ok_of_budget
       runtimeRelated.heap.frontier info fields.toArray arity nonempty tagFits
         objectFieldsFit usizeFieldsFit scalarBytesFit budget fits
-  exact ⟨heap, address, remainingBudget,
+  refine ⟨heap, address, remainingBudget, ?_⟩
+  have core :=
     allocCtorNonemptyStep_of_refines runtimeRelated argsLength decoded arity
       semanticArity fieldKindsSize fieldKindsValid fieldRelated nonempty tagFits
-      objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines allocated⟩
+      objectFieldsFit usizeFieldsFit scalarBytesFit resultRefines allocated
+  exact ⟨core.1, core.2.1, core.2.2.1, core.2.2.2.1,
+    core.2.2.2.2, allocated⟩
 
 /-- A related physical value always decodes to the exact W6 lane witnessed by
 `ValueRel`. -/

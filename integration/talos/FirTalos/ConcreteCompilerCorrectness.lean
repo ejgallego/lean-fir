@@ -4220,6 +4220,11 @@ theorem constructorNonemptyStep_of_budget
               nextStore.host.failure? = none ∧
               PhysicalValueRel nextWitness resultKind
                   (.i32 (UInt32.ofNat word.value)) sourceValue ∧
+              ReuseCapacityValueRel nextStore.host.runtime.heap nextWitness
+                  (constructorReuseCapacityEvidence info) resultKind
+                  (.word32 word) sourceValue ∧
+              HeaderCapacityTransport initial.host.runtime.heap
+                  nextStore.host.runtime.heap witness ∧
               nextStore.host.runtime.heap.AddressSpaceBudget
                 (remainingBytes -
                   (ConstructorLayout.ofInfo info).allocationBytes) := by
@@ -4238,12 +4243,19 @@ theorem constructorNonemptyStep_of_budget
       fieldsRelated index kind value (by simpa using kindAt)
         (by simpa using valueAt)
     exact ⟨word, by simpa using wordAt, valueRelated⟩
-  obtain ⟨heap, address, remainingBudget, extension, operation,
-      nextRuntimeRelated, physicalRelated, expectedSourceStep⟩ :=
+  obtain ⟨heap, address, remainingBudget, _baseExtension, _baseOperation,
+      _baseRuntimeRelated, _basePhysicalRelated, _baseSourceStep, allocated⟩ :=
     allocCtorNonemptyStep_of_refines_of_budget runtimeRelated argsLength
       decoded arity semanticArity fieldKindsSize fieldKindsValid
       fieldsRelatedArray nonempty tagFits objectFieldsFit usizeFieldsFit
       scalarBytesFit resultRefines budget allocationFits
+  obtain ⟨nextWitness, extension, operation, nextRuntimeRelated,
+      physicalRelated, capacityRelated, capacityTransport,
+      expectedSourceStep⟩ :=
+    allocCtorNonemptyStep_of_capacityEvidence runtimeRelated argsLength decoded
+      arity semanticArity fieldKindsSize fieldKindsValid fieldsRelatedArray
+      nonempty tagFits objectFieldsFit usizeFieldsFit scalarBytesFit
+      resultRefines allocated
   have resultEq :
       (semanticConstructorResult sourceRuntime info semanticArgs,
         .object (.heap sourceRuntime.nextLocation)) =
@@ -4252,14 +4264,13 @@ theorem constructorNonemptyStep_of_budget
   injection resultEq with runtimeEq valueEq
   subst nextRuntime
   subst sourceValue
-  let nextWitness :=
-    witness.bindConstructor sourceRuntime.nextLocation address info fieldKinds
   refine ⟨replaceHeap initial heap, address, nextWitness, operation, ?_, ?_,
     extension.closureDescriptors, extension, nextRuntimeRelated, ?_,
-    physicalRelated, ?_⟩
+    physicalRelated, capacityRelated, ?_, ?_⟩
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
+  · simpa [replaceHeap, clearFailure] using capacityTransport
   · simpa [replaceHeap, clearFailure] using remainingBudget
 
 /--
@@ -11849,7 +11860,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
   subst alignedResultIndex
   obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
       hostDescriptorsPreserved, witnessDescriptorsPreserved, extension,
-      nextRuntimeRelated, failureClear, valueRelated, remainingBudget⟩ :=
+      nextRuntimeRelated, failureClear, valueRelated, _capacityValue,
+      _capacityTransport, remainingBudget⟩ :=
     constructorNonemptyStep_of_budget stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -13797,6 +13809,127 @@ theorem
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Nonempty constructor allocation inserts the validator's exact constructor
+capacity fact while preserving every older fact and ordinary token.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => NonemptyConstructorSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨info, args, argumentCode, fieldKinds, resultKind, valueEq, tagFits,
+      valueKind, argumentsCompiled, resultCompiled, operationWellFormed,
+      nonempty, objectFieldsFit, usizeFieldsFit, scalarBytesFit⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  obtain ⟨semanticArgs, evaluated, semanticStep⟩ :=
+    sourceLetResult_constructor_eq valueEq sourceStep
+  have operationFacts :
+      (info.size = fieldKinds.size ∧
+        fieldKinds.all AbiKind.isObjectField = true) ∧
+        (constructorKind info).refines resultKind = true := by
+    simpa [RuntimeOp.abiWellFormed] using operationWellFormed
+  have semanticArity : semanticArgs.size = info.size := by
+    by_contra mismatch
+    simp [allocCtor, mismatch, Bind.bind, Except.bind] at semanticStep
+  have tagFits' : info.cidx < UInt32.size := by
+    simpa [Fir.Wasm.constructorTagFitsI32] using tagFits
+  have constructorFits :
+      (ConstructorLayout.ofInfo info).allocationBytes ≤ remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (argumentCode ++
+          [.call (.runtime (.allocCtor info fieldKinds resultKind))]) :=
+    compileLetValue_constructor valueEq tagFits valueKind argumentsCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨physicalArgs, argumentsReady, physicalArity, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned argumentsCompiled
+      argumentsAdapted evaluated related.stateRelated
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
+      hostDescriptorsPreserved, witnessDescriptorsPreserved, extension,
+      nextRuntimeRelated, failureClear, valueRelated, capacityValue,
+      capacityTransport, remainingBudget⟩ :=
+    constructorNonemptyStep_of_budget related.stateRelated.1 physicalArity
+      argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
+      operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
+      scalarBytesFit operationFacts.2 budget constructorFits
+  obtain ⟨updated, targetSet⟩ :=
+    FirTalos.Correctness.locals_set?_exists
+      (frameAligned.validIndex resultFound)
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.allocCtorCall callFound
+  have physicalParams : imp.params.length = physicalArgs.length :=
+    params.trans physicalArity.symm
+  have step :=
+    letStepSimulates_constructorArgs (context := context) valueEq evaluated
+      semanticStep related.stateRelated resultFound resultKindAt argumentsReady
+      imported spec.hostsSatisfy inBounds contracted physicalParams results
+      operation extension nextRuntimeRelated failureClear valueRelated targetSet
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+  have nextFrame :
+      ConcreteLocalFrameAligned sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore updated nextWitness :=
+    ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+  have nextRelated :
+      ReuseCapacityStateRelated
+        (insertReuseCapacityFact facts decl.fvarId
+          (constructorReuseCapacityEvidence info))
+        sourceFunction nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+        nextStore updated nextWitness :=
+    related.ofConstructorLetStep step resultFound resultKindAt targetSet
+      (WitnessTransport.ofExtension extension) capacityTransport capacityValue
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel
+        (insertReuseCapacityFact facts decl.fvarId
+          (constructorReuseCapacityEvidence info))
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) :=
+    ordinaryTokens.bindObject
+      (allocCtor_ordinaryPersistenceTransport semanticStep)
+      (allocCtor_result_is_object semanticStep)
+  have transfer :
+      reuseCapacityLetFacts? facts decl =
+        some
+          (insertReuseCapacityFact facts decl.fvarId
+            (constructorReuseCapacityEvidence info)) := by
+    simp [reuseCapacityLetFacts?, valueEq]
+  exact ⟨nextStore, updated, nextWitness,
+    insertReuseCapacityFact facts decl.fvarId
+      (constructorReuseCapacityEvidence info),
+    step, externalsPreserved, hostDescriptorsPreserved,
+    witnessDescriptorsPreserved, transfer, nextRelated, nextOrdinary,
+    nextFrame, by
+      simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
+
+/--
 Finite successful source evaluation indexed by the authoritative reuse fact
 map and exact source allocation reservation.
 
@@ -14484,6 +14617,103 @@ theorem ConcreteSupportedExport.correctReuseReadOnlyCode
             callerTail) :=
   spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnly
+    parameterCount
+
+/--
+Facts-indexed reuse plus heap-preserving direct operations and nonempty
+constructor allocation.
+-/
+def ReuseReadOnlyConstructorSupported (context : Fir.Wasm.Context)
+    (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure) : Prop :=
+  ReuseReadOnlySupported context facts decl ∨
+    NonemptyConstructorSupported context decl
+
+/-- The first allocating mixed facts-indexed production runtime law. -/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseReadOnlyConstructorSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun facts decl =>
+        ReuseReadOnlySupported context facts decl ∨
+          NonemptyConstructorSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction)
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | inl readOnlyOrReuse =>
+      exact spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnly
+        readOnlyOrReuse stepFits invariant sourceStep valueCompiled valueAdapted
+        resultFound
+  | inr constructor =>
+      exact
+        spec.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
+          constructor stepFits invariant sourceStep valueCompiled valueAdapted
+          resultFound
+
+/--
+Finite whole-export partial correctness for arbitrary interleavings of reuse,
+heap-preserving direct operations, and nonempty constructor allocation.
+-/
+theorem ConcreteSupportedExport.correctReuseReadOnlyConstructorCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context
+        (ReuseReadOnlyConstructorSupported context) directLetAllocationCost
+        facts sourceRuntime sourceEnv sourceCode resultFacts resultRuntime
+        resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
     parameterCount
 
 /--

@@ -4517,6 +4517,19 @@ interleavings through the actual generated export. The next widening step is
 allocating direct results, whose existing prefix/header transport must be
 paired with source ordinary-persistence for fresh cells.
 
+W6.6ge opens that allocating boundary with nonempty constructors.
+`OrdinaryPersistenceTransport` is now reflexive, transitive, and instantiated
+for fresh ordinary allocation, `allocCtor`, and reuse.
+`ReuseTokenOrdinaryRel.bindObject` packages the common rule that an
+object-valued result makes its inserted fact vacuous as a token while every
+old fact crosses the source transport. The budgeted nonempty-constructor
+runtime theorem now also exposes its exact `ReuseCapacityValueRel` result and
+mapped-header transport. The facts-indexed production law consumes those
+facts to insert the validator-selected constructor bound, and
+`correctReuseReadOnlyConstructorCode` proves arbitrary finite interleavings
+of reuse, the read-only direct family, and nonempty allocation. Natural,
+String, and boxed ordinary results are the next allocating families.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

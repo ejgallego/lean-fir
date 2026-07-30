@@ -938,6 +938,38 @@ private theorem alloc_ordinary_preserves_persistent_false
     subst afterCell
     exact beforeOrdinary
 
+/-- Fresh ordinary allocation preserves ordinaryness at every visible source
+heap location, including the newly allocated location. -/
+theorem alloc_ordinaryPersistenceTransport
+    {before after : RuntimeState} {object : HeapObject}
+    {reference : ObjectRef}
+    (operation : alloc before object false = (after, reference)) :
+    OrdinaryPersistenceTransport before after := by
+  intro location afterCell afterFound beforeOrdinary
+  cases beforeFound : findCell? before.heap location with
+  | some beforeCell =>
+      exact alloc_ordinary_preserves_persistent_false operation beforeFound
+        (beforeOrdinary beforeCell beforeFound) afterFound
+  | none =>
+      unfold alloc at operation
+      have afterEq :
+          ({ before with
+            heap :=
+              (before.nextLocation,
+                { object := object, rc := 1, persistent := false,
+                  live := true }) ::
+                before.heap
+            nextLocation := before.nextLocation + 1 } : RuntimeState) =
+            after :=
+        congrArg Prod.fst operation
+      subst after
+      by_cases same : before.nextLocation = location
+      · subst location
+        simp [findCell?] at afterFound
+        subst afterCell
+        rfl
+      · simp [findCell?, same, beforeFound] at afterFound
+
 private theorem allocCtor_preserves_persistent_false
     {before after : RuntimeState} {info : LCNF.CtorInfo}
     {args : Array Value} {result : Value} {location : Location}
@@ -979,6 +1011,44 @@ private theorem allocCtor_preserves_persistent_false
         (before := before) (after := (alloc before (.ctor object)).1)
         (object := .ctor object) (reference := (alloc before (.ctor object)).2)
         (operation := rfl) beforeFound beforeOrdinary afterFound
+
+/-- Every successful constructor allocation is an ordinary-persistence
+transport. Empty constructors leave the heap unchanged; nonempty constructors
+use fresh ordinary allocation. -/
+theorem allocCtor_ordinaryPersistenceTransport
+    {before after : RuntimeState} {info : LCNF.CtorInfo}
+    {args : Array Value} {result : Value}
+    (operation : allocCtor before info args = .ok (after, result)) :
+    OrdinaryPersistenceTransport before after := by
+  unfold allocCtor at operation
+  simp only [Bind.bind, Except.bind] at operation
+  by_cases wrongArity : args.size != info.size
+  · rw [if_pos wrongArity] at operation
+    contradiction
+  · rw [if_neg wrongArity] at operation
+    by_cases empty :
+        info.size == 0 && info.usize == 0 && info.ssize == 0
+    · rw [if_pos empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : before = after := congrArg Prod.fst pairEq
+      subst after
+      exact OrdinaryPersistenceTransport.refl before
+    · rw [if_neg empty] at operation
+      let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := args
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := [] }
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : (alloc before (.ctor object)).1 = after :=
+        congrArg Prod.fst pairEq
+      subst after
+      exact alloc_ordinaryPersistenceTransport
+        (before := before) (after := (alloc before (.ctor object)).1)
+        (object := .ctor object) (reference := (alloc before (.ctor object)).2)
+        (operation := rfl)
 
 private theorem setCell_preserves_persistent_false
     {before after : RuntimeState} {target location : Location}
@@ -1099,7 +1169,7 @@ theorem reuse_preserves_persistent_false
                     Bool.eq_false_of_not_eq_true live
                   simp [getLiveCell, targetFound, dead] at operation
 
-private theorem allocCtor_result_is_object
+theorem allocCtor_result_is_object
     {before after : RuntimeState} {info : LCNF.CtorInfo}
     {args : Array Value} {result : Value}
     (operation : allocCtor before info args = .ok (after, result)) :
@@ -1356,6 +1426,57 @@ theorem reuse_preserves_ordinary_lookup
       exact reuse_preserves_persistent_false operation beforeFound
         (beforeOrdinary beforeCell beforeFound) afterFound
 
+/-- Successful constructor reuse is an ordinary-persistence transport. -/
+theorem reuse_ordinaryPersistenceTransport
+    {before after : RuntimeState} {token result : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool} {args : Array Value}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result)) :
+    OrdinaryPersistenceTransport before after := by
+  intro location afterCell afterFound beforeOrdinary
+  exact reuse_preserves_ordinary_lookup operation beforeOrdinary afterFound
+
+/--
+Bind a result known to be an object while inserting any capacity evidence.
+The new fact cannot denote a reuse token, and every old fact crosses the
+supplied ordinary-persistence transport.
+-/
+theorem ReuseTokenOrdinaryRel.bindObject
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {nextEvidence : ReuseCapacityEvidence}
+    {before after : RuntimeState} {sourceEnv : Env}
+    {result : Value}
+    (ordinary : ReuseTokenOrdinaryRel facts before sourceEnv)
+    (transport : OrdinaryPersistenceTransport before after)
+    (resultObject : ∃ reference, result = .object reference) :
+    ReuseTokenOrdinaryRel
+      (insertReuseCapacityFact facts resultId nextEvidence) after
+      (Fir.LeanIR.Impure.bind sourceEnv resultId result) := by
+  intro tokenId available location cell tracked tokenLookup found
+  by_cases sameName : resultId.name = tokenId.name
+  · have resultLookup :
+        lookup (Fir.LeanIR.Impure.bind sourceEnv resultId result) tokenId =
+          some result := by
+      simp [Fir.LeanIR.Impure.bind, lookup, sameName]
+    rw [resultLookup] at tokenLookup
+    have resultToken : result = .reuseToken (some location) :=
+      Option.some.inj tokenLookup
+    obtain ⟨reference, resultEq⟩ := resultObject
+    rw [resultEq] at resultToken
+    contradiction
+  · have oldTracked :
+        findReuseCapacityEvidence? facts tokenId =
+          some (.retainedAtLeast available) := by
+      rw [← findReuseCapacityEvidence?_insert_other facts resultId tokenId
+        nextEvidence sameName]
+      exact tracked
+    have oldLookup :
+        lookup sourceEnv tokenId = some (.reuseToken (some location)) := by
+      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using tokenLookup
+    exact transport location cell found fun beforeCell beforeFound =>
+      ordinary tokenId available location beforeCell oldTracked oldLookup
+        beforeFound
+
 /--
 The authoritative fact-map insertion performed after successful reuse
 preserves the ordinary-token relation. The inserted result is an object, so
@@ -1373,32 +1494,8 @@ theorem ReuseTokenOrdinaryRel.bindReuse
     ReuseTokenOrdinaryRel
       (insertReuseCapacityFact facts resultId nextEvidence) after
       (Fir.LeanIR.Impure.bind sourceEnv resultId result) := by
-  intro tokenId available location cell tracked tokenLookup found
-  by_cases sameName : resultId.name = tokenId.name
-  · have resultLookup :
-        lookup (Fir.LeanIR.Impure.bind sourceEnv resultId result) tokenId =
-          some result := by
-      simp [Fir.LeanIR.Impure.bind, lookup, sameName]
-    rw [resultLookup] at tokenLookup
-    have resultToken : result = .reuseToken (some location) :=
-      Option.some.inj tokenLookup
-    obtain ⟨reference, resultObject⟩ := reuse_result_is_object operation
-    rw [resultObject] at resultToken
-    contradiction
-  · have oldTracked :
-        findReuseCapacityEvidence? facts tokenId =
-          some (.retainedAtLeast available) := by
-      rw [← findReuseCapacityEvidence?_insert_other facts resultId tokenId
-        nextEvidence sameName]
-      exact tracked
-    have oldLookup :
-        lookup sourceEnv tokenId = some (.reuseToken (some location)) := by
-      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using tokenLookup
-    exact reuse_preserves_ordinary_lookup operation
-      (fun beforeCell beforeFound =>
-        ordinary tokenId available location beforeCell oldTracked oldLookup
-          beforeFound)
-      found
+  exact ordinary.bindObject (reuse_ordinaryPersistenceTransport operation)
+    (reuse_result_is_object operation)
 
 /-- The empty validator fact map adds no obligation to W6's ordinary state
 relation. This is the initial bridge for a validated function body. -/
