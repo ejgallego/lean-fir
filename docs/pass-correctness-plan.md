@@ -1455,6 +1455,22 @@ reset, missing-token allocation, and concrete-token overwrite. All fourteen
 executable impure `let` families now expose ownership-strengthened exact
 matchers; next strengthen the global exact active-code dispatcher.
 
+The active-code ownership dispatcher lands at `fbf34a80`, with concrete
+dispatcher regressions at `fff91175`. A generic source theorem now preserves
+the complete current-environment, heap, and suspended-bind-frame ownership
+carrier across every executable impure `LCNF.Code` step: retained `let`,
+join-point installation, jump parameter binding, case selection, return,
+object/`USize`/scalar writes, tag replacement, reference-count increment and
+recursive decrement, and deletion. Exact-shadow and state-level reachable
+matchers return their existing non-lockstep target path and relation together
+with the successor source carrier. The jump case uses an explicit
+parameter-binding ownership law rather than treating the target environment
+as unchanged. Concrete regressions execute a one-argument jump, ordinary heap
+increment, recursive decrement to a dead cell, erased-sentinel deletion, and
+the global deleted-object-write dispatcher. This completes the active-code
+ownership boundary. The next distinct boundary is whole-machine ownership
+across named/value invocation and external request/response resumption.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1587,6 +1603,10 @@ heap-box allocation successors.
 source, hereditary, and exact ownership matchers; `997a8928` checks a
 heap-backed reset, paired missing-token allocation, and concrete-token
 in-place overwrite.
+`fbf34a80` assembles the source, exact-shadow, and reachable state-level
+ownership dispatchers for every executable impure active-code constructor;
+`fff91175` checks jump binding, reference-count increment/decrement, erased
+deletion, and global deleted-write dispatch with concrete machine steps.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1680,9 +1700,14 @@ the existing nullary-`.fap` semantic discrepancy.
    including complete-environment bounds for captured fixed arguments and
    concrete exact regressions. Retained reset and both reuse modes now
    preserve the same carrier, completing ownership-strengthened exact
-   matchers for all fourteen executable impure `let` families. Next strengthen
-   the global exact active-code dispatcher and carry the compositional closure
-   certificate through the general dispatcher.
+   matchers for all fourteen executable impure `let` families. The generic
+   source active-code dispatcher now preserves the carrier across every
+   executable impure code constructor, including jump parameter binding,
+   reference-count operations, deletion, cases, return, and direct writes.
+   Exact-shadow and reachable state-level dispatchers expose that result
+   together with the existing non-lockstep relation. Next carry ownership
+   across the distinct whole-machine invocation and external-response
+   boundary.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
