@@ -35,6 +35,10 @@ def classifiesAs (type : Lean.Expr) (expected : AbiKind) : Bool :=
 #guard classifiesAs LCNF.ImpureType.usize .usize
 #guard classifiesAs LCNF.ImpureType.float32 .float32
 #guard classifiesAs LCNF.ImpureType.float .float
+#guard supportedScalarProjectionKind .float32
+#guard supportedScalarProjectionKind .float
+#guard supportedBoxScalarKind .float32
+#guard supportedBoxScalarKind .float
 #guard match abiKind? LCNF.ImpureType.void with
   | .ok none => true
   | _ => false
@@ -383,12 +387,12 @@ def malformedUSizeAsScalarProjectionProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard !supportedProgram malformedUSizeAsScalarProjectionProgram
 
-def unsupportedFloatProjectionProgram : Fir.LeanIR.ImpureProgram :=
-  { decls := #[decl `unsupportedFloatProjection #[param p objType]
+def supportedFloatProjectionProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedFloatProjection #[param p objType]
       LCNF.ImpureType.float (.code <|
         .let (letDecl r LCNF.ImpureType.float (.sproj 1 0 p)) (.return r))] }
 
-#guard !supportedProgram unsupportedFloatProjectionProgram
+#guard supportedProgram supportedFloatProjectionProgram
 
 def boxed : FVarId := ⟨`boxed⟩
 

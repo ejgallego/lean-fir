@@ -32,11 +32,10 @@ def abiValueKind? (type : Expr) : Option AbiKind :=
   | .ok kind? => kind?
   | .error _ => none
 
-/-- Scalar field values currently represented by the shared impure runtime.
-Float fields remain gated by `FIR-BUG-wasm-none-float-runtime-gap`; `USize`
-uses the distinct `uproj` instruction. -/
+/-- Scalar field values represented by the shared impure runtime.
+`USize` uses the distinct `uproj` instruction. -/
 def supportedScalarProjectionKind : AbiKind → Bool
-  | .uint8 | .uint16 | .uint32 | .uint64 => true
+  | .uint8 | .uint16 | .uint32 | .uint64 | .float32 | .float => true
   | _ => false
 
 def supportedBoxScalarKind (kind : AbiKind) : Bool :=
