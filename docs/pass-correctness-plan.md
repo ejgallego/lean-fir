@@ -1403,6 +1403,19 @@ runtime relation. Next cover the heap-derived retained read family
 (`.oproj`, `.unbox`, and `.isShared`), then the allocation-capable retained
 results before strengthening the global exact dispatcher.
 
+The heap-derived retained-read ownership bridge lands at `b535c662`, with
+exact semantic regressions at `61fe8259`. Successful `.oproj` results are
+either non-heap values or owned constructor children, and successful heap
+`.unbox` results are owned boxed payloads; in both cases
+`HeapOwnershipBelowFrontier` places every returned heap address below the
+existing frontier. Successful `.isShared` queries return an immediate
+`UInt8`. The source-step, hereditary, and exact matchers for all three
+families now return post-step source ownership with the non-lockstep relation.
+The examples exercise the object-projection ownership API, a concrete tagged
+unbox, and a concrete heap-backed sharedness query. Next close the
+allocation-capable retained result families, beginning with literals and
+constructors, before strengthening the global exact dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1519,6 +1532,10 @@ nullary local aliasing.
 `51494be3` carries the same invariant through retained `.erased`, `.uproj`,
 and `.sproj` result binding; `89d6a99e` checks concrete exact `USize` and
 packed-scalar projection steps over a related owned constructor.
+`b535c662` derives frontier bounds for object fields and boxed payloads,
+proves the sharedness result heap-free, and carries retained `.oproj`,
+`.unbox`, and `.isShared` through the ownership-aware exact matchers;
+`61fe8259` checks their exact semantic-step APIs and concrete successors.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1602,11 +1619,13 @@ the existing nullary-`.fap` semantic discrepancy.
    ownership matchers. Runtime-neutral let actions now preserve the carrier
    across retained named/local invocation control changes, pushed bind frames,
    nullary local-value result binding, erased results, and root-free `USize`
-   and scalar projections, with exact wrappers and concrete regressions. Next
-   cover retained object projections, unboxing, and ownership queries, then
-   the remaining allocation-capable retained results; after that strengthen
-   the global exact active-code dispatcher and carry the compositional closure
-   certificate through the general dispatcher.
+   and scalar projections, with exact wrappers and concrete regressions.
+   Retained object projections, unboxing, and ownership queries now also
+   preserve the carrier, including heap-valued owned children and boxed
+   payloads. Next cover the allocation-capable retained result families,
+   beginning with literals and constructors; after that strengthen the global
+   exact active-code dispatcher and carry the compositional closure certificate
+   through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
