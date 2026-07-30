@@ -4981,15 +4981,30 @@ to the old contract, while `cachedHeapSevenStepsPublishAndResume` confirms the
 nontrivial internal body now publishes and resumes through the structured
 protocol.
 
-The next local theorem is callee alignment: connect the structured miss's
-pre-publication `callRuntime` to the hereditary declaration theorem's result
-runtime. This must allow nested declarations to evolve unrelated cache slots;
-it must not assume that the complete globals table is unchanged. That
-alignment will remove the remaining source publication equation from the
-budgeted miss constructor and allow `LazyCacheGlobalsRel.publish` to close at
-the exact generated post-state. Retained-token disjointness (or
-alias-invalidating validator transfer) remains the subsequent environment
-condition.
+W6.6gzl closes callee-result alignment without strengthening observations or
+assuming unchanged globals. `SourceCodeResult` records the complete terminal
+source runtime carried by a yielded state; `SuccessfulDeclaration` retains
+that exact result and derives its former observation-facing `ExecEvaluates`
+field as an accessor. `ConcreteCodeSimulation.sourceResult` constructs the
+exact relation through direct values, calls, externals, lazy caches, cases,
+and effects. The general `ExecSteps.final_eq_of_done` theorem identifies the
+terminal state of two deterministic finite runs even when `Observation`
+deliberately omits globals and the next-location frontier.
+
+`SourceLazyLetResult.miss_cacheFacts_of_callee` applies that theorem to the
+isolated miss body and the hereditary declaration result. Static source
+lookup, nullary-parameter, and code-body equations identify their common
+start; the theorem then derives both initial cache absence and the exact
+pre-publication runtime. Consequently
+`miss_of_budgetedDeclaration_cacheSet` no longer accepts
+`publicationRuntimeEq`. Nested declarations may evolve unrelated cache slots,
+and the final semantic publication is derived from execution.
+
+The next cache work is to derive the new static declaration equations and
+retained-token publication disjointness from the generated declaration
+environment (or coordinate alias-invalidating validator transfer), then use
+the same alignment result to construct the successor whole-cache table in the
+uniform implementation.
 
 ## Parallel agent packages
 

@@ -858,15 +858,23 @@ acceptance tests pass.
    relation. The paired `cachedHeapFourStepsRemainInCallee` and
    `cachedHeapSevenStepsPublishAndResume` guards retain the old counterexample
    and validate the repaired protocol.
-   Next prove callee-result alignment between the structured miss's
-   pre-publication runtime and the hereditary declaration theorem, preserving
-   unrelated nested cache evolution rather than assuming global-table
-   equality. Then resolve the
-   remaining `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration
-   instance by
+   `SourceCodeResult` now retains the complete terminal runtime of a source
+   body and erases to the former observation-facing theorem.
+   `SuccessfulDeclaration` carries that exact result, and
+   `ConcreteCodeSimulation.sourceResult` constructs it across every supported
+   structural node. `ExecSteps.final_eq_of_done` is the general deterministic
+   finite-run theorem used to identify exact terminal states without adding
+   globals or the allocation frontier to `Observation`.
+   `SourceLazyLetResult.miss_cacheFacts_of_callee` aligns the structured
+   miss's isolated body with the hereditary declaration theorem from static
+   source lookup/parameter/body equations. The budgeted generated miss now
+   derives its publication runtime equation instead of accepting it, while
+   permitting unrelated nested cache evolution.
+   Next derive those static declaration equations and resolve the remaining
+   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the
-   generated-environment selection conditions.
+   generated-environment selection and successor-cache-table conditions.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

@@ -1567,6 +1567,106 @@ theorem SourceLazyLetResult.miss_cacheFacts_of_valueEq
       exact SourceLazyLetResult.miss_cacheFacts sourceStep
 
 /--
+The structured source miss and the hereditary declaration theorem have the
+same deterministic callee run. Consequently the declaration result runtime is
+exactly the miss runtime immediately before cache publication.
+
+The source declaration lookup and body equations are static compiler facts.
+No equality between final runtimes is supplied by the caller, and unrelated
+cache slots may evolve during the callee execution.
+-/
+theorem SourceLazyLetResult.miss_cacheFacts_of_callee
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {calleeCode continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (declValue : decl.value = .fap declaration #[])
+    (declarationFound :
+      context.program.findDecl? declaration = some target)
+    (targetParams : target.params = #[])
+    (targetBody : target.value = .code calleeCode)
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (calleeResult :
+      SourceCodeResult context sourceExternals sourceRuntime [] calleeCode
+        resultRuntime sourceValue) :
+    findGlobal? sourceRuntime.globals declaration = none ∧
+      nextRuntime =
+        resultRuntime.setGlobal declaration sourceValue := by
+  cases decl with
+  | mk fvarId binderName type value =>
+      simp only at declValue
+      subst value
+      unfold SourceLazyLetResult SourceLazyMissResult at sourceStep
+      rcases sourceStep with
+        ⟨missDeclaration, calleeControl, calleeEnv, calleeJoins, calleeRuntime,
+          resultEnv, resultJoins, callRuntime, calleeSteps, staged, entered,
+          evaluated, published, bound⟩
+      have declarationEq : missDeclaration = declaration := by
+        simp [executeStep, coreStep, evalLetValue, evalArgs, Bind.bind,
+          Except.bind, pure, Except.pure, pushBindFrame] at staged
+        exact staged.symm
+      subst missDeclaration
+      have semanticEmpty :
+          findGlobal? sourceRuntime.globals declaration = none := by
+        cases found : findGlobal? sourceRuntime.globals declaration with
+        | none => rfl
+        | some cached =>
+            simp [executeStep, coreStep, found] at entered
+      have enteredExpected :
+          executeStep sourceExternals {
+              program := context.program
+              control := .invokeName declaration #[]
+              env := sourceEnv
+              frames := [.bind fvarId continuation sourceEnv []]
+              runtime := sourceRuntime } =
+            .next {
+              program := context.program
+              control := .code calleeCode
+              env := []
+              frames := [
+                .cache declaration,
+                .bind fvarId continuation sourceEnv []]
+              runtime := sourceRuntime } := by
+        simp [executeStep, coreStep, semanticEmpty, invokeDecl,
+          declarationFound, targetParams, targetBody, bindParams]
+      rw [enteredExpected] at entered
+      injection entered with protectedEq
+      cases protectedEq
+      obtain ⟨resultSteps, calleeResultEnv, resultExecution⟩ := calleeResult
+      have sourceDone :
+          executeStep sourceExternals {
+              program := context.program
+              control := .yielded sourceValue
+              env := resultEnv
+              joins := resultJoins
+              runtime := callRuntime } =
+            .done (ReturnedObservation callRuntime sourceValue) := by
+        rfl
+      have resultDone :
+          executeStep sourceExternals
+              (sourceYieldState context resultRuntime calleeResultEnv
+                sourceValue) =
+            .done (ReturnedObservation resultRuntime sourceValue) := by
+        rfl
+      have finalEq :=
+        FirTalos.Correctness.ExecSteps.final_eq_of_done evaluated sourceDone
+          resultExecution resultDone
+      have callRuntimeEq : callRuntime = resultRuntime :=
+        congrArg (fun state : MachineState => state.runtime) finalEq
+      have publication :
+          nextRuntime = callRuntime.setGlobal declaration sourceValue := by
+        simp [executeStep, coreStep] at published
+        exact published.symm
+      exact ⟨semanticEmpty, by simpa [callRuntimeEq] using publication⟩
+
+/--
 The generated cache-hit path is a zero-allocation budgeted lazy step.
 
 The populated flag/value globals select and identify the cached physical
@@ -2198,6 +2298,7 @@ theorem
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
     {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
     {kind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
@@ -2225,6 +2326,10 @@ theorem
       (sourceModule.callSignature? (.declaration declaration)).bind
           (·.results[0]?) = some kind)
     (flagIndexEq : flagIndex = 2 * cacheIndex)
+    (declarationFound :
+      context.program.findDecl? declaration = some sourceDeclaration)
+    (declarationParams : sourceDeclaration.params = #[])
+    (declarationBody : sourceDeclaration.value = .code calleeCode)
     (callee :
       BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime callRuntime
@@ -2256,8 +2361,6 @@ theorem
         (bind sourceEnv decl.fvarId sourceValue)
         (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
         callWitness)
-    (publicationRuntimeEq :
-      nextRuntime = callRuntime.setGlobal declaration sourceValue)
     (publicationDisjoint :
       ReuseTokenPublicationDisjoint facts callRuntime sourceEnv sourceValue)
     (resultKindEq : resultKind = kind)
@@ -2285,6 +2388,11 @@ theorem
       sourceRuntime nextRuntime sourceEnv sourceValue initial
       (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
       resultIndex initialWitness callWitness physical stepCost := by
+  have publicationRuntimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue :=
+    (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
+      declarationParams declarationBody sourceStep
+      callee.capacityPreserving.successful.sourceResult).2
   subst nextRuntime
   apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
     declValue initialRelated cacheTable initializerFound signature flagIndexEq

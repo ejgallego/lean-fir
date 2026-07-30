@@ -3591,4 +3591,36 @@ example
   FirTalos.Concrete.SourceLazyLetResult.miss_cacheFacts_of_valueEq valueEq
     sourceStep
 
+/--
+The exact hereditary callee result identifies the miss's pre-publication
+runtime. Static declaration lookup/body facts replace the former
+caller-supplied runtime equation and permit unrelated nested-cache evolution.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {calleeCode continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (valueEq : decl.value = .fap declaration #[])
+    (declarationFound :
+      context.program.findDecl? declaration = some target)
+    (targetParams : target.params = #[])
+    (targetBody : target.value = .code calleeCode)
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (calleeResult :
+      SourceCodeResult context sourceExternals sourceRuntime [] calleeCode
+        resultRuntime sourceValue) :
+    findGlobal? sourceRuntime.globals declaration = none ∧
+      nextRuntime =
+        resultRuntime.setGlobal declaration sourceValue :=
+  FirTalos.Concrete.SourceLazyLetResult.miss_cacheFacts_of_callee valueEq
+    declarationFound targetParams targetBody sourceStep calleeResult
+
 end FirTalos.Concrete.CompilerCorrectnessContract
