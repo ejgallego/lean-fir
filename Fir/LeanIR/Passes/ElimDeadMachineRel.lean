@@ -7686,6 +7686,14 @@ theorem EnvironmentBelowFrontier.of_evalArgs
       apply @listBound location
       simpa using member
 
+/-- A successful value-producing runtime operation advances rather than
+retreats the allocation frontier, and its returned heap value names only a
+location below the resulting frontier. -/
+structure RuntimeValueBelowFrontier
+    (before after : RuntimeState) (value : Value) : Prop where
+  frontier : before.nextLocation ≤ after.nextLocation
+  value : HeapLocationsBelowFrontier after [value]
+
 /-- Every source runtime root in a shadow relation names an allocated address
 strictly below the source frontier. Reachable heap correspondence supplies
 the cell, and freshness excludes every address at or above the frontier. -/
@@ -7917,6 +7925,59 @@ theorem HeapOwnershipBelowFrontier.allocCtor
       intro child member
       apply argumentsBelow
       simpa [object, HeapObject.ownedValues] using member
+  · unfold Fir.LeanIR.Impure.allocCtor at effect
+    simp only [Bind.bind, Except.bind] at effect
+    rw [if_pos (by simpa using arity)] at effect
+    simp at effect
+
+/-- Constructor allocation returns either an immediate tagged constructor at
+the same frontier or the freshly allocated heap address below the successor
+frontier. -/
+theorem allocCtor_resultBelowFrontier
+    (effect :
+      Fir.LeanIR.Impure.allocCtor runtime info arguments =
+        .ok (result, value)) :
+    RuntimeValueBelowFrontier runtime result value := by
+  by_cases arity : arguments.size = info.size
+  · by_cases immediate :
+        (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+    · have reduced := effect
+      simp [Fir.LeanIR.Impure.allocCtor, arity, immediate,
+        Pure.pure, Except.pure] at reduced
+      have runtimeEq : runtime = result := reduced.1
+      have valueEq :
+          Value.object (.tagged (UInt64.ofNat info.cidx)) = value :=
+        reduced.2
+      subst result
+      subst value
+      constructor
+      · exact Nat.le_refl _
+      · intro location member
+        simp at member
+    · let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := arguments
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := []
+      }
+      have reduced := effect
+      simp [Fir.LeanIR.Impure.allocCtor, arity, immediate,
+        Pure.pure, Except.pure] at reduced
+      have runtimeEq :
+          (Fir.LeanIR.Impure.alloc runtime (.ctor object)).1 =
+            result := reduced.1
+      have valueEq :
+          Value.object
+              (Fir.LeanIR.Impure.alloc runtime (.ctor object)).2 =
+            value := reduced.2
+      subst result
+      subst value
+      constructor
+      · simp [Fir.LeanIR.Impure.alloc]
+      · intro location member
+        simp [Fir.LeanIR.Impure.alloc] at member
+        subst location
+        simp [Fir.LeanIR.Impure.alloc]
   · unfold Fir.LeanIR.Impure.allocCtor at effect
     simp only [Bind.bind, Except.bind] at effect
     rw [if_pos (by simpa using arity)] at effect
@@ -9943,6 +10004,48 @@ theorem reuseSome_nextLocation_eq_of_ok
         | byteArray value => simp at effect
         | «opaque» value => simp at effect
 
+/-- Concrete-token reuse returns the same heap reference named by the token. -/
+theorem reuseSome_value_eq_of_ok
+    (effect :
+      reuse runtime (.reuseToken (some location)) info updateHeader
+        arguments = .ok (result, value)) :
+    value = .object (.heap location) := by
+  unfold reuse at effect
+  simp only [Bind.bind, Except.bind] at effect
+  split at effect
+  · simp at effect
+  · generalize readEq : getLiveCell runtime location = read at effect
+    cases read with
+    | error fault => simp at effect
+    | ok cell =>
+        simp only at effect
+        generalize objectEq : cell.object = object at effect
+        cases object with
+        | ctor old =>
+            simp only at effect
+            generalize setEq :
+              setCell runtime location
+                { cell with
+                  object := .ctor {
+                    tag := if updateHeader then info.cidx else old.tag
+                    objectFields := arguments
+                    usizeFields := Array.replicate info.usize 0
+                    scalarFields := []
+                  } } = updated at effect
+            cases updated with
+            | error fault => simp at effect
+            | ok nextRuntime =>
+                have pairEq := Except.ok.inj effect
+                have valueEq := congrArg Prod.snd pairEq
+                exact valueEq.symm
+        | closure fixed => simp at effect
+        | boxed type value => simp at effect
+        | string value => simp at effect
+        | natural value => simp at effect
+        | integer value => simp at effect
+        | byteArray value => simp at effect
+        | «opaque» value => simp at effect
+
 /-- Concrete-token reuse preserves the ownership bound when every heap
 argument installed in the reused constructor is already below the current
 frontier. This is the static premise supplied by compiler value typing. -/
@@ -10026,6 +10129,40 @@ theorem HeapOwnershipBelowFrontier.reuseNone
   apply wellFormed.allocCtor argumentsBelow
   simpa [Fir.LeanIR.Impure.reuse] using effect
 
+/-- Both reuse modes return a value below the resulting frontier. The
+allocation fallback follows constructor allocation; concrete reuse returns a
+previously allocated cell whose bound comes from heap ownership. -/
+theorem HeapOwnershipBelowFrontier.reuseResultBelowFrontier
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.reuse runtime
+          (.reuseToken tokenLocation) info updateHeader arguments =
+        .ok (result, value)) :
+    RuntimeValueBelowFrontier runtime result value := by
+  cases tokenLocation with
+  | none =>
+      apply allocCtor_resultBelowFrontier
+      simpa [Fir.LeanIR.Impure.reuse] using effect
+  | some location =>
+      have frontier :
+          result.nextLocation = runtime.nextLocation :=
+        reuseSome_nextLocation_eq_of_ok effect
+      have valueEq :
+          value = .object (.heap location) :=
+        reuseSome_value_eq_of_ok effect
+      let shape := reuseSome_success_shape effect
+      constructor
+      · rw [frontier]
+        exact Nat.le_refl _
+      · intro child member
+        simp only [List.mem_singleton] at member
+        rw [valueEq] at member
+        have same : child = location := by
+          simpa using member
+        subst child
+        rw [frontier]
+        exact wellFormed.cell_lt shape.found
+
 /-- Checked source argument evaluation supplies the value bound needed by
 constructor allocation directly from the live-root shadow relation. -/
 theorem ShadowRuntimeRel.leftAllocCtorPreservesHeapOwnershipBelowFrontier
@@ -10092,6 +10229,31 @@ structure SourceEnvironmentOwnershipBelowFrontier
   heap : HeapOwnershipBelowFrontier state.runtime
   env : EnvironmentBelowFrontier state.runtime state.env
 
+/-- Advancing the allocation frontier transports every old environment value
+while a separately proved heap invariant supplies the new runtime half. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.withRuntimeMonoFrontier
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (heap : HeapOwnershipBelowFrontier result)
+    (frontier : state.runtime.nextLocation ≤ result.nextLocation) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } where
+  heap := heap
+  env := EnvironmentBelowFrontier.monoFrontier
+    (@bounded.env) frontier
+
+/-- Binding a returned value below the current frontier preserves the full
+local source-state carrier. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.bindValue
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (valueBound :
+      HeapLocationsBelowFrontier state.runtime [value]) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with env := bind state.env binder value } where
+  heap := bounded.heap
+  env := EnvironmentBelowFrontier.bind
+    (binder := binder) (value := value)
+    bounded.env valueBound
+
 /-- Replacing only the runtime at an unchanged allocation frontier preserves
 the complete source-environment half of the carrier. -/
 theorem SourceEnvironmentOwnershipBelowFrontier.withRuntimeSameFrontier
@@ -10124,6 +10286,31 @@ theorem SourceEnvironmentOwnershipBelowFrontier.allocCtorHeap
     (EnvironmentBelowFrontier.of_evalArgs
       (@bounded.env) argumentExprs arguments evaluated)
     effect
+
+/-- Constructor allocation followed by the compiler's `let` binding
+preserves the full local source-state carrier, including the freshly returned
+heap reference in the allocating branch. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.allocCtorState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.allocCtor state.runtime info arguments =
+        .ok (result, value)) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with
+        runtime := result
+        env := bind state.env binder value } := by
+  let output := allocCtor_resultBelowFrontier effect
+  have afterRuntime :
+      SourceEnvironmentOwnershipBelowFrontier
+        { state with runtime := result } :=
+    bounded.withRuntimeMonoFrontier
+      (bounded.allocCtorHeap evaluated effect)
+      output.frontier
+  simpa using
+    (afterRuntime.bindValue
+      (binder := binder) output.value)
 
 /-- The same complete-environment premise supplies a deleted object write's
 new ownership edge even when its field argument is dead in the continuation. -/
@@ -10189,6 +10376,33 @@ theorem SourceEnvironmentOwnershipBelowFrontier.reuseHeap
       exact bounded.heap.reuseNone argumentsBelow effect
   | some location =>
       exact bounded.heap.reuseSome argumentsBelow effect
+
+/-- Reuse followed by the compiler's `let` binding preserves the full local
+carrier in both branches: the allocation fallback advances the frontier,
+while concrete reuse returns an already bounded heap cell. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.reuseState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.reuse state.runtime
+          (.reuseToken tokenLocation) info updateHeader arguments =
+        .ok (result, value)) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with
+        runtime := result
+        env := bind state.env binder value } := by
+  let output :=
+    bounded.heap.reuseResultBelowFrontier effect
+  have afterRuntime :
+      SourceEnvironmentOwnershipBelowFrontier
+        { state with runtime := result } :=
+    bounded.withRuntimeMonoFrontier
+      (bounded.reuseHeap evaluated effect)
+      output.frontier
+  simpa using
+    (afterRuntime.bindValue
+      (binder := binder) output.value)
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler

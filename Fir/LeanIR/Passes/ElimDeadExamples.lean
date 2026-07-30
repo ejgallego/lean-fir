@@ -4975,12 +4975,11 @@ noncomputable def deletedReuseNoneLedgerResult :
   }
   related.reuseNoneLeftGarbage oneFieldInfo #[.erased] (by rfl) true
 
-/-- The failed-token fixture exercises the complete-environment bridge. Its
-erased argument is intentionally dead in the target continuation, but is
-still bounded as a source environment value when failed reuse allocates. -/
-theorem deletedReuseNoneOwnershipBelowFrontier :
-    HeapOwnershipBelowFrontier
-      deletedReuseNoneLedgerResult.nextRuntime := by
+/-- The failed-token fixture's complete source environment is bounded even
+though its erased reuse argument is dead in the target continuation. -/
+theorem deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier :
+    SourceEnvironmentOwnershipBelowFrontier
+      deletedReuseNoneSourceState := by
   have erasedBelow :
       HeapLocationsBelowFrontier ({} : RuntimeState) [.erased] := by
     intro location member
@@ -5034,7 +5033,16 @@ theorem deletedReuseNoneOwnershipBelowFrontier :
         HeapOwnershipBelowFrontier.empty
     env := sourceEnvBound
   }
-  apply bounded.reuseHeap
+  exact bounded
+
+/-- The failed-token fixture exercises the complete-environment bridge. Its
+dead source operand suffices to preserve heap ownership across the allocation
+fallback without widening target continuation liveness. -/
+theorem deletedReuseNoneOwnershipBelowFrontier :
+    HeapOwnershipBelowFrontier
+      deletedReuseNoneLedgerResult.nextRuntime := by
+  apply
+    deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.reuseHeap
       (argumentExprs := #[.fvar reuseArgVar])
       (arguments := #[.erased])
       (tokenLocation := none)
@@ -5044,6 +5052,35 @@ theorem deletedReuseNoneOwnershipBelowFrontier :
       evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
     rfl
   · exact deletedReuseNoneLedgerResult.effect
+
+/-- The same fixture crosses the next non-leaf boundary: after the deleted
+reuse allocates, its returned heap value is bound under the dead source local
+and execution proceeds into the retained continuation with the complete
+environment/heap carrier intact. -/
+theorem deletedReuseNoneBoundContinuationOwnershipBelowFrontier :
+    SourceEnvironmentOwnershipBelowFrontier
+      { deletedReuseNoneSourceState with
+        runtime := deletedReuseNoneLedgerResult.nextRuntime
+        env := bind deletedReuseNoneSourceState.env dead
+          deletedReuseNoneLedgerResult.value
+        control := .code (.return live) } := by
+  have next :=
+    deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.reuseState
+      (binder := dead)
+      (argumentExprs := #[.fvar reuseArgVar])
+      (arguments := #[.erased])
+      (tokenLocation := none)
+      (info := oneFieldInfo)
+      (updateHeader := true)
+      (by
+        simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
+          evalArgs, evalArg, Impure.bind, lookup,
+          reuseTokenVar, reuseArgVar]
+        rfl)
+      deletedReuseNoneLedgerResult.effect
+  constructor
+  · exact next.heap
+  · exact @next.env
 
 /-- The deleted-write fixture starts from the same ownership invariant: its
 single constructor cell owns only the erased value. -/
