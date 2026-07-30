@@ -1283,10 +1283,24 @@ previously external address premise from the compiler's live input set.
 Constructor allocation, object-field replacement, and both concrete and
 missing-token reuse now preserve `HeapOwnershipBelowFrontier` directly.
 Compiler-facing wrappers compose successful operand evaluation with these
-operation laws. The failed-token source-only allocation and deleted
-object-write fixtures exercise the wrappers, and their results inherit the
-ownership invariant without inspecting the result heap. Remaining work is to
-thread this invariant through general checked machine execution and combine it
+operation laws.
+
+The complete source-environment bridge lands at `b05c62d5`. Continuation
+liveness cannot justify every source operand: a deleted operation still
+evaluates operands that are absent from the target continuation's live set.
+`EnvironmentBelowFrontier` therefore bounds every value found in the source
+environment independently of target liveness. It starts at the empty
+environment, survives binding and frontier growth, and supplies address bounds
+for arbitrary successful `evalArg` and `evalArgs` results.
+
+`SourceEnvironmentOwnershipBelowFrontier` combines that environment fact with
+heap ownership. Object-field replacement and reset preserve the full local
+carrier; constructor allocation and both reuse modes preserve its heap half.
+The failed-token reuse and deleted object-write fixtures now use this carrier
+without artificially widening target liveness, and inherit the ownership
+invariant without inspecting the result heap. Remaining work is to prove
+result-value and binding preservation for allocation/reuse, then lift the
+carrier through checked control, frames, and the general dispatcher together
 with the compositional source-only closure certificate.
 
 The first compiler-facing policy is now explicit as well.
@@ -1375,6 +1389,10 @@ fresh-frontier exclusion from heap ownership bounds lands at `f29b5a90`;
 `7ebfb53c` preserves the bound through release/reset and concrete reuse, and
 `67183055` derives installed-value bounds from checked evaluation and covers
 constructor allocation, object writes, and both reuse-token branches.
+`b05c62d5` separates target continuation liveness from complete source
+environment ownership, derives operand bounds for deleted operations, and
+preserves the combined local environment/heap carrier across object writes and
+reset while covering the heap results of allocation and reuse.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1435,11 +1453,15 @@ the existing nullary-`.fap` semantic discrepancy.
    concrete-token reuse. `HeapLocationsBelowFrontier` and the shadow-runtime
    root laws now derive the installed-value address premise from covered
    `evalArg`/`evalArgs`; constructor allocation, object-field writes, and both
-   reuse-token branches consume it directly. Next carry the ownership bound
-   and compositional closure certificate through checked machine executions.
-   Arbitrary checked entries must still initialize and preserve these
-   compiler typing/ownership facts without finite execution-graph
-   enumeration.
+   reuse-token branches consume it directly. Complete source-environment
+   ownership now covers deleted operands without changing the target liveness
+   set, and the combined local environment/heap carrier survives object writes
+   and reset. Next prove allocation/reuse result-value and environment-binding
+   laws so that carrier survives deleted `let` transitions, then carry it and
+   the compositional closure certificate through checked control, frames, and
+   the general dispatcher. Arbitrary checked entries must still initialize and
+   preserve these compiler typing/ownership facts without finite
+   execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
