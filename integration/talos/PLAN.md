@@ -4600,6 +4600,18 @@ the complete direct/reuse family plus persistent ownership, ordinary
 increment, and recursive decrement. Explicit deletion is the remaining
 ownership operation.
 
+W6.6gl completes that ownership family. The source theorem
+`deleteValue_ordinaryPersistenceTransport` handles both the erased reset
+sentinel identity and the ordinary one-cell liveness/reference-count update.
+`effectRuntimeRefines_ordinaryDelete_reuseCapacityOwnership` combines it with
+the existing production delete call and mapped-capacity theorem.
+`effectRuntimeRefines_reuseOwnership` then assembles the exact existing
+`OwnershipEffectSupported` union, and
+`correctReuseBudgetedDirectOwnershipCode` proves finite whole-export partial
+correctness for arbitrary interleavings of every direct/reuse operation with
+all persistent and ordinary ownership effects. Constructor/tag and field
+mutation are the next effect families.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

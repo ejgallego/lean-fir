@@ -682,8 +682,10 @@ acceptance tests pass.
    `decLocationFuel_ordinaryPersistenceTransport` composes parent and child
    releases through the explicit source fuel, and
    `correctReuseBudgetedDirectOwnershipThroughDecrementCode` adds recursive
-   decrement under the ownership-strengthened reuse frame. Explicit deletion
-   is the next ownership obligation.
+   decrement under the ownership-strengthened reuse frame.
+   `correctReuseBudgetedDirectOwnershipCode` adds explicit deletion and now
+   covers the complete `OwnershipEffectSupported` family. Constructor/tag and
+   field mutation are the next effect obligations.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

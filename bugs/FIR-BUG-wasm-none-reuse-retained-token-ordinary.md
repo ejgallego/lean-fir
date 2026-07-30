@@ -92,9 +92,11 @@ ordinary increments compose through `incValue_ordinaryPersistenceTransport`,
 which proves the update preserves every cell's persistence bit. Successful
 recursive decrement composes through the fuel-indexed
 `decLocationFuel_ordinaryPersistenceTransport`, including releases of owned
-constructor fields and closure captures. This bug still blocks validator-wide
-admission of effects that can create persistent aliases or otherwise fail that
-transport.
+constructor fields and closure captures. Explicit deletion composes through
+`deleteValue_ordinaryPersistenceTransport`; its erased sentinel is an identity
+and its ordinary branch preserves the deleted cell's persistence bit. This bug
+still blocks validator-wide admission of effects that can create persistent
+aliases or otherwise fail that transport.
 
 ## Classification and triage
 

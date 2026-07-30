@@ -1258,6 +1258,40 @@ theorem incValue_ordinaryPersistenceTransport
   | erased => simp [incValue] at operation
   | reuseToken token => simp [incValue] at operation
 
+/-- Successful explicit deletion changes only reference count and liveness of
+one live heap cell; the erased reset sentinel is a runtime identity. -/
+theorem deleteValue_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    (operation : deleteValue before value = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  cases value with
+  | erased =>
+      have runtimeEq := Except.ok.inj operation
+      subst after
+      exact OrdinaryPersistenceTransport.refl before
+  | object reference =>
+      cases reference with
+      | tagged payload => simp [deleteValue] at operation
+      | heap location =>
+          unfold deleteValue at operation
+          cases read : getLiveCell before location with
+          | error failure =>
+              simp only [read, Bind.bind, Except.bind] at operation
+              contradiction
+          | ok cell =>
+              have targetFound :
+                  findCell? before.heap location = some cell :=
+                (Fir.LeanIR.Passes.ElimDead.getLiveCell_spec read).1
+              simp only [read, Bind.bind, Except.bind] at operation
+              exact setCell_ordinaryPersistenceTransport targetFound
+                (by
+                  cases cell
+                  rfl)
+                operation
+  | scalar scalar => simp [deleteValue] at operation
+  | usize value => simp [deleteValue] at operation
+  | reuseToken token => simp [deleteValue] at operation
+
 /-- A successful state-threading list fold composes ordinary-persistence
 transports supplied by each successful step. -/
 theorem List.foldlM_ordinaryPersistenceTransport
