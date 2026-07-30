@@ -1253,7 +1253,7 @@ reachability exclusion. The deleted-constructor/retained-allocation regression
 now constructs the bound from `empty` and `alloc` and no longer proves
 freshness by enumerating the leaf fixture's reachable paths. The next
 lifecycle step is to preserve this bound through the mutation, release,
-reset, and reuse operations admitted by checked compiler executions, and then
+reset, and reuse operations performed by checked compiler executions, and then
 package it with the machine readiness invariant so non-leaf compiler-owned
 graphs receive the same closure certificate.
 
