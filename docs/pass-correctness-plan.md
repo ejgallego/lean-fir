@@ -1157,6 +1157,21 @@ liveness, or slot bounds. The remaining static work is now to prove those
 operand evaluations and successful operation facts from compiler
 typing/ownership invariants along arbitrary checked executions.
 
+The compiler-facing deleted-write bridge lands at `44b1c2ff`.
+`SourceOnlyHeapBinding.deletedObjectSetReadyAt_of_effect`,
+`deletedUSizeSetReadyAt_of_effect`, and
+`deletedScalarSetReadyAt_of_effect` combine an exact source-only environment
+binding, operand evaluation, successful runtime mutation, and the related
+runtime pair into the complete root-aware deleted-write certificate. The
+bridge recovers heap layout and bounds from the successful effect and uses
+the allocation ledger to exclude the selected source address from target
+roots. Both the nonempty-ledger example and exact closed-write client now use
+this interface; their hand-built local heap-shape witnesses are gone. This
+also isolates the genuinely necessary static obligation: arbitrary
+compiler-produced states must guarantee operand evaluation and mutation
+success, since a faulting source write cannot be simulated by target
+stuttering.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1233,7 +1248,9 @@ environment/ledger owner-preservation extraction lands at `3f720ba4`;
 source-only allocation lifecycle transport lands at `3744edf1`, and exact
 heap-binding/reset-token provenance lands at `0041d70c`. Successful
 deleted-write effects are converted into all three local heap shapes at
-`7ecdc33b`.
+`7ecdc33b`; `44b1c2ff` composes those shapes with source-only binding
+provenance and the target allocation ledger into the complete compiler-facing
+write-readiness contract.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1281,10 +1298,11 @@ the existing nullary-`.fap` semantic discrepancy.
    same-frontier operations and paired allocations, plus exact heap-binding
    and reset-token provenance, are extracted. Successful object, `USize`, and
    scalar writes, reset, and concrete reuse now expose their local operation
-   shapes generically. Arbitrary checked entries must still derive and
-   preserve the compiler typing/ownership facts that guarantee the operand
-   evaluations and successful operations, without finite execution-graph
-   enumeration.
+   shapes generically. Deleted writes additionally have a compiler-facing
+   source-only binding/effect bridge to the complete root-aware readiness
+   contract. Arbitrary checked entries must still derive and preserve the
+   compiler typing/ownership facts that guarantee operand evaluations and
+   successful operations, without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
