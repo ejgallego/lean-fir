@@ -7534,6 +7534,95 @@ structure HeapOwnershipBelowFrontier
     Value.object (.heap child) ∈ cell.object.ownedValues.toList →
       child < runtime.nextLocation
 
+/-- Every heap address occurring in a list of values lies below the runtime's
+fresh allocation frontier. This is the value-side form consumed by
+constructor allocation, object writes, and concrete reuse. -/
+def HeapLocationsBelowFrontier
+    (runtime : RuntimeState) (values : List Value) : Prop :=
+  ∀ {location},
+    Value.object (.heap location) ∈ values →
+      location < runtime.nextLocation
+
+/-- A root sublist inherits the heap-address bound of a larger root list. -/
+theorem HeapLocationsBelowFrontier.mono
+    (bounded : HeapLocationsBelowFrontier runtime larger)
+    (subset : RootSubset smaller larger) :
+    HeapLocationsBelowFrontier runtime smaller := by
+  intro location member
+  exact bounded (subset _ member)
+
+/-- Every source runtime root in a shadow relation names an allocated address
+strictly below the source frontier. Reachable heap correspondence supplies
+the cell, and freshness excludes every address at or above the frontier. -/
+theorem ShadowRuntimeRel.leftRuntimeRootsBelowFrontier
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
+    HeapLocationsBelowFrontier left
+      (runtimeRoots left leftExtra) := by
+  intro location member
+  have reachable :
+      Reachable left.heap (runtimeRoots left leftExtra) location :=
+    .root member
+  obtain ⟨_, _, _, _, leftFound, _, _⟩ :=
+    related.heap.1 location reachable
+  apply Nat.lt_of_not_ge
+  intro atOrAbove
+  have fresh :=
+    related.leftHeapFresh location atOrAbove
+  rw [fresh] at leftFound
+  cases leftFound
+
+/-- Symmetric target-side root bound supplied by a shadow relation. -/
+theorem ShadowRuntimeRel.rightRuntimeRootsBelowFrontier
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra) :
+    HeapLocationsBelowFrontier right
+      (runtimeRoots right rightExtra) := by
+  intro location member
+  have reachable :
+      Reachable right.heap (runtimeRoots right rightExtra) location :=
+    .root member
+  obtain ⟨_, _, _, _, rightFound, _, _⟩ :=
+    related.heap.2 location reachable
+  apply Nat.lt_of_not_ge
+  intro atOrAbove
+  have fresh :=
+    related.rightHeapFresh location atOrAbove
+  rw [fresh] at rightFound
+  cases rightFound
+
+/-- A covered source argument evaluated from the live environment carries no
+fresh-or-future heap address. -/
+theorem ShadowRuntimeRel.leftEvalArgBelowFrontier
+    (related : ShadowRuntimeRel rho left right
+      (envRootsOn used env ++ leftExtra) rightExtra)
+    (covered : ArgCovered used argument)
+    (evaluated : evalArg env argument = .ok value) :
+    HeapLocationsBelowFrontier left [value] := by
+  intro location member
+  simp only [List.mem_singleton] at member
+  subst value
+  rcases evalArg_value_rooted covered evaluated with same | envMember
+  · cases same
+  · apply related.leftRuntimeRootsBelowFrontier
+    simp [runtimeRoots, envMember]
+
+/-- Array evaluation lifts the same bound pointwise to every installed
+constructor argument. -/
+theorem ShadowRuntimeRel.leftEvalArgsBelowFrontier
+    (related : ShadowRuntimeRel rho left right
+      (envRootsOn used env ++ leftExtra) rightExtra)
+    (covered : ArgsCovered used arguments)
+    (evaluated : evalArgs env arguments = .ok values) :
+    HeapLocationsBelowFrontier left values.toList := by
+  intro location member
+  have rooted :=
+    evalArgs_values_subset covered evaluated
+      (.object (.heap location)) member
+  have envMember :
+      Value.object (.heap location) ∈ envRootsOn used env := by
+    simpa using rooted
+  apply related.leftRuntimeRootsBelowFrontier
+  simp [runtimeRoots, envMember]
+
 /-- Ownership-graph-preserving heap rewrites transport the static address
 bound whenever they retain the allocation frontier. -/
 theorem HeapOwnershipBelowFrontier.transportOwnershipFrame
@@ -7642,6 +7731,61 @@ theorem HeapOwnershipBelowFrontier.alloc
         simpa [Fir.LeanIR.Impure.alloc, findCell?, Ne.symm fresh] using found
       exact Nat.lt_trans (wellFormed.owned_lt oldFound member)
         (Nat.lt_succ_self runtime.nextLocation)
+
+/-- Constructor allocation preserves the ownership bound when every
+heap-valued constructor argument already lies below the old frontier. The
+immediate-constructor branch leaves the runtime unchanged; the heap branch
+delegates to the primitive allocation law. -/
+theorem HeapOwnershipBelowFrontier.allocCtor
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
+    (effect :
+      Fir.LeanIR.Impure.allocCtor runtime info arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  by_cases arity : arguments.size = info.size
+  · by_cases immediate :
+        (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+    · have pairEq :
+          (runtime, .object (.tagged (UInt64.ofNat info.cidx))) =
+            (result, value) := by
+        have reduced := effect
+        simp [Fir.LeanIR.Impure.allocCtor, arity, immediate,
+          Pure.pure, Except.pure] at reduced
+        exact Prod.ext reduced.1 reduced.2
+      have runtimeEq : runtime = result :=
+        congrArg Prod.fst pairEq
+      subst result
+      exact wellFormed
+    · let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := arguments
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := []
+      }
+      have pairEq :
+          ((Fir.LeanIR.Impure.alloc runtime (.ctor object)).1,
+            .object
+              (Fir.LeanIR.Impure.alloc runtime (.ctor object)).2) =
+            (result, value) := by
+        have reduced := effect
+        simp [Fir.LeanIR.Impure.allocCtor, arity, immediate,
+          Pure.pure, Except.pure] at reduced
+        exact Prod.ext reduced.1 reduced.2
+      have runtimeEq :
+          (Fir.LeanIR.Impure.alloc runtime (.ctor object)).1 =
+            result :=
+        congrArg Prod.fst pairEq
+      subst result
+      apply wellFormed.alloc
+      intro child member
+      apply argumentsBelow
+      simpa [object, HeapObject.ownedValues] using member
+  · unfold Fir.LeanIR.Impure.allocCtor at effect
+    simp only [Bind.bind, Except.bind] at effect
+    rw [if_pos (by simpa using arity)] at effect
+    simp at effect
 
 /-- A reset-token local carries the same source-only allocation capability in
 the form consumed by a later concrete-token `reuse`. -/
@@ -8461,6 +8605,56 @@ theorem HeapOwnershipBelowFrontier.setCell_sameObject
   intro child member
   rw [objectEq] at member
   exact wellFormed.owned_lt found member
+
+/-- A successful constructor object-field write preserves the ownership
+bound when the newly installed value is itself below the current frontier. -/
+theorem HeapOwnershipBelowFrontier.setObjectField
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (fieldBelow : HeapLocationsBelowFrontier runtime [field])
+    (effect :
+      Fir.LeanIR.Impure.setObjectField runtime object index field =
+        .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.setObjectField
+    Fir.LeanIR.Impure.modifyConstructor at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at effect
+  cases constructorResult with
+  | error fault =>
+      simp at effect
+  | ok constructorResult =>
+      rcases constructorResult with ⟨location, cell, constructor⟩
+      have shape :=
+        getConstructor_shape_of_ok constructorEq
+      simp only at effect
+      by_cases indexBound :
+          index < constructor.objectFields.size
+      · rw [dif_pos indexBound] at effect
+        let replacement : HeapCell :=
+          { cell with object := .ctor {
+              constructor with
+              objectFields :=
+                constructor.objectFields.set index field } }
+        apply wellFormed.setCell shape.2.1 _ effect
+        intro child member
+        have changedMemberList :
+            Value.object (.heap child) ∈
+              (constructor.objectFields.set index field).toList := by
+          simpa [replacement, HeapObject.ownedValues] using member
+        have changedMember :
+            Value.object (.heap child) ∈
+              constructor.objectFields.set index field :=
+          Array.mem_toList_iff.mp changedMemberList
+        rcases Array.mem_or_eq_of_mem_set changedMember with
+          oldMember | changed
+        · exact wellFormed.owned_lt shape.2.1 (by
+            simpa [shape.2.2.2, HeapObject.ownedValues]
+              using oldMember)
+        · apply fieldBelow
+          simpa using changed
+      · rw [dif_neg indexBound] at effect
+        simp at effect
 
 /-- A recursive release changes only the ownership closure of its root and
 never changes the ownership graph itself. -/
@@ -9619,9 +9813,8 @@ argument installed in the reused constructor is already below the current
 frontier. This is the static premise supplied by compiler value typing. -/
 theorem HeapOwnershipBelowFrontier.reuseSome
     (wellFormed : HeapOwnershipBelowFrontier runtime)
-    (argumentsBelow : ∀ {child},
-      Value.object (.heap child) ∈ arguments.toList →
-        child < runtime.nextLocation)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
     (effect :
       Fir.LeanIR.Impure.reuse runtime
           (.reuseToken (some location)) info updateHeader arguments =
@@ -9683,6 +9876,78 @@ theorem HeapOwnershipBelowFrontier.reuseSome
         | integer value => simp at effect
         | byteArray value => simp at effect
         | «opaque» value => simp at effect
+
+/-- A missing concrete reuse token falls back to constructor allocation, so
+the allocation law supplies exactly the ownership preservation obligation. -/
+theorem HeapOwnershipBelowFrontier.reuseNone
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
+    (effect :
+      Fir.LeanIR.Impure.reuse runtime
+          (.reuseToken none) info updateHeader arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  apply wellFormed.allocCtor argumentsBelow
+  simpa [Fir.LeanIR.Impure.reuse] using effect
+
+/-- Checked source argument evaluation supplies the value bound needed by
+constructor allocation directly from the live-root shadow relation. -/
+theorem ShadowRuntimeRel.leftAllocCtorPreservesHeapOwnershipBelowFrontier
+    (related : ShadowRuntimeRel rho runtime target
+      (envRootsOn used env ++ leftExtra) rightExtra)
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (covered : ArgsCovered used argumentExprs)
+    (evaluated :
+      evalArgs env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.allocCtor runtime info arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.allocCtor
+    (related.leftEvalArgsBelowFrontier covered evaluated)
+    effect
+
+/-- Checked source field evaluation supplies the sole new ownership edge
+needed by an object-field update. -/
+theorem ShadowRuntimeRel.leftSetObjectFieldPreservesHeapOwnershipBelowFrontier
+    (related : ShadowRuntimeRel rho runtime target
+      (envRootsOn used env ++ leftExtra) rightExtra)
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (covered : ArgCovered used fieldArgument)
+    (evaluated :
+      evalArg env fieldArgument = .ok field)
+    (effect :
+      Fir.LeanIR.Impure.setObjectField runtime object index field =
+        .ok result) :
+    HeapOwnershipBelowFrontier result :=
+  wellFormed.setObjectField
+    (related.leftEvalArgBelowFrontier covered evaluated)
+    effect
+
+/-- Both concrete-token reuse and its missing-token allocation fallback
+preserve the ownership bound once checked argument evaluation has supplied
+the installed-value bounds. -/
+theorem ShadowRuntimeRel.leftReusePreservesHeapOwnershipBelowFrontier
+    (related : ShadowRuntimeRel rho runtime target
+      (envRootsOn used env ++ leftExtra) rightExtra)
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (covered : ArgsCovered used argumentExprs)
+    (evaluated :
+      evalArgs env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.reuse runtime
+          (.reuseToken tokenLocation) info updateHeader arguments =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  have argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList :=
+    related.leftEvalArgsBelowFrontier covered evaluated
+  cases tokenLocation with
+  | none =>
+      exact wellFormed.reuseNone argumentsBelow effect
+  | some location =>
+      exact wellFormed.reuseSome argumentsBelow effect
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler

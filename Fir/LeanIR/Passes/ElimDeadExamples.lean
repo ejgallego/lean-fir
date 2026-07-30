@@ -4975,6 +4975,80 @@ noncomputable def deletedReuseNoneLedgerResult :
   }
   related.reuseNoneLeftGarbage oneFieldInfo #[.erased] (by rfl) true
 
+/-- The failed-token fixture exercises the checked-operand bridge: although
+reuse allocates only on the source, its evaluated argument is covered by the
+operation's input live set, so the result retains the ownership bound. -/
+theorem deletedReuseNoneOwnershipBelowFrontier :
+    HeapOwnershipBelowFrontier
+      deletedReuseNoneLedgerResult.nextRuntime := by
+  let operationUsed : UsedLocals :=
+    neutralUsed.insert reuseArgVar
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedReuseNoneSourceState.runtime
+      deletedReuseTargetState.runtime
+      (envRootsOn operationUsed deletedReuseNoneSourceState.env ++ [])
+      (envRootsOn operationUsed deletedReuseNoneSourceState.env) := by
+    have env : EnvRelOn emptyAddressRenaming operationUsed
+        deletedReuseNoneSourceState.env
+        deletedReuseNoneSourceState.env := by
+      simpa [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
+        liveEnv] using
+        (((EnvRelOn.empty emptyAddressRenaming operationUsed).bindBoth
+          (binder := live) ValueRel.erased).bindBoth
+          (binder := reuseTokenVar) ValueRel.reuseNone).bindBoth
+          (binder := reuseArgVar) ValueRel.erased
+    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  apply runtime.leftReusePreservesHeapOwnershipBelowFrontier
+      (argumentExprs := #[.fvar reuseArgVar])
+      (arguments := #[.erased])
+      (tokenLocation := none)
+      (info := oneFieldInfo)
+      (updateHeader := true)
+      (wellFormed := by
+        simpa [deletedReuseNoneSourceState] using
+          HeapOwnershipBelowFrontier.empty)
+  · intro argument member
+    simp at member
+    subst argument
+    simp [ArgCovered, operationUsed]
+  · simp [deletedReuseNoneSourceState, deletedReuseNoneSourceEnv,
+      evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
+    rfl
+  · exact deletedReuseNoneLedgerResult.effect
+
+/-- The deleted-write fixture starts from the same ownership invariant: its
+single constructor cell owns only the erased value. -/
+theorem deletedWriteSourceOwnershipBelowFrontier :
+    HeapOwnershipBelowFrontier deletedWriteSourceRuntime := by
+  change HeapOwnershipBelowFrontier
+    (alloc ({} : RuntimeState) (.ctor deletedWriteObject) false).1
+  apply HeapOwnershipBelowFrontier.empty.alloc
+  intro child member
+  simp [deletedWriteObject, HeapObject.ownedValues] at member
+
+/-- The deleted object write exercises the checked single-argument bridge;
+the erased field introduces no future address and the existing cell update
+therefore retains the ownership invariant. -/
+theorem deletedObjectWritePreservesOwnershipBelowFrontier
+    (effect :
+      setObjectField deletedWriteSourceRuntime
+          (.object (.heap 0)) 0 .erased =
+        .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  have runtime : ShadowRuntimeRel emptyAddressRenaming
+      deletedWriteSourceRuntime deletedWritesTargetState.runtime
+      (envRootsOn neutralUsed deletedWriteSourceEnv ++ [])
+      (envRootsOn neutralUsed deletedWritesTargetState.env) := by
+    simpa [deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  apply runtime.leftSetObjectFieldPreservesHeapOwnershipBelowFrontier
+      (fieldArgument := .erased)
+      (wellFormed := deletedWriteSourceOwnershipBelowFrontier)
+      (effect := effect)
+  · trivial
+  · rfl
+
 theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
     deletedReuseNoneLedgerResult.runtime.ledger.owner = fun _ => 0 := by
   simp [deletedReuseNoneLedgerResult,
