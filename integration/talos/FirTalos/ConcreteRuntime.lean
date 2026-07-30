@@ -4896,10 +4896,69 @@ theorem resetStep_tagged_of_refines
       ← descriptorsEq, concreteReset, replaceHeap]
   · simpa [replaceHeap, clearFailure] using runtimeRelated
 
+/--
+A successful persistent-or-nonunique fallback reset follows the same public
+decrement path in both runtimes and preserves every mapped allocation extent.
+-/
+theorem resetStep_fallback_of_refines_with_capacity
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell) (live : cell.live = true)
+    (fallbackSemantic : cell.persistent = true ∨ cell.rc ≠ 1)
+    (updated : reset runtime count (.object (.heap location)) =
+      .ok (nextRuntime, .reuseToken none)) :
+    ∃ heap,
+      resetStep count initial [.i32 (UInt32.ofNat address.value)] =
+          .Return [.i32 (UInt32.ofNat Word32.zero.value)]
+            (replaceHeap initial heap) ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime witness
+          nextRuntime ∧
+        ValueRel witness .reuseToken (.word32 Word32.zero)
+          (.reuseToken none) ∧
+        MappedHeaderCapacityTransport initial.host.runtime.heap heap
+          witness ∧
+        heap.heapCursor =
+          initial.host.runtime.heap.heapCursor := by
+  have fallbackSource :
+      (cell.persistent || cell.rc != 1) = true := by
+    rcases fallbackSemantic with semanticPersistent | notUnique
+    · simp [semanticPersistent]
+    · simp [notUnique]
+  have semanticDec : decLocation runtime location = .ok nextRuntime := by
+    unfold reset at updated
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at updated
+    rw [if_pos fallbackSource] at updated
+    cases decEq : decLocation runtime location with
+    | error fault =>
+        rw [decEq] at updated
+        contradiction
+    | ok middleRuntime =>
+        rw [decEq] at updated
+        have pairEq := Except.ok.inj updated
+        have runtimeEq : middleRuntime = nextRuntime := congrArg Prod.fst pairEq
+        subst middleRuntime
+        rfl
+  obtain ⟨heap, concreteReset, heapRelated, tokenRelated,
+      capacityTransport⟩ :=
+    runtimeRelated.heap.resetObject_refines_fallback_with_capacity mapped found
+      live fallbackSemantic updated
+  refine ⟨heap, ?_, ?_, tokenRelated, capacityTransport,
+    resetObject_preserves_heapCursor concreteReset⟩
+  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
+      ← descriptorsEq, concreteReset, replaceHeap]
+  · exact FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+      runtimeRelated heapRelated (decLocation_runtimeAux semanticDec)
+
 /-- A nonunique mapped heap object follows reset's decrement-and-empty-token
 path in both runtimes while preserving the physical extent of every mapped
-header. Persistent reachable cells are included because their canonical zero
-reference count is nonunique. -/
+header. -/
 theorem resetStep_nonunique_of_refines_with_capacity
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime nextRuntime : RuntimeState} {location : Location}
@@ -4923,30 +4982,10 @@ theorem resetStep_nonunique_of_refines_with_capacity
           (.reuseToken none) ∧
         MappedHeaderCapacityTransport initial.host.runtime.heap heap
           witness := by
-  have semanticDec : decLocation runtime location = .ok nextRuntime := by
-    unfold reset at updated
-    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
-      at updated
-    rw [if_pos (by simp [notUnique])] at updated
-    cases decEq : decLocation runtime location with
-    | error fault =>
-        rw [decEq] at updated
-        contradiction
-    | ok middleRuntime =>
-        rw [decEq] at updated
-        have pairEq := Except.ok.inj updated
-        have runtimeEq : middleRuntime = nextRuntime := congrArg Prod.fst pairEq
-        subst middleRuntime
-        rfl
-  obtain ⟨heap, concreteReset, heapRelated, tokenRelated,
-      capacityTransport⟩ :=
-    runtimeRelated.heap.resetObject_refines_nonunique_with_capacity mapped found
-      live notUnique updated
-  refine ⟨heap, ?_, ?_, tokenRelated, capacityTransport⟩
-  · simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
-      ← descriptorsEq, concreteReset, replaceHeap]
-  · exact FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
-      runtimeRelated heapRelated (decLocation_runtimeAux semanticDec)
+  obtain ⟨heap, operation, nextRelated, tokenRelated, capacity, _cursor⟩ :=
+    resetStep_fallback_of_refines_with_capacity runtimeRelated descriptorsEq
+      mapped found live (.inr notUnique) updated
+  exact ⟨heap, operation, nextRelated, tokenRelated, capacity⟩
 
 /-- Compatibility surface for clients that need only runtime and value
 refinement from the nonunique reset branch. -/
@@ -5069,6 +5108,221 @@ theorem resetStep_unique_of_refines
     protocol, capacity⟩
   simp [resetStep, clearFailure, Word32.ofUInt32_ofNat_value,
     ← descriptorsEq, concreteReset, replaceHeap]
+
+/--
+Every successful semantic reset of a represented `tobject` is implemented by
+the concrete reset host, independently of the tagged, fallback, or unique
+constructor branch selected at runtime.
+
+The theorem derives branch facts from the successful source operation and
+returns only the ordinary witness transport, value relation, mapped-header
+transport, and exact frontier preservation needed by compiler composition.
+-/
+theorem resetStep_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject sourceToken : Value}
+    {word : Word32} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (updated :
+      reset runtime count sourceObject = .ok (nextRuntime, sourceToken)) :
+    ∃ heap nextWitness token,
+      resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+          .Return [.i32 (UInt32.ofNat token.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        ValueRel nextWitness .reuseToken (.word32 token) sourceToken ∧
+        nextWitness.closureDescriptors = witness.closureDescriptors ∧
+        MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+        heap.heapCursor = initial.host.runtime.heap.heapCursor := by
+  cases objectRelated with
+  | tobject referenceRelated =>
+      cases referenceRelated with
+      | tagged taggedRelated =>
+          have pairEq :
+              (runtime, .reuseToken none) = (nextRuntime, sourceToken) := by
+            simpa [reset] using updated
+          have runtimeEq : runtime = nextRuntime := congrArg Prod.fst pairEq
+          have tokenEq : Value.reuseToken none = sourceToken :=
+            congrArg Prod.snd pairEq
+          subst nextRuntime
+          subst sourceToken
+          obtain ⟨operation, nextRelated, tokenRelated⟩ :=
+            resetStep_tagged_of_refines runtimeRelated descriptorsEq
+              taggedRelated count
+          exact ⟨initial.host.runtime.heap, witness, Word32.zero, operation,
+            WitnessTransport.refl witness, nextRelated, tokenRelated,
+            rfl, MappedHeaderCapacityTransport.refl _ _, rfl⟩
+      | heap heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              rename_i location
+              obtain ⟨cell, found, _cellRelated⟩ :=
+                runtimeRelated.heap.concreteToSemantic location word mapped
+              have live : cell.live = true := by
+                by_contra notLive
+                have dead : cell.live = false :=
+                  Bool.eq_false_of_not_eq_true notLive
+                have liveError :
+                    getLiveCell runtime location =
+                      .error (.deadObject location) := by
+                  simp [getLiveCell, found, dead]
+                have impossible := updated
+                simp [reset, getLiveCell, found, dead] at impossible
+                contradiction
+              have liveGet : getLiveCell runtime location = .ok cell := by
+                simp [getLiveCell, found, live]
+              by_cases fallback : cell.persistent || cell.rc != 1
+              · have fallbackSemantic :
+                    cell.persistent = true ∨ cell.rc ≠ 1 := by
+                  simpa using fallback
+                have analyzed := updated
+                simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                  Bind.bind, Except.bind] at analyzed
+                rw [if_pos fallback] at analyzed
+                cases decEq : decLocation runtime location with
+                | error fault =>
+                    rw [decEq] at analyzed
+                    contradiction
+                | ok middleRuntime =>
+                    rw [decEq] at analyzed
+                    have pairEq := Except.ok.inj analyzed
+                    have runtimeEq : middleRuntime = nextRuntime :=
+                      congrArg Prod.fst pairEq
+                    have tokenEq : Value.reuseToken none = sourceToken :=
+                      congrArg Prod.snd pairEq
+                    subst nextRuntime
+                    subst sourceToken
+                    obtain ⟨heap, operation, nextRelated, tokenRelated,
+                        capacity, cursor⟩ :=
+                      resetStep_fallback_of_refines_with_capacity
+                        runtimeRelated descriptorsEq mapped found live
+                        fallbackSemantic updated
+                    exact ⟨heap, witness, Word32.zero, operation,
+                      WitnessTransport.refl witness, nextRelated, tokenRelated,
+                      rfl, capacity, cursor⟩
+              · have ordinary : cell.persistent = false := by
+                  cases persistentEq : cell.persistent with
+                  | false => rfl
+                  | true => exact False.elim (fallback (by
+                      simp [persistentEq]))
+                have unique : cell.rc = 1 := by
+                  by_contra notUnique
+                  exact fallback (by simp [notUnique])
+                cases objectEq : cell.object with
+                | ctor object =>
+                    by_cases countFits : count ≤ object.objectFields.size
+                    · let replacement : HeapCell :=
+                        { object := .ctor (resetProtocolObject object count)
+                          rc := cell.rc
+                          persistent := cell.persistent }
+                      obtain ⟨middleRuntime, semanticSet, _, _, _, _⟩ :=
+                        Fir.LeanIR.Impure.setCell_spec_of_find runtime location
+                          cell replacement found
+                      have analyzed := updated
+                      simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                        Bind.bind, Except.bind] at analyzed
+                      rw [if_neg fallback, objectEq] at analyzed
+                      simp only at analyzed
+                      rw [if_neg (Nat.not_lt.mpr countFits)] at analyzed
+                      change (do
+                          let next ← setCell runtime location replacement
+                          let next ←
+                            (object.objectFields.extract 0 count).foldlM
+                              (fun next value =>
+                                releaseResetField next value) next
+                          pure
+                            (next, Value.reuseToken (some location))) =
+                            .ok (nextRuntime, sourceToken) at analyzed
+                      rw [semanticSet] at analyzed
+                      simp only [Bind.bind, Except.bind] at analyzed
+                      cases foldEq :
+                          (object.objectFields.extract 0 count).foldlM
+                            (fun next value => releaseResetField next value)
+                            middleRuntime with
+                      | error fault =>
+                          rw [foldEq] at analyzed
+                          contradiction
+                      | ok finalRuntime =>
+                          rw [foldEq] at analyzed
+                          have pairEq := Except.ok.inj analyzed
+                          have runtimeEq : finalRuntime = nextRuntime :=
+                            congrArg Prod.fst pairEq
+                          have tokenEq :
+                              Value.reuseToken (some location) = sourceToken :=
+                            congrArg Prod.snd pairEq
+                          subst nextRuntime
+                          subst sourceToken
+                          obtain ⟨heap, info, fieldKinds, operation, transport,
+                              nextRelated, tokenRelated, protocol, capacity⟩ :=
+                            resetStep_unique_of_refines runtimeRelated
+                              descriptorsEq mapped found live ordinary unique
+                              objectEq countFits updated
+                          let nextWitness :=
+                            witness.rebindConstructor word info
+                              (resetProtocolFieldKinds fieldKinds count)
+                          exact ⟨heap, nextWitness, word, operation, transport,
+                            nextRelated, tokenRelated, by
+                              simp [nextWitness,
+                                RefinementWitness.rebindConstructor],
+                            capacity,
+                            resetObject_preserves_heapCursor
+                              protocol.concreteReset⟩
+                    · have impossible := updated
+                      simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                        Bind.bind, Except.bind] at impossible
+                      rw [if_neg fallback, objectEq] at impossible
+                      simp only at impossible
+                      rw [if_pos (Nat.lt_of_not_ge countFits)] at impossible
+                      simp at impossible
+                | boxed type value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | natural value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | integer value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | string value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | byteArray value =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | closure function arity fixed =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
+                | «opaque» typeName =>
+                    have impossible := updated
+                    simp only [reset, getLiveCell, found, live, ↓reduceIte,
+                      Bind.bind, Except.bind] at impossible
+                    rw [if_neg fallback, objectEq] at impossible
+                    contradiction
 
 /-- A stale nonempty reuse token preserves the exact address/location
 dead-object fault after host argument decoding and the aligned arity gate. -/

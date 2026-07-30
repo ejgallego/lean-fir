@@ -69,6 +69,11 @@ def hostFn? : RuntimeOp → Option (Wasm.HostFn Host)
   | .delete => some deleteFn
   | .getTag => some getTagFn
 
+/-- Every generated reset identity resolves to the count-indexed concrete
+reset host. -/
+@[simp] theorem hostFn?_reset (count : Nat) :
+    hostFn? (.reset count) = some (resetFn count) := rfl
+
 /-- Every concrete boxed-scalar kind resolves to its matching typed-unbox
 host. This is the public proof boundary for the resolver's private scalar
 classification table. -/

@@ -142,7 +142,14 @@ heap exactly and return the full residual address-space budget. Typed-unbox
 admission exposes only a source-state scalar-kind compatibility judgment;
 production output and `StateRelated` recover the concrete word, descriptor,
 checked read, call, and exact i32/i64 result lane. Sharing admission needs only
-source/compiler local typing.
+source/compiler local typing. Successful reset composes through the
+ownership-strengthened `OwnershipBudgetedDirectSupported` family:
+`ResetSupported` contains only source/compiler local typing, while the
+successful semantic step and `ConcreteRuntimeRel` derive the tagged,
+persistent/nonunique fallback, or unique-constructor branch. Exact frontier
+and descriptor-table preservation re-establish the ownership-aware indexed
+frame, so reset interleaves with pure externals and every currently proved
+ownership/tag/field-mutation effect without a branch certificate.
 Natural literals now use the same indexed law. `naturalAllocationBytes`
 classifies their concrete cost as zero for wasm32-tagged immediates, an
 aligned one-slot object for promoted source tags, or an aligned limb object

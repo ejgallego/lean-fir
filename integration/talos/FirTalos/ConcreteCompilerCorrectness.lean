@@ -6308,6 +6308,30 @@ inductive IsSharedSupported (context : Fir.Wasm.Context) :
       IsSharedSupported context decl
 
 /--
+Static admission for a successful ownership reset.
+
+The predicate records only the source declaration and compiler-local typing
+facts. The tagged, persistent/nonunique, and unique-constructor runtime
+branches are reconstructed from `StateRelated` and the successful source
+step; no concrete word, heap cell, reset token, or target execution witness
+appears in this boundary.
+-/
+inductive ResetSupported (context : Fir.Wasm.Context) :
+    LCNF.LetDecl .impure → Prop where
+  | intro
+      (count : Nat) (objectId : FVarId) (objectKind : AbiKind)
+      (valueEq : decl.value = .reset count objectId)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok .reuseToken)
+      (objectCompiled :
+        Fir.Wasm.getLocal context objectId =
+          .ok (.localGet objectId, objectKind))
+      (objectRefines : objectKind.refines .tobject = true)
+      (resultCompiled :
+        Fir.Wasm.getLocal context decl.fvarId =
+          .ok (.localGet decl.fvarId, .reuseToken)) :
+      ResetSupported context decl
+
+/--
 Source compatibility and the ordinary runtime relation reconstruct every
 representation-specific premise of checked concrete unboxing.
 
@@ -6805,6 +6829,59 @@ theorem sourceLetResult_box_eq
           subst nextRuntime
           subst sourceValue
           exact ⟨sourceScalar, rfl, evaluated⟩
+
+/--
+Invert a successful reset declaration to the source object lookup and
+semantic reset step. This is source evaluation inversion only; in particular,
+it does not classify the object representation or reset branch.
+-/
+theorem sourceLetResult_reset_eq
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {sourceValue : Value}
+    {count : Nat} {objectId : FVarId}
+    (valueEq : decl.value = .reset count objectId)
+    (sourceStep :
+      SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+        sourceValue) :
+    ∃ sourceObject,
+      lookup sourceEnv objectId = some sourceObject ∧
+        reset sourceRuntime count sourceObject =
+          .ok (nextRuntime, sourceValue) := by
+  unfold SourceLetResult at sourceStep
+  simp only [evalLetValue, valueEq] at sourceStep
+  cases sourceLookup : lookup sourceEnv objectId with
+  | none =>
+      have lookupFailed :
+          lookupValue sourceEnv objectId = .error (.unknownVar objectId) := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupFailed] at sourceStep
+      contradiction
+  | some sourceObject =>
+      have lookupSucceeded :
+          lookupValue sourceEnv objectId = .ok sourceObject := by
+        simp [lookupValue, sourceLookup]
+      rw [lookupSucceeded] at sourceStep
+      simp only [Bind.bind, Except.bind] at sourceStep
+      cases evaluated : reset sourceRuntime count sourceObject with
+      | error fault =>
+          rw [evaluated] at sourceStep
+          contradiction
+      | ok result =>
+          rw [evaluated] at sourceStep
+          have pairEq :
+              (result.1, LetAction.value result.2) =
+                (nextRuntime, LetAction.value sourceValue) :=
+            Except.ok.inj sourceStep
+          have runtimeEq : result.1 = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have valueEq' : result.2 = sourceValue :=
+            LetAction.value.inj (congrArg Prod.snd pairEq)
+          subst nextRuntime
+          subst sourceValue
+          exact ⟨sourceObject, rfl, evaluated⟩
 
 /-- Every successful sharing observation returns the direct `UInt8` lane. -/
 theorem isShared_ok_eq_uint8
@@ -12499,6 +12576,125 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_isShared
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Cost-indexed runtime-law instance for successful ownership reset.
+
+Production lowering and adaptation determine the object local and
+count-indexed reset call. The successful source step and `StateRelated`
+determine the concrete object representation; `resetStep_of_refines` then
+derives the tagged, persistent/nonunique, or unique-constructor branch
+internally. Reset preserves the heap frontier exactly, so its source cost is
+zero even when recursively releasing captured fields.
+-/
+theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_reset
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ResetSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction
+        externals) := by
+  intro sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ budgeted sourceStep stateRelated valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨count, objectId, objectKind, valueEq, valueKind, objectCompiled,
+      objectRefines, resultCompiled⟩
+  obtain ⟨sourceObject, sourceLookup, semanticReset⟩ :=
+    sourceLetResult_reset_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime (.reset count))] :=
+    compileLetValue_reset valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId]) (operation := .reset count) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨heap, nextWitness, token, operation, transport, nextRelated,
+              tokenRelated, witnessDescriptorsPreserved, capacity, cursor⟩ :=
+            resetStep_of_refines stateRelated.1 budgeted.2.symm objectRelated
+              semanticReset
+          obtain ⟨updatedLocals, targetSet, nextFrameAligned⟩ :=
+            budgeted.1.1.1.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+              (nextStore := replaceHeap targetStore heap)
+              (nextWitness := nextWitness)
+              (physical := .i32 (UInt32.ofNat token.value)) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.resetCall callFound
+          have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+            exact {
+              cursorPositive := by
+                simpa [cursor] using budgeted.1.1.2.cursorPositive
+              endWithinAddressSpace := by
+                simpa [cursor] using
+                  budgeted.1.1.2.endWithinAddressSpace }
+          refine ⟨replaceHeap targetStore heap, updatedLocals, nextWitness,
+            letStepSimulates_reset valueEq sourceLookup semanticReset
+              stateRelated transport nextRelated
+              (by simp [replaceHeap, clearFailure])
+              resultFound resultKindAt hObject tokenRelated imported
+              spec.hostsSatisfy inBounds contracted params results operation
+              targetSet,
+            ?_, ?_, witnessDescriptorsPreserved, ?_⟩
+          · simp [replaceHeap, clearFailure]
+          · simp [replaceHeap, clearFailure]
+          · refine ⟨?_, ?_⟩
+            · refine ⟨⟨nextFrameAligned, ?_⟩, ?_, ?_, ?_⟩
+              · change heap.AddressSpaceBudget
+                  (remainingBytes - directLetAllocationCost decl)
+                simpa [directLetAllocationCost, valueEq] using nextBudget
+              · change
+                  targetStore.host.externals.IntegerResultRefines externals
+                exact budgeted.1.2.1
+              · change
+                  FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+                    targetStore.host.externals externals
+                exact budgeted.1.2.2.1
+              · change
+                  FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+                    targetStore.host.externals externals
+                exact budgeted.1.2.2.2
+            · simpa [replaceHeap, clearFailure,
+                witnessDescriptorsPreserved] using budgeted.2
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 Current mixed allocating structural fragment: local aliases, immediate
 integer/`USize` literals, representation-polymorphic natural literals,
 successful object/`USize`/packed-scalar projections, integer boxing, typed
@@ -12518,6 +12714,19 @@ def BudgetedDirectSupported (context : Fir.Wasm.Context)
                   IsSharedSupported context decl ∨
                     StringLiteralSupported context decl ∨
                       NonemptyConstructorSupported context decl
+
+/--
+The complete direct family available under the ownership descriptor
+agreement: the ordinary budgeted structural fragment plus successful reset.
+
+Reset is separated from `BudgetedDirectSupported` because recursively
+releasing closure captures requires the descriptor agreement carried by the
+ownership frame. This distinction is an invariant requirement, not a
+per-program certificate.
+-/
+def OwnershipBudgetedDirectSupported (context : Fir.Wasm.Context)
+    (decl : LCNF.LetDecl .impure) : Prop :=
+  BudgetedDirectSupported context decl ∨ ResetSupported context decl
 
 /--
 The cost-indexed runtime law composes natural/String/constructor allocation
@@ -12939,6 +13148,40 @@ theorem
   exact
     DirectLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
       (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
+
+/--
+The ownership-strengthened direct family composes the ordinary structural
+fragment with branch-independent reset correctness.
+-/
+theorem
+    ConcreteSupportedExport.directLetRuntimeRefines_ownershipBudgetedDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OwnershipBudgetedDirectSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) := by
+  change
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (fun decl =>
+        BudgetedDirectSupported context decl ∨ ResetSupported context decl)
+      directLetAllocationCost
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals)
+  exact DirectLetRuntimeRefinesWithCost.or
+    (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.directLetRuntimeRefinesWithCost_reset externals)
 
 /--
 Pure integer, natural, and scalar external calls likewise preserve the
@@ -14979,6 +15222,84 @@ theorem
     ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
       scalarImplementation⟩, descriptorAgreement⟩
     (spec.directLetRuntimeRefines_budgetedDirect_ownership externals)
+    (spec.externalLetRuntimeRefinesWithCost_ownership externals)
+    caseRuntimeRefines_defaultOnly
+    (spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation
+      (externals := externals))
+    parameterCount
+
+/--
+Concrete whole-export partial correctness for arbitrary interleaving of
+successful reset with the ownership family, constructor-tag mutation, all
+supported successful field mutations, default-only cases, and the complete
+direct/pure-external family.
+
+The evaluation predicate admits reset only through
+`OwnershipBudgetedDirectSupported`; the compiler theorem derives its runtime
+branch rather than accepting a branch certificate.
+-/
+theorem
+    ConcreteSupportedExport.correctBudgetedPureExternalOwnershipTagAllFieldMutationAndReset
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (OwnershipBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  exact spec.correctBudgetedCode evaluation stateRelated
+    ⟨⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩
+    (spec.directLetRuntimeRefines_ownershipBudgetedDirect externals)
     (spec.externalLetRuntimeRefinesWithCost_ownership externals)
     caseRuntimeRefines_defaultOnly
     (spec.effectRuntimeRefines_ownershipTagAndAllFieldMutation

@@ -7,6 +7,117 @@ namespace Fir.Wasm.Concrete
 open Lean.Compiler
 open Fir.LeanIR.Impure
 
+/-- A successful fold of concrete one-step releases never changes the heap
+frontier. This local form is used by reset after it clears the owned prefix. -/
+private theorem List.foldlM_decrementReferenceOnce_preserves_heapCursor
+    {values : List Word32} {before after : MemoryState}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      values.foldlM (init := before) (fun state child =>
+        decrementReferenceOnce state child true descriptors) = .ok after) :
+    after.heapCursor = before.heapCursor := by
+  induction values generalizing before with
+  | nil =>
+      simpa only [List.foldlM_nil, Except.ok.injEq] using
+        (congrArg MemoryState.heapCursor (Except.ok.inj operation)).symm
+  | cons value rest ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at operation
+      cases firstOperation :
+          decrementReferenceOnce before value true descriptors with
+      | error failure =>
+          rw [firstOperation] at operation
+          contradiction
+      | ok middle =>
+          rw [firstOperation] at operation
+          exact (ih operation).trans
+            (decrementReferenceOnce_preserves_heapCursor firstOperation)
+
+/--
+Every successful concrete reset preserves the exact heap frontier.
+
+Reset either returns immediately, performs one ownership release, or rewrites
+the selected object-field prefix and folds ownership release over the old
+children. None of those operations allocates.
+-/
+theorem resetObject_preserves_heapCursor
+    {state result : MemoryState} {count : Nat} {object token : Word32}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      resetObject state count object descriptors = .ok (result, token)) :
+    result.heapCursor = state.heapCursor := by
+  unfold resetObject at operation
+  cases classified : object.classify <;> rw [classified] at operation
+  · simp at operation
+  · simp only [pure, Except.pure, Except.ok.injEq, Prod.mk.injEq] at operation
+    simpa [← operation.1]
+  · cases headerRead : state.readLiveHeader object with
+    | error failure =>
+        simp [liftMemory, headerRead, Bind.bind, Except.bind] at operation
+    | ok header =>
+        simp only [liftMemory, headerRead, Bind.bind, Except.bind] at operation
+        by_cases fallback :
+            header.isPromotedTag || header.persistent || header.refCount != 1
+        · rw [if_pos fallback] at operation
+          cases released :
+              decrementReferenceOnce state object true descriptors with
+          | error failure =>
+              rw [released] at operation
+              contradiction
+          | ok next =>
+              rw [released] at operation
+              simp only [pure, Except.pure] at operation
+              have pairEq := Except.ok.inj operation
+              have resultEq : next = result := congrArg Prod.fst pairEq
+              subst result
+              exact decrementReferenceOnce_preserves_heapCursor released
+        · rw [if_neg fallback] at operation
+          by_cases constructorKind : header.kind == .constructor
+          · rw [if_pos constructorKind] at operation
+            by_cases outOfBounds : header.aux1.toNat < count
+            · rw [if_pos outOfBounds] at operation
+              contradiction
+            · rw [if_neg outOfBounds] at operation
+              cases ownedRead :
+                  (List.range count).mapM fun index =>
+                    readObjectField state object index with
+              | error failure =>
+                  rw [ownedRead] at operation
+                  contradiction
+              | ok owned =>
+                  rw [ownedRead] at operation
+                  cases fieldsWritten :
+                      writeObjectFields state.memory object.value 0
+                        (List.replicate count taggedZero) with
+                  | error failure =>
+                      simp [liftMemory, fieldsWritten] at operation
+                  | ok memory =>
+                      simp only [liftMemory, fieldsWritten, Functor.map,
+                        Except.map, pure, Except.pure] at operation
+                      cases released :
+                          owned.foldlM
+                            (init := ({ state with memory } : MemoryState))
+                            (fun next child =>
+                              decrementReferenceOnce next child true
+                                descriptors) with
+                      | error failure =>
+                          rw [released] at operation
+                          contradiction
+                      | ok next =>
+                          rw [released] at operation
+                          simp only [pure, Except.pure] at operation
+                          have pairEq := Except.ok.inj operation
+                          have resultEq : next = result :=
+                            congrArg Prod.fst pairEq
+                          subst result
+                          simpa using
+                            List.foldlM_decrementReferenceOnce_preserves_heapCursor
+                              (before :=
+                                ({ state with memory } : MemoryState))
+                              released
+          · rw [if_neg constructorKind] at operation
+            contradiction
+  · simp at operation
+
 /-- Explicit transition relation for the unique reset-to-reuse protocol.
 `LiveHeapRel` is required only before reset; the exact concrete and semantic
 reset equations name the temporary states without claiming that cleared
@@ -1930,6 +2041,88 @@ theorem LiveHeapRel.resetObject_refines_tagged
       ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) := by
   exact ⟨related.resetObject_tagged tagged count, rfl, .reuseNone⟩
 
+/--
+A successful fallback reset—selected by either persistence or a nonunique
+semantic reference count—performs exactly one concrete ownership release,
+returns the empty token, and preserves every mapped allocation extent.
+-/
+theorem LiveHeapRel.resetObject_refines_fallback_with_capacity
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {count : Nat}
+    (related : LiveHeapRel state witness runtime)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (fallbackSemantic : cell.persistent = true ∨ cell.rc ≠ 1)
+    (semanticOperation :
+      Fir.LeanIR.Impure.reset runtime count (.object (.heap location)) =
+        .ok (nextRuntime, .reuseToken none)) :
+    ∃ result,
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, Word32.zero) ∧
+      LiveHeapRel result witness nextRuntime ∧
+      ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) ∧
+      MappedHeaderCapacityTransport state result witness := by
+  have fallbackSource :
+      (cell.persistent || cell.rc != 1) = true := by
+    rcases fallbackSemantic with semanticPersistent | notUnique
+    · simp [semanticPersistent]
+    · simp [notUnique]
+  have semanticDec :
+      Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime := by
+    unfold Fir.LeanIR.Impure.reset at semanticOperation
+    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
+      at semanticOperation
+    rw [if_pos fallbackSource] at semanticOperation
+    cases decEq : Fir.LeanIR.Impure.decLocation runtime location with
+    | error fault =>
+        rw [decEq] at semanticOperation
+        contradiction
+    | ok middleRuntime =>
+        rw [decEq] at semanticOperation
+        have pairEq := Except.ok.inj semanticOperation
+        have runtimeEq : middleRuntime = nextRuntime :=
+          congrArg Prod.fst pairEq
+        subst middleRuntime
+        rfl
+  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
+    related.concreteToSemantic location address mapped
+  rw [found] at mappedFound
+  have cellEq := Option.some.inj mappedFound
+  subst mappedCell
+  have targetRelated := cellRelation.live_of_eq_true live
+  obtain ⟨header, headerRead, _rawHeaderRead, notPromoted, persistent,
+      refCount⟩ :=
+    targetRelated.ownershipHeader
+  have fallback :
+      (header.isPromotedTag || header.persistent || header.refCount != 1) =
+        true := by
+    rcases fallbackSemantic with semanticPersistent | notUnique
+    · have headerPersistent : header.persistent = true :=
+        persistent.trans semanticPersistent
+      simp [notPromoted, headerPersistent]
+    · have headerCountNe : header.refCount ≠ 1 := by
+        intro one
+        rw [one] at refCount
+        simp at refCount
+        exact notUnique refCount.symm
+      simp [notPromoted, headerCountNe]
+  obtain ⟨result, concreteDec, finalRelated, capacityTransport⟩ :=
+    related.decrementReferenceOnce_refines_with_capacity mapped true semanticDec
+  have addressHeap :=
+    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
+      headerRead).1
+  have concreteReset :
+      resetObject state count address witness.closureDescriptors =
+        .ok (result, Word32.zero) := by
+    unfold resetObject
+    rw [addressHeap, headerRead]
+    simp only [Bind.bind, Except.bind, liftMemory]
+    rw [if_pos fallback, concreteDec]
+    rfl
+  exact ⟨result, concreteReset, finalRelated, .reuseNone, capacityTransport⟩
+
 /-- A non-unique ordinary heap cell follows reset's fallback path: one public
 decrement is performed, the empty reuse token is returned, and every mapped
 header retains its physical extent. -/
@@ -1950,54 +2143,8 @@ theorem LiveHeapRel.resetObject_refines_nonunique_with_capacity
       LiveHeapRel result witness nextRuntime ∧
       ValueRel witness .reuseToken (.word32 Word32.zero) (.reuseToken none) ∧
       MappedHeaderCapacityTransport state result witness := by
-  obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
-    related.concreteToSemantic location address mapped
-  rw [found] at mappedFound
-  have cellEq := Option.some.inj mappedFound
-  subst mappedCell
-  have targetRelated := cellRelation.live_of_eq_true live
-  obtain ⟨header, headerRead, _, notPromoted, _, refCount⟩ :=
-    targetRelated.ownershipHeader
-  have headerCountNe : header.refCount ≠ 1 := by
-    intro one
-    rw [one] at refCount
-    simp at refCount
-    exact notUnique refCount.symm
-  have fallback :
-      (header.isPromotedTag || header.persistent || header.refCount != 1) = true := by
-    simp [notPromoted, headerCountNe]
-  have semanticDec :
-      Fir.LeanIR.Impure.decLocation runtime location = .ok nextRuntime := by
-    unfold Fir.LeanIR.Impure.reset at semanticOperation
-    simp only [getLiveCell, found, live, ↓reduceIte, Bind.bind, Except.bind]
-      at semanticOperation
-    rw [if_pos (by simp [notUnique])]
-      at semanticOperation
-    cases decEq : Fir.LeanIR.Impure.decLocation runtime location with
-    | error fault =>
-        rw [decEq] at semanticOperation
-        contradiction
-    | ok middleRuntime =>
-        rw [decEq] at semanticOperation
-        have pairEq := Except.ok.inj semanticOperation
-        have runtimeEq : middleRuntime = nextRuntime :=
-          congrArg Prod.fst pairEq
-        subst middleRuntime
-        rfl
-  obtain ⟨result, concreteDec, finalRelated, capacityTransport⟩ :=
-    related.decrementReferenceOnce_refines_with_capacity mapped true semanticDec
-  have addressHeap :=
-    (MemoryState.PrefixExtension.readLiveHeader_facts state address header
-      headerRead).1
-  have concreteReset :
-      resetObject state count address witness.closureDescriptors =
-        .ok (result, Word32.zero) := by
-    unfold resetObject
-    rw [addressHeap, headerRead]
-    simp only [Bind.bind, Except.bind, liftMemory]
-    rw [if_pos fallback, concreteDec]
-    rfl
-  exact ⟨result, concreteReset, finalRelated, .reuseNone, capacityTransport⟩
+  exact related.resetObject_refines_fallback_with_capacity mapped found live
+    (.inr notUnique) semanticOperation
 
 /-- Compatibility surface for clients that need only heap and value
 refinement from the nonunique reset branch. -/

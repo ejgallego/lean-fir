@@ -17,7 +17,7 @@ failure correspondence. The matrix is intentionally conservative.
 | `closureApply` | Legacy callback excluded; generated trampoline uses metadata, capture projection, and direct calls | Not applicable as a runtime operation | Not applicable as a runtime operation | Complete compiler candidate enumeration/fold adaptation and execution after an arbitrary nonmatching prefix, capture/argument assembly, underapplication and saturated direct-call bodies, final result-local reload, concrete interprocedural judgment, body-WP-to-termination bridge, and ordinary/erased/multi-stage whole-module Node/V8 and browser-Worker executions compose |
 | `closureMatches` | Concrete Talos metadata host | Exact match/nonmatch heap theorem | Partial | The complete compiler-generated nested matcher fold adapts and executes: nonmatches recurse, the first match selects its body, and later candidates remain unreachable; module-derived dispatch tables and ordinary/erased/multi-stage whole-module Node/V8 and browser-Worker executions cover the executable boundary |
 | `closureProj` | Concrete Talos typed-capture host | Typed heap theorem | Partial | Recursive generated capture/argument assembly composes any projected fixed prefix with local arguments and either candidate body; module-derived descriptor tables and ordinary/multi-stage whole-module Node/V8 and browser-Worker executions cover the executable boundary, while erased captures correctly skip projection |
-| `reset` | Yes | Tagged, nonunique, and unique protocol theorems | Dead-object source-address, unique-nonconstructor `expectedConstructor`, unique-constructor object-bounds, nonunique fallback decrement, and non-`expectedObject` recursively mapped child faults exact; release-fuel target traps are excluded across every mapped reset branch, with the erased child source mismatch separately carded | Concrete Talos host plus tagged/fallback/unique source/compiler/adapter composition, exact unary call, reuse-token local write, arbitrary continuation, unique/nonunique whole-module executions, and unique/shared Node/V8 plus browser-Worker concrete execution; fallback and recursive child-fault leaves preserve the exact delegated failure, while mapped host calls cannot emit the structured release-fuel target trap |
+| `reset` | Yes | Tagged, persistent/nonunique fallback, and unique protocol theorems; one branch-independent successful refinement derives the selected case, exact frontier preservation, witness transport, and descriptor preservation | Dead-object source-address, unique-nonconstructor `expectedConstructor`, unique-constructor object-bounds, nonunique fallback decrement, and non-`expectedObject` recursively mapped child faults exact; release-fuel target traps are excluded across every mapped reset branch, with the erased child source mismatch separately carded | Concrete Talos host plus certificate-free `ResetSupported` compiler/adapter composition, exact unary call, reuse-token local write, arbitrary continuation, unique/nonunique whole-module executions, and unique/shared Node/V8 plus browser-Worker concrete execution; the ownership-strengthened direct family admits reset alongside every current pure external and ownership/tag/all-field-mutation effect without a tagged/fallback/unique certificate; fallback and recursive child-fault leaves preserve the exact delegated failure, while mapped host calls cannot emit the structured release-fuel target trap |
 | `reuse` | Yes | Fresh empty/nonempty and in-place theorems | Dead-object source-address and live-nonconstructor `expectedConstructor` faults exact; token/arity gates exclude earlier semantic faults; `reuseCapacitySafeProgram` excludes unknown or undersized retained tokens and exposes the in-place layout inequality | Concrete Talos host plus all three source/compiler/adapter branches, arbitrary-arity token/field call, descriptor transport, result-local write, arbitrary continuation, in-place/fresh whole-module executions, and in-place/fresh Node/V8 plus browser-Worker concrete execution; a generic arbitrary-arity trap combinator proves result-local write and continuation unreachable |
 | `box` | Five integer/USize kinds | Tagged and heap theorems | Partial | Witness-growing concrete host, source/compiler/adapter composition, exact unary call, object local write, maximum-`UInt64` whole-module execution, and Node/V8 plus browser-Worker heap-box/round-trip execution compose; the certificate-free indexed runtime law derives the canonical scalar lane from source/compiler typing and `StateRelated`, constructively selects immediate/promoted/heap representation from one fixed one-slot reservation, recovers the production call, and joins every mixed whole-export endpoint without target or allocation witnesses; floats share the runtime gap |
 | `unbox` | Five integer/USize kinds | Tagged and heap theorems | `expectedScalar` and dead-object source-address faults exact; `.tobject` and supported-kind gates exclude the other semantic faults | ABI-indexed concrete host, representation-indexed source step, compiler/adapter, generated unary result call, exact i32/i64 local write, continuation, maximum-`UInt64` whole-module execution, and Node/V8 plus browser-Worker heap-box/round-trip execution compose; the certificate-free indexed runtime law consumes only source-state scalar-kind compatibility and reconstructs tagged/heap representation, descriptor match, checked read, production call, and destination write through `StateRelated`, preserving the complete budget/metadata frame and joining every mixed whole-export endpoint; floats share the runtime gap |
@@ -68,6 +68,12 @@ Cross-cutting W6.5 state:
   compatible typed unboxing, and `isShared` in arbitrary finite
   interleavings. Each read-only instance records exact heap preservation and
   therefore retains the complete residual budget.
+  `OwnershipBudgetedDirectSupported` adds successful reset only when the
+  threaded frame also carries host/witness closure-descriptor agreement.
+  Source/compiler admission remains branch-free; the semantic step and state
+  relation derive tagged, persistent/nonunique fallback, or unique reset,
+  exact frontier preservation retains the budget, and the strongest
+  ownership/tag/all-field whole-export endpoint consumes the composed law.
   Natural literals are included through an exact three-way cost boundary:
   zero-byte wasm32 tagged immediates, aligned one-slot promoted tags, and
   aligned arbitrary-precision limb objects. The allocator theorem constructs
@@ -349,9 +355,13 @@ Cross-cutting W6.5 state:
   source scalar and i32/i64 operand lanes, representation-dependent witness
   growth, the generated unary host call, object destination-local write, and
   continuation; and
-- reset composes through its immediate, nonunique decrement, and unique
-  protocol branches, transporting the representation witness and exact
-  reuse-token local through the generated unary host call and continuation;
+- reset composes through one certificate-free direct law that derives its
+  immediate, persistent/nonunique fallback, or unique protocol branch from
+  source success and the state relation, transporting the representation
+  witness, exact reuse-token local, descriptor agreement, and unchanged
+  frontier through the generated unary host call and continuation; the
+  ownership-strengthened whole-export theorem interleaves it with every
+  current pure external and ownership/tag/all-field mutation effect;
   unique/shared Node/V8 and browser-Worker artifact execution composes; and
 - reuse composes through fresh tagged, fresh heap, and in-place protocol
   branches, transporting the exact constructor descriptor across the generated

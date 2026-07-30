@@ -4395,6 +4395,28 @@ mixed whole-export theorem without a per-program certificate. This changes
 no FIR semantic contract, concrete layout, executable ABI, or W7 helper
 signature.
 
+W6.6fx replaces reset's earlier branch-specific composition surface with a
+certificate-free structural theorem. `ResetSupported` records only the source
+declaration, object/result local compiler equations, and ordinary `.tobject`
+typing. It contains no tagged/fallback/unique choice, concrete object word,
+heap cell, reset token, target index, capacity witness, or execution step.
+
+`resetStep_of_refines` derives all three successful branches from the
+successful semantic reset and `ConcreteRuntimeRel`. The fallback theorem now
+covers both persistent and nonunique objects, while unique constructor reset
+retains its exact witness rebind and mapped-header transport. Every successful
+branch proves exact heap-frontier preservation and unchanged witness closure
+descriptors. Production lowering/adaptation and
+`ConcreteSupportedExport.resetCall` recover the generated unary call;
+`directLetRuntimeRefinesWithCost_reset` performs the reuse-token local write
+and re-establishes the complete pure-external ownership frame at zero cost.
+`OwnershipBudgetedDirectSupported` keeps reset separate from the ordinary
+direct family because recursive capture release needs descriptor agreement,
+then composes both laws. The strongest ownership/tag/all-field-mutation
+whole-export endpoint now admits arbitrary interleaving of successful reset
+without a per-program or branch certificate. No FIR semantic contract,
+concrete layout, executable ABI, or W7 helper signature changed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

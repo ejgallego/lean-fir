@@ -259,6 +259,80 @@ example
   spec.directLetRuntimeRefinesWithCost_box
 
 /--
+Reset admission is source/compiler-facing: it contains neither a selected
+runtime branch nor a concrete heap/address/token witness.
+-/
+example
+    {context : Fir.Wasm.Context} {decl : LCNF.LetDecl .impure}
+    (count : Nat) (objectId : FVarId) (objectKind : AbiKind)
+    (valueEq : decl.value = .reset count objectId)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok .reuseToken)
+    (objectCompiled :
+      Fir.Wasm.getLocal context objectId =
+        .ok (.localGet objectId, objectKind))
+    (objectRefines : objectKind.refines .tobject = true)
+    (resultCompiled :
+      Fir.Wasm.getLocal context decl.fvarId =
+        .ok (.localGet decl.fvarId, .reuseToken)) :
+    ResetSupported context decl :=
+  .intro count objectId objectKind valueEq valueKind objectCompiled
+    objectRefines resultCompiled
+
+/--
+The concrete reset boundary derives all representation branches from the
+successful semantic step and preserves both the witness descriptor table and
+the exact heap frontier.
+-/
+example
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {sourceObject sourceToken : Value}
+    {word : Word32} {count : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (objectRelated :
+      ValueRel witness .tobject (.word32 word) sourceObject)
+    (updated :
+      reset runtime count sourceObject = .ok (nextRuntime, sourceToken)) :
+    ∃ heap nextWitness token,
+      resetStep count initial [.i32 (UInt32.ofNat word.value)] =
+          .Return [.i32 (UInt32.ofNat token.value)]
+            (replaceHeap initial heap) ∧
+        WitnessTransport witness nextWitness ∧
+        ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
+          nextRuntime ∧
+        ValueRel nextWitness .reuseToken (.word32 token) sourceToken ∧
+        nextWitness.closureDescriptors = witness.closureDescriptors ∧
+        MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+        heap.heapCursor = initial.host.runtime.heap.heapCursor :=
+  resetStep_of_refines runtimeRelated descriptorsEq objectRelated updated
+
+/--
+Successful reset satisfies the cost-indexed direct runtime law under the
+ownership frame, without a concrete branch or translation certificate.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} :
+    DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ResetSupported context)
+      directLetAllocationCost
+      (ConcreteBudgetedPureExternalOwnershipFrame sourceFunction externals) :=
+  spec.directLetRuntimeRefinesWithCost_reset externals
+
+/--
 The typed-unbox compatibility boundary is source-only. Tagged operands are
 polymorphic; heap operands expose the live semantic cell and stored scalar
 kind, never a concrete address or descriptor lookup.
@@ -2495,6 +2569,72 @@ example
   spec.correctBudgetedPureExternalOwnershipTagAndAllFieldMutation evaluation
     stateRelated frameAligned budget integerImplementation naturalImplementation
     scalarImplementation descriptorAgreement parameterCount
+
+/--
+The strongest ownership/field-mutation whole-export endpoint also admits
+branch-independent successful reset as a direct declaration.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      BudgetedCodeEvaluates context externals
+        (OwnershipBudgetedDirectSupported context)
+        (PureExternalSupported context externals)
+        DefaultOnlyCaseSupported
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost sourceRuntime sourceEnv sourceCode resultRuntime
+        resultValue requiredBytes)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget requiredBytes)
+    (integerImplementation :
+      initial.host.externals.IntegerResultRefines externals)
+    (naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        initial.host.externals externals)
+    (scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        initial.host.externals externals)
+    (descriptorAgreement :
+      initial.host.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctBudgetedPureExternalOwnershipTagAllFieldMutationAndReset
+    evaluation stateRelated frameAligned budget integerImplementation
+    naturalImplementation scalarImplementation descriptorAgreement
+    parameterCount
 
 /--
 The mixed whole-export theorem admits arbitrary nesting of normalized

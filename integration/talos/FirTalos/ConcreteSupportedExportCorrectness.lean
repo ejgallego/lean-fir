@@ -445,6 +445,42 @@ theorem ConcreteSupportedExport.scalarProjectionCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment for one count-indexed concrete reset call. -/
+theorem ConcreteSupportedExport.resetCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context code sourceModule sourceFunction
+        target hosts exportName)
+    {count id : Nat}
+    (found :
+      callIndex? sourceModule (.runtime (.reset count)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? = some (resetContract count) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = resetStep count initial args)
+    simpa only [resolvedContract?, hostFn?_reset, Option.map_some,
+      resetFn] using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- Resolver/adaptor alignment for one concrete integer-boxing call. -/
 theorem ConcreteSupportedExport.boxCall
     {program : Fir.LeanIR.ImpureProgram}
