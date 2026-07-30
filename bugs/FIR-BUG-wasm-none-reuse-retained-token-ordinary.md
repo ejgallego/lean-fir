@@ -89,9 +89,12 @@ immediate, Natural, and String results, yielding a whole-export theorem for
 the complete current direct family plus reuse. Compiler-erased persistent
 ownership effects also compose because they are runtime identities. Successful
 ordinary increments compose through `incValue_ordinaryPersistenceTransport`,
-which proves the update preserves every cell's persistence bit. This bug still
-blocks validator-wide admission of effects that can create persistent aliases
-or otherwise fail that transport.
+which proves the update preserves every cell's persistence bit. Successful
+recursive decrement composes through the fuel-indexed
+`decLocationFuel_ordinaryPersistenceTransport`, including releases of owned
+constructor fields and closure captures. This bug still blocks validator-wide
+admission of effects that can create persistent aliases or otherwise fail that
+transport.
 
 ## Classification and triage
 

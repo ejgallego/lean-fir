@@ -4586,6 +4586,20 @@ persistent ownership effects, and successful ordinary increments. Recursive
 decrement is next; unlike increment, it may release an owned graph and needs a
 whole-transition ordinary-persistence theorem.
 
+W6.6gk discharges that recursive obligation. Generic list/array fold transport
+and the fuel-indexed `decLocationFuel_ordinaryPersistenceTransport` prove that
+successful recursive release changes reference counts and liveness without
+changing any cell's persistence bit. `ConcreteReuseCapacityOwnershipFrame`
+adds exactly the closure-descriptor agreement consumed by decrement, while a
+generic direct-law lift preserves it from the already exposed host/witness
+table equations. The effect structural theorem is now parameterized by any
+facts-indexed frame with a `ReuseCapacityStateRelated` projection, avoiding a
+second structural proof. The endpoint
+`correctReuseBudgetedDirectOwnershipThroughDecrementCode` therefore covers
+the complete direct/reuse family plus persistent ownership, ordinary
+increment, and recursive decrement. Explicit deletion is the remaining
+ownership operation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

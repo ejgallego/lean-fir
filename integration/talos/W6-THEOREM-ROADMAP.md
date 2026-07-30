@@ -678,7 +678,11 @@ acceptance tests pass.
    `correctReuseBudgetedDirectPersistentIncrementCode` adds successful
    ordinary increments: `incValue_ordinaryPersistenceTransport` establishes
    the source condition, while the existing concrete increment theorem
-   supplies exact executable and mapped-header transport. Recursive decrement
+   supplies exact executable and mapped-header transport.
+   `decLocationFuel_ordinaryPersistenceTransport` composes parent and child
+   releases through the explicit source fuel, and
+   `correctReuseBudgetedDirectOwnershipThroughDecrementCode` adds recursive
+   decrement under the ownership-strengthened reuse frame. Explicit deletion
    is the next ownership obligation.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects

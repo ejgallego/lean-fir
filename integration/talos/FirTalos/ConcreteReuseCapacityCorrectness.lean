@@ -1258,6 +1258,151 @@ theorem incValue_ordinaryPersistenceTransport
   | erased => simp [incValue] at operation
   | reuseToken token => simp [incValue] at operation
 
+/-- A successful state-threading list fold composes ordinary-persistence
+transports supplied by each successful step. -/
+theorem List.foldlM_ordinaryPersistenceTransport
+    {α : Type} {step : RuntimeState → α → Except RuntimeFault RuntimeState}
+    (stepTransport : ∀ {before after item},
+      step before item = .ok after →
+        OrdinaryPersistenceTransport before after)
+    {items : List α} {before after : RuntimeState}
+    (operation : items.foldlM (init := before) step = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  induction items generalizing before with
+  | nil =>
+      simp only [List.foldlM_nil] at operation
+      have runtimeEq := Except.ok.inj operation
+      subst after
+      exact OrdinaryPersistenceTransport.refl before
+  | cons item items ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at operation
+      cases head : step before item with
+      | error failure =>
+          rw [head] at operation
+          contradiction
+      | ok middle =>
+          rw [head] at operation
+          exact (stepTransport head).trans (ih operation)
+
+/-- Array-fold form used by recursive release of constructor fields and
+closure captures. -/
+theorem Array.foldlM_ordinaryPersistenceTransport
+    {α : Type} {step : RuntimeState → α → Except RuntimeFault RuntimeState}
+    (stepTransport : ∀ {before after item},
+      step before item = .ok after →
+        OrdinaryPersistenceTransport before after)
+    {items : Array α} {before after : RuntimeState}
+    (operation : items.foldlM step before = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  have listOperation :
+      items.toList.foldlM (init := before) step = .ok after := by
+    simpa only [Array.foldlM_toList] using operation
+  exact List.foldlM_ordinaryPersistenceTransport stepTransport listOperation
+
+/-- Every successful recursive semantic release preserves ordinaryness at
+every source heap location. The induction follows the explicit release fuel;
+parent and child updates only change reference counts and liveness. -/
+theorem decLocationFuel_ordinaryPersistenceTransport
+    {fuel : Nat} {before after : RuntimeState} {location : Location}
+    (operation : decLocationFuel fuel before location = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  induction fuel generalizing before after location with
+  | zero => simp [decLocationFuel] at operation
+  | succ fuel ih =>
+      simp only [decLocationFuel] at operation
+      cases read : getLiveCell before location with
+      | error failure =>
+          simp only [read, Bind.bind, Except.bind] at operation
+          contradiction
+      | ok cell =>
+          have targetFound :
+              findCell? before.heap location = some cell :=
+            (Fir.LeanIR.Passes.ElimDead.getLiveCell_spec read).1
+          simp only [read, Bind.bind, Except.bind] at operation
+          cases persistent : cell.persistent with
+          | true =>
+              simp only [persistent, ↓reduceIte] at operation
+              have runtimeEq := Except.ok.inj operation
+              subst after
+              exact OrdinaryPersistenceTransport.refl before
+          | false =>
+              simp only [persistent, Bool.false_eq_true, ↓reduceIte]
+                at operation
+              by_cases zero : cell.rc = 0
+              · rw [if_pos zero] at operation
+                contradiction
+              · rw [if_neg zero] at operation
+                by_cases aboveOne : cell.rc > 1
+                · rw [if_pos aboveOne] at operation
+                  exact setCell_ordinaryPersistenceTransport targetFound
+                    (by simp [persistent]) operation
+                · rw [if_neg aboveOne] at operation
+                  cases parentOperation :
+                      setCell before location
+                        { object := cell.object, rc := 0, live := false } with
+                  | error failure =>
+                      rw [parentOperation] at operation
+                      contradiction
+                  | ok parent =>
+                      rw [parentOperation] at operation
+                      apply
+                        (setCell_ordinaryPersistenceTransport targetFound
+                          (by simp [persistent]) parentOperation).trans
+                      apply Array.foldlM_ordinaryPersistenceTransport
+                        (operation := operation)
+                      intro childBefore childAfter value childOperation
+                      cases value with
+                      | object reference =>
+                          cases reference with
+                          | heap child => exact ih childOperation
+                          | tagged payload =>
+                              simp only at childOperation
+                              have runtimeEq := Except.ok.inj childOperation
+                              subst childAfter
+                              exact
+                                OrdinaryPersistenceTransport.refl childBefore
+                      | usize value | scalar value | erased | reuseToken value =>
+                          simp only at childOperation
+                          have runtimeEq := Except.ok.inj childOperation
+                          subst childAfter
+                          exact OrdinaryPersistenceTransport.refl childBefore
+
+/-- Public recursive-release specialization. -/
+theorem decLocation_ordinaryPersistenceTransport
+    {before after : RuntimeState} {location : Location}
+    (operation : decLocation before location = .ok after) :
+    OrdinaryPersistenceTransport before after :=
+  decLocationFuel_ordinaryPersistenceTransport operation
+
+/-- One semantic decrement preserves ordinary persistence for heap operands
+and is a runtime identity for checked tagged operands. -/
+theorem decValueOnce_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value} {check : Bool}
+    (operation : decValueOnce before value check = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact decLocation_ordinaryPersistenceTransport operation
+      | tagged payload =>
+          cases check <;> simp [decValueOnce] at operation
+          subst after
+          exact OrdinaryPersistenceTransport.refl before
+  | usize value | scalar value | erased | reuseToken value =>
+      simp [decValueOnce] at operation
+
+/-- Repeated successful decrement composes the one-step transport across its
+state-threading fold. -/
+theorem decValue_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    {amount : Nat} {check : Bool}
+    (operation : decValue before value amount check = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  apply List.foldlM_ordinaryPersistenceTransport (operation := operation)
+  exact fun stepOperation =>
+    decValueOnce_ordinaryPersistenceTransport stepOperation
+
 private theorem except_bind_pure_pair_eq_ok
     {ε α β : Type} {action : Except ε α}
     {output actual : β} {result : α}

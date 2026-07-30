@@ -13123,6 +13123,20 @@ def ConcreteReuseCapacityFrame
         targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes
 
 /--
+The facts-indexed reuse frame strengthened with the immutable closure
+descriptor agreement required by recursive ownership operations.
+-/
+def ConcreteReuseCapacityOwnershipFrame
+    (sourceFunction : Fir.Wasm.Function)
+    (facts : ReuseCapacityFacts) (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (targetStore : Wasm.Store Host) (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteReuseCapacityFrame sourceFunction facts remainingBytes sourceRuntime
+      sourceEnv targetStore targetLocals witness ∧
+    targetStore.host.closureDescriptors = witness.closureDescriptors
+
+/--
 Uniform facts-indexed direct-`let` law for successful reuse.
 
 Unlike the older program-specific reuse simulation, this interface contains
@@ -13215,6 +13229,50 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.or
   | inr rightSupported =>
       exact right rightSupported stepFits invariant sourceStep valueCompiled
         valueAdapted resultFound
+
+/--
+A facts-indexed direct law lifts through closure-descriptor agreement. Every
+successful direct step already exposes preservation of the host and witness
+descriptor tables independently.
+-/
+theorem
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Invariant) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits invariant.1 sourceStep valueCompiled
+      valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved,
+    witnessDescriptorsPreserved, transfer, nextInvariant,
+    hostDescriptorsPreserved.trans
+      (invariant.2.trans witnessDescriptorsPreserved.symm)⟩
 
 /--
 The production compiler, adapter, resolver, concrete runtime, and source reuse
@@ -14780,6 +14838,9 @@ theorem
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -14797,24 +14858,29 @@ theorem
       CodeAdapted context sourceModule sourceFunction labels code targetCode)
     (localsAligned : LocalLayoutAligned context sourceFunction)
     (invariant :
-      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
-        sourceRuntime sourceEnv initial locals witness)
+      Frame facts requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
       ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
         sourceFunction labels target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ConcreteReuseCapacityFrame sourceFunction))
+        directLetAllocationCost Frame)
     (effectRuntimeRefines :
       ∀ facts,
         EffectRuntimeRefines context sourceModule sourceFunction labels
           target.wasmModule hosts.env EffectSupported
-          (ConcreteReuseCapacityFrame sourceFunction facts)) :
+          (Frame facts)) :
     ∃ resultStore resultLocals resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels target.wasmModule
           hosts.env sourceRuntime sourceEnv code targetCode initial locals
           witness [] (ExactReturnControlPost resultStore physical) ∧
-        ConcreteReuseCapacityFrame sourceFunction resultFacts 0 resultRuntime
-          resultEnv resultStore resultLocals resultWitness ∧
+        Frame resultFacts 0 resultRuntime resultEnv resultStore resultLocals
+          resultWitness ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness resultKind physical resultValue := by
   induction evaluation generalizing targetCode initial locals witness with
@@ -14822,7 +14888,7 @@ theorem
       obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
           targetEq⟩ :=
         CodeAdapted.return_eq localsAligned adapted
-      have stateRelated := invariant.1.stateRelated
+      have stateRelated := (frameRelated invariant).stateRelated
       obtain ⟨physical, targetLookup, valueRelated⟩ :=
         stateRelated.resolve sourceLookup resultFound kindAt
       subst targetCode
@@ -14854,9 +14920,9 @@ theorem
       have factsEq := Option.some.inj producedTransfer
       subst producedFacts
       have continuationInvariant :
-          ConcreteReuseCapacityFrame sourceFunction nextFacts continuationCost
-            letNextRuntime (bind letSourceEnv decl.fvarId letSourceValue)
-            nextStore nextLocals nextWitness := by
+          Frame nextFacts continuationCost letNextRuntime
+            (bind letSourceEnv decl.fvarId letSourceValue) nextStore nextLocals
+            nextWitness := by
         simpa using nextInvariant
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
@@ -14869,8 +14935,8 @@ theorem
   | effect supported sourceStep continued ih =>
       obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
           nextInvariant⟩ :=
-        effectRuntimeRefines _ supported sourceStep invariant.1.stateRelated
-          invariant adapted
+        effectRuntimeRefines _ supported sourceStep
+          (frameRelated invariant).stateRelated invariant adapted
       obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
         ih continuationAdapted nextInvariant
@@ -15148,6 +15214,9 @@ theorem
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -15160,19 +15229,24 @@ theorem
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
         resultFacts resultRuntime resultEnv resultValue requiredBytes)
     (invariant :
-      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
-        sourceRuntime sourceEnv initial
+      Frame facts requiredBytes sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
     (directRuntimeRefines :
       ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
         sourceFunction [] target.wasmModule hosts.env DirectSupported
-        directLetAllocationCost
-        (ConcreteReuseCapacityFrame sourceFunction))
+        directLetAllocationCost Frame)
     (effectRuntimeRefines :
       ∀ facts,
         EffectRuntimeRefines context sourceModule sourceFunction []
           target.wasmModule hosts.env EffectSupported
-          (ConcreteReuseCapacityFrame sourceFunction facts))
+          (Frame facts))
     (parameterCount :
       parameters.length = spec.targetFunction.numParams) :
     ExecEvaluates externals
@@ -15186,8 +15260,8 @@ theorem
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       exactWP, resultInvariant, failureClear, valueRelated⟩ :=
     spec.codeWP_of_reuseCapacityEffectCodeEvaluates_exactReturn evaluation
-      spec.bodyAdapted spec.localsAligned invariant directRuntimeRefines
-      effectRuntimeRefines
+      spec.bodyAdapted spec.localsAligned invariant frameRelated
+      directRuntimeRefines effectRuntimeRefines
   have bodyWP :
       CodeWP context sourceModule sourceFunction [] target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
@@ -15223,7 +15297,8 @@ theorem
   subst final
   subst results
   exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
-    resultInvariant.1.stateRelated.1, failureClear, valueRelated, rfl⟩
+    (frameRelated resultInvariant).stateRelated.1, failureClear, valueRelated,
+    rfl⟩
 
 /-- Reuse-only specialization of the generic facts-indexed export theorem. -/
 theorem ConcreteSupportedExport.correctReuseCapacityCode
@@ -15797,6 +15872,46 @@ theorem
       exact literals literal stepFits invariant sourceStep valueCompiled
         valueAdapted resultFound
 
+/-- The complete facts-indexed direct family also preserves the ownership
+descriptor agreement needed by recursive decrement. -/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (fun facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors)
+  exact
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.preservingClosureDescriptorAgreement
+      (context := context) (sourceModule := sourceModule)
+      (sourceFunction := sourceFunction) (labels := labels)
+      (module := target.wasmModule) (hostEnv := hosts.env)
+      (Supported := ReuseBudgetedDirectSupported context)
+      (letCost := directLetAllocationCost)
+      (Invariant := ConcreteReuseCapacityFrame sourceFunction)
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
+
 /--
 Finite whole-export partial correctness for arbitrary interleavings of
 successful validated reuse and every operation in `BudgetedDirectSupported`.
@@ -15906,6 +16021,169 @@ theorem
           exact nextBudget⟩
 
 /--
+Ordinary increment also preserves the ownership-strengthened reuse frame.
+The concrete step changes only heap memory and retains the same witness, so
+closure-descriptor agreement is unchanged.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      fits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.inc_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.incrementCall callFound
+      obtain ⟨heap, step, cursor, capacity⟩ :=
+        effectStepSimulates_inc_with_capacity objectLookup updated stateRelated
+          objectCompiled objectFound kindAt objectRefines callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results fits
+      rcases invariant.1 with
+        ⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩
+      have nextCapacity :
+          ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+            (replaceHeap targetStore heap) targetLocals witness :=
+        capacityRelated.ofReplaceHeapEffectStep step capacity
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
+        ordinaryTokens.transport
+          (incValue_ordinaryPersistenceTransport updated)
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextAgreement :
+          (replaceHeap targetStore heap).host.closureDescriptors =
+            witness.closureDescriptors := by
+        simpa [replaceHeap, clearFailure] using invariant.2
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step,
+        ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
+          change heap.AddressSpaceBudget remainingBytes
+          exact nextBudget⟩, nextAgreement⟩⟩
+
+/--
+Recursive ordinary decrement preserves the ownership-strengthened reuse
+frame. The existing executable theorem owns descriptor-guided release and
+mapped-header transport; the source fuel induction owns ordinary persistence.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDecrement_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
+    targetStore targetLocals remainingBytes witness supported _sourceStep
+    stateRelated invariant adapted
+  cases supported with
+  | dec sourceRuntime nextRuntime sourceEnv objectId amount check objectFields?
+      continuation objectKind sourceObject objectCompiled objectRefines
+      objectLookup updated =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetEq⟩ :=
+        CodeAdapted.dec_eq supportedExport.localsAligned objectCompiled adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        supportedExport.decrementCall callFound
+      obtain ⟨heap, step, cursor, capacity⟩ :=
+        effectStepSimulates_dec_with_capacity objectLookup updated stateRelated
+          objectCompiled objectFound kindAt objectRefines invariant.2 callFound
+          continuationAdapted imported supportedExport.hostsSatisfy inBounds
+          contracted params results
+      rcases invariant.1 with
+        ⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩
+      have nextCapacity :
+          ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
+            (replaceHeap targetStore heap) targetLocals witness :=
+        capacityRelated.ofReplaceHeapEffectStep step capacity
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
+        ordinaryTokens.transport
+          (decValue_ordinaryPersistenceTransport updated)
+      have nextBudget : heap.AddressSpaceBudget remainingBytes := by
+        constructor
+        · simpa [cursor] using budget.cursorPositive
+        · simpa [cursor] using budget.endWithinAddressSpace
+      have nextAgreement :
+          (replaceHeap targetStore heap).host.closureDescriptors =
+            witness.closureDescriptors := by
+        simpa [replaceHeap, clearFailure] using invariant.2
+      exact ⟨targetRest, replaceHeap targetStore heap, witness,
+        continuationAdapted, step,
+        ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
+          change heap.AddressSpaceBudget remainingBytes
+          exact nextBudget⟩, nextAgreement⟩⟩
+
+/-- The ownership prefix proved for facts-indexed reuse: compiler-erased
+persistent operations, ordinary increment, and recursive decrement. -/
+abbrev ReuseOwnershipThroughDecrementEffectSupported
+    (context : Fir.Wasm.Context) : EffectSupportedPredicate :=
+  EffectSupportedOr PersistentOwnershipEffectSupported
+    (EffectSupportedOr (OrdinaryIncrementEffectSupported context)
+      (OrdinaryDecrementEffectSupported context))
+
+/-- One uniform effect law for the currently admitted ownership prefix. -/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipThroughDecrement
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (ReuseOwnershipThroughDecrementEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefines.or
+  · exact effectRuntimeRefines_persistentOwnership
+  · apply EffectRuntimeRefines.or
+    · exact
+        spec.effectRuntimeRefines_ordinaryIncrement_reuseCapacityOwnership
+    · exact
+        spec.effectRuntimeRefines_ordinaryDecrement_reuseCapacityOwnership
+
+/--
 The complete facts-indexed direct family may interleave with compiler-erased
 persistent ownership operations. These effects are source and target
 identities, so every fact-map instance of the reuse frame is preserved.
@@ -15952,6 +16230,7 @@ theorem
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctReuseCapacityEffectCode evaluation invariant
+    (fun invariant => invariant.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
     (fun _ => effectRuntimeRefines_persistentOwnership) parameterCount
 
@@ -16003,6 +16282,7 @@ theorem
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) :=
   spec.correctReuseCapacityEffectCode evaluation invariant
+    (fun invariant => invariant.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
     (fun facts =>
       EffectRuntimeRefines.or
@@ -16010,6 +16290,58 @@ theorem
         effectRuntimeRefines_persistentOwnership
         (spec.effectRuntimeRefines_ordinaryIncrement_reuseCapacity
           (facts := facts)))
+    parameterCount
+
+/--
+Finite whole-export partial correctness through recursive ownership release:
+the complete direct/reuse fragment may interleave persistent ownership,
+ordinary increment, and successful recursive decrement.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipThroughDecrementCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context)
+        (ReuseOwnershipThroughDecrementEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipThroughDecrement)
     parameterCount
 
 /--
