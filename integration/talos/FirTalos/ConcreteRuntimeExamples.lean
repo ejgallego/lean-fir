@@ -360,6 +360,28 @@ private def cachedHeapProgram : Fir.LeanIR.ImpureProgram :=
         .let (letDecl r LCNF.ImpureType.tobject (.oproj 0 cachedQ)) <|
         .return r)] }
 
+/--
+Regression witness for `FIR-BUG-wasm-none-lazy-source-step-count`.
+
+After four source steps, an internal cached declaration is still finishing
+its body; its cache and caller-bind frames have not yet been consumed.
+-/
+private def cachedHeapFourStepsRemainInCallee : Bool :=
+  match cachedHeapProgram.findDecl? `main with
+  | some { value := .code code, .. } =>
+      match run 4 rejectExternals {
+          program := cachedHeapProgram
+          control := .code code } with
+      | .outOfFuel {
+          control := .code (.return _)
+          frames := .cache name :: .bind _ _ _ _ :: _
+          .. } =>
+          name == `FirTalos.Concrete.cachedHeap
+      | _ => false
+  | _ => false
+
+#guard cachedHeapFourStepsRemainInCallee
+
 #guard fixtureReturnsWord? cachedHeapProgram 85
 
 /--

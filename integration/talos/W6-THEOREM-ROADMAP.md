@@ -837,8 +837,16 @@ acceptance tests pass.
    inside the table invariant, eliminating separate layout and uniqueness
    premises from initial construction and publication.
    Coordinate one integration-owned validator proof accessor constructing
-   `LazyCacheValidationFacts` from successful validation; then extract the
-   semantic empty/publication facts from source miss execution. Resolve the
+   `LazyCacheValidationFacts` from successful validation.
+   Source miss inversion is separately blocked by
+   `FIR-BUG-wasm-none-lazy-source-step-count`: the fixed four-step
+   `SourceLazyLetResult .miss` cannot reach the caller continuation after an
+   internal cached declaration with a nontrivial body. The executable
+   `cachedHeapFourStepsRemainInCallee` guard preserves that counterexample.
+   Coordinate an integration-owned structured or callee-length-indexed source
+   relation, then derive semantic lookup absence and publication from it; do
+   not replace that shared relation with a per-program execution certificate
+   or W6-private evaluator. Resolve the
    remaining `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration
    instance by
    deriving those facts from the generated declaration environment or by

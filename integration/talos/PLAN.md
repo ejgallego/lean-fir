@@ -4956,6 +4956,18 @@ Independently, the proof lane must extract semantic cache absence, the source
 publication equation, and retained-token disjointness (or validator
 invalidation) from generated source miss execution.
 
+That source inversion is currently blocked by
+`FIR-BUG-wasm-none-lazy-source-step-count`. `SourceLazyLetResult .miss`
+requires exactly four interpreter steps, but an internal nullary declaration
+needs an arbitrary finite body execution before its cache frame can publish
+the result and resume the caller. `cachedHeapFourStepsRemainInCallee` records
+the executable counterexample: after four steps the canonical cached-heap
+fixture is still at the callee return with both cache and caller-bind frames
+pending. Repair belongs to the shared proof-semantics contract: replace the
+fixed miss count with a structured or callee-length-indexed relation, then
+derive lookup absence and publication from that relation. W6 will not add a
+per-program execution certificate or a private evaluator as a workaround.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
