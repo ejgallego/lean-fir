@@ -1377,6 +1377,19 @@ active-code dispatcher is intentionally not strengthened yet: doing so next
 requires ownership preservation for every retained active-code and
 invocation/frame-push branch, not just the three deleted-write cases.
 
+The retained-call ownership bridge lands at `597b57ea`, with concrete
+regressions at `633d259d`. `LetActionOwnershipBelowFrontier` packages the
+single distinction needed by every runtime-neutral let successor: a returned
+value must already lie below the current frontier, while named and value
+invocations preserve the current runtime and save the completely owned
+environment in a bind frame. Retained `.fap` now carries the machine invariant
+through named invocation; retained `.fvar` covers both nullary aliasing of an
+owned environment value and non-nullary value invocation. Hereditary and exact
+graph matchers expose the relation and post-step ownership together. Concrete
+fixtures check the bind-frame and local-alias successors. Next cover the
+remaining retained result-producing active-code families before strengthening
+the global exact dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1486,6 +1499,10 @@ object-field replacement, and reset, including reset's dead token binding;
 writes, strengthens their deleted core/semantic matchers, and exposes
 ownership-aware exact matchers for all three deleted-write branches;
 `475451b9` checks the two remaining concrete semantic edges.
+`597b57ea` unifies runtime-neutral let ownership and carries the complete
+machine invariant through retained `.fap`/`.fvar` value binding, control
+changes, and bind-frame pushes; `633d259d` checks exact named invocation and
+nullary local aliasing.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1566,10 +1583,12 @@ the existing nullary-`.fap` semantic discrepancy.
    writes now also preserve the heap, local-environment, and complete-machine
    carriers; their deleted core and semantic matchers have concrete
    regressions, and all three deleted-write views expose branch-local exact
-   ownership matchers. Next preserve the carrier across retained active-code
-   result bindings, invocation/control changes, and pushed frames, then
-   strengthen the global exact active-code dispatcher and carry the
-   compositional closure certificate through the general dispatcher.
+   ownership matchers. Runtime-neutral let actions now preserve the carrier
+   across retained named/local invocation control changes, pushed bind frames,
+   and nullary local-value result binding, with exact wrappers and concrete
+   regressions. Next cover the remaining retained active-code result-producing
+   families, then strengthen the global exact active-code dispatcher and carry
+   the compositional closure certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
