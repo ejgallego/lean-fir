@@ -773,8 +773,16 @@ acceptance tests pass.
    publication transports.
    `LazyCacheImplementation.runtimeRefines` reduces the remaining generated
    cache obligation to one environment-wide implementation condition.
-   Proving the direct-call and lazy-cache environment conditions is the next
-   interprocedural task.
+   `BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet` now executes
+   the exact generated declaration-call/`cacheSet`/two-global miss block
+   instead of accepting a preassembled lazy simulation.
+   `miss_of_budgetedDeclaration_cacheSet` composes that block with the
+   budgeted hereditary callee theorem and threads all declaration transports
+   into cache publication. The remaining miss-local theorem is recursive
+   persistence preservation for unrelated ordinary facts, mapped header
+   extents, and the unchanged frontier. Proving that theorem and the two
+   generated-environment selection conditions is the next interprocedural
+   task.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

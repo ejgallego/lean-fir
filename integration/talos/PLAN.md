@@ -4792,6 +4792,22 @@ Finally, `LazyCacheImplementation.runtimeRefines` reduces the generic
 structural law to one generated declaration-environment theorem, parallel to
 the direct-call boundary.
 
+W6.6gz closes the executable lazy-miss prefix.
+`BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet` invokes the
+existing compiler-anchored nullary body, concrete `cacheSet`, both Wasm global
+publications, and the surrounding miss conditional directly; callers no
+longer provide an assembled lazy-step simulation.
+`miss_of_budgetedDeclaration_cacheSet` then consumes the same budgeted
+hereditary declaration theorem as direct calls and composes its ordinary,
+witness, header, immutable-table, and residual-budget transports with the
+publication step.
+
+The remaining miss proof is now sharply local: show that recursive cache
+persistence preserves every unrelated ordinary reuse token, every mapped
+allocation extent, and the unchanged heap frontier. The concrete cache
+execution, callee recursion, handler/descriptor tables, local write, global
+publication, and residual-budget composition are no longer open.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

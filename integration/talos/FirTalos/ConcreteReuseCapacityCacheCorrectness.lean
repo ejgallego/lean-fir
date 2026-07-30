@@ -195,6 +195,275 @@ theorem BudgetedCapacityPreservingLazyStep.miss
 }
 
 /--
+Close the exact compiler-generated lazy miss from a hereditary declaration
+body, concrete `cacheSet`, and the two Wasm global publications, then attach
+the W6 resource transports.
+
+Unlike `BudgetedCapacityPreservingLazyStep.miss`, this theorem does not accept
+an already assembled lazy simulation. It invokes the existing
+compiler-anchored miss-body theorem and the surrounding flag conditional
+directly.
+-/
+theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {kind : AbiKind}
+    {declarationId cacheSetId : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial afterCall afterCache valueStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {initialWitness nextWitness : RefinementWitness}
+    {physical oldValue oldFlag : Wasm.Value}
+    {flagIndex valueIndex resultIndex stepCost : Nat}
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (initialRelated :
+      StateRelated callerFunction sourceRuntime sourceEnv initial locals
+        initialWitness)
+    (flagEmpty :
+      initial.globals.globals[flagIndex]? = some (.i32 0))
+    (body :
+      CachedDeclarationBodyWP context sourceModule calleeFunction module
+        hostEnv sourceRuntime sourceCode targetFunction initial afterCall
+        initialWitness physical)
+    (notImport :
+      module.imports[declarationId]? = none)
+    (functionFound :
+      module.funcs[declarationId - module.imports.length]? =
+        some targetFunction)
+    (importFound :
+      module.imports[cacheSetId]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : cacheSetId < module.imports.length)
+    (contractFound :
+      spec.contracts[cacheSetId]? =
+        some (cacheSetContract declaration kind))
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueGlobal :
+      afterCache.globals.globals[valueIndex]? = some oldValue)
+    (valueStoreEq :
+      valueStore = writeWasmGlobal afterCache valueIndex physical)
+    (flagGlobal :
+      valueStore.globals.globals[flagIndex]? = some oldFlag)
+    (distinct : valueIndex ≠ flagIndex)
+    (targetSet :
+      locals.set? resultIndex physical = some nextLocals)
+    (nextRelated :
+      StateRelated callerFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue)
+        (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
+        nextWitness)
+    (ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (witnessTransport :
+      WitnessTransport initialWitness nextWitness)
+    (capacityTransport :
+      HeaderCapacityTransport initial.host.runtime.heap
+        (writeWasmGlobal valueStore flagIndex (.i32 1)).host.runtime.heap
+        initialWitness)
+    (externalsPreserved :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.externals =
+        initial.host.externals)
+    (hostDescriptorsPreserved :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
+        initial.host.closureDescriptors)
+    (witnessDescriptorsPreserved :
+      nextWitness.closureDescriptors =
+        initialWitness.closureDescriptors)
+    (residualBudget :
+      ∀ remainingBytes,
+        stepCost ≤ remainingBytes →
+          initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
+            ((writeWasmGlobal valueStore flagIndex
+                (.i32 1)).host.runtime.heap).AddressSpaceBudget
+              (remainingBytes - stepCost)) :
+    BudgetedCapacityPreservingLazyStep .miss context callerFunction module
+      hostEnv sourceExternals decl continuation
+      [.globalGet flagIndex,
+        .iff 0 0 [] [
+          .call declarationId,
+          .call cacheSetId,
+          .globalSet valueIndex,
+          .const 1,
+          .globalSet flagIndex],
+        .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue initial
+      (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
+      resultIndex initialWitness nextWitness physical stepCost := by
+  have missBody :
+      LazyMissBodySimulates module hostEnv
+        [.call declarationId, .call cacheSetId, .globalSet valueIndex,
+          .const 1, .globalSet flagIndex]
+        valueIndex resultIndex initial
+        (writeWasmGlobal valueStore flagIndex (.i32 1))
+        locals nextLocals :=
+    lazyMissBodySimulates_of_bodyWP_cacheSet body notImport functionFound
+      importFound hostSatisfies importInBounds contractFound parameterCount
+      resultCount operation valueGlobal valueStoreEq flagGlobal distinct
+      targetSet
+  have simulates :
+      LazyLetStepSimulates .miss context callerFunction module hostEnv
+        sourceExternals decl continuation
+        [.globalGet flagIndex,
+          .iff 0 0 [] [
+            .call declarationId,
+            .call cacheSetId,
+            .globalSet valueIndex,
+            .const 1,
+            .globalSet flagIndex],
+          .globalGet valueIndex]
+        sourceRuntime nextRuntime sourceEnv sourceValue initial
+        (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
+        resultIndex initialWitness nextWitness :=
+    lazyLetStepSimulates_miss sourceStep initialRelated flagEmpty missBody
+      nextRelated
+  exact .miss simulates targetSet ordinaryTransport witnessTransport
+    capacityTransport externalsPreserved hostDescriptorsPreserved
+    witnessDescriptorsPreserved residualBudget
+
+/--
+A budgeted hereditary nullary declaration plus a nonallocating cache
+publication closes the complete lazy miss resource boundary.
+
+The declaration consumes the path's allocation cost. `cacheSet` may update
+persistence metadata and semantic globals but must preserve already mapped
+header extents and the residual address-space budget; the two Wasm
+`global.set`s are part of the same final store and require no additional
+resource premise.
+-/
+theorem
+    BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {calleeCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {kind resultKind : AbiKind}
+    {declarationId cacheSetId : Nat}
+    {imp : Wasm.ImportDecl}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial afterCall afterCache valueStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {initialWitness callWitness : RefinementWitness}
+    {physical oldValue oldFlag : Wasm.Value}
+    {flagIndex valueIndex resultIndex stepCost : Nat}
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (initialRelated :
+      StateRelated callerFunction sourceRuntime sourceEnv initial locals
+        initialWitness)
+    (flagEmpty :
+      initial.globals.globals[flagIndex]? = some (.i32 0))
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+        calleeFunction module hostEnv sourceExternals sourceRuntime callRuntime
+        [] calleeCode targetFunction declarationId initial afterCall
+        initialWitness callWitness [] resultKind sourceValue physical stepCost)
+    (importFound :
+      module.imports[cacheSetId]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : cacheSetId < module.imports.length)
+    (contractFound :
+      spec.contracts[cacheSetId]? =
+        some (cacheSetContract declaration kind))
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueGlobal :
+      afterCache.globals.globals[valueIndex]? = some oldValue)
+    (valueStoreEq :
+      valueStore = writeWasmGlobal afterCache valueIndex physical)
+    (flagGlobal :
+      valueStore.globals.globals[flagIndex]? = some oldFlag)
+    (distinct : valueIndex ≠ flagIndex)
+    (targetSet :
+      locals.set? resultIndex physical = some nextLocals)
+    (nextRelated :
+      StateRelated callerFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue)
+        (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
+        callWitness)
+    (publicationOrdinary :
+      OrdinaryPersistenceTransport callRuntime nextRuntime)
+    (publicationCapacity :
+      HeaderCapacityTransport afterCall.host.runtime.heap
+        (writeWasmGlobal valueStore flagIndex (.i32 1)).host.runtime.heap
+        callWitness)
+    (publicationExternals :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.externals =
+        afterCall.host.externals)
+    (publicationDescriptors :
+      (writeWasmGlobal valueStore flagIndex (.i32 1)).host.closureDescriptors =
+        afterCall.host.closureDescriptors)
+    (publicationBudget :
+      ∀ remainingBytes,
+        afterCall.host.runtime.heap.AddressSpaceBudget remainingBytes →
+          ((writeWasmGlobal valueStore flagIndex
+              (.i32 1)).host.runtime.heap).AddressSpaceBudget
+            remainingBytes) :
+    BudgetedCapacityPreservingLazyStep .miss context callerFunction module
+      hostEnv sourceExternals decl continuation
+      [.globalGet flagIndex,
+        .iff 0 0 [] [
+          .call declarationId,
+          .call cacheSetId,
+          .globalSet valueIndex,
+          .const 1,
+          .globalSet flagIndex],
+        .globalGet valueIndex]
+      sourceRuntime nextRuntime sourceEnv sourceValue initial
+      (writeWasmGlobal valueStore flagIndex (.i32 1)) locals nextLocals
+      resultIndex initialWitness callWitness physical stepCost := by
+  apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
+    initialRelated flagEmpty
+    callee.capacityPreserving.successful.cachedBody
+    callee.capacityPreserving.successful.notImport
+    callee.capacityPreserving.successful.functionFound
+    importFound hostSatisfies importInBounds contractFound parameterCount
+    resultCount operation valueGlobal valueStoreEq flagGlobal distinct
+    targetSet nextRelated
+  · exact callee.ordinaryTransport.trans publicationOrdinary
+  · exact callee.capacityPreserving.witnessTransport
+  · exact callee.capacityPreserving.capacityTransport.transAcross
+      callee.capacityPreserving.witnessTransport publicationCapacity
+  · exact publicationExternals.trans callee.externalsPreserved
+  · exact publicationDescriptors.trans callee.hostDescriptorsPreserved
+  · exact callee.witnessDescriptorsPreserved
+  · intro remainingBytes stepFits budget
+    exact publicationBudget _
+      (callee.residualBudget stepFits budget)
+
+/--
 A budgeted lazy result re-establishes the canonical mixed facts-indexed
 frame, erasing only the destination's stale reuse fact.
 

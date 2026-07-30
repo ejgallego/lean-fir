@@ -529,8 +529,12 @@ Cross-cutting W6.5 state:
   erasure, ordinary tokens, local alignment, immutable handlers/descriptors,
   and residual headroom; the concrete hit is proved zero-cost with unchanged
   store and witness, while the miss boundary is ready to consume the existing
-  hereditary declaration/cache-publication theorem plus its resource
-  transports; and
+  hereditary declaration theorem; the exact compiler-generated miss block
+  now executes through the nullary body, concrete `cacheSet`, both physical
+  global writes, the result reload, and caller-local write, and declaration
+  resource transports compose through publication; only the publication-local
+  ordinary-token, mapped-header-extent, and frontier-preservation theorem
+  remains to instantiate the miss boundary; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.
