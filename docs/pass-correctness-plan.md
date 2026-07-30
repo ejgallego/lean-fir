@@ -1337,6 +1337,19 @@ carrier through checked active-code and invocation transitions, then combine
 it with the compositional source-only closure certificate in the general
 dispatcher.
 
+The first active-code ownership edge lands at `a43b7f4c`.
+Reusable whole-machine lifts now carry the local constructor-allocation,
+object-write, reset, and reuse ownership laws through every suspended bind
+environment. The deleted-reuse matcher uses one concrete runtime effect for
+both the exact source-only compiler relation and the ownership carrier, in
+both the missing-token allocation and concrete-token branches. A failed-token
+fixture checks the full semantic `Step`: the source allocates and binds
+compiler-only garbage while the target stutters at the retained continuation,
+and the resulting source machine remains owned below its frontier. Next apply
+the same active-code pattern to deleted constructor allocation, object writes,
+and reset, then cover retained result bindings and frame-pushing invocation
+edges before assembling the general dispatcher.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1436,6 +1449,9 @@ checks the source-only failed-reuse heap across an exact yielded-bind step.
 `ba52212b` preserves heap ownership through persistence/global installation,
 completes exact cache restoration, and assembles bind/apply/cache ownership
 under the hereditary yielded dispatcher.
+`a43b7f4c` lifts allocation, object-write, reset, and reuse ownership through
+the complete machine stack, preserves the carrier across both deleted-reuse
+token branches, and checks the semantic missing-token transition.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1506,10 +1522,14 @@ the existing nullary-`.fap` semantic discrepancy.
    exact hereditary yielded bind, apply, and cache restoration preserve it.
    Recursive persistence/global insertion retains the ownership graph, and a
    checked yielded dispatcher now returns the target path, exact machine
-   relation, and source carrier together. Next lift the existing local
-   operation carrier laws through checked active-code transitions, preserve the
-   carrier across invocation/control changes and pushed frames, and then carry
-   the compositional closure certificate through the general dispatcher.
+   relation, and source carrier together. Whole-machine lifts now cover
+   constructor allocation, object writes, reset, and both reuse modes; the
+   deleted-reuse active-code matcher preserves the carrier in both token
+   branches and its semantic wrapper is checked by the failed-token fixture.
+   Next extend that pattern to deleted constructor allocation, object writes,
+   and reset, then preserve the carrier across retained result bindings,
+   invocation/control changes, and pushed frames before carrying the
+   compositional closure certificate through the general dispatcher.
    Arbitrary checked entries must still initialize and preserve these compiler
    typing/ownership facts without finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
