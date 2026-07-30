@@ -3880,6 +3880,73 @@ example
     selection
 
 /--
+The constructive saturated-dispatch boundary resolves the concrete closure
+address and exact matcher result from the ordinary state relation plus both
+immutable closure-table equations. No physical address or matcher execution
+is supplied independently.
+-/
+example
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {closureKind : AbiKind}
+    {location : Location}
+    {cell : HeapCell}
+    {function expectedFunction : Name}
+    {arity expectedArity expectedFixed : Nat}
+    {captures : Array Value}
+    (related :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        witness)
+    (dispatchEq :
+      witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (sourceLookup :
+      lookup sourceEnv closureId = some (.object (.heap location)))
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureKindAt :
+      (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
+        some closureKind)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures) :
+    ∃ address : Word32,
+      locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        closureMatchesStep expectedFunction expectedArity expectedFixed initial
+            [.i32 (UInt32.ofNat address.value)] =
+          .Return [
+            .i32 (if function == expectedFunction && arity == expectedArity &&
+              captures.size == expectedFixed then 1 else 0)]
+            (FirTalos.Concrete.clearFailure initial) ∧
+        closureData sourceRuntime (.object (.heap location)) =
+          .ok (function, arity, captures) :=
+  related.resolveClosureMatcher dispatchEq descriptorsEq sourceLookup
+    closureFound closureKindAt cellFound cellLive cellObjectEq
+
+/--
+First-match selection is a theorem over the executable matcher bits, not an
+extra candidate-order certificate.
+-/
+example
+    {α : Type} (matched : α → UInt32) (values : List α)
+    (existsMatch :
+      ∃ candidate ∈ values, (matched candidate != 0) = true) :
+    ∃ before selected suffix,
+      values = before ++ selected :: suffix ∧
+        (∀ candidate, candidate ∈ before → matched candidate = 0) ∧
+          (matched selected != 0) = true :=
+  exists_first_nonzero matched values existsMatch
+
+/--
 The production compiler-generated non-heap lazy family is available over the
 fixed-entry cache frame. Misses thread the recursively evolved table and use
 heap-neutral publication to preserve the hereditary ordinaryness transport.

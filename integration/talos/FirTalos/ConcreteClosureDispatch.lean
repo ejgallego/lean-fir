@@ -7,6 +7,106 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/--
+A physical lane related to a semantic heap object exposes the exact concrete
+address and refinement-witness location mapping.
+
+The statement is representation-polymorphic in the source ABI kind: both the
+precise `.object` lane and the widened `.tobject` lane reduce to the same
+wasm32 address. All scalar, erased, tagged, and wide-lane cases are ruled out
+by the indexed `ValueRel`.
+-/
+theorem PhysicalValueRel.heapAddress
+    {witness : RefinementWitness} {kind : AbiKind}
+    {physical : Wasm.Value} {location : Location}
+    (related :
+      PhysicalValueRel witness kind physical (.object (.heap location))) :
+    ∃ address,
+      physical = .i32 (UInt32.ofNat address.value) ∧
+        witness.locations.lookup? location = some address := by
+  cases related with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | object heapRelated =>
+          cases heapRelated with
+          | mapped mapped =>
+              exact ⟨_, rfl, mapped⟩
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap heapRelated =>
+              cases heapRelated with
+              | mapped mapped =>
+                  exact ⟨_, rfl, mapped⟩
+  | word64 valueRelated =>
+      cases valueRelated
+  | float32Bits valueRelated =>
+      cases valueRelated
+  | float64Bits valueRelated =>
+      cases valueRelated
+
+/--
+Resolve a source closure local and execute an arbitrary generated metadata
+matcher from source/runtime refinement facts.
+
+Both immutable closure-table equations are explicit. This is the precise
+boundary needed by saturated-dispatch selection: it derives the physical
+address and exact matcher result instead of accepting either as a call-site
+certificate.
+-/
+theorem StateRelated.resolveClosureMatcher
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {closureKind : AbiKind}
+    {location : Location}
+    {cell : HeapCell}
+    {function expectedFunction : Lean.Name}
+    {arity expectedArity expectedFixed : Nat}
+    {captures : Array Value}
+    (related :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        witness)
+    (dispatchEq :
+      witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (sourceLookup :
+      lookup sourceEnv closureId = some (.object (.heap location)))
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureKindAt :
+      (functionBindings sourceFunction)[closureIndex]?.map Prod.snd =
+        some closureKind)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures) :
+    ∃ address : Word32,
+      locals.get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) ∧
+        closureMatchesStep expectedFunction expectedArity expectedFixed initial
+            [.i32 (UInt32.ofNat address.value)] =
+          .Return [
+            .i32 (if function == expectedFunction && arity == expectedArity &&
+              captures.size == expectedFixed then 1 else 0)]
+            (FirTalos.Concrete.clearFailure initial) ∧
+        closureData sourceRuntime (.object (.heap location)) =
+          .ok (function, arity, captures) := by
+  obtain ⟨physical, localFound, physicalRelated⟩ :=
+    related.resolve sourceLookup closureFound closureKindAt
+  obtain ⟨address, physicalEq, mapped⟩ :=
+    physicalRelated.heapAddress
+  subst physical
+  obtain ⟨matcher, closureDataEq⟩ :=
+    closureMatchesStep_of_refines related.1 dispatchEq descriptorsEq mapped
+      cellFound cellLive cellObjectEq
+  exact ⟨address, localFound, matcher, closureDataEq⟩
+
 /-- One compiler-produced closure candidate after numeric Talos adaptation,
 paired with the exact concrete matcher invocation used to select it. The body
 remains abstract here: later theorems discharge it with either partial
@@ -49,6 +149,168 @@ structure ClosureCandidateCase
     closureMatchesStep function arity fixed initial
         [.i32 (UInt32.ofNat address.value)] =
       .Return [.i32 matched] (clearFailure initial)
+
+/--
+The candidate's recorded matcher bit is determined by the related semantic
+closure, rather than being an independent dynamic premise.
+-/
+theorem ClosureCandidateCase.matched_eq_of_refines
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {initial : Wasm.Store Host}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {witness : RefinementWitness}
+    {runtime : RuntimeState}
+    {location : Location}
+    {cell : HeapCell}
+    {function : Lean.Name}
+    {arity : Nat}
+    {captures : Array Value}
+    (candidate :
+      ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address)
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? runtime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures) :
+    candidate.matched =
+      if function == candidate.function && arity == candidate.arity &&
+          captures.size == candidate.fixed then
+        1
+      else
+        0 := by
+  have matcher :=
+    (closureMatchesStep_of_refines runtimeRelated dispatchEq descriptorsEq
+      mapped cellFound cellLive cellObjectEq
+      (expectedFunction := candidate.function)
+      (expectedArity := candidate.arity)
+      (expectedFixed := candidate.fixed)).1
+  have returnsEq := candidate.operation.symm.trans matcher
+  have valuesEq :
+      [Wasm.Value.i32 candidate.matched] =
+        [Wasm.Value.i32 (if function == candidate.function &&
+          arity == candidate.arity && captures.size == candidate.fixed then
+            1
+          else
+            0)] := by
+    injection returnsEq
+  have valueEq :
+      Wasm.Value.i32 candidate.matched =
+        Wasm.Value.i32 (if function == candidate.function &&
+          arity == candidate.arity && captures.size == candidate.fixed then
+            1
+          else
+            0) := by
+    simpa using congrArg List.head? valuesEq
+  exact Wasm.Value.i32.inj valueEq
+
+/--
+Any finite candidate list containing a nonzero matcher has a canonical
+first-matching split. The prefix theorem is independent of compiler
+enumeration; later dispatch induction only has to prove that the generated
+candidate family contains a matching semantic closure identity.
+-/
+theorem exists_first_nonzero
+    {α : Type} (matched : α → UInt32) (values : List α)
+    (existsMatch :
+      ∃ candidate ∈ values, (matched candidate != 0) = true) :
+    ∃ before selected suffix,
+      values = before ++ selected :: suffix ∧
+        (∀ candidate, candidate ∈ before → matched candidate = 0) ∧
+          (matched selected != 0) = true := by
+  induction values with
+  | nil =>
+      simp at existsMatch
+  | cons candidate values ih =>
+      by_cases candidateZero : matched candidate = 0
+      · have tailMatch :
+            ∃ selected ∈ values, (matched selected != 0) = true := by
+          obtain ⟨selected, selectedMem, selectedNonzero⟩ := existsMatch
+          simp only [List.mem_cons] at selectedMem
+          rcases selectedMem with selectedEq | selectedMem
+          · rw [selectedEq, candidateZero] at selectedNonzero
+            simp at selectedNonzero
+          · exact ⟨selected, selectedMem, selectedNonzero⟩
+        obtain ⟨before, selected, suffix, valuesEq, beforeZero,
+            selectedNonzero⟩ :=
+          ih tailMatch
+        refine
+          ⟨candidate :: before, selected, suffix, ?_, ?_, selectedNonzero⟩
+        · simp [valuesEq]
+        · intro other otherMem
+          simp only [List.mem_cons] at otherMem
+          rcases otherMem with otherEq | otherMem
+          · simpa [otherEq] using candidateZero
+          · exact beforeZero other otherMem
+      · refine ⟨[], candidate, values, rfl, ?_, ?_⟩
+        · simp
+        · simp [candidateZero]
+
+/--
+One generated candidate with the semantic closure identity determines the
+first executable matcher selected by the complete candidate fold.
+
+The caller proves only static enumeration coverage of the closure's function,
+total arity, and fixed-capture count. Concrete matcher results for that
+candidate and every earlier candidate are consequences of runtime refinement.
+-/
+theorem closureCandidates_exists_first_match_of_refines
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {initial : Wasm.Store Host}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {witness : RefinementWitness}
+    {runtime : RuntimeState}
+    {location : Location}
+    {cell : HeapCell}
+    {function : Lean.Name}
+    {arity : Nat}
+    {captures : Array Value}
+    (candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address))
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? runtime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures)
+    (containsMatch :
+      ∃ candidate ∈ candidates,
+        (function == candidate.function && arity == candidate.arity &&
+          captures.size == candidate.fixed) = true) :
+    ∃ before selected suffix,
+      candidates = before ++ selected :: suffix ∧
+        (∀ candidate, candidate ∈ before →
+          candidate.matched = (0 : UInt32)) ∧
+          (selected.matched != 0) = true := by
+  have executableMatch :
+      ∃ candidate ∈ candidates, (candidate.matched != 0) = true := by
+    obtain ⟨candidate, candidateMem, candidateIdentity⟩ := containsMatch
+    refine ⟨candidate, candidateMem, ?_⟩
+    rw [candidate.matched_eq_of_refines runtimeRelated dispatchEq
+      descriptorsEq mapped cellFound cellLive cellObjectEq]
+    simp [candidateIdentity]
+  exact exists_first_nonzero (fun candidate => candidate.matched) candidates
+    executableMatch
 
 theorem ClosureCandidateCase.matcherAdapted
     {sourceModule : Fir.Wasm.Module}

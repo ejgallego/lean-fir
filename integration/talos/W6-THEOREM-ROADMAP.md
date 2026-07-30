@@ -1045,9 +1045,25 @@ acceptance tests pass.
    `internalNonHeapLazyRuntimeRefines_entryRelativeCache` theorem and its
    contract guard close the current internal lazy family without an
    unchanged-global premise.
-   Next derive the cache-aware direct-call implementation uniformly from
-   production declaration selection, including admitted saturated closure
-   dispatch, and construct
+   Cache-aware named-call selection and the compiler-derived saturated-call
+   adapter are now installed. For saturated closure dispatch,
+   `PhysicalValueRel.heapAddress` and
+   `StateRelated.resolveClosureMatcher` derive the concrete local address and
+   executable matcher result from the ordinary state relation, a live source
+   closure cell, and the two immutable closure-table equations.
+   `ClosureCandidateCase.matched_eq_of_refines` classifies each generated
+   candidate, while
+   `closureCandidates_exists_first_match_of_refines` derives the complete
+   nonmatching-prefix/selected/suffix split from one semantic
+   function/arity/fixed-count coverage fact. This removes matcher bits and
+   first-match order as independent induction assumptions.
+   The canonical cache frame currently drops host/witness closure-dispatch
+   equality even though it preserves closure descriptors; see
+   `FIR-BUG-wasm-none-closure-dispatch-frame-agreement`. Next thread both
+   immutable closure tables through every entry and operation transport, then
+   prove candidate coverage directly from
+   `compileClosureCandidatesForTarget` and resolver/declaration facts.
+   After that, construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment. Do not reintroduce a
    `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site

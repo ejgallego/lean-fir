@@ -5415,6 +5415,37 @@ extension because it cannot satisfy the current all-location
 invariant or coordinated alias/fact invalidation, not an unsound
 unchanged-heap adapter.
 
+W6.6hc begins the constructive saturated-selection discharge at the concrete
+matcher boundary. `PhysicalValueRel.heapAddress` proves that either admitted
+object-like ABI lane for a semantic heap reference contains the exact mapped
+wasm32 address. `StateRelated.resolveClosureMatcher` combines that fact with
+the source local lookup and live semantic closure cell to derive both the
+physical local and the exact executable `closureMatchesStep` result. Its only
+non-state premises are the two immutable closure-table equations already
+required by the concrete matcher.
+
+`ClosureCandidateCase.matched_eq_of_refines` consequently makes every
+candidate bit a theorem of the semantic closure identity.
+`exists_first_nonzero` supplies the generic finite first-match split, and
+`closureCandidates_exists_first_match_of_refines` combines them: once the
+production candidate enumeration contains the closure's function, total
+arity, and fixed-capture count, the complete nonmatching prefix and selected
+nonzero case follow constructively. The contract harness fixes both the local
+matcher boundary and the first-match theorem; it does not accept a physical
+address or target execution.
+
+This inspection exposed
+`FIR-BUG-wasm-none-closure-dispatch-frame-agreement`: the canonical W6
+reuse/capacity/cache frame retains host/witness closure-descriptor equality
+but loses the corresponding closure-dispatch equality. Initial construction
+and the concrete operations preserve both immutable tables, but
+`closureMatchesStep_of_refines` cannot be invoked from the current composed
+frame until dispatch agreement is threaded through direct, effect, call,
+lazy, entry-relative, and hereditary transports. The next closure slice is
+that invariant lift, followed by a production candidate-coverage theorem from
+`compileClosureCandidatesForTarget` and resolver facts. Matcher outcomes must
+not be postulated through `ClosureCandidateCase.operation` as a workaround.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
