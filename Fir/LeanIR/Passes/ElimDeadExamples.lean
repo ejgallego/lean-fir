@@ -4650,7 +4650,13 @@ theorem deletedPapSourceOnlyKeepsAllocationLedger :
     deletedPapLedgerResult.runtime.ledger.owner = fun _ => 0 := by
   simp [deletedPapLedgerResult,
     LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage,
+    LedgerShadowRuntimeRel.allocLeftGarbage,
     TargetAllocationLedger.empty]
+
+theorem deletedPapHeapResultSourceOnly :
+    SourceOnlyUnderTargetLedger
+      deletedPapLedgerResult.runtime.ledger 0 :=
+  deletedPapLedgerResult.heapSourceOnly 0 (by rfl)
 
 /-- The retained heap-box fixture keeps its live input in the ambient
 liveness set and its box result in the continuation. -/
@@ -4805,7 +4811,14 @@ theorem deletedBoxSourceOnlyKeepsAllocationLedger :
     deletedBoxLedgerResult.runtime.ledger.owner = fun _ => 0 := by
   simp [deletedBoxLedgerResult,
     LedgerShadowRuntimeRel.boxScalarLeftGarbage,
+    LedgerShadowRuntimeRel.allocLeftGarbage,
+    ScalarValue.toUInt64, maxTaggedPayload,
     TargetAllocationLedger.empty]
+
+theorem deletedBoxHeapResultSourceOnly :
+    SourceOnlyUnderTargetLedger
+      deletedBoxLedgerResult.runtime.ledger 0 :=
+  deletedBoxLedgerResult.heapSourceOnly 0 (by rfl)
 
 /-- A retained failed reuse keeps the token live in the ambient set and uses
 its result in the continuation. -/
@@ -4973,7 +4986,38 @@ theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
   simp [deletedReuseNoneLedgerResult,
     LedgerShadowRuntimeRel.reuseNoneLeftGarbage,
     LedgerShadowRuntimeRel.allocCtorLeftGarbage,
-    TargetAllocationLedger.empty]
+    LedgerShadowRuntimeRel.allocLeftGarbage,
+    TargetAllocationLedger.empty, oneFieldInfo]
+
+/-- The deleted failed-reuse result now exposes the stronger fact needed by
+later concrete reuse: its heap result is outside the target owner ledger. -/
+theorem deletedReuseNoneHeapResultSourceOnly :
+    SourceOnlyUnderTargetLedger
+      deletedReuseNoneLedgerResult.runtime.ledger 0 :=
+  deletedReuseNoneLedgerResult.heapSourceOnly 0 (by rfl)
+
+/-- A deleted constructor allocation followed by an unrelated retained
+paired allocation is the minimal non-lockstep ownership lifecycle. -/
+noncomputable def deletedCtorLifecycleSourceOnly :=
+  LedgerShadowRuntimeRel.empty.allocCtorLeftGarbage
+    oneFieldInfo #[.erased] (by rfl)
+
+noncomputable def deletedCtorLifecyclePaired :=
+  deletedCtorLifecycleSourceOnly.runtime.allocBoth
+    (HeapObjectRel.natural 9223372036854775808)
+    (by simp [RootSubset, HeapObject.ownedValues])
+    (by simp [RootSubset, HeapObject.ownedValues])
+    false
+
+/-- The later retained allocation adds a target owner without claiming the
+earlier deleted constructor's source address. -/
+theorem deletedCtorSourceOnlySurvivesPairedAllocation :
+    SourceOnlyUnderTargetLedger
+      deletedCtorLifecyclePaired.runtime.ledger 0 := by
+  apply deletedCtorLifecyclePaired.sourceOnly_of_found
+    deletedCtorLifecycleSourceOnly.runtime
+  · exact deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
+  · rfl
 
 /-- The existing concrete-token deletion starts with an empty target owner
 ledger; its source cell is therefore source-only by construction. -/

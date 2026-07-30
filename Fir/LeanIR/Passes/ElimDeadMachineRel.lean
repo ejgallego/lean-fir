@@ -7630,6 +7630,59 @@ theorem TargetAllocationLedger.sourceOnly_extendOfMapping
     simpa [TargetAllocationLedger.extendOfMapping, newest] using
       sourceOnly rightLocation old
 
+/-- Source-only provenance survives a renaming extension when the target
+allocation frontier is unchanged. The new ledger may be packaged by any
+existing-address operation; reverse-map uniqueness forces its owners to agree
+with the old ledger on the entire allocated target prefix. -/
+theorem TargetAllocationLedger.sourceOnly_of_sameFrontierExtension
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (nextLedger : TargetAllocationLedger larger rightFrontier)
+    (extension : RenamingExtends rho larger)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location) :
+    SourceOnlyUnderTargetLedger nextLedger location := by
+  intro rightLocation bounded
+  have oldMapped :=
+    extension.reverse (ledger.reverseMapped rightLocation bounded)
+  have nextMapped := nextLedger.reverseMapped rightLocation bounded
+  rw [oldMapped] at nextMapped
+  have ownerEq :
+      ledger.owner rightLocation = nextLedger.owner rightLocation :=
+    Option.some.inj nextMapped
+  intro selected
+  exact sourceOnly rightLocation bounded (ownerEq.trans selected)
+
+/-- Source-only provenance survives any proof-relevant paired allocation
+ledger, without requiring that clients unfold its owner table. Old target
+slots retain their reverse mappings under the renaming extension; the one new
+slot is owned by the freshly paired source address. -/
+theorem TargetAllocationLedger.sourceOnly_of_pairedAllocation
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (nextLedger : TargetAllocationLedger larger (rightFrontier + 1))
+    (extension : RenamingExtends rho larger)
+    (mapping : larger.forward left = some rightFrontier)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location)
+    (different : left ≠ location) :
+    SourceOnlyUnderTargetLedger nextLedger location := by
+  intro rightLocation bounded
+  by_cases newest : rightLocation = rightFrontier
+  · subst rightLocation
+    have ownerEq :
+        nextLedger.owner rightFrontier = left :=
+      nextLedger.owner_eq_of_forward mapping (Nat.lt_succ_self _)
+    intro selected
+    exact different (ownerEq.symm.trans selected)
+  · have old : rightLocation < rightFrontier :=
+      Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+    have oldMapped :=
+      extension.reverse (ledger.reverseMapped rightLocation old)
+    have nextMapped := nextLedger.reverseMapped rightLocation bounded
+    rw [oldMapped] at nextMapped
+    have ownerEq :
+        ledger.owner rightLocation = nextLedger.owner rightLocation :=
+      Option.some.inj nextMapped
+    intro selected
+    exact sourceOnly rightLocation old (ownerEq.trans selected)
+
 /-- An address already known to be absent from the renaming is outside every
 target allocation ledger. This is the induction entry point immediately
 before a deleted source-only allocation. -/
@@ -8189,6 +8242,69 @@ structure LedgerShadowRuntimeRel (rho : AddressRenaming)
   runtime : ShadowRuntimeRel rho left right leftExtra rightExtra
   ledger : TargetAllocationLedger rho right.nextLocation
 
+/-- The current source allocation frontier is outside every owner recorded
+in the target allocation ledger. This is the allocation-lifecycle fact used
+when the compiler emits a source-only heap object at the next fresh address. -/
+theorem LedgerShadowRuntimeRel.sourceOnly_nextLocation
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra) :
+    SourceOnlyUnderTargetLedger related.ledger left.nextLocation :=
+  related.ledger.sourceOnly_of_forwardUnmapped
+    (related.runtime.leftMappingFresh left.nextLocation (Nat.le_refl _))
+
+/-- Preserve an already allocated source-only cell through an arbitrary
+proof-relevant paired allocation. The old heap witness places the selected
+cell strictly before the fresh source frontier; ledger reverse-map uniqueness
+then preserves it across both the old target prefix and the one new slot. -/
+theorem LedgerShadowRuntimeRel.sourceOnly_of_pairedAllocation
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (nextLedger :
+      TargetAllocationLedger larger (right.nextLocation + 1))
+    (extension : RenamingExtends rho larger)
+    (mapping :
+      larger.forward left.nextLocation = some right.nextLocation)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location)
+    (found : findCell? left.heap location = some cell) :
+    SourceOnlyUnderTargetLedger nextLedger location := by
+  have different : left.nextLocation ≠ location := by
+    intro same
+    subst location
+    have fresh := related.runtime.leftHeapFresh
+      left.nextLocation (Nat.le_refl _)
+    rw [fresh] at found
+    cases found
+  exact related.ledger.sourceOnly_of_pairedAllocation
+    nextLedger extension mapping sourceOnly different
+
+/-- Preserve source-only provenance through an arbitrary related operation
+whose target allocation frontier is unchanged. This covers reset, writes, and
+concrete-token reuse even when their proof result exposes a stronger hidden
+address renaming. -/
+theorem LedgerShadowRuntimeRel.sourceOnly_of_sameTargetFrontierExtension
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (next :
+      LedgerShadowRuntimeRel larger nextLeft nextRight
+        nextLeftExtra nextRightExtra)
+    (extension : RenamingExtends rho larger)
+    (frontier : nextRight.nextLocation = right.nextLocation)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location) :
+    SourceOnlyUnderTargetLedger next.ledger location := by
+  intro rightLocation bounded
+  have oldBounded : rightLocation < right.nextLocation := by
+    simpa [frontier] using bounded
+  have oldMapped :=
+    extension.reverse
+      (related.ledger.reverseMapped rightLocation oldBounded)
+  have nextMapped := next.ledger.reverseMapped rightLocation bounded
+  rw [oldMapped] at nextMapped
+  have ownerEq :
+      related.ledger.owner rightLocation =
+        next.ledger.owner rightLocation :=
+    Option.some.inj nextMapped
+  intro selected
+  exact sourceOnly rightLocation oldBounded (ownerEq.trans selected)
+
 /-- Empty runtimes start with the empty renaming and empty allocation
 ledger. -/
 def LedgerShadowRuntimeRel.empty :
@@ -8251,6 +8367,20 @@ noncomputable def LedgerShadowRuntimeRel.resetBoth_of_related
       count leftObject rightObject leftToken :=
   Classical.choice
     (related.resetBoth_of_related_nonempty objectRoot objects sourceEffect)
+
+/-- A retained reset does not allocate target storage, so every source-only
+address remains outside the result ledger. -/
+theorem LedgerResetBothResult.sourceOnly
+    (related : LedgerShadowRuntimeRel rho left right leftExtra rightExtra)
+    (result :
+      LedgerResetBothResult rho left right leftResult leftExtra rightExtra
+        count leftObject rightObject leftToken)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location) :
+    SourceOnlyUnderTargetLedger result.runtime.ledger location :=
+  related.sourceOnly_of_sameTargetFrontierExtension
+    result.runtime (RenamingExtends.refl rho)
+    (reset_nextLocation_eq_of_ok result.targetEffect) sourceOnly
 
 /-- A deleted source-only allocation preserves the target ledger exactly. -/
 def LedgerShadowRuntimeRel.allocLeftGarbage
@@ -8320,6 +8450,34 @@ noncomputable def LedgerShadowRuntimeRel.allocBoth
           extension left.nextLocation mapping
     }
   }
+
+/-- A source-only cell already present in the source heap remains outside the
+owner ledger returned by a paired allocation. Heap freshness proves that the
+old cell cannot be the new allocation frontier, and the generic paired-ledger
+law handles both the retained prefix and the new target slot. -/
+theorem LedgerAllocBothResult.sourceOnly_of_found
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (allocated : LedgerAllocBothResult rho left right leftExtra rightExtra
+      leftObject rightObject persistent)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location)
+    (found : findCell? left.heap location = some cell) :
+    SourceOnlyUnderTargetLedger allocated.runtime.ledger location := by
+  have mapping :
+      allocated.larger.forward left.nextLocation =
+        some right.nextLocation := by
+    have mappedValue :
+        ValueRel allocated.larger
+          (.object (.heap left.nextLocation))
+          (.object (.heap right.nextLocation)) := by
+      simpa [alloc] using allocated.values
+    cases mappedValue with
+    | heap mapping => exact mapping
+  simpa [alloc] using
+    related.sourceOnly_of_pairedAllocation
+      allocated.runtime.ledger allocated.extension mapping
+      sourceOnly found
 
 /-- Proof-relevant paired allocation result for a retained partial
 application closure. -/
@@ -8430,6 +8588,9 @@ structure LedgerPapLeftGarbageResult
     } = .ok (nextRuntime, .value value)
   runtime :
     LedgerShadowRuntimeRel rho nextRuntime rightRuntime leftExtra rightExtra
+  heapSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      SourceOnlyUnderTargetLedger runtime.ledger location
 
 /-- A deleted partial application allocates only a source closure, so the
 target frontier and owner ledger remain unchanged. -/
@@ -8441,21 +8602,22 @@ noncomputable def LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage
     (underapplied : values.size < target.params.size) :
     LedgerPapLeftGarbageResult rho state rightRuntime leftExtra rightExtra
       fvarId binderName type name arguments := by
-  let witness := related.runtime.evalLetValuePapLeftGarbage
-    (fvarId := fvarId) (binderName := binderName) (type := type)
-    argumentsResult targetFound underapplied
-  let nextRuntime := Classical.choose witness
-  have valueWitness := Classical.choose_spec witness
-  let value := Classical.choose valueWitness
-  have specification := Classical.choose_spec valueWitness
+  let object : HeapObject := .closure name target.params.size values
   exact {
-    nextRuntime
-    value
-    effect := specification.1
-    runtime := {
-      runtime := specification.2
-      ledger := related.ledger
-    }
+    nextRuntime := (alloc state.runtime object).1
+    value := .object (alloc state.runtime object).2
+    effect := by
+      simp only [evalLetValue, argumentsResult, Bind.bind, Except.bind]
+      rw [targetFound]
+      simp only
+      rw [if_neg (Nat.not_le_of_lt underapplied)]
+      rfl
+    runtime := related.allocLeftGarbage object false
+    heapSourceOnly := by
+      intro location valueEq
+      simp [alloc] at valueEq
+      subst location
+      exact related.sourceOnly_nextLocation
   }
 
 /-- Publishing covered constructor arguments changes only the direct-root
@@ -8628,6 +8790,9 @@ structure LedgerCtorLeftGarbageResult
     allocCtor left info arguments = .ok (nextRuntime, value)
   runtime :
     LedgerShadowRuntimeRel rho nextRuntime right leftExtra rightExtra
+  heapSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      SourceOnlyUnderTargetLedger runtime.ledger location
 
 /-- A deleted constructor either creates no heap cell or adds one source-only
 cell. In both cases the target frontier, renaming, and allocation ledger are
@@ -8638,18 +8803,37 @@ noncomputable def LedgerShadowRuntimeRel.allocCtorLeftGarbage
     (arity : arguments.size = info.size) :
     LedgerCtorLeftGarbageResult rho left right leftExtra rightExtra info
       arguments := by
-  let witness :=
-    related.runtime.allocCtorLeftGarbage info arguments arity
-  let nextRuntime := Classical.choose witness
-  have valueWitness := Classical.choose_spec witness
-  let value := Classical.choose valueWitness
-  have specification := Classical.choose_spec valueWitness
-  exact {
-    nextRuntime
-    value
-    effect := specification.1
-    runtime := { runtime := specification.2, ledger := related.ledger }
-  }
+  by_cases empty : (info.size = 0 ∧ info.usize = 0) ∧ info.ssize = 0
+  · exact {
+      nextRuntime := left
+      value := .object (.tagged (UInt64.ofNat info.cidx))
+      effect := by
+        simp [allocCtor, arity, empty.1.1, empty.1.2, empty.2]
+        rfl
+      runtime := related
+      heapSourceOnly := by
+        intro location impossible
+        cases impossible
+    }
+  · let object : ConstructorObject := {
+      tag := info.cidx
+      objectFields := arguments
+      usizeFields := Array.replicate info.usize 0
+      scalarFields := []
+    }
+    exact {
+      nextRuntime := (alloc left (.ctor object)).1
+      value := .object (alloc left (.ctor object)).2
+      effect := by
+        simp [allocCtor, arity, empty, object]
+        rfl
+      runtime := related.allocLeftGarbage (.ctor object) false
+      heapSourceOnly := by
+        intro location valueEq
+        simp [alloc] at valueEq
+        subst location
+        exact related.sourceOnly_nextLocation
+    }
 
 /-- Proof-relevant result of a retained failed-token reuse. Such a reuse is
 exactly a constructor allocation, so its result either preserves the current
@@ -8719,6 +8903,9 @@ structure LedgerReuseNoneLeftGarbageResult
       .ok (nextRuntime, value)
   runtime :
     LedgerShadowRuntimeRel rho nextRuntime right leftExtra rightExtra
+  heapSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      SourceOnlyUnderTargetLedger runtime.ledger location
 
 /-- A deleted failed reuse delegates to source-only constructor allocation
 and retains the incoming target ledger verbatim. -/
@@ -8735,6 +8922,7 @@ noncomputable def LedgerShadowRuntimeRel.reuseNoneLeftGarbage
     value := allocated.value
     effect := by simpa [reuse] using allocated.effect
     runtime := allocated.runtime
+    heapSourceOnly := allocated.heapSourceOnly
   }
 
 /-- Proof-relevant result of a retained concrete-token reuse. The operation
@@ -8830,6 +9018,24 @@ noncomputable def LedgerShadowRuntimeRel.reuseSomeBoth
   Classical.choice
     (related.reuseSomeBoth_of_related_nonempty mapping arguments tail
       tokenReachable arity sourceEffect)
+
+/-- Concrete-token reuse mutates an existing target cell without advancing
+its frontier, so source-only provenance transports across the returned hidden
+renaming extension. -/
+theorem LedgerReuseSomeBothResult.sourceOnly
+    (related : LedgerShadowRuntimeRel rho left right
+      (leftArguments.toList ++ leftExtra)
+      (rightArguments.toList ++ rightExtra))
+    (result :
+      LedgerReuseSomeBothResult rho left right leftResult
+        leftExtra rightExtra leftLocation rightLocation info updateHeader
+        leftArguments rightArguments leftValue)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger related.ledger location) :
+    SourceOnlyUnderTargetLedger result.runtime.ledger location :=
+  related.sourceOnly_of_sameTargetFrontierExtension
+    result.runtime result.extension
+    (reuseSome_nextLocation_eq_of_ok result.rightEffect) sourceOnly
 
 /-- Proof-relevant result of evaluating one literal on both related
 runtimes. Immediate literals retain the current renaming and ledger;
@@ -8984,6 +9190,30 @@ def LedgerShadowRuntimeRel.literalLeftGarbage
       leftExtra rightExtra where
   runtime := related.runtime.literalLeftGarbage literalValue
   ledger := related.ledger
+
+/-- Any heap value produced by a deleted literal is allocated exactly at the
+incoming source frontier and is therefore outside the unchanged target owner
+ledger. Immediate numeric literals make the premise impossible. -/
+theorem LedgerShadowRuntimeRel.literalLeftGarbage_heapSourceOnly
+    (related : LedgerShadowRuntimeRel rho left right
+      leftExtra rightExtra)
+    (valueEq :
+      (literal left literalValue).2 = .object (.heap location)) :
+    SourceOnlyUnderTargetLedger
+      (related.literalLeftGarbage literalValue).ledger location := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · simp [literal, small] at valueEq
+      · simp [literal, small, alloc] at valueEq
+        subst location
+        exact related.sourceOnly_nextLocation
+  | str value =>
+      simp [literal, alloc] at valueEq
+      subst location
+      exact related.sourceOnly_nextLocation
+  | uint8 value | uint16 value | uint32 value | uint64 value | usize value =>
+      simp [literal] at valueEq
 
 /-- Proof-relevant result of boxing one related retained input. Tagged
 results preserve the incoming renaming and ledger; heap-backed results expose
@@ -9193,6 +9423,9 @@ structure LedgerBoxLeftGarbageResult
     box left type input = .ok (nextRuntime, value)
   runtime :
     LedgerShadowRuntimeRel rho nextRuntime right leftExtra rightExtra
+  heapSourceOnly :
+    ∀ location, value = .object (.heap location) →
+      SourceOnlyUnderTargetLedger runtime.ledger location
 
 /-- A deleted scalar box preserves the target frontier and owner ledger,
 whether the source result is tagged or heap-backed. -/
@@ -9202,17 +9435,37 @@ noncomputable def LedgerShadowRuntimeRel.boxScalarLeftGarbage
     (type : Expr) (scalar : ScalarValue) :
     LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
       type (.scalar scalar) := by
-  let witness := related.runtime.boxScalarLeftGarbage type scalar
-  let nextRuntime := Classical.choose witness
-  have valueWitness := Classical.choose_spec witness
-  let value := Classical.choose valueWitness
-  have specification := Classical.choose_spec valueWitness
-  exact {
-    nextRuntime
-    value
-    effect := specification.1
-    runtime := { runtime := specification.2, ledger := related.ledger }
-  }
+  let payload := scalar.toUInt64
+  by_cases small : payload.toNat ≤ maxTaggedPayload
+  · exact {
+      nextRuntime := left
+      value := .object (.tagged payload)
+      effect := by
+        unfold box
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos (by simpa [payload] using small)]
+        rfl
+      runtime := related
+      heapSourceOnly := by
+        intro location impossible
+        cases impossible
+    }
+  · let object : HeapObject := .boxed type (.scalar scalar)
+    exact {
+      nextRuntime := (alloc left object).1
+      value := .object (alloc left object).2
+      effect := by
+        unfold box
+        simp only [Bind.bind, Except.bind]
+        rw [if_neg (by simpa [payload] using small)]
+        rfl
+      runtime := related.allocLeftGarbage object false
+      heapSourceOnly := by
+        intro location valueEq
+        simp [alloc] at valueEq
+        subst location
+        exact related.sourceOnly_nextLocation
+    }
 
 /-- A deleted `USize` box has the same ledger-preserving split. -/
 noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
@@ -9221,17 +9474,36 @@ noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
     (type : Expr) (word : UInt64) :
     LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
       type (.usize word) := by
-  let witness := related.runtime.boxUSizeLeftGarbage type word
-  let nextRuntime := Classical.choose witness
-  have valueWitness := Classical.choose_spec witness
-  let value := Classical.choose valueWitness
-  have specification := Classical.choose_spec valueWitness
-  exact {
-    nextRuntime
-    value
-    effect := specification.1
-    runtime := { runtime := specification.2, ledger := related.ledger }
-  }
+  by_cases small : word.toNat ≤ maxTaggedPayload
+  · exact {
+      nextRuntime := left
+      value := .object (.tagged word)
+      effect := by
+        unfold box
+        simp only [Bind.bind, Except.bind]
+        rw [if_pos small]
+        rfl
+      runtime := related
+      heapSourceOnly := by
+        intro location impossible
+        cases impossible
+    }
+  · let object : HeapObject := .boxed type (.usize word)
+    exact {
+      nextRuntime := (alloc left object).1
+      value := .object (alloc left object).2
+      effect := by
+        unfold box
+        simp only [Bind.bind, Except.bind]
+        rw [if_neg small]
+        rfl
+      runtime := related.allocLeftGarbage object false
+      heapSourceOnly := by
+        intro location valueEq
+        simp [alloc] at valueEq
+        subst location
+        exact related.sourceOnly_nextLocation
+    }
 
 /-- Narrowing the published roots does not change either runtime or the
 target allocation history. -/
