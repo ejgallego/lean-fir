@@ -64,6 +64,8 @@ export const EXPECTED_CONCRETE_FAULTS = Object.freeze([
 
 /** Compiler-produced source artifacts audited by the concrete-switch preflight. */
 export const CONCRETE_SOURCE_PROBES = Object.freeze([
+  "source-float32-id",
+  "source-float64-id",
   "source-nat",
   "source-nat-list-case",
   "source-pretty-format",

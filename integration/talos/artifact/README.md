@@ -340,16 +340,21 @@ The command writes `answer.wasm`, the Node-compatible ABI manifest
 `answer.wasm.lcnf`. Invocation arguments are checked against the ABI kinds
 derived from the compiled entry; changing them changes only the manifest, not
 the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
-`uint8(n)`, `uint16(n)`, `uint32(n)`, `uint64(n)`, and `usize(n)` arguments,
-plus `string("…")` and `natList([…])`, with range and schema checks before
-compilation. Join-point-bearing source programs remain an explicit fragment
-follow-up even when their individual runtime operations are supported.
+`uint8(n)`, `uint16(n)`, `uint32(n)`, `uint64(n)`, `float32Bits(n)`,
+`float64Bits(n)`, and `usize(n)` arguments, plus `string("…")` and
+`natList([…])`, with range and schema checks before compilation. The two float
+forms take unsigned decimal IEEE-754 bit patterns rather than JavaScript or
+Lean decimal floating-point literals; this preserves signed zero, infinities,
+subnormals, and quiet-NaN payloads in the invocation manifest. Join-point-
+bearing source programs remain an explicit fragment follow-up even when their
+individual runtime operations are supported.
 
 The lane-local source fixture executes compiler-produced identity declarations
-for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize` at their boundary values.
-The Node runner derives every physical argument from the manifest and
-normalizes signed WebAssembly `i32` results back to the declared unsigned
-source width before comparison.
+for `UInt8`, `UInt16`, `UInt32`, `UInt64`, `USize`, `Float32`, and `Float` at
+selected exact-bit boundaries, including a noncanonical quiet-NaN payload and
+negative zero. The Node runner derives every physical argument from the
+manifest and normalizes each WebAssembly result back to the declared semantic
+width before comparison.
 The source checks additionally execute Lean 4.32's compiler-produced small
 `Nat` literal, reconstruct a Unicode string and a list containing a natural
 above the tagged-immediate range, then execute the list classifier through the

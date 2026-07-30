@@ -25,6 +25,22 @@ const string = (value) => Object.freeze({ kind: "string", value });
  * They deliberately describe the emitted low-level ABI, not a JavaScript facade.
  */
 export const CONCRETE_SOURCE_EXPECTATIONS = Object.freeze({
+  "source-float32-id": Object.freeze({
+    mode: "invocation",
+    fixture: "Fir.Wasm.Emit.SourceFixture.idFloat32",
+    sourceEntry: "Fir.Wasm.Emit.SourceFixture.idFloat32",
+    params: Object.freeze(["float32"]),
+    result: "float32",
+    expected: scalar("float32", 0x7fc12345n),
+  }),
+  "source-float64-id": Object.freeze({
+    mode: "invocation",
+    fixture: "Fir.Wasm.Emit.SourceFixture.idFloat64",
+    sourceEntry: "Fir.Wasm.Emit.SourceFixture.idFloat64",
+    params: Object.freeze(["float"]),
+    result: "float",
+    expected: scalar("float", 0x8000000000000000n),
+  }),
   "source-nat": Object.freeze({
     mode: "invocation",
     fixture: "Fir.Validation.Corpus.Source.litNat",

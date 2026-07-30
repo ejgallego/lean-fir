@@ -15,6 +15,8 @@ syntax "uint8" "(" num ")" : firWasmArg
 syntax "uint16" "(" num ")" : firWasmArg
 syntax "uint32" "(" num ")" : firWasmArg
 syntax "uint64" "(" num ")" : firWasmArg
+syntax "float32Bits" "(" num ")" : firWasmArg
+syntax "float64Bits" "(" num ")" : firWasmArg
 syntax "usize" "(" num ")" : firWasmArg
 syntax "string" "(" str ")" : firWasmArg
 syntax "natList" "(" "[" num,* "]" ")" : firWasmArg
@@ -50,6 +52,12 @@ private def elabArgument (runtime : Fir.LeanIR.Impure.RuntimeState) :
   | `(firWasmArg| uint64($value:num)) => do
       pure (runtime, .scalar (.uint64 (UInt64.ofNat
         (← checkedNat "uint64" value 18446744073709551615))))
+  | `(firWasmArg| float32Bits($value:num)) => do
+      pure (runtime, .scalar (.float32Bits (UInt32.ofNat
+        (← checkedNat "float32Bits" value 4294967295))))
+  | `(firWasmArg| float64Bits($value:num)) => do
+      pure (runtime, .scalar (.float64Bits (UInt64.ofNat
+        (← checkedNat "float64Bits" value 18446744073709551615))))
   | `(firWasmArg| usize($value:num)) => do
       pure (runtime, .usize (UInt64.ofNat
         (← checkedNat "usize" value 18446744073709551615)))
