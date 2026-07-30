@@ -7498,6 +7498,86 @@ def SourceOnlyUnderTargetLedger
   ∀ rightLocation, rightLocation < rightFrontier →
     ledger.owner rightLocation ≠ location
 
+/-- An environment local names a source heap allocation that is outside the
+target owner ledger. The address is retained as proof-relevant data so later
+reset/write/reuse edges can select it without rediscovering allocation order. -/
+structure SourceOnlyHeapBinding
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (env : Env) (binder : FVarId) (location : Location) : Prop where
+  read :
+    lookupValue env binder = .ok (.object (.heap location))
+  sourceOnly : SourceOnlyUnderTargetLedger ledger location
+
+/-- A reset-token local carries the same source-only allocation capability in
+the form consumed by a later concrete-token `reuse`. -/
+structure SourceOnlyReuseTokenBinding
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (env : Env) (binder : FVarId) (location : Location) : Prop where
+  read :
+    lookupValue env binder = .ok (.reuseToken (some location))
+  sourceOnly : SourceOnlyUnderTargetLedger ledger location
+
+/-- Binding a certified heap value publishes its allocation provenance under
+the new compiler local. -/
+theorem SourceOnlyHeapBinding.bindSelf
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location)
+    (env : Env) (binder : FVarId) :
+    SourceOnlyHeapBinding ledger
+      (bind env binder (.object (.heap location))) binder location where
+  read := by simp [lookupValue]
+  sourceOnly
+
+/-- Unrelated environment bindings preserve a heap local's provenance. -/
+theorem SourceOnlyHeapBinding.bindOther
+    (binding : SourceOnlyHeapBinding ledger env binder location)
+    (different : other.name ≠ binder.name) (value : Value) :
+    SourceOnlyHeapBinding ledger
+      (bind env other value) binder location where
+  read := by
+    simpa [lookupValue_bind_of_name_ne env other binder value different]
+      using binding.read
+  sourceOnly := binding.sourceOnly
+
+/-- Binding a certified concrete reuse token publishes its capability under
+the result local. -/
+theorem SourceOnlyReuseTokenBinding.bindSelf
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger location)
+    (env : Env) (binder : FVarId) :
+    SourceOnlyReuseTokenBinding ledger
+      (bind env binder (.reuseToken (some location))) binder location where
+  read := by simp [lookupValue]
+  sourceOnly
+
+/-- Unrelated environment bindings preserve a reset-token capability. -/
+theorem SourceOnlyReuseTokenBinding.bindOther
+    (binding : SourceOnlyReuseTokenBinding ledger env binder location)
+    (different : other.name ≠ binder.name) (value : Value) :
+    SourceOnlyReuseTokenBinding ledger
+      (bind env other value) binder location where
+  read := by
+    simpa [lookupValue_bind_of_name_ne env other binder value different]
+      using binding.read
+  sourceOnly := binding.sourceOnly
+
+/-- A ledger lifecycle proof transports a heap binding without reopening its
+environment lookup. -/
+theorem SourceOnlyHeapBinding.monoLedger
+    (binding : SourceOnlyHeapBinding ledger env binder location)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger nextLedger location) :
+    SourceOnlyHeapBinding nextLedger env binder location where
+  read := binding.read
+  sourceOnly
+
+/-- Ledger transport for a reset-token binding. -/
+theorem SourceOnlyReuseTokenBinding.monoLedger
+    (binding : SourceOnlyReuseTokenBinding ledger env binder location)
+    (sourceOnly :
+      SourceOnlyUnderTargetLedger nextLedger location) :
+    SourceOnlyReuseTokenBinding nextLedger env binder location where
+  read := binding.read
+  sourceOnly
+
 /-- Allocation-order clients may prove source-only provenance by showing that
 every paired target owner was allocated strictly before the selected source
 location. -/
@@ -8186,6 +8266,79 @@ theorem reset_nextLocation_eq_of_ok
   | scalar value => simp [reset] at effect
   | erased => simp [reset] at effect
   | reuseToken location? => simp [reset] at effect
+
+/-- A successful reset that returns a concrete reuse token returns the
+address of its heap-object operand. This is the operational link between an
+environment heap binding and the token binding consumed by later reuse. -/
+theorem reset_reuseSome_location_eq_of_ok
+    (effect :
+      reset runtime count (.object (.heap objectLocation)) =
+        .ok (result, .reuseToken (some tokenLocation))) :
+    tokenLocation = objectLocation := by
+  unfold reset at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize cellEq :
+    getLiveCell runtime objectLocation = cellResult at effect
+  cases cellResult with
+  | error fault => simp at effect
+  | ok cell =>
+      simp only at effect
+      by_cases shared : cell.persistent || cell.rc != 1
+      · rw [if_pos shared] at effect
+        generalize decEq :
+          decLocation runtime objectLocation = decResult at effect
+        cases decResult with
+        | error fault => simp at effect
+        | ok nextRuntime =>
+            simp [Pure.pure, Except.pure] at effect
+      · rw [if_neg shared] at effect
+        generalize objectEq : cell.object = heapObject at effect
+        cases heapObject with
+        | ctor object =>
+            simp only at effect
+            by_cases tooMany : count > object.objectFields.size
+            · rw [if_pos tooMany] at effect
+              simp at effect
+            · rw [if_neg tooMany] at effect
+              generalize setEq :
+                setCell runtime objectLocation
+                    { cell with object := .ctor {
+                        object with
+                        objectFields :=
+                          object.objectFields.mapIdx
+                            (fun index field =>
+                              if index < count then
+                                .object (.tagged 0)
+                              else field) } } = setResult at effect
+              cases setResult with
+              | error fault => simp at effect
+              | ok parent =>
+                  simp only at effect
+                  generalize foldEq :
+                    Array.foldlM
+                        (fun next field =>
+                          releaseResetField next field)
+                        parent
+                        (object.objectFields.extract 0 count) =
+                      foldResult at effect
+                  cases foldResult with
+                  | error fault => simp at effect
+                  | ok finalRuntime =>
+                      have pairEq := Except.ok.inj effect
+                      have tokenEq :
+                          Value.reuseToken (some objectLocation) =
+                            Value.reuseToken (some tokenLocation) :=
+                        congrArg Prod.snd pairEq
+                      exact
+                        (Option.some.inj
+                          (Value.reuseToken.inj tokenEq)).symm
+        | closure fixed => simp at effect
+        | boxed type value => simp at effect
+        | string value => simp at effect
+        | natural value => simp at effect
+        | integer value => simp at effect
+        | byteArray value => simp at effect
+        | «opaque» value => simp at effect
 
 /-- Reusing a concrete token updates an existing cell and therefore
 preserves the allocation frontier on every successful result. -/
@@ -11443,6 +11596,34 @@ def DeletedResetLocalReadyAt.of_evalLetValue
             objectRead
             effect := resetEffect
           }
+
+/-- A successful concrete-token reset transfers a certified heap binding into
+the exact token binding installed for its result local. The reset operation
+itself proves that both bindings name the same source address. -/
+theorem DeletedResetLocalReadyAt.sourceOnlyReuseTokenBinding
+    (shape : DeletedResetLocalReadyAt state count object)
+    (objectBinding :
+      SourceOnlyHeapBinding ledger state.env object objectLocation)
+    (tokenEq :
+      shape.token = .reuseToken (some tokenLocation))
+    (binder : FVarId) :
+    SourceOnlyReuseTokenBinding ledger
+      (bind state.env binder shape.token) binder tokenLocation := by
+  have objectEq :
+      shape.objectValue = .object (.heap objectLocation) := by
+    have bindingRead := objectBinding.read
+    rw [shape.objectRead] at bindingRead
+    exact Except.ok.inj bindingRead
+  have effect := shape.effect
+  rw [objectEq, tokenEq] at effect
+  have locationEq :
+      tokenLocation = objectLocation :=
+    reset_reuseSome_location_eq_of_ok effect
+  exact {
+    read := by simp [lookupValue, tokenEq]
+    sourceOnly := by
+      simpa [locationEq] using objectBinding.sourceOnly
+  }
 
 /-- Add an independently proved reachable-runtime frame to a successful local
 reset outcome. -/

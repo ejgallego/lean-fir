@@ -5019,6 +5019,54 @@ theorem deletedCtorSourceOnlySurvivesPairedAllocation :
   · exact deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
   · rfl
 
+/-- Bind the deleted constructor under the object local consumed by reset. -/
+noncomputable def deletedCtorLifecycleResetState : MachineState :=
+  { program := { decls := #[] }
+    control := .yielded .erased
+    env := bind [] resetObjectVar (.object (.heap 0))
+    runtime := deletedCtorLifecycleSourceOnly.nextRuntime }
+
+noncomputable def deletedCtorLifecycleResetLocalReady :
+    DeletedResetLocalReadyAt
+      deletedCtorLifecycleResetState 1 resetObjectVar := by
+  apply DeletedResetLocalReadyAt.of_evalLetValue
+      (fvarId := reuseTokenVar)
+      (binderName := reuseTokenVar.name)
+      (type := objType)
+  rfl
+
+/-- The concrete reset token installed in the successor environment retains
+the deleted constructor's certified source-only address. -/
+theorem deletedCtorSourceOnlyBindingTransfersToResetToken :
+    SourceOnlyReuseTokenBinding
+      deletedCtorLifecycleSourceOnly.runtime.ledger
+      (bind deletedCtorLifecycleResetState.env reuseTokenVar
+        deletedCtorLifecycleResetLocalReady.token)
+      reuseTokenVar 0 := by
+  have objectBinding :
+      SourceOnlyHeapBinding
+        deletedCtorLifecycleSourceOnly.runtime.ledger
+        deletedCtorLifecycleResetState.env resetObjectVar 0 := {
+    read := by rfl
+    sourceOnly :=
+      deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
+  }
+  exact
+    deletedCtorLifecycleResetLocalReady.sourceOnlyReuseTokenBinding
+      objectBinding (by rfl) reuseTokenVar
+
+/-- A later retained paired allocation preserves the reset token's provenance:
+the token still names a source allocation absent from the enlarged target
+owner ledger. -/
+theorem deletedCtorResetTokenSurvivesPairedAllocation :
+    SourceOnlyReuseTokenBinding
+      deletedCtorLifecyclePaired.runtime.ledger
+      (bind deletedCtorLifecycleResetState.env reuseTokenVar
+        deletedCtorLifecycleResetLocalReady.token)
+      reuseTokenVar 0 :=
+  deletedCtorSourceOnlyBindingTransfersToResetToken.monoLedger
+    deletedCtorSourceOnlySurvivesPairedAllocation
+
 /-- The existing concrete-token deletion starts with an empty target owner
 ledger; its source cell is therefore source-only by construction. -/
 noncomputable def deletedReuseSomeLedgerRuntime :
