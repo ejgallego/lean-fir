@@ -8895,6 +8895,77 @@ theorem HeapOwnershipBelowFrontier.setObjectField
       · rw [dif_neg indexBound] at effect
         simp at effect
 
+/-- An absolute-slot `USize` write changes only the constructor's unboxed
+word array. Its owned object-field graph is therefore inherited unchanged
+from the replaced cell. -/
+theorem HeapOwnershipBelowFrontier.setUSizeSlot
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.setUSizeSlot runtime object slot field =
+        .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.setUSizeSlot at effect
+  cases field with
+  | usize fieldValue =>
+      unfold Fir.LeanIR.Impure.modifyConstructor at effect
+      simp only [Bind.bind, Except.bind] at effect
+      generalize constructorEq :
+        getConstructor runtime object = constructorResult at effect
+      cases constructorResult with
+      | error fault => simp at effect
+      | ok constructorResult =>
+          rcases constructorResult with ⟨location, cell, constructor⟩
+          have shape := getConstructor_shape_of_ok constructorEq
+          simp only at effect
+          by_cases lower : constructor.objectFields.size ≤ slot
+          · simp only [lower, ↓reduceIte] at effect
+            by_cases bounded :
+                slot - constructor.objectFields.size <
+                  constructor.usizeFields.size
+            · rw [dif_pos bounded] at effect
+              apply wellFormed.setCell shape.2.1 _ effect
+              intro child member
+              apply wellFormed.owned_lt shape.2.1
+              simpa [shape.2.2.2, HeapObject.ownedValues] using member
+            · rw [dif_neg bounded] at effect
+              simp at effect
+          · simp [lower] at effect
+  | object reference => simp at effect
+  | scalar value => simp at effect
+  | erased => simp at effect
+  | reuseToken location => simp at effect
+
+/-- A packed-scalar write likewise changes only the constructor's unboxed
+metadata and preserves every owned heap edge. -/
+theorem HeapOwnershipBelowFrontier.setScalarField
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.setScalarField
+          runtime object width offset field =
+        .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.setScalarField at effect
+  cases field with
+  | scalar fieldValue =>
+      unfold Fir.LeanIR.Impure.modifyConstructor at effect
+      simp only [Bind.bind, Except.bind] at effect
+      generalize constructorEq :
+        getConstructor runtime object = constructorResult at effect
+      cases constructorResult with
+      | error fault => simp at effect
+      | ok constructorResult =>
+          rcases constructorResult with ⟨location, cell, constructor⟩
+          have shape := getConstructor_shape_of_ok constructorEq
+          simp only at effect
+          apply wellFormed.setCell shape.2.1 _ effect
+          intro child member
+          apply wellFormed.owned_lt shape.2.1
+          simpa [shape.2.2.2, HeapObject.ownedValues] using member
+  | object reference => simp at effect
+  | usize value => simp at effect
+  | erased => simp at effect
+  | reuseToken location => simp at effect
+
 /-- A recursive release changes only the ownership closure of its root and
 never changes the ownership graph itself. -/
 structure DecLocationFuelFrame
@@ -10474,6 +10545,33 @@ theorem SourceEnvironmentOwnershipBelowFrontier.setObjectFieldState
     (bounded.setObjectFieldHeap evaluated effect)
     (setObjectField_nextLocation_eq_of_ok effect)
 
+/-- An absolute-slot `USize` write preserves the local source carrier because
+it preserves both heap ownership and the allocation frontier. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.setUSizeSlotState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setUSizeSlot state.runtime object slot field =
+        .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.setUSizeSlot effect)
+    (setUSizeSlot_nextLocation_eq_of_ok effect)
+
+/-- A packed-scalar write preserves the local source carrier because it
+changes no owned heap edge and leaves the allocation frontier fixed. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.setScalarFieldState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setScalarField
+          state.runtime object width offset field =
+        .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.setScalarField effect)
+    (setScalarField_nextLocation_eq_of_ok effect)
+
 /-- Reset also preserves the full source environment carrier: recursive
 release maintains heap ownership and every successful branch keeps the
 allocation frontier fixed. -/
@@ -10677,6 +10775,39 @@ theorem SourceMachineOwnershipBelowFrontier.setObjectFieldState
     (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
       (by
         rw [setObjectField_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- An absolute-slot `USize` write lifts through the whole machine because
+every suspended bind environment sees the same allocation frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.setUSizeSlotState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setUSizeSlot state.runtime object slot field =
+        .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.setUSizeSlotState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [setUSizeSlot_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- A packed-scalar write lifts through the whole machine under the same
+fixed-frontier argument. -/
+theorem SourceMachineOwnershipBelowFrontier.setScalarFieldState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setScalarField
+          state.runtime object width offset field =
+        .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.setScalarFieldState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [setScalarField_nextLocation_eq_of_ok effect]
         exact Nat.le_refl _))
 
 /-- Reset's fixed frontier similarly lifts its local ownership proof through
@@ -14073,6 +14204,56 @@ theorem coreStep_deletedUSizeSet_of_ready_binderReady
       sourceState targetState programs frames continuation joins env
       objectRead fieldRead effect next⟩
 
+/-- The deleted absolute-slot write preserves complete source-machine
+ownership together with exact compiler provenance. -/
+theorem coreStep_deletedUSizeSet_of_ready_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.uset object index field sourceContinuation)) =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } ∧
+        SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, lower, bounded,
+      unreachable⟩
+  rcases runtime.setUSizeSlotLeftUnreachable found live objectEq lower bounded
+      unreachable fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  rcases coreStep_deletedUSizeSet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectRead fieldRead effect next with
+    ⟨transition, afterRelated⟩
+  have afterOwnership :=
+    (ownership.setUSizeSlotState effect)
+      |>.withControlAndJoins
+        (.code sourceContinuation) sourceState.joins
+  exact ⟨nextRuntime, transition, afterRelated,
+    by simpa using afterOwnership⟩
+
 theorem coreStep_deletedScalarSet_of_ready
     (sourceState targetState : MachineState)
     (programs : ProgramRelated (ShadowCodeRelated fuel)
@@ -14151,6 +14332,55 @@ theorem coreStep_deletedScalarSet_of_ready_binderReady
     coreStep_deletedScalarSet_binderReadyReachableRelated
       sourceState targetState programs frames continuation joins env
       objectRead fieldRead effect next⟩
+
+/-- The deleted packed-scalar write preserves complete source-machine
+ownership together with exact compiler provenance. -/
+theorem coreStep_deletedScalarSet_of_ready_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedScalarSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState) :
+    ∃ nextRuntime,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        control := .code sourceContinuation }
+      coreStep (withCodeControl sourceState
+          (.sset object width offset field type sourceContinuation)) =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } ∧
+        SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases ready with
+    ⟨location, cell, constructor, fieldValue,
+      objectRead, fieldRead, found, live, objectEq, unreachable⟩
+  rcases runtime.setScalarFieldLeftUnreachable found live objectEq
+      unreachable width offset fieldValue with
+    ⟨nextRuntime, effect, next⟩
+  rcases coreStep_deletedScalarSet_binderReadyReachableRelated
+      sourceState targetState programs frames continuation joins env
+      objectRead fieldRead effect next with
+    ⟨transition, afterRelated⟩
+  have afterOwnership :=
+    (ownership.setScalarFieldState effect)
+      |>.withControlAndJoins
+        (.code sourceContinuation) sourceState.joins
+  exact ⟨nextRuntime, transition, afterRelated,
+    by simpa using afterOwnership⟩
 
 /-- A successful failed-token reuse has passed the constructor arity check.
 This is the allocation branch's root-independent operational inversion. -/
@@ -35241,6 +35471,53 @@ theorem ExactShadowCodeBinderReady.match_objectSetDeletedStep
     (ready.objectSetDeleted_continuationGraph fuelBound usedBound)
     joins env runtime deletedReady step
 
+/-- Ownership-strengthened exact deleted object-write matcher. -/
+theorem ExactShadowCodeBinderReady.match_objectSetDeletedStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object : FVarId} {field : LCNF.Arg .impure}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains object = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.objectSetDeleted
+          (index := index) (field := field) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedObjectSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.oset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  exact match_deletedObjectSetStep_of_ready_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.objectSetDeleted_continuationGraph fuelBound usedBound)
+    joins env runtime deletedReady ownership step
+
 /-- Ledger-aware exact deleted object-write matcher. -/
 theorem ExactShadowCodeBinderReady.match_objectSetDeletedStep_ledger
     {initial continuationUsed ambient : UsedLocals}
@@ -35654,6 +35931,48 @@ theorem match_deletedUSizeSetStep_of_ready_binderReady
     ⟨targetAfter, _targetEq, targetPath, afterRelated⟩
   exact ⟨targetAfter, targetPath, afterRelated⟩
 
+/-- Ownership-strengthened semantic-step form of a deleted absolute-slot
+write. The source's unboxed update preserves the complete machine carrier
+while the target stutters. -/
+theorem match_deletedUSizeSetStep_of_ready_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases coreStep_deletedUSizeSet_of_ready_binderReady_withOwnership
+      sourceState targetState programs frames continuation joins env runtime
+      ready ownership with
+    ⟨nextRuntime, transition, afterRelated, afterOwnership⟩
+  have sourceOwnership :=
+    afterOwnership.ofStepNext transition step
+  rcases match_sourceOnlyCoreStep_binderReady transition afterRelated step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter, sourceOwnership⟩
+
 /-- Ledger-aware source-step/target-stutter rule for a certified deleted
 absolute-slot write. -/
 theorem match_deletedUSizeSetStep_of_ready_binderReady_ledger
@@ -35839,6 +36158,53 @@ theorem ExactShadowCodeBinderReady.match_usizeSetDeletedStep
     sourceState targetState programs frames
     (ready.usizeSetDeleted_continuationGraph fuelBound usedBound)
     joins env runtime deletedReady step
+
+/-- Ownership-strengthened exact deleted absolute-slot matcher. -/
+theorem ExactShadowCodeBinderReady.match_usizeSetDeletedStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel index : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains object = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.usizeSetDeleted
+          (index := index) (field := field) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedUSizeSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      object index field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.uset object index field sourceContinuation)) sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  exact match_deletedUSizeSetStep_of_ready_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.usizeSetDeleted_continuationGraph fuelBound usedBound)
+    joins env runtime deletedReady ownership step
 
 /-- Ledger-aware exact deleted absolute-slot matcher. -/
 theorem ExactShadowCodeBinderReady.match_usizeSetDeletedStep_ledger
@@ -36259,6 +36625,49 @@ theorem match_deletedScalarSetStep_of_ready_binderReady
     ⟨targetAfter, _targetEq, targetPath, afterRelated⟩
   exact ⟨targetAfter, targetPath, afterRelated⟩
 
+/-- Ownership-strengthened semantic-step form of a deleted packed-scalar
+write. The source's unboxed update preserves the complete machine carrier
+while the target stutters. -/
+theorem match_deletedScalarSetStep_of_ready_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedScalarSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      object field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.sset object width offset field type sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases coreStep_deletedScalarSet_of_ready_binderReady_withOwnership
+      sourceState targetState programs frames continuation joins env runtime
+      ready ownership with
+    ⟨nextRuntime, transition, afterRelated, afterOwnership⟩
+  have sourceOwnership :=
+    afterOwnership.ofStepNext transition step
+  rcases match_sourceOnlyCoreStep_binderReady transition afterRelated step with
+    ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter, sourceOwnership⟩
+
 /-- Ledger-aware source-step/target-stutter rule for a certified deleted
 packed-scalar write. -/
 theorem match_deletedScalarSetStep_of_ready_binderReady_ledger
@@ -36451,6 +36860,55 @@ theorem ExactShadowCodeBinderReady.match_scalarSetDeletedStep
     sourceState targetState programs frames
     (ready.scalarSetDeleted_continuationGraph fuelBound usedBound)
     joins env runtime deletedReady step
+
+/-- Ownership-strengthened exact deleted packed-scalar matcher. -/
+theorem ExactShadowCodeBinderReady.match_scalarSetDeletedStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel width offset : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {object field : FVarId} {type : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {absent : continuationUsed.contains object = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.scalarSetDeleted
+          (width := width) (offset := offset) (field := field)
+          (type := type) continuation absent))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset continuationUsed ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (deletedReady : DeletedScalarSetReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn ambient sourceState.env ++ sourceFrameRoots))
+      object field)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      (withCodeControl sourceState
+        (.sset object width offset field type sourceContinuation))
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  exact match_deletedScalarSetStep_of_ready_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.scalarSetDeleted_continuationGraph fuelBound usedBound)
+    joins env runtime deletedReady ownership step
 
 /-- Ledger-aware exact deleted packed-scalar matcher. -/
 theorem ExactShadowCodeBinderReady.match_scalarSetDeletedStep_ledger
