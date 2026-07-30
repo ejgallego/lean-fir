@@ -1,4 +1,4 @@
-import FirTalos.ConcreteReuseCapacityCallCorrectness
+import FirTalos.ConcreteReuseCapacityCacheCorrectness
 import FirTalos.ConcreteSupportedExportCorrectness
 
 namespace FirTalos.Concrete

@@ -4773,6 +4773,25 @@ uniform theorem discharges the generic call law. The next work is therefore
 not another caller-side adapter; it is to prove this implementation condition
 from the generated program's declaration environment.
 
+W6.6gy adds lazy caches to the same certificate-free induction.
+`ReuseCapacityBudgetedCodeEvaluates.lazyLet` records only the source cache
+path, finite source step, path cost, and validator transfer.
+`ReuseCapacityLazyLetRuntimeRefinesWithCost` requires a uniform implementation
+theorem to recover and execute the production globals/conditional prefix and
+restore the exact residual frame.
+
+`BudgetedCapacityPreservingLazyStep` is the proof-side hit/miss boundary:
+existing executable lazy-cache theorems are paired with the checked result
+write, ordinary/witness/header transports, immutable-table preservation, and
+path-dependent residual budget.
+`ConcreteReuseCapacityPureExternalOwnershipFrame.ofLazyCacheResult` performs
+the shared fact erasure and frame reconstruction.
+The hit constructor proves zero allocation with unchanged store/witness; the
+miss constructor accepts the hereditary declaration/publication transports.
+Finally, `LazyCacheImplementation.runtimeRefines` reduces the generic
+structural law to one generated declaration-environment theorem, parallel to
+the direct-call boundary.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

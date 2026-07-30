@@ -521,6 +521,16 @@ Cross-cutting W6.5 state:
   joins the same family from a source-state scalar-kind judgment, with
   descriptors, concrete reads, production calls, and exact physical lanes
   derived internally rather than supplied as certificates; and
+- the facts-indexed structural induction now admits lazy zero-argument
+  bindings on both source cache paths: the source relation contains no target
+  fragment, global index, or execution certificate; a uniform implementation
+  law derives the production globals/conditional prefix and exact successor
+  frame; the shared budgeted lazy-step boundary reconstructs destination-fact
+  erasure, ordinary tokens, local alignment, immutable handlers/descriptors,
+  and residual headroom; the concrete hit is proved zero-cost with unchanged
+  store and witness, while the miss boundary is ready to consume the existing
+  hereditary declaration/cache-publication theorem plus its resource
+  transports; and
 - the remaining supported subfamilies still need whole-module or concrete
   external-engine coverage, while the wider generated Node/browser corpus
   continues to use the semantic JavaScript host runtime in parallel.

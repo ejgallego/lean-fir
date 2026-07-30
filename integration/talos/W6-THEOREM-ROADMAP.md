@@ -761,8 +761,20 @@ acceptance tests pass.
    `DirectDeclarationCallImplementation.runtimeRefines` then reduces the
    generic call law to one recursive generated-program condition that selects
    this callee theorem from actual compiler/adapter output.
-   Proving that environment-wide condition is the next interprocedural task;
-   lazy-cache publication follows the same result-step pattern afterward.
+   `ReuseCapacityBudgetedCodeEvaluates.lazyLet` and
+   `ReuseCapacityLazyLetRuntimeRefinesWithCost` now extend the same
+   certificate-free induction to source-selected lazy-cache hit/miss paths.
+   `BudgetedCapacityPreservingLazyStep` states their exact shared proof-side
+   boundary, while
+   `ConcreteReuseCapacityPureExternalOwnershipFrame.ofLazyCacheResult`
+   reconstructs facts, ordinary tokens, locals, immutable tables, and residual
+   budget once for both paths. The concrete hit is a zero-cost unchanged-store
+   instance; the miss boundary consumes hereditary declaration and cache
+   publication transports.
+   `LazyCacheImplementation.runtimeRefines` reduces the remaining generated
+   cache obligation to one environment-wide implementation condition.
+   Proving the direct-call and lazy-cache environment conditions is the next
+   interprocedural task.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
