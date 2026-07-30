@@ -1237,6 +1237,26 @@ allocation case of hereditary reset-certificate preservation; nonallocating
 ownership-graph frames and unrelated environment bindings are already
 covered.
 
+The fresh-frontier ownership bound lands at `f29b5a90`.
+`HeapOwnershipBelowFrontier` states that every stored cell address and every
+heap-valued owned edge lies strictly below `nextLocation`.
+`HeapOwnershipBelowFrontier.reachable_lt` lifts the local edge condition to
+arbitrary owned paths, and `frontierUnreachable` therefore excludes the next
+fresh address from the closure of every successfully found root. The invariant
+holds for the empty runtime and survives `alloc` when each heap reference
+owned by the new object names an address below the old frontier.
+
+`LedgerAllocBothResult.heapClosureBinding_of_heapOwnershipBelowFrontier`
+feeds that static fact directly into the paired allocation lifecycle: a root
+lookup plus the ownership bound replaces the earlier client-supplied
+reachability exclusion. The deleted-constructor/retained-allocation regression
+now constructs the bound from `empty` and `alloc` and no longer proves
+freshness by enumerating the leaf fixture's reachable paths. The next
+lifecycle step is to preserve this bound through the mutation, release,
+reset, and reuse operations admitted by checked compiler executions, and then
+package it with the machine readiness invariant so non-leaf compiler-owned
+graphs receive the same closure certificate.
+
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
 exactly a deleted nullary `.fap`; retained nullary applications remain
@@ -1318,7 +1338,8 @@ provenance and the target allocation ledger into the complete compiler-facing
 write-readiness contract. The corresponding failed- and concrete-token reuse
 effect bridges land at `8c6ea3e6`; recursive release/reset closure framing and
 the hereditary target-ledger bridge land at `475b642b`, and its
-environment/heap/ledger/allocation lifecycle lands at `cd09942c`.
+environment/heap/ledger/allocation lifecycle lands at `cd09942c`. Static
+fresh-frontier exclusion from heap ownership bounds lands at `f29b5a90`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1372,9 +1393,11 @@ the existing nullary-`.fap` semantic discrepancy.
    from successful effects, and concrete reuse consumes reset-token
    provenance directly. Recursive release and reset now preserve every lookup
    outside their original owned closures, and the target-ledger reset bridge
-   consumes an explicit hereditary source-only closure certificate. Next
-   derive the fresh-frontier exclusion law for arbitrary compiler-owned
-   allocation graphs, then carry the now-compositional certificate through
+   consumes an explicit hereditary source-only closure certificate.
+   `HeapOwnershipBelowFrontier` now derives fresh-frontier exclusion for
+   arbitrary owned paths and is initialized and preserved by allocation.
+   Next preserve the bound through mutation, recursive release, reset, and
+   reuse, then carry it and the compositional closure certificate through
    checked executions. Arbitrary checked entries must still derive and
    preserve these compiler typing/ownership facts without finite
    execution-graph enumeration.
