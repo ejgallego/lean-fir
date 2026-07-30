@@ -819,6 +819,13 @@ acceptance tests pass.
    operations that preserve both global tables. A semantic lookup eliminates
    the empty branch, and `hit_of_compiledCacheTable` consumes the resulting
    physical lane at the exact generated indices.
+   `SourceLazyLetResult.hit_cacheFacts` now derives that semantic lookup and
+   the unchanged source runtime directly from the complete three-step hit.
+   Internal-code and external miss branches are impossible because the third
+   step cannot consume both the cache and caller-binding frames.
+   `hit_of_compiledCacheTable` therefore no longer accepts a caller-supplied
+   cache-presence premise; the contract harness fixes this source-only
+   inversion boundary.
    `LazyCacheGlobalsRel.publish` now proves the pointwise miss-publication
    update. Semantic absence yields the old zero flag; initializer uniqueness
    and the even/odd physical layout preserve every other source/target slot.

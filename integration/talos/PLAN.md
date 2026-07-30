@@ -4906,6 +4906,16 @@ changes. A semantic lookup forces the corresponding slot to be populated, so
 `hit_of_compiledCacheTable` now derives the physical cache lane and complete
 generated hit directly from the table invariant.
 
+W6.6gzj removes that remaining semantic-lookup premise from the hit boundary.
+`SourceLazyLetResult.hit_cacheFacts` inverts the complete three-step source
+execution and proves both that the source runtime is unchanged and that the
+named global already contains the returned value. The impossible miss branch
+is discharged structurally: one internal-code step cannot remove both the
+callee cache frame and the caller binding frame, and one yielded external step
+can remove at most the cache frame. `hit_of_compiledCacheTable` now consumes
+only source/compiler facts, the source execution, and the canonical cache
+table. The contract harness preserves this certificate-free source boundary.
+
 W6.6gzg closes the pointwise publication update.
 `LazyCacheGlobalsRel.emptySlot` turns semantic cache absence into the exact
 zero physical flag; the value write preserves that flag.

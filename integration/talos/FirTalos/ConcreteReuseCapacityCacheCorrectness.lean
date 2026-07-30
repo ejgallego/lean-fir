@@ -1281,6 +1281,210 @@ structure BudgetedCapacityPreservingLazyStep
             (remainingBytes - stepCost)
 
 /--
+One source interpreter step in a declaration body cannot discharge both the
+callee cache frame and its caller binding frame.
+-/
+private theorem executeStep_code_frames_ne_nil
+    {externals : ExternalImpl}
+    {state next : MachineState}
+    {code : LCNF.Code .impure}
+    {first second : Frame}
+    {rest : List Frame}
+    (transition :
+      executeStep externals {
+          state with
+          control := .code code
+          frames := first :: second :: rest } = .next next) :
+    next.frames ≠ [] := by
+  intro empty
+  cases next with
+  | mk nextProgram nextControl nextEnv nextJoins nextFrames nextRuntime =>
+      simp only at empty
+      subst nextFrames
+      cases code <;>
+        simp_all [executeStep, coreStep, fail, observe, pushBindFrame,
+          resumeExternal] <;>
+        grind
+
+/--
+One yielded source step consumes at most one frame, so a cache frame followed
+by a caller binding frame cannot reach an empty stack.
+-/
+private theorem executeStep_yielded_frames_ne_nil
+    {externals : ExternalImpl}
+    {state next : MachineState}
+    {value : Value}
+    {first second : Frame}
+    {rest : List Frame}
+    (transition :
+      executeStep externals {
+          state with
+          control := .yielded value
+          frames := first :: second :: rest } = .next next) :
+    next.frames ≠ [] := by
+  intro empty
+  cases next with
+  | mk nextProgram nextControl nextEnv nextJoins nextFrames nextRuntime =>
+      simp only at empty
+      subst nextFrames
+      cases first <;> simp_all [executeStep, coreStep]
+
+/--
+A complete three-step source cache hit determines both semantic facts used by
+the generated hit proof: the source runtime is unchanged and the named global
+already contains the returned value.
+
+The declaration lookup and empty-parameter facts exclude malformed or partial
+calls. If the semantic cache lookup were empty, an internal declaration would
+still have both its cache and caller-binding frames, while an external
+declaration could consume at most the cache frame. Neither can reach the
+empty-frame caller continuation in the third step.
+-/
+theorem SourceLazyLetResult.hit_cacheFacts
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {fvarId : FVarId}
+    {type : Expr}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
+          fvarId
+          binderName := fvarId.name
+          type
+          value := .fap declaration #[] }
+        continuation nextRuntime sourceValue) :
+    nextRuntime = sourceRuntime ∧
+      findGlobal? sourceRuntime.globals declaration = some sourceValue := by
+  unfold SourceLazyLetResult at sourceStep
+  cases sourceStep with
+  | step first rest =>
+      cases rest with
+      | step second rest =>
+          cases rest with
+          | step third rest =>
+              cases rest
+              simp [executeStep, coreStep, evalLetValue, evalArgs, pure,
+                Except.pure, pushBindFrame] at first
+              cases first
+              have targetParamsEmpty : target.params = #[] :=
+                Array.isEmpty_iff.mp paramsEq
+              cases found :
+                  findGlobal? sourceRuntime.globals declaration with
+              | none =>
+                  simp [executeStep, coreStep, found, invokeDecl, targetEq,
+                    targetParamsEmpty, bindParams] at second
+                  cases valueEq : target.value with
+                  | code code =>
+                      simp [valueEq] at second
+                      cases second
+                      have third' :
+                          executeStep sourceExternals {
+                            program := context.program
+                            control := .code code
+                            frames := [
+                              .cache declaration,
+                              .bind fvarId continuation sourceEnv []]
+                            runtime := sourceRuntime } =
+                          .next {
+                            program := context.program
+                            control := .code continuation
+                            env := bind sourceEnv fvarId sourceValue
+                            runtime := nextRuntime } := by
+                        simpa using third
+                      exact (executeStep_code_frames_ne_nil
+                        (state := {
+                          program := context.program
+                          control := .code code
+                          runtime := sourceRuntime })
+                        (next := {
+                          program := context.program
+                          control := .code continuation
+                          env := bind sourceEnv fvarId sourceValue
+                          runtime := nextRuntime })
+                        (first := .cache declaration)
+                        (second := .bind fvarId continuation sourceEnv [])
+                        (rest := [])
+                        third') rfl |>.elim
+                  | extern externAttr =>
+                      simp [valueEq] at second
+                      cases callResult :
+                          sourceExternals.call {
+                            name := declaration
+                            paramTypes := #[]
+                            resultType := target.type
+                            args := #[] } sourceRuntime with
+                      | error fault =>
+                          simp [callResult] at second
+                      | ok response =>
+                        simp [callResult, resumeExternal] at second
+                        cases second
+                        have third' :
+                          executeStep sourceExternals {
+                            program := context.program
+                            control := .yielded response.value
+                            frames := [
+                              .cache declaration,
+                              .bind fvarId continuation sourceEnv []]
+                            runtime := {
+                              heap := response.heap
+                              nextLocation := response.nextLocation
+                              globals := sourceRuntime.globals
+                              world := response.world
+                              trace := sourceRuntime.trace.push {
+                                name := declaration
+                                args := #[]
+                                result := response.value } } } =
+                          .next {
+                            program := context.program
+                            control := .code continuation
+                            env := bind sourceEnv fvarId sourceValue
+                            runtime := nextRuntime } := by
+                          simpa [MachineState.withValue] using third
+                        exact (executeStep_yielded_frames_ne_nil
+                          (state := {
+                            program := context.program
+                            control := .yielded response.value
+                            runtime := {
+                              heap := response.heap
+                              nextLocation := response.nextLocation
+                              globals := sourceRuntime.globals
+                              world := response.world
+                              trace := sourceRuntime.trace.push {
+                                name := declaration
+                                args := #[]
+                                result := response.value } } })
+                          (next := {
+                            program := context.program
+                            control := .code continuation
+                            env := bind sourceEnv fvarId sourceValue
+                            runtime := nextRuntime })
+                          (value := response.value)
+                          (first := .cache declaration)
+                          (second := .bind fvarId continuation sourceEnv [])
+                          (rest := [])
+                          third') rfl |>.elim
+              | some cached =>
+                  simp [executeStep, coreStep, found] at second
+                  cases second
+                  simp [executeStep, coreStep] at third
+                  rcases third with ⟨valueEq, runtimeEq⟩
+                  change (fvarId, cached) :: sourceEnv =
+                    (fvarId, sourceValue) :: sourceEnv at valueEq
+                  injection valueEq with cachedEq
+                  have sourceValueEq : cached = sourceValue := by
+                    simpa using congrArg Prod.snd cachedEq
+                  subst sourceValue
+                  subst nextRuntime
+                  exact ⟨rfl, rfl⟩
+
+/--
 The generated cache-hit path is a zero-allocation budgeted lazy step.
 
 The populated flag/value globals select and identify the cached physical
@@ -1535,8 +1739,9 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
 Compiler-anchored hit derived from the whole generated cache-table invariant.
 
 The caller supplies only the lowering index/signature equations and the
-semantic cache lookup. `LazyCacheGlobalsRel` rules out the empty branch,
-recovers the cached physical lane, and feeds the existing per-slot theorem.
+three-step source execution. Source inversion derives the semantic cache
+lookup; `LazyCacheGlobalsRel` then rules out the empty physical branch,
+recovers the cached lane, and feeds the existing per-slot theorem.
 -/
 theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     {facts : ReuseCapacityFacts}
@@ -1574,8 +1779,6 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     (signature :
       (sourceModule.callSignature? (.declaration declaration)).bind
           (·.results[0]?) = some resultKind)
-    (semanticFound :
-      findGlobal? sourceRuntime.globals declaration = some sourceValue)
     (sourceStep :
       SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
           fvarId
@@ -1642,6 +1845,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
             locals nextLocals resultIndex initialWitness initialWitness physical
             0 := by
   dsimp
+  obtain ⟨_, semanticFound⟩ :=
+    SourceLazyLetResult.hit_cacheFacts targetEq paramsEq sourceStep
   obtain ⟨physical, slot⟩ :=
     cacheTable.populatedSlot initializerFound signature semanticFound
   obtain ⟨nextLocals, compiled, adapted, hit⟩ :=

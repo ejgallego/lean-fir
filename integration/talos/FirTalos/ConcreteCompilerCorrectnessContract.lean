@@ -1,4 +1,4 @@
-import FirTalos.ConcreteCompilerCorrectness
+import FirTalos.ConcreteReuseCapacityCacheCorrectness
 
 namespace FirTalos.Concrete.CompilerCorrectnessContract
 
@@ -3536,5 +3536,34 @@ example
     argumentsCompiled localCompiled operationWellFormed nonempty
     objectFieldsFit usizeFieldsFit scalarBytesFit evaluated semanticStep
     stateRelated parameterCount capacity localSetReady
+
+/--
+The cache-hit source premise itself determines the unchanged runtime and
+semantic global lookup. Callers do not supply a separate cache-presence fact.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {fvarId : FVarId}
+    {type : Expr}
+    {declaration : Name}
+    {target : LCNF.Decl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (targetEq : context.program.findDecl? declaration = some target)
+    (paramsEq : target.params.isEmpty = true)
+    (sourceStep :
+      SourceLazyLetResult .hit context sourceExternals sourceRuntime sourceEnv {
+          fvarId
+          binderName := fvarId.name
+          type
+          value := .fap declaration #[] }
+        continuation nextRuntime sourceValue) :
+    nextRuntime = sourceRuntime ∧
+      findGlobal? sourceRuntime.globals declaration = some sourceValue :=
+  FirTalos.Concrete.SourceLazyLetResult.hit_cacheFacts targetEq paramsEq
+    sourceStep
 
 end FirTalos.Concrete.CompilerCorrectnessContract
