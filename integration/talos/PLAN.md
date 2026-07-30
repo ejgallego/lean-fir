@@ -5186,14 +5186,39 @@ the successor whole-cache relation. Thus the internal miss call site supplies
 no target execution, numeric index, host-contract, physical-value, or local
 layout certificate.
 
-The remaining construction work is now sharply separated. The recursive
-program proof must establish `LazyCacheInternalMissInduction`, whose unresolved
-semantic component is the existing
-`FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication transport.
-External nullary cache misses require a distinct hereditary external-result
-branch rather than pretending that every cached declaration has an internal
-code body. The universal validator accessor and exact lazy result-kind
-alignment remain the independent shared-contract obligations described above.
+W6.6gzu instantiates the uniform internal lazy-runtime law.
+`LazyCacheInternalSupported` is the source-only hit/miss family used by the
+structural code proof. Its hit constructor fixes allocation cost to zero; its
+miss constructor retains only the selected internal declaration body and
+recursive cost. Neither constructor contains target code, numeric indices,
+physical values, stores, witnesses, or executions.
+
+`LazyCacheInternalCalleeInduction` factors the hereditary target theorem from
+the source-runtime postcondition required after the declaration returns.
+`LazyCacheInternalPublicationInduction` chooses the exact semantic condition:
+every authoritative retained reuse token is outside the ownership closure of
+the value about to be published. Its `toMissInduction` theorem constructively
+derives the former facts-aware publication transport. The weaker
+`LazyCacheInternalHereditaryInduction` is already sufficient for non-heap
+results, because `publication_of_nonHeapReference` proves their ownership
+closure cannot contain a retained heap token.
+
+`LazyCacheInternalDeclarationInduction` quantifies that result uniformly over
+all admitted internal misses and canonical caller frames. This is a recursive
+module theorem, not a target execution certificate supplied at one call site.
+`LazyCacheImplementation.ofInternalCompiler` combines it with the compiler-
+derived hit and miss theorems, and
+`ConcreteSupportedExport.internalLazyRuntimeRefines` exposes the resulting
+`ReuseCapacityLazyLetRuntimeRefinesWithCost` instance consumed by the existing
+structural compiler proof.
+
+The remaining heap-result work is therefore a source alias theorem or a
+coordinated validator transfer that invalidates retained facts which can reach
+the published graph; it is tracked by
+`FIR-BUG-wasm-none-reuse-retained-token-ordinary`. External nullary misses
+still require their distinct hereditary external-result branch. The universal
+validator accessor and exact lazy result-kind alignment remain the independent
+shared-contract obligations described above.
 
 ## Parallel agent packages
 

@@ -3932,6 +3932,154 @@ def LazyCacheInternalMissInduction
             sourceValue
 
 /--
+Hereditary declaration selection parameterized by one source-runtime
+postcondition.
+
+This factors the recursive target theorem from the semantic property required
+at its exact source post-state. Instantiating `Post` with reachability
+disjointness gives the preferred cache-publication boundary; instantiating it
+with `True` records the ordinary hereditary callee theorem alone.
+-/
+def LazyCacheInternalCalleeInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (sourceRuntime : RuntimeState)
+    (declaration : Name)
+    (calleeCode : LCNF.Code .impure)
+    (resultKind : AbiKind)
+    (initial : Wasm.Store Host)
+    (initialWitness : RefinementWitness)
+    (sourceValue : Value)
+    (stepCost : Nat)
+    (Post : RuntimeState → Prop) : Prop :=
+  ∀ {declarationId : Nat},
+    callIndex? sourceModule (.declaration declaration) = some declarationId →
+      ∃ calleeFunction targetFunction callRuntime afterCall callWitness
+          physical,
+        BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+            sourceModule calleeFunction module hostEnv sourceExternals
+            sourceRuntime callRuntime [] calleeCode targetFunction
+            declarationId initial afterCall initialWitness callWitness []
+            resultKind sourceValue physical stepCost ∧
+          Post callRuntime
+
+/-- Preferred recursive cache-miss boundary: the hereditary callee result is
+paired with reachability disjointness at its exact semantic post-state. -/
+abbrev LazyCacheInternalPublicationInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (facts : ReuseCapacityFacts)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (declaration : Name)
+    (calleeCode : LCNF.Code .impure)
+    (resultKind : AbiKind)
+    (initial : Wasm.Store Host)
+    (initialWitness : RefinementWitness)
+    (sourceValue : Value)
+    (stepCost : Nat) : Prop :=
+  LazyCacheInternalCalleeInduction context sourceModule module hostEnv
+    sourceExternals sourceRuntime declaration calleeCode resultKind initial
+    initialWitness sourceValue stepCost fun callRuntime =>
+      ReuseTokenPublicationDisjoint facts callRuntime sourceEnv sourceValue
+
+/-- Hereditary callee theorem without a publication property. This is already
+enough for non-heap results, whose ownership closure is empty. -/
+abbrev LazyCacheInternalHereditaryInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (sourceRuntime : RuntimeState)
+    (declaration : Name)
+    (calleeCode : LCNF.Code .impure)
+    (resultKind : AbiKind)
+    (initial : Wasm.Store Host)
+    (initialWitness : RefinementWitness)
+    (sourceValue : Value)
+    (stepCost : Nat) : Prop :=
+  LazyCacheInternalCalleeInduction context sourceModule module hostEnv
+    sourceExternals sourceRuntime declaration calleeCode resultKind initial
+    initialWitness sourceValue stepCost fun _ => True
+
+/-- Reachability-disjoint declaration induction constructively supplies the
+facts-aware ordinary-token publication transport. -/
+theorem LazyCacheInternalPublicationInduction.toMissInduction
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {resultId : FVarId}
+    {declaration : Name}
+    {calleeCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (induction :
+      LazyCacheInternalPublicationInduction context sourceModule module hostEnv
+        sourceExternals facts sourceRuntime sourceEnv declaration calleeCode
+        resultKind initial initialWitness sourceValue stepCost) :
+    LazyCacheInternalMissInduction context sourceModule module hostEnv
+      sourceExternals facts sourceRuntime sourceEnv resultId declaration
+      calleeCode resultKind initial initialWitness sourceValue stepCost := by
+  intro declarationId declarationCall
+  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+      physical, callee, disjoint⟩ :=
+    induction declarationCall
+  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+    physical, callee,
+    ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration
+      disjoint⟩
+
+/-- Non-heap lazy results add the publication property to any hereditary
+callee theorem without an alias-analysis premise. -/
+theorem
+    LazyCacheInternalHereditaryInduction.publication_of_nonHeapReference
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {declaration : Name}
+    {calleeCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (induction :
+      LazyCacheInternalHereditaryInduction context sourceModule module hostEnv
+        sourceExternals sourceRuntime declaration calleeCode resultKind initial
+        initialWitness sourceValue stepCost)
+    (nonHeap : IsNonHeapReference sourceValue) :
+    LazyCacheInternalPublicationInduction context sourceModule module hostEnv
+      sourceExternals facts sourceRuntime sourceEnv declaration calleeCode
+      resultKind initial initialWitness sourceValue stepCost := by
+  intro declarationId declarationCall
+  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+      physical, callee, _⟩ :=
+    induction declarationCall
+  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
+    physical, callee,
+    ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap⟩
+
+/--
 Structural compiler-derived internal lazy-cache miss.
 
 The source support relation supplies only the nullary declaration and its
@@ -4128,6 +4276,93 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
   · simp [Fir.Wasm.reuseCapacityLetFacts?, valueEq]
 
 /--
+Source-facing internal lazy-cache family handled by the structural compiler
+law.
+
+The hit constructor fixes the source allocation cost to zero. The miss
+constructor retains the source declaration body and arbitrary recursive cost.
+Neither constructor contains target code, numeric call indices, concrete
+values, stores, witnesses, or executions.
+-/
+inductive LazyCacheInternalSupported (context : Fir.Wasm.Context) :
+    LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      LCNF.Code .impure → RuntimeState → Value → Nat → Prop where
+  | hit
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      (call :
+        LazyCacheCallSupported context decl declaration sourceDeclaration
+          resultKind) :
+      LazyCacheInternalSupported context .hit sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue 0
+  | miss
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure}
+      (call :
+        LazyCacheInternalMissSupported context decl declaration
+          sourceDeclaration resultKind calleeCode) :
+      LazyCacheInternalSupported context .miss sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue stepCost
+
+/--
+Module-level recursive theorem required by internal lazy misses.
+
+For every admitted source miss and canonical caller frame, declaration
+induction must produce the hereditary cache-aware callee result at the numeric
+index chosen later by production adaptation, together with the exact
+facts-aware publication transport. This is the single recursive semantic
+condition left after compiler, resolver, cache-layout, and caller-local
+selection have been derived. It is quantified uniformly over executions and
+therefore is a program theorem, not a per-call target certificate.
+-/
+def LazyCacheInternalDeclarationInduction
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {callerFunction : Fir.Wasm.Function}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure}
+      {sourceValue : Value}
+      {initial : Wasm.Store Host}
+      {locals : Wasm.Locals}
+      {remainingBytes stepCost : Nat}
+      {initialWitness : RefinementWitness},
+    LazyCacheInternalMissSupported context decl declaration sourceDeclaration
+        resultKind calleeCode →
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+          decl continuation nextRuntime sourceValue →
+        ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+            sourceExternals facts remainingBytes sourceRuntime sourceEnv
+            initial locals initialWitness →
+          LazyCacheInternalPublicationInduction context sourceModule
+            targetModule.wasmModule hosts.env sourceExternals facts
+            sourceRuntime sourceEnv declaration calleeCode resultKind initial
+            initialWitness sourceValue stepCost
+
+/--
 Uniform implementation condition for compiler-generated lazy declarations.
 
 From the source path/admission and the actual compiler/adapter outputs, the
@@ -4188,6 +4423,60 @@ structure LazyCacheImplementation
               some (eraseReuseCapacityFact facts decl.fvarId) ∧
             LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore
 
+/--
+Production internal hit/miss composition constructs the uniform lazy
+implementation from one generated cache environment and the recursive
+declaration theorem.
+
+Hits are discharged directly by the generated table. Misses use the
+module-level induction only for the hereditary callee/publication result; all
+target indices, imports, contracts, locals, concrete publication operations,
+and successor cache state are recovered by the compiler-derived theorem.
+-/
+theorem LazyCacheImplementation.ofInternalCompiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (declarations :
+      LazyCacheInternalDeclarationInduction context sourceModule targetModule
+        hosts sourceExternals) :
+    LazyCacheImplementation context sourceModule sourceFunction labels
+      targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context) := by
+  refine ⟨generated, ?_⟩
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue initial locals resultIndex stepCost
+    remainingBytes initialWitness supported sourceStep invariant valueCompiled
+    valueAdapted resultFound
+  cases supported with
+  | hit call =>
+      exact
+        BudgetedCapacityPreservingLazyStep.hit_of_compiler context sourceModule
+          sourceFunction labels targetModule.wasmModule hosts.env
+          sourceExternals call spec.localsAligned generated sourceStep invariant
+          valueCompiled valueAdapted resultFound rfl
+  | miss call =>
+      exact
+        BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
+          context sourceModule sourceFunction labels targetModule hosts
+          exportName spec sourceExternals call generated sourceStep invariant
+          valueCompiled valueAdapted resultFound
+          (LazyCacheInternalPublicationInduction.toMissInduction
+            (resultId := decl.fvarId)
+            (declarations call sourceStep invariant))
+
 /-- A uniform lazy-declaration implementation instantiates the generic cache
 law for the canonical mixed frame. -/
 theorem LazyCacheImplementation.runtimeRefines
@@ -4221,5 +4510,42 @@ theorem LazyCacheImplementation.runtimeRefines
       transfer
   exact ⟨nextStore, nextLocals, nextWitness,
     eraseReuseCapacityFact facts decl.fvarId, reconstructed⟩
+
+/--
+Public facts-indexed lazy runtime law for compiler-generated internal
+declarations.
+
+This is the exact boundary consumed by
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn`: source evaluation
+contains only `LazyCacheInternalSupported`, while target execution is derived
+from the supported export, generated cache environment, and the uniform
+declaration induction.
+-/
+theorem ConcreteSupportedExport.internalLazyRuntimeRefines
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (declarations :
+      LazyCacheInternalDeclarationInduction context sourceModule targetModule
+        hosts sourceExternals) :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels targetModule.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalSupported context)
+      (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals) :=
+  (LazyCacheImplementation.ofInternalCompiler spec generated
+    declarations).runtimeRefines
 
 end FirTalos.Concrete

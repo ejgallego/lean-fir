@@ -935,6 +935,24 @@ acceptance tests pass.
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication transport,
    while external nullary misses deliberately remain a separate hereditary
    external-result branch.
+   `LazyCacheInternalSupported` now packages the source-only hit/miss family
+   consumed by the structural proof. Its constructors retain source admission
+   and recursive cost but no target code, indices, values, stores, witnesses,
+   or executions.
+   `LazyCacheInternalCalleeInduction` factors the hereditary declaration
+   theorem from its source postcondition. The preferred
+   `LazyCacheInternalPublicationInduction` instantiates that postcondition
+   with authoritative retained-token disjointness from the published
+   ownership closure and constructively derives the former publication
+   transport. The weaker hereditary theorem suffices without alias analysis
+   whenever the returned value is a non-heap reference.
+   `LazyCacheInternalDeclarationInduction` lifts this condition uniformly
+   over every admitted internal miss and canonical cache frame. It is a
+   recursive module theorem rather than a call-site target certificate.
+   `LazyCacheImplementation.ofInternalCompiler` composes it with the
+   compiler-derived hit and miss branches, and
+   `ConcreteSupportedExport.internalLazyRuntimeRefines` exposes the exact
+   facts-indexed runtime law consumed by the generic structural code theorem.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source
@@ -943,13 +961,13 @@ acceptance tests pass.
    the generated module. Coordinate the shared lowering repair before
    deriving exact kind alignment from supported compiler output; do not weaken
    W6's exact typed-lane relation.
-   Next package the source/static nullary admission used by the hit theorem,
-   construct the hereditary miss from generated declaration/import
-   selection, and resolve the remaining
-   `FIR-BUG-wasm-none-reuse-retained-token-ordinary` publication instance by
-   deriving it from the generated declaration environment or by coordinating
-   alias-invalidating validator transfer. Integration must still expose the
-   universal validator accessor needed to discharge
+   Next construct `LazyCacheInternalDeclarationInduction` recursively for the
+   generated declaration environment. Non-heap result branches use the proved
+   hereditary adapter directly; heap results must derive
+   `ReuseTokenPublicationDisjoint` from source alias information or coordinate
+   an alias-invalidating validator transfer. External nullary declarations
+   remain a separate hereditary external-result branch. Integration must
+   still expose the universal validator accessor needed to discharge
    `LazyCacheValidationFacts` for every successfully validated module.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
