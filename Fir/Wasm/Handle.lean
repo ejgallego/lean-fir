@@ -60,8 +60,15 @@ def AbiKind.acceptsValue : AbiKind → Value → Bool
   | .uint16, .scalar (.uint16 _) => true
   | .uint32, .scalar (.uint32 _) => true
   | .uint64, .scalar (.uint64 _) => true
+  | .float32, .scalar (.float32Bits _) => true
+  | .float, .scalar (.float64Bits _) => true
   | .usize, .usize _ => true
   | _, _ => false
+
+#guard AbiKind.float32.acceptsValue (.scalar (.float32Bits 0x7fc00001))
+#guard AbiKind.float.acceptsValue (.scalar (.float64Bits 0x8000000000000000))
+#guard !AbiKind.float32.acceptsValue (.scalar (.float64Bits 0x7ff8000000000001))
+#guard !AbiKind.float.acceptsValue (.scalar (.float32Bits 0x80000000))
 
 /--
 An alias-preserving table for values represented as opaque `i32` handles.
