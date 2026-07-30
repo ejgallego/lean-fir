@@ -7550,6 +7550,77 @@ theorem SourceOnlyHeapBinding.bindOther
       using binding.read
   sourceOnly := binding.sourceOnly
 
+/-- An unrelated local binding preserves the hereditary heap-closure
+certificate as well as its parent binding. -/
+theorem SourceOnlyHeapClosureBinding.bindOther
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location heap)
+    (different : other.name ≠ binder.name) (value : Value) :
+    SourceOnlyHeapClosureBinding ledger
+      (bind env other value) binder location heap where
+  binding := closure.binding.bindOther different value
+  ownerUnreachable := closure.ownerUnreachable
+
+/-- A one-sided reachability transport preserves closure disjointness.
+This is the general heap lifecycle rule: every path from the selected root in
+the later heap must already have existed in the earlier heap. -/
+theorem SourceOnlyHeapClosureBinding.transportHeap
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location before)
+    (backward : ∀ other,
+      Reachable after [.object (.heap location)] other →
+        Reachable before [.object (.heap location)] other) :
+    SourceOnlyHeapClosureBinding ledger env binder location after where
+  binding := closure.binding
+  ownerUnreachable := by
+    intro rightLocation bounded reachable
+    exact closure.ownerUnreachable rightLocation bounded
+      (backward _ reachable)
+
+/-- Preserving the complete ownership graph is a sufficient heap lifecycle
+rule for a hereditary source-only binding. -/
+theorem SourceOnlyHeapClosureBinding.heapOwnershipFrame
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location before)
+    (frame : HeapOwnershipFrame before after) :
+    SourceOnlyHeapClosureBinding ledger env binder location after :=
+  closure.transportHeap fun _ reachable =>
+    frame.symm.reachable reachable
+
+/-- Allocating at a frontier that was outside the selected closure cannot
+create a new path from that closure. The new heap differs only at the fresh
+frontier, which no traversed parent may reach. -/
+theorem reachable_before_alloc_of_frontier_unreachable
+    (frontierUnreachable :
+      ¬Reachable runtime.heap roots runtime.nextLocation)
+    (reachable :
+      Reachable (alloc runtime object persistent).1.heap roots location) :
+    Reachable runtime.heap roots location := by
+  apply reachable_of_heapFrame_of_unreachable
+      (modified := runtime.nextLocation)
+      (before := runtime.heap)
+      (after := (alloc runtime object persistent).1.heap)
+  · intro other different
+    simpa [alloc, findCell?, Ne.symm different]
+  · exact frontierUnreachable
+  · exact reachable
+
+/-- Heap-side lifecycle law for an allocation after the selected closure.
+The sole semantic premise is that the old closure did not already contain the
+fresh allocation frontier. -/
+theorem SourceOnlyHeapClosureBinding.alloc
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location runtime.heap)
+    (frontierUnreachable :
+      ¬Reachable runtime.heap [.object (.heap location)]
+        runtime.nextLocation)
+    (object : HeapObject) (persistent : Bool) :
+    SourceOnlyHeapClosureBinding ledger env binder location
+      (alloc runtime object persistent).1.heap :=
+  closure.transportHeap fun _ reachable =>
+    reachable_before_alloc_of_frontier_unreachable
+      frontierUnreachable reachable
+
 /-- Binding a certified concrete reuse token publishes its capability under
 the result local. -/
 theorem SourceOnlyReuseTokenBinding.bindSelf
@@ -7580,6 +7651,26 @@ theorem SourceOnlyHeapBinding.monoLedger
     SourceOnlyHeapBinding nextLedger env binder location where
   read := binding.read
   sourceOnly
+
+/-- A hereditary binding transports to a new ledger once its complete owned
+closure is known disjoint from every owner in that ledger. Parent-only
+source provenance follows from the root case of the same fact. -/
+theorem SourceOnlyHeapClosureBinding.monoLedger
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location heap)
+    (nextLedger :
+      TargetAllocationLedger nextRho nextRightFrontier)
+    (ownerUnreachable : ∀ rightLocation,
+      rightLocation < nextRightFrontier →
+        ¬Reachable heap [.object (.heap location)]
+          (nextLedger.owner rightLocation)) :
+    SourceOnlyHeapClosureBinding nextLedger env binder location heap where
+  binding := closure.binding.monoLedger (by
+    intro rightLocation bounded same
+    apply ownerUnreachable rightLocation bounded
+    rw [same]
+    exact .root (by simp))
+  ownerUnreachable := ownerUnreachable
 
 /-- Ledger transport for a reset-token binding. -/
 theorem SourceOnlyReuseTokenBinding.monoLedger
@@ -7774,6 +7865,109 @@ theorem TargetAllocationLedger.sourceOnly_of_pairedAllocation
       Option.some.inj nextMapped
     intro selected
     exact sourceOnly rightLocation old (ownerEq.trans selected)
+
+/-- Hereditary source-only provenance survives a same-frontier renaming
+extension. Reverse-map uniqueness identifies every owner in the new ledger
+with its predecessor. -/
+theorem SourceOnlyHeapClosureBinding.sameFrontierExtension
+    {ledger : TargetAllocationLedger rho rightFrontier}
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location heap)
+    (nextLedger :
+      TargetAllocationLedger larger rightFrontier)
+    (extension : RenamingExtends rho larger) :
+    SourceOnlyHeapClosureBinding nextLedger env binder location heap := by
+  apply closure.monoLedger nextLedger
+  intro rightLocation bounded reachable
+  have oldMapped :=
+    extension.reverse (ledger.reverseMapped rightLocation bounded)
+  have nextMapped :=
+    nextLedger.reverseMapped rightLocation bounded
+  rw [oldMapped] at nextMapped
+  have ownerEq :
+      ledger.owner rightLocation =
+        nextLedger.owner rightLocation :=
+    Option.some.inj nextMapped
+  rw [← ownerEq] at reachable
+  exact closure.ownerUnreachable rightLocation bounded reachable
+
+/-- A paired allocation extends a hereditary certificate exactly when the
+newly paired source owner is also outside the selected source closure. Old
+slots are transported by the renaming extension; the new target-frontier slot
+is discharged by the explicit new-owner fact. -/
+theorem SourceOnlyHeapClosureBinding.pairedAllocation
+    {ledger : TargetAllocationLedger rho rightFrontier}
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location heap)
+    (nextLedger :
+      TargetAllocationLedger larger (rightFrontier + 1))
+    (extension : RenamingExtends rho larger)
+    (mapping : larger.forward left = some rightFrontier)
+    (newOwnerUnreachable :
+      ¬Reachable heap [.object (.heap location)] left) :
+    SourceOnlyHeapClosureBinding nextLedger env binder location heap := by
+  apply closure.monoLedger nextLedger
+  intro rightLocation bounded reachable
+  by_cases newest : rightLocation = rightFrontier
+  · subst rightLocation
+    have ownerEq :
+        nextLedger.owner rightFrontier = left :=
+      nextLedger.owner_eq_of_forward mapping (Nat.lt_succ_self _)
+    rw [ownerEq] at reachable
+    exact newOwnerUnreachable reachable
+  · have old : rightLocation < rightFrontier :=
+      Nat.lt_of_le_of_ne (Nat.lt_add_one_iff.mp bounded) newest
+    have oldMapped :=
+      extension.reverse (ledger.reverseMapped rightLocation old)
+    have nextMapped :=
+      nextLedger.reverseMapped rightLocation bounded
+    rw [oldMapped] at nextMapped
+    have ownerEq :
+        ledger.owner rightLocation =
+          nextLedger.owner rightLocation :=
+      Option.some.inj nextMapped
+    rw [← ownerEq] at reachable
+    exact closure.ownerUnreachable rightLocation old reachable
+
+/-- Same-frontier runtime steps may update both the hidden renaming and the
+source heap in one lifecycle transition, provided later closure paths
+transport back to the earlier heap. -/
+theorem SourceOnlyHeapClosureBinding.sameFrontierTransport
+    {ledger : TargetAllocationLedger rho rightFrontier}
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location before)
+    (nextLedger :
+      TargetAllocationLedger larger rightFrontier)
+    (extension : RenamingExtends rho larger)
+    (backward : ∀ other,
+      Reachable after [.object (.heap location)] other →
+        Reachable before [.object (.heap location)] other) :
+    SourceOnlyHeapClosureBinding
+      nextLedger env binder location after :=
+  (closure.sameFrontierExtension nextLedger extension)
+    |>.transportHeap backward
+
+/-- Paired allocation lifecycle rule combining ledger growth with the
+source-heap transition. Besides backward closure transport, the caller states
+that the newly paired source owner was not already in the old closure. -/
+theorem SourceOnlyHeapClosureBinding.pairedAllocationTransport
+    {ledger : TargetAllocationLedger rho rightFrontier}
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location before)
+    (nextLedger :
+      TargetAllocationLedger larger (rightFrontier + 1))
+    (extension : RenamingExtends rho larger)
+    (mapping : larger.forward left = some rightFrontier)
+    (newOwnerUnreachable :
+      ¬Reachable before [.object (.heap location)] left)
+    (backward : ∀ other,
+      Reachable after [.object (.heap location)] other →
+        Reachable before [.object (.heap location)] other) :
+    SourceOnlyHeapClosureBinding
+      nextLedger env binder location after :=
+  (closure.pairedAllocation nextLedger extension mapping
+      newOwnerUnreachable)
+    |>.transportHeap backward
 
 /-- An address already known to be absent from the renaming is outside every
 target allocation ledger. This is the induction entry point immediately
@@ -9321,6 +9515,36 @@ theorem LedgerAllocBothResult.sourceOnly_of_found
     related.sourceOnly_of_pairedAllocation
       allocated.runtime.ledger allocated.extension mapping
       sourceOnly found
+
+/-- A paired allocation transports an existing hereditary source closure when
+the old closure excludes the fresh source frontier. That single premise both
+keeps the new ledger owner out of the closure and prevents allocating its cell
+from revealing a latent path. -/
+theorem LedgerAllocBothResult.heapClosureBinding_of_frontierUnreachable
+    (allocated : LedgerAllocBothResult rho left right
+      leftExtra rightExtra leftObject rightObject persistent)
+    (ledger : TargetAllocationLedger rho right.nextLocation)
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location left.heap)
+    (frontierUnreachable :
+      ¬Reachable left.heap [.object (.heap location)]
+        left.nextLocation) :
+    SourceOnlyHeapClosureBinding allocated.runtime.ledger
+      env binder location (alloc left leftObject persistent).1.heap := by
+  have mapping :
+      allocated.larger.forward left.nextLocation =
+        some right.nextLocation := by
+    have mappedValue :
+        ValueRel allocated.larger
+          (.object (.heap left.nextLocation))
+          (.object (.heap right.nextLocation)) := by
+      simpa [alloc] using allocated.values
+    cases mappedValue with
+    | heap mapping => exact mapping
+  have ledgerClosure :=
+    closure.pairedAllocation allocated.runtime.ledger
+      allocated.extension mapping frontierUnreachable
+  exact ledgerClosure.alloc frontierUnreachable leftObject persistent
 
 /-- Proof-relevant paired allocation result for a retained partial
 application closure. -/

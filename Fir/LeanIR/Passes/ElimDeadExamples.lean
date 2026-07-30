@@ -5013,6 +5013,66 @@ theorem deletedCtorSourceOnlySurvivesPairedAllocation :
   · exact deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
   · rfl
 
+/-- The stronger hereditary certificate survives the same paired allocation.
+The deleted constructor is a leaf, so its closure excludes the fresh source
+frontier; the generic lifecycle theorem transports both its heap closure and
+the enlarged target ledger. -/
+theorem deletedCtorHeapClosureSurvivesPairedAllocation :
+    SourceOnlyHeapClosureBinding
+      deletedCtorLifecyclePaired.runtime.ledger
+      (bind [] resetObjectVar (.object (.heap 0)))
+      resetObjectVar 0
+      (alloc deletedCtorLifecycleSourceOnly.nextRuntime
+        (.natural 9223372036854775808) false).1.heap := by
+  have objectBinding :
+      SourceOnlyHeapBinding
+        deletedCtorLifecycleSourceOnly.runtime.ledger
+        (bind [] resetObjectVar (.object (.heap 0)))
+        resetObjectVar 0 := {
+    read := by rfl
+    sourceOnly :=
+      deletedCtorLifecycleSourceOnly.heapSourceOnly 0 (by rfl)
+  }
+  have found :
+      findCell? deletedCtorLifecycleSourceOnly.nextRuntime.heap 0 =
+        some ({
+          object := .ctor {
+            tag := oneFieldInfo.cidx
+            objectFields := #[.erased]
+            usizeFields := Array.replicate oneFieldInfo.usize 0
+            scalarFields := []
+          }
+        } : HeapCell) := by
+    rfl
+  have noChildren : ∀ child,
+      Value.object (.heap child) ∉
+        ({
+          object := .ctor {
+            tag := oneFieldInfo.cidx
+            objectFields := #[.erased]
+            usizeFields := Array.replicate oneFieldInfo.usize 0
+            scalarFields := []
+          }
+        } : HeapCell).object.ownedValues.toList := by
+    intro child member
+    simp [HeapObject.ownedValues] at member
+  have closure :=
+    objectBinding.closure_of_no_heap_children found noChildren
+  have frontierUnreachable :
+      ¬Reachable deletedCtorLifecycleSourceOnly.nextRuntime.heap
+        [.object (.heap 0)]
+        deletedCtorLifecycleSourceOnly.nextRuntime.nextLocation := by
+    intro reachable
+    have same :=
+      reachable_eq_of_no_heap_children found noChildren reachable
+    change (1 : Nat) = 0 at same
+    omega
+  exact
+    deletedCtorLifecyclePaired
+      |>.heapClosureBinding_of_frontierUnreachable
+        deletedCtorLifecycleSourceOnly.runtime.ledger
+        closure frontierUnreachable
+
 /-- Bind the deleted constructor under the object local consumed by reset. -/
 noncomputable def deletedCtorLifecycleResetState : MachineState :=
   { program := { decls := #[] }
