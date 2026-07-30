@@ -1298,10 +1298,19 @@ heap ownership. Object-field replacement and reset preserve the full local
 carrier; constructor allocation and both reuse modes preserve its heap half.
 The failed-token reuse and deleted object-write fixtures now use this carrier
 without artificially widening target liveness, and inherit the ownership
-invariant without inspecting the result heap. Remaining work is to prove
-result-value and binding preservation for allocation/reuse, then lift the
-carrier through checked control, frames, and the general dispatcher together
-with the compositional source-only closure certificate.
+invariant without inspecting the result heap.
+
+The value-binding bridge lands at `fd4f531f`.
+`RuntimeValueBelowFrontier` packages frontier monotonicity with a bound on the
+returned value. Constructor allocation supplies it for both immediate and heap
+constructors; concrete reuse returns its existing token location and the
+missing-token branch delegates to allocation. The combined carrier now
+survives both runtime replacement and the compiler's following `let` binding.
+The failed-token fixture exercises the exact non-leaf transition: it allocates
+source-only garbage, binds the fresh result under the dead source local, and
+enters the retained continuation without widening target liveness. Remaining
+work is to lift the carrier through checked control and frames, then combine it
+with the source-only closure certificate in the general dispatcher.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1393,6 +1402,9 @@ constructor allocation, object writes, and both reuse-token branches.
 environment ownership, derives operand bounds for deleted operations, and
 preserves the combined local environment/heap carrier across object writes and
 reset while covering the heap results of allocation and reuse.
+`fd4f531f` adds monotone-frontier/returned-value laws for allocation and both
+reuse modes, preserves the full carrier through result binding, and checks the
+post-reuse retained-continuation state.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1456,12 +1468,13 @@ the existing nullary-`.fap` semantic discrepancy.
    reuse-token branches consume it directly. Complete source-environment
    ownership now covers deleted operands without changing the target liveness
    set, and the combined local environment/heap carrier survives object writes
-   and reset. Next prove allocation/reuse result-value and environment-binding
-   laws so that carrier survives deleted `let` transitions, then carry it and
-   the compositional closure certificate through checked control, frames, and
-   the general dispatcher. Arbitrary checked entries must still initialize and
-   preserve these compiler typing/ownership facts without finite
-   execution-graph enumeration.
+   and reset. Allocation and both reuse modes now return a value below a
+   monotone result frontier, so the carrier also survives their following
+   source `let` bindings. Next carry it and the compositional closure
+   certificate through checked control, bind/apply frames, and the general
+   dispatcher. Arbitrary checked entries must still initialize and preserve
+   these compiler typing/ownership facts without finite execution-graph
+   enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
