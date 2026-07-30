@@ -690,8 +690,11 @@ acceptance tests pass.
    reusable source and target transport boundaries for constructor mutation.
    `correctReuseBudgetedDirectOwnershipAndTagCode` instantiates them for
    successful tag writes, extending the facts-indexed whole-export theorem
-   through `OwnershipAndTagEffectSupported`. Object-field mutation is the
-   next effect obligation.
+   through `OwnershipAndTagEffectSupported`.
+   `correctReuseBudgetedDirectOwnershipTagAndObjectCode` adds both FVar and
+   compiler-erased object-field writes through the same transports and the
+   existing descriptor-indexed production simulations. `USize` and
+   packed-scalar mutation are the next effect obligations.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

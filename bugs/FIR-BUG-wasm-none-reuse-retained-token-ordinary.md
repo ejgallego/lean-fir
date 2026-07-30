@@ -98,8 +98,10 @@ and its ordinary branch preserves the deleted cell's persistence bit.
 Constructor-tag mutation composes through the generic
 `modifyConstructor_ordinaryPersistenceTransport`, which covers any successful
 constructor-payload rewrite that retains the decoded cell's ownership
-metadata. This bug still blocks validator-wide admission of effects that can
-create persistent aliases or otherwise fail that transport.
+metadata. FVar and compiler-erased object-field writes now compose through the
+same theorem and a shared facts-indexed target-effect transport. This bug still
+blocks validator-wide admission of effects that can create persistent aliases
+or otherwise fail that transport.
 
 ## Classification and triage
 

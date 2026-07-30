@@ -4627,6 +4627,18 @@ operation, the complete ownership family, and successful tag mutation.
 Object-field mutation is next and can reuse the same two generic transport
 boundaries.
 
+W6.6gn applies those boundaries to both object-field argument forms. The FVar
+instance reconstructs the object and field locals, selected descriptor kind,
+binary host call, and exact checked write; the erased instance reconstructs
+the compiler's canonical zero payload and erased descriptor slot. Both source
+steps are instances of `modifyConstructor_ordinaryPersistenceTransport`, and
+both target steps cross
+`ConcreteReuseCapacityOwnershipFrame.ofReplaceHeapEffectStep`.
+`correctReuseBudgetedDirectOwnershipTagAndObjectCode` therefore covers
+arbitrary finite interleavings of the complete direct/reuse family with
+ownership, tag mutation, and FVar or erased object-slot writes. `USize` and
+packed-scalar mutation are the next facts-indexed effects.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
