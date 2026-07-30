@@ -5236,18 +5236,30 @@ complete publication-aware module theorem from those two premises.
 exposes the full compiler-generated cache law without a separate alias premise
 for that fragment.
 
-The next recursive proof step is no longer cache-specific. The generic
-structural `codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn` theorem
-already returns the final cache frame, but its public conclusion currently
-drops the entry-to-exit `WitnessTransport`, `HeaderCapacityTransport`,
-`OrdinaryPersistenceTransport`, and immutable external/descriptor equations
-required by `BudgetedCapacityPreservingSuccessfulDeclarationWithCache`.
-Strengthen that structural conclusion (or thread an equivalent entry-relative
-frame) and select generated declaration bodies uniformly; do not reintroduce
-`ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or a per-call target
-execution as a premise. Heap-valued `.object`/`.tobject` results still add the
-independent reachability-disjointness or alias-invalidating fact-transfer
-obligation described above.
+W6.6gzw establishes the entry-relative structural boundary needed to build
+that recursive module theorem. `ReuseCapacityBudgetedCodeEvaluates.sourceResult`
+retains the exact terminal source runtime for mixed direct, external, call,
+lazy, case, and effect executions. `ReuseCapacityCodeEntryTransports` packages
+entry-to-current witness, old-header capacity, ordinary-persistence,
+external-table, and both descriptor-table facts; `refl` initializes the
+invariant and `step` composes one operation theorem.
+`ReuseCapacityEntryRelativeFrame` strengthens any existing facts-indexed frame
+with this bundle, while
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelative` reuses the
+certificate-free syntax induction and returns the exact source result, target
+`CodeWP`, final base frame, and all six entry-to-exit transports. No target
+execution is added to source admission.
+
+The remaining construction work is explicit. Each admitted operation family
+must rebuild the entry-relative cache frame from its existing
+current-to-successor transport package. Production lowering/adaptation must
+then select each internal initializer body uniformly, and the resulting
+structural proof must supply the cache-aware hereditary declaration package.
+That package additionally asks for a residual address-space theorem uniform
+in caller slack; the current exact-cost structural index ends at budget zero,
+so this requires either a slack-general structural theorem or a derivation
+from operation residuals and target determinism. These are module-level
+compiler/runtime obligations, not call-site execution certificates.
 
 ## Parallel agent packages
 

@@ -15522,7 +15522,87 @@ inductive ReuseCapacityBudgetedCodeEvaluates
         EffectSupported letCost facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes
 
-/-- The mixed facts-indexed relation denotes an exact finite interpreter run. -/
+/--
+The mixed facts-indexed relation retains the exact terminal source runtime.
+
+This is stronger than the observation-facing interpreter theorem: globals,
+the allocation frontier, and the rest of the runtime state remain available
+to hereditary declaration and cache-publication proofs.
+-/
+theorem ReuseCapacityBudgetedCodeEvaluates.sourceResult
+    {context : Fir.Wasm.Context}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CallSupported LazySupported CaseSupported
+        EffectSupported letCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes) :
+    SourceCodeResult context externals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue := by
+  induction evaluation with
+  | ret sourceLookup =>
+      exact (CodeEvaluates.ret sourceLookup).sourceResult externals
+  | @letValue facts decl letRuntime letEnv nextRuntime sourceValue nextFacts
+      continuation resultFacts resultRuntime resultEnv resultValue cost
+      supported sourceStep transfer continued ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          have evaluated :
+              evalLetValue
+                  (sourceCodeState context letRuntime letEnv
+                    (.let decl continuation)) decl =
+                .ok (nextRuntime, .value sourceValue) := by
+            unfold SourceLetResult at sourceStep
+            cases decl.value <;> exact sourceStep
+          unfold sourceCodeState at evaluated
+          simp [executeStep, coreStep, sourceCodeState, evaluated])
+          (.refl _))
+        ih
+  | externalLet _ sourceStep _ _ ih =>
+      apply SourceCodeResult.ofSteps (prefixCount := 3) ?_ ih
+      simpa [SourceExternalLetResult, sourceCodeState] using sourceStep
+  | callLet _ sourceStep _ _ ih =>
+      obtain ⟨count, callSteps⟩ := sourceStep
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ ih
+      simpa [sourceCodeState] using callSteps
+  | lazyLet _ _ sourceStep _ _ ih =>
+      obtain ⟨count, lazySteps⟩ := sourceStep.execSteps
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ ih
+      simpa [sourceCodeState] using lazySteps
+  | caseOf _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+          simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
+          (.refl _))
+        ih
+  | effect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by simpa [sourceCodeState] using sourceStep externals)
+          (.refl _))
+        ih
+
+/-- The exact mixed source result erases to the public interpreter judgment. -/
 theorem ReuseCapacityBudgetedCodeEvaluates.execEvaluates
     {context : Fir.Wasm.Context}
     {externals : ExternalImpl}
@@ -15553,22 +15633,112 @@ theorem ReuseCapacityBudgetedCodeEvaluates.execEvaluates
         resultFacts resultRuntime resultEnv resultValue requiredBytes) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
-      (ReturnedObservation resultRuntime resultValue) := by
-  induction evaluation with
-  | ret sourceLookup =>
-      exact (CodeEvaluates.ret sourceLookup).execEvaluates externals
-  | letValue _ sourceStep _ _ ih =>
-      exact sourceLetResult_thenExecEvaluates sourceStep ih
-  | externalLet _ sourceStep _ _ ih =>
-      exact sourceExternalLetResult_thenExecEvaluates sourceStep ih
-  | callLet _ sourceStep _ _ ih =>
-      exact sourceCallLetResult_thenExecEvaluates sourceStep ih
-  | lazyLet _ _ sourceStep _ _ ih =>
-      exact sourceLazyLetResult_thenExecEvaluates sourceStep ih
-  | caseOf _ sourceStep _ ih =>
-      exact sourceCaseResult_thenExecEvaluates sourceStep ih
-  | effect _ sourceStep _ ih =>
-      exact sourceEffectResult_thenExecEvaluates sourceStep ih
+      (ReturnedObservation resultRuntime resultValue) :=
+  evaluation.sourceResult.execEvaluates
+
+/--
+Entry-to-current transports needed to turn a structural code proof into a
+hereditary declaration theorem.
+
+The fields are consequences of generated execution, not target-execution
+certificates. Keeping them together makes the exact induction invariant
+explicit: old values remain represented, old owned headers keep their
+capacity, ordinary source cells remain ordinary, and immutable implementation
+tables do not change.
+-/
+structure ReuseCapacityCodeEntryTransports
+    (entryRuntime currentRuntime : RuntimeState)
+    (entryStore currentStore : Wasm.Store Host)
+    (entryWitness currentWitness : RefinementWitness) : Prop where
+  witness : WitnessTransport entryWitness currentWitness
+  capacity :
+    HeaderCapacityTransport entryStore.host.runtime.heap
+      currentStore.host.runtime.heap entryWitness
+  ordinary : OrdinaryPersistenceTransport entryRuntime currentRuntime
+  externals :
+    currentStore.host.externals = entryStore.host.externals
+  hostDescriptors :
+    currentStore.host.closureDescriptors =
+      entryStore.host.closureDescriptors
+  witnessDescriptors :
+    currentWitness.closureDescriptors = entryWitness.closureDescriptors
+
+/-- Every execution entry satisfies its transport invariant reflexively. -/
+theorem ReuseCapacityCodeEntryTransports.refl
+    (runtime : RuntimeState)
+    (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    ReuseCapacityCodeEntryTransports runtime runtime store store witness
+      witness := {
+  witness := WitnessTransport.refl witness
+  capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
+  ordinary := OrdinaryPersistenceTransport.refl runtime
+  externals := rfl
+  hostDescriptors := rfl
+  witnessDescriptors := rfl }
+
+/--
+Extend entry-relative transports across one proved runtime step.
+
+Operation-family theorems already construct the six current-to-successor
+facts separately. This lemma is their common composition rule and is the only
+transport algebra required by the structural induction.
+-/
+theorem ReuseCapacityCodeEntryTransports.step
+    {entryRuntime currentRuntime nextRuntime : RuntimeState}
+    {entryStore currentStore nextStore : Wasm.Store Host}
+    {entryWitness currentWitness nextWitness : RefinementWitness}
+    (entry :
+      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
+        currentStore entryWitness currentWitness)
+    (witness : WitnessTransport currentWitness nextWitness)
+    (capacity :
+      HeaderCapacityTransport currentStore.host.runtime.heap
+        nextStore.host.runtime.heap currentWitness)
+    (ordinary : OrdinaryPersistenceTransport currentRuntime nextRuntime)
+    (externals :
+      nextStore.host.externals = currentStore.host.externals)
+    (hostDescriptors :
+      nextStore.host.closureDescriptors =
+        currentStore.host.closureDescriptors)
+    (witnessDescriptors :
+      nextWitness.closureDescriptors =
+        currentWitness.closureDescriptors) :
+    ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+      nextStore entryWitness nextWitness := {
+  witness := WitnessTransport.trans entry.witness witness
+  capacity :=
+    HeaderCapacityTransport.transAcross entry.capacity entry.witness capacity
+  ordinary := OrdinaryPersistenceTransport.trans entry.ordinary ordinary
+  externals := externals.trans entry.externals
+  hostDescriptors := hostDescriptors.trans entry.hostDescriptors
+  witnessDescriptors :=
+    witnessDescriptors.trans entry.witnessDescriptors }
+
+/--
+Any facts-indexed structural frame can be strengthened with transports from
+one fixed execution entry. Runtime laws over this frame must prove their
+current-to-successor facts once; `ReuseCapacityCodeEntryTransports.step`
+threads the accumulated result.
+-/
+def ReuseCapacityEntryRelativeFrame
+    (Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (currentRuntime : RuntimeState)
+    (currentEnv : Env)
+    (currentStore : Wasm.Store Host)
+    (currentLocals : Wasm.Locals)
+    (currentWitness : RefinementWitness) : Prop :=
+  Frame facts remainingBytes currentRuntime currentEnv currentStore
+      currentLocals currentWitness ∧
+    ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
+      currentStore entryWitness currentWitness
 
 /--
 Uniform facts-indexed external-result runtime law.
@@ -16461,6 +16631,141 @@ theorem
       exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
         codeWP_effect step continuationWP, resultInvariant, failureClear,
         valueRelated⟩
+
+/--
+Certificate-free structural partial correctness with exact entry-to-exit
+runtime transports.
+
+The operation families are proved over `ReuseCapacityEntryRelativeFrame`;
+their per-step transport facts are accumulated by the frame rather than
+discarded by the structural induction. The conclusion therefore contains the
+exact source result, target execution, final base frame, and all transports
+needed by `BudgetedCapacityPreservingSuccessfulDeclaration`.
+-/
+theorem
+    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelative
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CallSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost facts sourceRuntime sourceEnv
+        code resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        ExternalSupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        CallSupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        LazySupported
+        (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness))
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env EffectSupported
+          (ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
+            facts)) :
+    SourceCodeResult context externals sourceRuntime sourceEnv code resultRuntime
+        resultValue ∧
+      ∃ resultStore resultLocals resultWitness resultKind physical,
+        CodeWP context sourceModule sourceFunction labels target.wasmModule
+            hosts.env sourceRuntime sourceEnv code targetCode initial locals
+            witness [] (ExactReturnControlPost resultStore physical) ∧
+          Frame resultFacts 0 resultRuntime resultEnv resultStore resultLocals
+            resultWitness ∧
+          ReuseCapacityCodeEntryTransports sourceRuntime resultRuntime initial
+            resultStore witness resultWitness ∧
+          resultStore.host.failure? = none ∧
+          PhysicalValueRel resultWitness resultKind physical resultValue := by
+  have entryInvariant :
+      ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness facts
+        requiredBytes sourceRuntime sourceEnv initial locals witness :=
+    ⟨invariant,
+      ReuseCapacityCodeEntryTransports.refl sourceRuntime initial witness⟩
+  have entryFrameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        ReuseCapacityEntryRelativeFrame Frame sourceRuntime initial witness
+            frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness := by
+    intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+      frameWitness related
+    exact frameRelated related.1
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      targetWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+      adapted localsAligned entryInvariant entryFrameRelated
+      directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+      lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+  exact ⟨evaluation.sourceResult, resultStore, resultLocals, resultWitness,
+    resultKind, physical, targetWP, resultInvariant.1, resultInvariant.2,
+    failureClear, valueRelated⟩
 
 /--
 Reuse-only specialization of the generic facts-indexed structural theorem.

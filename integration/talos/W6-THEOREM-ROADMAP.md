@@ -972,15 +972,30 @@ acceptance tests pass.
    the generated module. Coordinate the shared lowering repair before
    deriving exact kind alignment from supported compiler output; do not weaken
    W6's exact typed-lane relation.
-   Next construct `LazyCacheInternalHereditaryDeclarationInduction`
-   recursively for the generated declaration environment. The generic
-   structural code theorem already returns the final cache frame, but its
-   current conclusion drops entry-to-exit witness, header-capacity,
-   ordinary-persistence, external-table, and descriptor transports required
-   by the hereditary declaration package. Strengthen that conclusion or
-   thread an equivalent entry-relative frame; do not reintroduce a
-   `ConcreteCodeSimulation`, `ReuseCapacityCodeSimulation`, or call-site
-   target execution premise. Heap-valued `.object`/`.tobject` results then add
+   `ReuseCapacityBudgetedCodeEvaluates.sourceResult` now retains the exact
+   terminal source runtime for the complete mixed structural judgment.
+   `ReuseCapacityCodeEntryTransports` collects witness, header-capacity,
+   ordinary-persistence, external-table, host-descriptor, and
+   witness-descriptor preservation from one execution entry; its `refl` and
+   `step` theorems provide the complete transport algebra.
+   `ReuseCapacityEntryRelativeFrame` pairs those facts with any existing
+   facts-indexed frame, and
+   `codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelative` specializes
+   the certificate-free structural proof to that frame. Its conclusion now
+   returns the exact source result, target `CodeWP`, final base frame, and all
+   six entry-to-exit transports.
+   Next lift each admitted direct, external, call, lazy, and effect runtime
+   family over the entry-relative cache frame, using the operation packages'
+   existing current-to-successor transports and the common `step` theorem.
+   Then derive production internal-function selection and construct
+   `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
+   generated declaration environment. The hereditary declaration package
+   also requires a residual-budget theorem uniform in caller slack; either
+   generalize the structural budget index from exact cost to arbitrary
+   remaining capacity or derive that field from the operation packages plus
+   target determinism. Do not reintroduce a `ConcreteCodeSimulation`,
+   `ReuseCapacityCodeSimulation`, or call-site target execution premise.
+   Heap-valued `.object`/`.tobject` results then add
    `ReuseTokenPublicationDisjoint` from source alias information or a
    coordinated alias-invalidating validator transfer. External nullary
    declarations remain a separate hereditary external-result branch.
