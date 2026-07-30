@@ -20,11 +20,17 @@ runtime, or shared interpreter semantics.
 The LCNF-to-C frontend is shared. Runtime selection is a link profile, not a
 second compiler:
 
-| Profile | Host contract | Current acceptance fixture |
-| --- | --- | --- |
-| `freestanding` | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
-| `emscripten` | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd` | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
-| `wasi` | single-threaded Lean core-object runtime in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, object and byte arrays, strings, captured one/two-argument closures, exact reclamation, scalar C, and a real monotonic-clock import |
+| Profile | Support status | Host contract | Current acceptance fixture |
+| --- | --- | --- | --- |
+| `freestanding` | primary, deliberately narrow | `wasm32-unknown-unknown`, no imports or libc | raw `UInt64` expression and tail loop |
+| `emscripten` | primary for realistic programs | browser/Node ES module plus pinned `libleanrt`, `libInit`, and `libStd` | lists, arrays, strings, closures, `Except`, `Std.HashMap`, and real `IO.eprintln` |
+| `wasi` | experimental, ABI 3 frozen | single-threaded Lean core-object runtime in a WASI Preview 1 reactor (`wasm32-wasip1`) | boxed `UInt64`, lists, object and byte arrays, strings, captured one/two-argument closures, exact reclamation, scalar C, and a real monotonic-clock import |
+
+Normal lane acceptance runs the freestanding and Emscripten profiles through
+`check-primary.sh`. WASI stays green through `check-wasi.sh` and
+`check-all.sh`, but it is not on the short-term feature-expansion path. See
+the [WASI support policy](WASI-PORTING.md) for the frozen boundary and the
+gate for a future selective upstream runtime port.
 
 `Smoke.lean` exports two raw `UInt64` functions. One is a scalar expression;
 the other is a compiler-lowered tail loop. `HeapSmoke.lean` dynamically
@@ -131,23 +137,29 @@ FIR_WASM_LD=/path/to/wasm-ld \
 bash integration/lcnf-c-wasm/check.sh
 ```
 
-## Running Emscripten and WASI
+## Running the primary profiles
 
-Both setups install only into this worktree's ignored `.deps/lcnf-c-wasm`
-directory:
+The Emscripten setup installs only into this worktree's ignored
+`.deps/lcnf-c-wasm` directory. After the freestanding linker setup above, run:
 
 ```sh
 bash integration/lcnf-c-wasm/setup-emscripten.sh
-bash integration/lcnf-c-wasm/check-emscripten.sh
+bash integration/lcnf-c-wasm/check-primary.sh
 
 FIR_BROWSER=google-chrome \
   bash integration/lcnf-c-wasm/check-emscripten.sh
+```
 
+## Running the experimental WASI profile
+
+The frozen WASI setup also installs under `.deps/lcnf-c-wasm`:
+
+```sh
 bash integration/lcnf-c-wasm/setup-wasi-sdk.sh
 bash integration/lcnf-c-wasm/check-wasi.sh
 ```
 
-After both setups, all three profiles can be checked together:
+After all setups, primary plus experimental profiles can be checked together:
 
 ```sh
 bash integration/lcnf-c-wasm/check-all.sh
