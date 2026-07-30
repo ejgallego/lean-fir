@@ -1391,6 +1391,45 @@ structure BudgetedCapacityPreservingSuccessfulDeclarationWithCache
   cacheTable :
     LazyCacheGlobalsRel resultWitness sourceModule resultRuntime afterCall
 
+/--
+Reinterpret a cache-aware declaration at a refined caller-facing ABI kind.
+The whole-cache postcondition is independent of the physical result kind.
+-/
+theorem
+    BudgetedCapacityPreservingSuccessfulDeclarationWithCache.ofRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {actualKind expectedKind : AbiKind}
+    {resultValue : Value}
+    {physical : Wasm.Value}
+    {stepCost : Nat}
+    (declaration :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule sourceFunction module hostEnv sourceExternals sourceRuntime
+        resultRuntime sourceEnv sourceCode targetFunction functionIndex initial
+        afterCall initialWitness resultWitness parameters actualKind resultValue
+        physical stepCost)
+    (refines : actualKind.refines expectedKind = true) :
+    BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+      sourceModule sourceFunction module hostEnv sourceExternals sourceRuntime
+      resultRuntime sourceEnv sourceCode targetFunction functionIndex initial
+      afterCall initialWitness resultWitness parameters expectedKind resultValue
+      physical stepCost := {
+  declaration := declaration.declaration.ofRefines refines
+  cacheTable := declaration.cacheTable }
+
 theorem LazyCacheGlobalsRel.layout
     {witness : RefinementWitness}
     {source : Fir.Wasm.Module}
@@ -3596,6 +3635,80 @@ def ConcreteReuseCapacityCacheFrame
       witness ∧
     LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore ∧
     ClosureTablesAgree targetStore witness
+
+/-- The canonical cache frame retains the facts-indexed concrete/source state
+relation used by every structural operation family. -/
+theorem ConcreteReuseCapacityCacheFrame.stateRelated
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness) :
+    ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness :=
+  invariant.1.1.1.1
+
+/-- The resource index of the canonical cache frame is the concrete wasm32
+address-space headroom owned by the current execution suffix. -/
+theorem ConcreteReuseCapacityCacheFrame.budget
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness) :
+    targetStore.host.runtime.heap.AddressSpaceBudget remainingBytes :=
+  invariant.1.1.1.2.2.2
+
+/--
+Replace only the address-space resource index of a canonical cache frame.
+
+All representation, ownership, handler, cache, and immutable-table fields are
+independent of the numeric budget. This constructor lets a hereditary proof
+re-run the same generated declaration with arbitrary caller-owned slack.
+-/
+theorem ConcreteReuseCapacityCacheFrame.withBudget
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {beforeBytes afterBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts beforeBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness)
+    (budget :
+      targetStore.host.runtime.heap.AddressSpaceBudget afterBytes) :
+    ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals facts
+      afterBytes sourceRuntime sourceEnv targetStore targetLocals witness := by
+  rcases invariant with
+    ⟨⟨⟨⟨related, ordinary, aligned, _⟩, integer, natural, scalar⟩,
+      descriptors⟩, cache, closureTables⟩
+  exact
+    ⟨⟨⟨⟨related, ordinary, aligned, budget⟩, integer, natural, scalar⟩,
+      descriptors⟩, cache, closureTables⟩
 
 /--
 The canonical cache frame resolves an exact generated closure matcher without
@@ -6920,5 +7033,194 @@ theorem
         entryRuntime entryStore entryWitness) :=
   (LazyCacheImplementationWithEntryTransports.ofInternalCompilerNonHeap spec
     generated resultKinds declarations).runtimeRefinesEntryRelative
+
+/--
+Package the structural mixed-code theorem as one hereditary cache-aware
+declaration result.
+
+The canonical execution is proved with exactly the source-selected allocation
+budget. To establish the declaration package's stronger budget-parametric
+field, re-run the same structural proof with arbitrary caller-owned slack and
+use `CodeWP.exactReturn_unique` to identify its existential target result with
+the canonical store and lane. Thus callers receive one fixed execution result;
+the repeated proof supplies only resource evidence.
+-/
+theorem
+    ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context sourceExternals
+        DirectSupported ExternalSupported CallSupported LazySupported
+        CaseSupported EffectSupported directLetAllocationCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        ExternalSupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        CallSupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        LazySupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction []
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction []
+          target.wasmModule hosts.env EffectSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness facts))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ∃ resultStore resultWitness resultKind physical,
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule sourceFunction target.wasmModule hosts.env sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode spec.targetFunction
+        spec.targetFunctionIndex initial resultStore initialWitness
+        resultWitness parameters resultKind resultValue physical
+        requiredBytes := by
+  have initialExact :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts (requiredBytes + 0) sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness := by
+    simpa using invariant
+  obtain ⟨sourceResult, resultStore, resultLocals, resultWitness, resultKind,
+      physical, exactWP, resultInvariant, entryTransports, failureClear,
+      valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
+      (slack := 0) evaluation spec.bodyAdapted spec.localsAligned initialExact
+      (fun related => related.stateRelated) directRuntimeRefines
+      externalRuntimeRefines callRuntimeRefines lazyRuntimeRefines
+      caseRuntimeRefines effectRuntimeRefines
+  have body :
+      DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
+        hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction initial
+        resultStore initialWitness parameters physical := by
+    refine ⟨parameterCount, spec.singleResult, fun callerTail => ?_⟩
+    apply exactWP.conseq
+    intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
+      ← parameterCount]
+  have successful :
+      SuccessfulDeclaration context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
+        sourceEnv sourceCode spec.targetFunction spec.targetFunctionIndex
+        initial resultStore initialWitness resultWitness parameters resultKind
+        resultValue physical := {
+    sourceResult
+    notImport := spec.notImport
+    functionFound := spec.targetFunctionFound
+    body
+    runtimeRelated := resultInvariant.stateRelated.stateRelated.1
+    failureClear
+    valueRelated }
+  have capacityPreserving :
+      CapacityPreservingSuccessfulDeclaration context sourceModule
+        sourceFunction target.wasmModule hosts.env sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode spec.targetFunction
+        spec.targetFunctionIndex initial resultStore initialWitness
+        resultWitness parameters resultKind resultValue physical := {
+    successful
+    witnessTransport := entryTransports.witness
+    capacityTransport := entryTransports.capacity }
+  have residualBudget :
+      ∀ {remainingBytes : Nat},
+        requiredBytes ≤ remainingBytes →
+          initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
+            resultStore.host.runtime.heap.AddressSpaceBudget
+              (remainingBytes - requiredBytes) := by
+    intro remainingBytes stepFits budget
+    let slack := remainingBytes - requiredBytes
+    have budgetEq : requiredBytes + slack = remainingBytes := by
+      simp [slack, Nat.add_sub_of_le stepFits]
+    have slackInvariant :
+        ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals facts (requiredBytes + slack) sourceRuntime sourceEnv
+          initial (spec.targetFunction.toLocals parameters.reverse)
+          initialWitness :=
+      invariant.withBudget (by simpa [budgetEq] using budget)
+    obtain ⟨_, slackStore, slackLocals, slackWitness, slackKind,
+        slackPhysical, slackWP, slackResultInvariant, _, _, _⟩ :=
+      spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
+        (slack := slack) evaluation spec.bodyAdapted spec.localsAligned
+        slackInvariant (fun related => related.stateRelated)
+        directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+        lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+    have resultEq := exactWP.exactReturn_unique slackWP
+    rw [resultEq.1]
+    simpa [slack] using slackResultInvariant.budget
+  exact ⟨resultStore, resultWitness, resultKind, physical, {
+    declaration := {
+      toClosureTablesTransport := entryTransports.toClosureTablesTransport
+      capacityPreserving
+      ordinaryTransport := entryTransports.ordinary
+      externalsPreserved := entryTransports.externals
+      residualBudget }
+    cacheTable := resultInvariant.2.1 }⟩
 
 end FirTalos.Concrete

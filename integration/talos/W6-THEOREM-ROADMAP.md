@@ -992,9 +992,21 @@ acceptance tests pass.
    at `requiredBytes + slack` and returns the final frame at `slack`, while
    `codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack`
    returns that residual frame together with the exact source result, target
-   `CodeWP`, and all six entry transports. This discharges the hereditary
-   declaration contract's residual-budget uniformity requirement without
-   target determinism or target-execution certificates.
+   `CodeWP`, and all six entry transports. Because each slack instantiation
+   initially has its own existential target endpoint, this does not by itself
+   discharge the hereditary declaration contract's fixed-post-state residual
+   budget requirement.
+   `CodeWP.exactReturn_unique` now uses deterministic Wasm execution to identify
+   all of those exact-return endpoints. Combined with
+   `ConcreteReuseCapacityCacheFrame.withBudget`, the new
+   `budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates`
+   packages one fixed execution, universal residual budget, all entry
+   transports, and the evolved whole-cache relation. No target-execution
+   certificate is introduced.
+   `PhysicalValueRel.ofRefines` and the declaration `ofRefines` adapters
+   preserve that package while exposing an actual ABI result at an admitted
+   caller-facing superkind. This fixes
+   `FIR-BUG-wasm-none-slack-existential-uniform-budget`.
    The transport-strengthened pure-external boundary now also exposes exact
    preservation of semantic globals, physical Wasm globals, and the concrete
    host cache layout. Its

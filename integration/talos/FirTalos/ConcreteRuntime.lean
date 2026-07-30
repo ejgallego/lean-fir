@@ -170,6 +170,25 @@ theorem PhysicalValueRel.toTObject
   | float32Bits valueRelated => cases valueRelated
   | float64Bits valueRelated => cases valueRelated
 
+/--
+Transport a physical/semantic value relation along the compiler's complete
+ABI refinement order.
+
+Apart from equality, the only admitted refinement is an exact `.object` or
+`.tagged` representation widened to `.tobject`; `toTObject` implements those
+two cases without changing the physical lane.
+-/
+theorem PhysicalValueRel.ofRefines
+    {witness : RefinementWitness} {actual expected : AbiKind}
+    {physical : Wasm.Value} {semantic : Value}
+    (related : PhysicalValueRel witness actual physical semantic)
+    (refines : actual.refines expected = true) :
+    PhysicalValueRel witness expected physical semantic := by
+  cases actual <;> cases expected <;>
+    simp [AbiKind.refines] at refines <;>
+    try { exact related } <;>
+    exact related.toTObject (by simp [AbiKind.refines])
+
 /-- A concrete local write binds its semantic result while preserving every
 old binding under monotone proof-witness growth. -/
 theorem EnvLocalsRelated.bind

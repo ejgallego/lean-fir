@@ -96,6 +96,53 @@ structure BudgetedCapacityPreservingSuccessfulDeclaration
             (remainingBytes - stepCost)
 
 /--
+Reinterpret a budgeted declaration result at any ABI kind refined by its
+actual physical representation. Execution and all frame transports are
+unchanged; only the returned value relation is weakened along
+`AbiKind.refines`.
+-/
+theorem BudgetedCapacityPreservingSuccessfulDeclaration.ofRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {actualKind expectedKind : AbiKind}
+    {resultValue : Value}
+    {physical : Wasm.Value}
+    {stepCost : Nat}
+    (declaration :
+      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+        sourceFunction module hostEnv sourceExternals sourceRuntime
+        resultRuntime sourceEnv sourceCode targetFunction functionIndex initial
+        afterCall initialWitness resultWitness parameters actualKind resultValue
+        physical stepCost)
+    (refines : actualKind.refines expectedKind = true) :
+    BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+      sourceFunction module hostEnv sourceExternals sourceRuntime resultRuntime
+      sourceEnv sourceCode targetFunction functionIndex initial afterCall
+      initialWitness resultWitness parameters expectedKind resultValue physical
+      stepCost := by
+  exact {
+    declaration with
+    capacityPreserving := {
+      declaration.capacityPreserving with
+      successful := {
+        declaration.capacityPreserving.successful with
+        valueRelated :=
+          declaration.capacityPreserving.successful.valueRelated.ofRefines
+            refines } } }
+
+/--
 Exact concrete partial-application execution plus the two hereditary frame
 facts needed by a caller.
 

@@ -22,6 +22,60 @@ def ExactReturnControlPost (afterCall : Wasm.Store Host)
   fun continuation =>
     continuation = .Return afterCall [physical]
 
+/--
+Two exact-return proofs for the same concrete execution identify the same
+store and physical result.
+
+`Wasm.wp` is fuel-parametric, but execution at any common sufficient fuel is
+the same deterministic `Wasm.exec` call. This theorem is the bridge needed
+when a resource proof re-runs one generated body with additional
+address-space slack: the second existential result is not a new target
+execution.
+-/
+theorem CodeWP.exactReturn_unique
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {firstStore secondStore : Wasm.Store Host}
+    {firstPhysical secondPhysical : Wasm.Value}
+    (first :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals witness tail
+        (ExactReturnControlPost firstStore firstPhysical))
+    (second :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals witness tail
+        (ExactReturnControlPost secondStore secondPhysical)) :
+    firstStore = secondStore ∧ firstPhysical = secondPhysical := by
+  have firstWP := first.2.2
+  have secondWP := second.2.2
+  unfold Wasm.wp at firstWP secondWP
+  obtain ⟨firstFuel, firstRuns⟩ := firstWP
+  obtain ⟨secondFuel, secondRuns⟩ := secondWP
+  have firstResult :=
+    firstRuns (max firstFuel secondFuel) (Nat.le_max_left _ _)
+  have secondResult :=
+    secondRuns (max firstFuel secondFuel) (Nat.le_max_right _ _)
+  dsimp [ExactReturnControlPost] at firstResult secondResult
+  have resultEq :
+      Wasm.Continuation.Return firstStore [firstPhysical] =
+        Wasm.Continuation.Return secondStore [secondPhysical] :=
+    firstResult.symm.trans secondResult
+  injection resultEq with storeEq valuesEq
+  injection valuesEq with physicalEq
+  exact ⟨storeEq, physicalEq⟩
+
 /-- Weakening the target continuation preserves the concrete code judgment. -/
 theorem CodeWP.conseq
     {context : Fir.Wasm.Context}

@@ -4191,6 +4191,43 @@ example
   ⟨callee.declaration, callee.cacheTable⟩
 
 /--
+The hereditary cache package can expose a caller-facing ABI superkind without
+changing its execution, resource, or whole-cache postconditions.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {actualKind expectedKind : AbiKind}
+    {resultValue : Value}
+    {physical : Wasm.Value}
+    {stepCost : Nat}
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule sourceFunction module hostEnv sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode targetFunction
+        functionIndex initial afterCall initialWitness resultWitness parameters
+        actualKind resultValue physical stepCost)
+    (refines : actualKind.refines expectedKind = true) :
+    BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+      sourceModule sourceFunction module hostEnv sourceExternals sourceRuntime
+      resultRuntime sourceEnv sourceCode targetFunction functionIndex initial
+      afterCall initialWitness resultWitness parameters expectedKind resultValue
+      physical stepCost :=
+  callee.ofRefines refines
+
+/--
 Executable witness for
 `FIR-BUG-wasm-none-lazy-cache-result-refinement`.
 

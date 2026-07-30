@@ -5263,19 +5263,21 @@ from a frame at `requiredBytes + slack` and returns the final frame at exactly
 `codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack` combines
 that result with the fixed-entry transport invariant, returning the exact
 source result, target `CodeWP`, residual caller frame, and all six
-entry-to-exit transports. This is the uniform residual-budget theorem required
-by `BudgetedCapacityPreservingSuccessfulDeclaration`; it is derived from
-operation-family laws rather than target determinism or an execution
-certificate.
+entry-to-exit transports. Each slack instantiation may initially name a
+different existential target endpoint, so this result alone does not establish
+the fixed-post-state residual field required by
+`BudgetedCapacityPreservingSuccessfulDeclaration`. Exact-return determinism
+must additionally identify those endpoints; no execution certificate is
+required.
 
 The remaining construction work is explicit. Each admitted operation family
 must rebuild the entry-relative cache frame from its existing
 current-to-successor transport package. Production lowering/adaptation must
 then select each internal initializer body uniformly, and the resulting
 structural proof must supply the cache-aware hereditary declaration package.
-The residual address-space field is now supplied by W6.6gzx. The remaining
-items are module-level compiler/runtime obligations, not call-site execution
-certificates.
+W6.6gzx supplies the slack-parametric resource evidence; W6.6hg below packages
+it at one fixed deterministic endpoint. The remaining items are module-level
+compiler/runtime obligations, not call-site execution certificates.
 
 W6.6gzy closes the first entry-relative cache operation family. The
 transport-strengthened pure-external boundary now retains three facts that
@@ -5501,6 +5503,25 @@ first executable match. This fixes
 `FIR-BUG-wasm-none-saturated-candidate-arbitrary-address` without weakening
 decoding or adding a target execution certificate. Recursive hereditary
 declaration construction remains the next call slice.
+
+W6.6hg closes the hereditary declaration packaging boundary exposed by the
+entry-relative structural theorem.
+`CodeWP.exactReturn_unique` proves that two exact-return `CodeWP` executions
+from the same target configuration name the same post-store and physical
+result. `ConcreteReuseCapacityCacheFrame.withBudget` then re-runs the
+slack-parametric structural proof at any caller budget and transports its
+residual frame back to the canonical endpoint.
+
+`budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates` packages
+one exact source/target execution, all entry transports, universal residual
+budget, and the evolved whole-cache relation as
+`BudgetedCapacityPreservingSuccessfulDeclarationWithCache`.
+`PhysicalValueRel.ofRefines` and the two declaration `ofRefines` adapters
+expose that same package at an admitted caller-facing ABI superkind without
+changing execution or cache state. This fixes
+`FIR-BUG-wasm-none-slack-existential-uniform-budget`. The next slice constructs
+the recursive hereditary declaration family from generated declarations and
+uses these packages in named and saturated calls.
 
 ## Parallel agent packages
 
