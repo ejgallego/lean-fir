@@ -970,6 +970,63 @@ theorem alloc_ordinaryPersistenceTransport
         rfl
       · simp [findCell?, same, beforeFound] at afterFound
 
+/-- Semantic scalar boxing either leaves the source heap unchanged for a
+tagged result or appends one fresh ordinary boxed cell. -/
+theorem box_ordinaryPersistenceTransport
+    {before after : RuntimeState} {type : Expr} {value result : Value}
+    (operation : box before type value = .ok (after, result)) :
+    OrdinaryPersistenceTransport before after := by
+  unfold box at operation
+  simp only [Bind.bind, Except.bind] at operation
+  cases value with
+  | scalar scalar =>
+      simp only at operation
+      by_cases tagged : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · rw [if_pos tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq : before = after := congrArg Prod.fst pairEq
+        subst after
+        exact OrdinaryPersistenceTransport.refl before
+      · rw [if_neg tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq :
+            (alloc before (.boxed type (.scalar scalar))).1 = after :=
+          congrArg Prod.fst pairEq
+        subst after
+        exact alloc_ordinaryPersistenceTransport
+          (before := before)
+          (after := (alloc before (.boxed type (.scalar scalar))).1)
+          (object := .boxed type (.scalar scalar))
+          (reference := (alloc before (.boxed type (.scalar scalar))).2)
+          (operation := rfl)
+  | usize value =>
+      simp only at operation
+      by_cases tagged : value.toNat ≤ maxTaggedPayload
+      · rw [if_pos tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq : before = after := congrArg Prod.fst pairEq
+        subst after
+        exact OrdinaryPersistenceTransport.refl before
+      · rw [if_neg tagged] at operation
+        simp only [pure, Except.pure] at operation
+        have pairEq := Except.ok.inj operation
+        have afterEq :
+            (alloc before (.boxed type (.usize value))).1 = after :=
+          congrArg Prod.fst pairEq
+        subst after
+        exact alloc_ordinaryPersistenceTransport
+          (before := before)
+          (after := (alloc before (.boxed type (.usize value))).1)
+          (object := .boxed type (.usize value))
+          (reference := (alloc before (.boxed type (.usize value))).2)
+          (operation := rfl)
+  | object reference => simp at operation
+  | erased => simp at operation
+  | reuseToken token => simp at operation
+
 private theorem allocCtor_preserves_persistent_false
     {before after : RuntimeState} {info : LCNF.CtorInfo}
     {args : Array Value} {result : Value} {location : Location}

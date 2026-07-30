@@ -13809,6 +13809,130 @@ theorem
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Successful integer boxing erases the destination reuse fact and preserves all
+older facts across its immediate, promoted-tag, and fresh heap-box branches.
+The source transition likewise either preserves the heap or appends one fresh
+ordinary cell.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_box
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => BoxSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨scalarId, kind, valueEq, valueKind, scalarCompiled, annotationKind,
+      resultCompiled⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  obtain ⟨sourceScalar, sourceLookup, semanticBox⟩ :=
+    sourceLetResult_box_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet scalarId,
+          .call (.runtime (.box kind.abiKind .tobject))] :=
+    compileLetValue_box valueEq valueKind scalarCompiled annotationKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, scalarFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [scalarId])
+      (operation := .box kind.abiKind .tobject) valueAdapted
+  cases scalarFound with
+  | cons scalarFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedScalarIndex, alignedScalarFound, scalarKindAt⟩ :=
+        spec.localsAligned scalarCompiled
+      rw [scalarFound] at alignedScalarFound
+      injection alignedScalarFound with scalarIndexEq
+      subst alignedScalarIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨physical, hScalar, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup scalarFound scalarKindAt
+      obtain ⟨scalar, kindEq, sourceScalarEq, physicalEq⟩ :=
+        physicalRelated.boxedScalar_of_kind
+      subst sourceScalar
+      subst physical
+      have boxFits :
+          boxScalarAllocationBytes ≤ remainingBytes := by
+        simpa [directLetAllocationCost, valueEq] using allocationFits
+      obtain ⟨heap, word, boxed, remainingBudget⟩ :=
+        related.stateRelated.1.heap.frontier.boxScalar_eq_ok_of_budget scalar
+          budget boxFits
+      obtain ⟨updated, targetSet⟩ :=
+        FirTalos.Correctness.locals_set?_exists
+          (frameAligned.validIndex resultFound)
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.boxCall callFound
+      obtain ⟨actualRuntime, actualValue, nextWitness, extension,
+          nextRuntimeRelated, valueRelated, step⟩ :=
+        letStepSimulates_box (context := context) kindEq valueEq sourceLookup
+          related.stateRelated resultFound resultKindAt hScalar boxed imported
+          spec.hostsSatisfy inBounds contracted params results targetSet
+      obtain ⟨runtimeEq, sourceValueEq⟩ :=
+        SourceLetResult.deterministic sourceStep step.1
+      subst actualRuntime
+      subst actualValue
+      have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+      have nextFrame :
+          ConcreteLocalFrameAligned sourceFunction nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+      have capacityTransport :
+          HeaderCapacityTransport targetStore.host.runtime.heap heap witness :=
+        HeaderCapacityTransport.boxScalar targetStore.host.runtime.heap heap
+          witness scalar word related.stateRelated.1.heap.frontier boxed
+      have nextRelated :
+          ReuseCapacityStateRelated
+            (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+            nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        related.ofLetStepEraseOfSet step resultFound targetSet
+          (WitnessTransport.ofExtension extension) capacityTransport
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel
+            (eraseReuseCapacityFact facts decl.fvarId) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) :=
+        ordinaryTokens.eraseBind
+          (box_ordinaryPersistenceTransport semanticBox)
+      have transfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [reuseCapacityLetFacts?, valueEq]
+      have nextBudget :
+          (replaceHeap targetStore heap).host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - boxScalarAllocationBytes) := by
+        simpa [replaceHeap, clearFailure] using remainingBudget
+      exact ⟨replaceHeap targetStore heap, updated, nextWitness,
+        eraseReuseCapacityFact facts decl.fvarId, step,
+        by simp [replaceHeap, clearFailure],
+        by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        transfer, nextRelated, nextOrdinary, nextFrame, by
+          simpa [directLetAllocationCost, valueEq] using nextBudget⟩
+
+/--
 Successful typed unboxing preserves the facts-indexed reuse frame. The source
 heap and concrete heap are unchanged, so the destination fact is erased while
 all older capacity facts and ordinary-token obligations cross reflexively.
@@ -14963,6 +15087,102 @@ theorem ConcreteSupportedExport.correctReuseReadOnlyConstructorCode
             callerTail) :=
   spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
+    parameterCount
+
+/--
+Facts-indexed reuse plus the complete heap-preserving direct family, nonempty
+constructors, and integer boxing.
+-/
+def ReuseConstructorBoxSupported (context : Fir.Wasm.Context)
+    (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure) : Prop :=
+  ReuseReadOnlyConstructorSupported context facts decl ∨
+    BoxSupported context decl
+
+/-- Compose integer boxing with the current allocating facts-indexed family. -/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseConstructorBoxSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun facts decl =>
+        ReuseReadOnlyConstructorSupported context facts decl ∨
+          BoxSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction)
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | inl reuseReadOnlyConstructor =>
+      exact
+        spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
+          reuseReadOnlyConstructor stepFits invariant sourceStep valueCompiled
+          valueAdapted resultFound
+  | inr box =>
+      exact spec.reuseCapacityDirectLetRuntimeRefinesWithCost_box box stepFits
+        invariant sourceStep valueCompiled valueAdapted resultFound
+
+/--
+Finite whole-export partial correctness for arbitrary interleavings of reuse,
+heap-preserving direct operations, nonempty constructors, and integer boxing.
+-/
+theorem ConcreteSupportedExport.correctReuseConstructorBoxCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context
+        (ReuseConstructorBoxSupported context) directLetAllocationCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
     parameterCount
 
 /--

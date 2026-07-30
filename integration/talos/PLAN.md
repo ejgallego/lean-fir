@@ -4537,6 +4537,18 @@ address-space budget. `ReuseReadOnlySupported` and therefore
 ownership-sensitive observations. The next widening step remains Natural,
 String, and boxed ordinary allocation.
 
+W6.6gg adds integer boxing across all three physical representations.
+`box_ordinaryPersistenceTransport` proves that semantic boxing either leaves
+the source heap unchanged or appends one fresh ordinary box.
+`HeaderCapacityTransport.boxScalar` already gives the matching concrete
+retained-header transport for immediate, promoted-tag, and heap-box results.
+The facts-indexed production law now composes those transports with the exact
+one-slot reservation, witness extension, destination-fact erasure, and
+generated export. `correctReuseConstructorBoxCode` covers arbitrary finite
+interleavings of boxing with reuse, every heap-preserving direct reader, and
+nonempty constructors. Natural and String literals are the remaining direct
+allocating families in this fragment.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -83,10 +83,10 @@ available when its threaded ordinary-token invariant holds.
 `OrdinaryPersistenceTransport` now isolates the exact condition for an
 intervening operation. Local aliases, immediate literals, all successful
 read-only projection families, typed unboxing, and `isShared` satisfy it.
-Fresh ordinary allocation and `allocCtor` satisfy it too, yielding a mixed
-constructor/read-only/reuse whole-export theorem. This bug still blocks
-validator-wide admission of effects that can create persistent aliases or
-otherwise fail that transport.
+Fresh ordinary allocation, `allocCtor`, and all integer-boxing representation
+branches satisfy it too, yielding mixed constructor/boxing/read-only/reuse
+whole-export theorems. This bug still blocks validator-wide admission of
+effects that can create persistent aliases or otherwise fail that transport.
 
 ## Classification and triage
 

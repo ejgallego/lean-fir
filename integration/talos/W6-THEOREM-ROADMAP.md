@@ -664,6 +664,10 @@ acceptance tests pass.
    `OrdinaryPersistenceTransport` and its concrete capacity-result/header
    transport. `correctReuseReadOnlyConstructorCode` is the first allocating
    mixed whole-export endpoint.
+   Integer boxing now joins this endpoint through
+   `correctReuseConstructorBoxCode`; its immediate, promoted, and heap
+   branches share one source ordinary-persistence theorem and one concrete
+   retained-header transport.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
