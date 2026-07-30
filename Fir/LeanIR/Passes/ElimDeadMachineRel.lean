@@ -10552,6 +10552,80 @@ theorem SourceMachineOwnershipBelowFrontier.bindValue
     bounded.env valueBound
   frames := bounded.frames
 
+/-- Constructor allocation and its result binding lift from the local
+environment carrier to the whole machine by transporting every saved bind
+environment across the advanced frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.allocCtorState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.allocCtor state.runtime info arguments =
+        .ok (result, value)) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime := result
+        env := bind state.env binder value } := by
+  let output := allocCtor_resultBelowFrontier effect
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.allocCtorState evaluated effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier
+      bounded.frames output.frontier)
+
+/-- Object-field replacement leaves the frontier fixed, so its local
+environment/heap law transports every suspended bind environment unchanged. -/
+theorem SourceMachineOwnershipBelowFrontier.setObjectFieldState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (evaluated :
+      evalArg state.env fieldArgument = .ok field)
+    (effect :
+      Fir.LeanIR.Impure.setObjectField state.runtime object index field =
+        .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.setObjectFieldState evaluated effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [setObjectField_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Reset's fixed frontier similarly lifts its local ownership proof through
+the complete machine stack. -/
+theorem SourceMachineOwnershipBelowFrontier.resetState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.reset state.runtime count object =
+        .ok (result, token)) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.resetState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [reset_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Both concrete reuse and its allocation fallback lift through result
+binding while all saved bind environments follow the result frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.reuseState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (effect :
+      Fir.LeanIR.Impure.reuse state.runtime
+          (.reuseToken tokenLocation) info updateHeader arguments =
+        .ok (result, value)) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime := result
+        env := bind state.env binder value } := by
+  let output := bounded.heap.reuseResultBelowFrontier effect
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.reuseState evaluated effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier
+      bounded.frames output.frontier)
+
 /-- Pushing a bind frame saves the already bounded current environment. -/
 theorem SourceMachineOwnershipBelowFrontier.pushBindFrame
     (bounded : SourceMachineOwnershipBelowFrontier state) :
@@ -14143,6 +14217,115 @@ theorem coreStep_deletedReuse_of_ready_binderReady
         coreStep_deletedLet_binderReadyReachableRelated
           sourceState targetState programs frames continuation joins env
           absent evaluated next⟩
+
+/-- The hereditary deleted-reuse edge also preserves complete machine
+ownership. The concrete reuse effect feeds both the source-only runtime
+relation and the full-stack result-binding carrier. -/
+theorem coreStep_deletedReuse_of_ready_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedReuseReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      token info arguments)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState) :
+    let declaration : LCNF.LetDecl .impure := {
+      fvarId
+      binderName
+      type
+      value := .reuse token info updateHeader arguments }
+    ∃ nextRuntime value,
+      let sourceAfter := {
+        sourceState with
+        runtime := nextRuntime
+        env := bind sourceState.env fvarId value
+        control := .code sourceContinuation }
+      coreStep { sourceState with
+          control := .code (.let declaration sourceContinuation) } =
+          .next sourceAfter ∧
+        BinderReadyReachableMachineRelated fuel rho sourceAfter
+          { targetState with control := .code targetContinuation } ∧
+        SourceMachineOwnershipBelowFrontier sourceAfter := by
+  dsimp only
+  cases ready with
+  | none values tokenRead argumentsRead arity =>
+      rcases runtime.reuseNoneLeftGarbage
+          info values arity updateHeader with
+        ⟨nextRuntime, value, effect, next⟩
+      have evaluated :
+          evalLetValue sourceState {
+            fvarId
+            binderName
+            type
+            value := .reuse token info updateHeader arguments
+          } = .ok (nextRuntime, .value value) := by
+        simp only [evalLetValue, tokenRead, Bind.bind, Except.bind,
+          argumentsRead]
+        rw [effect]
+        rfl
+      rcases coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next with
+        ⟨transition, afterRelated⟩
+      have afterOwnership :=
+        (ownership.reuseState
+          (binder := fvarId)
+          (argumentExprs := arguments)
+          (arguments := values)
+          (tokenLocation := none)
+          (info := info)
+          (updateHeader := updateHeader)
+          argumentsRead effect)
+          |>.withControlAndJoins
+            (.code sourceContinuation) sourceState.joins
+      exact ⟨nextRuntime, value, transition, afterRelated,
+        by simpa using afterOwnership⟩
+  | some location cell oldObject values tokenRead argumentsRead found live
+      objectEq arity unreachable =>
+      rcases runtime.reuseSomeLeftUnreachable
+          found live objectEq unreachable info values arity updateHeader with
+        ⟨nextRuntime, effect, next⟩
+      have evaluated :
+          evalLetValue sourceState {
+            fvarId
+            binderName
+            type
+            value := .reuse token info updateHeader arguments
+          } =
+            .ok (nextRuntime, .value (.object (.heap location))) := by
+        simp only [evalLetValue, tokenRead, Bind.bind, Except.bind,
+          argumentsRead]
+        rw [effect]
+        rfl
+      rcases coreStep_deletedLet_binderReadyReachableRelated
+          sourceState targetState programs frames continuation joins env
+          absent evaluated next with
+        ⟨transition, afterRelated⟩
+      have afterOwnership :=
+        (ownership.reuseState
+          (binder := fvarId)
+          (argumentExprs := arguments)
+          (arguments := values)
+          (tokenLocation := some location)
+          (info := info)
+          (updateHeader := updateHeader)
+          argumentsRead effect)
+          |>.withControlAndJoins
+            (.code sourceContinuation) sourceState.joins
+      exact ⟨nextRuntime, .object (.heap location),
+        transition, afterRelated, by simpa using afterOwnership⟩
 
 /-- Proof-visible ownership contract for deleting a `reset`.  The interpreter
 effect must succeed and preserve every heap cell reachable from the active
@@ -27649,6 +27832,56 @@ theorem match_deletedReuseLetStep_binderReady
           transition afterRelated step with
         ⟨targetAfter, _targetEq, targetPath, relatedAfter⟩
       exact ⟨targetAfter, targetPath, relatedAfter⟩
+
+/-- Semantic-step wrapper for the ownership-strengthened deleted-reuse edge.
+The target stutters to its exact continuation while the concrete source
+successor retains the complete machine carrier. -/
+theorem match_deletedReuseStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (absent : used.contains fvarId = false)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ready : DeletedReuseReadyAt sourceState
+      (runtimeRoots sourceState.runtime
+        (envRootsOn used sourceState.env ++ sourceFrameRoots))
+      token info arguments)
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId
+          binderName
+          type
+          value := .reuse token info updateHeader arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        { targetState with control := .code targetContinuation }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases coreStep_deletedReuse_of_ready_binderReady_withOwnership
+      sourceState targetState programs frames continuation joins env absent
+      runtime ready ownership with
+    ⟨nextRuntime, value, transition, afterRelated, afterOwnership⟩
+  have sourceOwnership :=
+    afterOwnership.ofStepNext transition step
+  rcases match_sourceOnlyCoreStep_binderReady
+      transition afterRelated step with
+    ⟨targetAfter, targetEq, targetPath, relatedAfter⟩
+  exact ⟨targetAfter, targetPath, relatedAfter, sourceOwnership⟩
 
 /-- Ledger-carrying retained matcher specialized to a failed reuse token.
 The token and arguments are read successfully on the source, transported by

@@ -5035,6 +5035,82 @@ theorem deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier :
   }
   exact bounded
 
+/-- The ownership-strengthened active-code matcher carries the complete source
+machine invariant across the failed-token reuse allocation and dead result
+binding while the target stutters at its retained continuation. -/
+theorem deletedReuseNoneExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedReuseNoneSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals deletedReuseTargetState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        deletedReuseNoneSourceState.program
+        deletedReuseTargetState.program := by
+    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseSomeProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        deletedReuseNoneSourceState.frames
+        deletedReuseTargetState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 2 neutralUsed
+        (.return live) (.return live) := by
+    apply retainedLargeNatContinuationRun.toBinderReadyShadowCodeGraphAt
+    · omega
+    · exact UsedSubset.refl neutralUsed
+    · apply
+        retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+        (index :=
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+      · simp [codeBinderIds, BinderNamesUnique]
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        deletedReuseNoneSourceState.joins
+        deletedReuseTargetState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedReuseNoneSourceState.env deletedReuseTargetState.env := by
+    simpa [deletedReuseNoneSourceState, deletedReuseTargetState] using
+      deletedReuseNoneEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedReuseNoneSourceState.runtime
+        deletedReuseTargetState.runtime
+        (envRootsOn neutralUsed deletedReuseNoneSourceState.env ++ [])
+        (envRootsOn neutralUsed deletedReuseTargetState.env ++ []) := by
+    simpa using deletedReuseNoneRuntimeRelated
+  have ownership :
+      SourceMachineOwnershipBelowFrontier
+        deletedReuseNoneSourceState :=
+    SourceMachineOwnershipBelowFrontier.ofEnvironment
+      deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier
+      (by trivial)
+  simpa [deletedReuseNoneSourceState, deletedReuseTargetState,
+    deletedReuseBefore, deletedReuseAfter, deadReuseDecl, letDecl] using
+    (match_deletedReuseStep_binderReady_withOwnership
+      (sourceState := deletedReuseNoneSourceState)
+      (targetState := deletedReuseTargetState)
+      (sourceContinuation := .return live)
+      (targetContinuation := .return live)
+      (fvarId := dead)
+      (binderName := dead.name)
+      (type := objType)
+      (token := reuseTokenVar)
+      (info := oneFieldInfo)
+      (updateHeader := true)
+      (arguments := #[.fvar reuseArgVar])
+      programs frames continuation joins env (by native_decide)
+      runtime (by simpa using deletedReuseNoneReady) ownership step)
+
 /-- The failed-token fixture exercises the complete-environment bridge. Its
 dead source operand suffices to preserve heap ownership across the allocation
 fallback without widening target continuation liveness. -/
