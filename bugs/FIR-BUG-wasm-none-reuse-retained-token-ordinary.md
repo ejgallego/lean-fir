@@ -155,3 +155,13 @@ is now executable and precise: generated-environment composition must prove
 the source publication equation plus reachability disjointness for each
 retained fact, or the shared validator must invalidate facts that cannot meet
 that condition.
+
+The subsequent cache-hit boundary is now explicit as well.
+`PopulatedLazyCacheSlotRel` relates the semantic cache entry to the initialized
+Wasm flag/value globals and its checked physical-value refinement. Exact miss
+publication constructs this relation, and the compiler-anchored hit theorem
+consumes it to derive the destination write and post-binding state relation.
+This removes another opaque hit premise without weakening the runtime. The
+remaining program-level work is to thread the per-slot relation across the
+complete generated cache table alongside the source publication/disjointness
+obligation above.

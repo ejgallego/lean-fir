@@ -803,7 +803,17 @@ acceptance tests pass.
    through semantic `setGlobal`; empty facts and non-heap values are immediate
    instances. The executable miss constructor consequently asks for the exact
    source publication equation and graph disjointness rather than an opaque
-   transport theorem. Resolve the remaining
+   transport theorem.
+   `PopulatedLazyCacheSlotRel` now supplies the previously missing relation
+   between one semantic cache entry and its Wasm flag/value pair.
+   Miss publication constructs that relation, while
+   `hit_of_populatedSlot` derives the checked local update and post-binding
+   state relation. `hit_of_compiledCache` fixes the exact production
+   compiler/adapter program and cache indices. The uniform implementation law
+   now receives the full reuse-capacity frame, including the local-frame
+   bounds required by that write.
+   Lift this per-slot relation to the complete generated cache table and
+   thread it through the canonical program invariant. Resolve the remaining
    `FIR-BUG-wasm-none-reuse-retained-token-ordinary` integration instance by
    deriving those facts from the generated declaration environment or by
    coordinating alias-invalidating validator transfer, then close the

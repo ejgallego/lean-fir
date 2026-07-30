@@ -4876,6 +4876,28 @@ post-state equation from the source lazy-miss construction and prove
 disjointness for every retained fact, or coordinate a shared validator
 transfer that invalidates facts for which disjointness cannot be established.
 
+W6.6gze adds the generated cache-state layer needed to connect a published
+miss to a later hit. `PopulatedLazyCacheSlotRel` relates the exact semantic
+global entry to its initialized Wasm flag/value pair and the
+`PhysicalValueRel` at the declaration's checked result kind.
+`PopulatedLazyCacheSlotRel.ofPublication` derives that relation from the
+already-executed source `setGlobal` plus the two Wasm `global.set`s.
+`BudgetedCapacityPreservingLazyStep.hit` now derives its post-binding
+`StateRelated` fact from the cached physical lane instead of accepting it as
+an opaque premise; `hit_of_populatedSlot` additionally constructs the checked
+destination write from `ConcreteLocalFrameAligned`.
+`hit_of_compiledCache` anchors the result to the production
+`compileLetValue`/Talos-adapter equations and exact `2 * cacheIndex` layout.
+
+The uniform `LazyCacheImplementation` boundary consequently consumes the
+canonical `ConcreteReuseCapacityFrame`, not merely its semantic-state
+component: local-frame capacity is a real generated execution resource.
+The next generated-environment slice must lift the per-slot relation to all
+cache declarations, establish its empty initial state, and thread it across
+ordinary operations and miss publication. The miss side still separately
+owes the source publication equation and retained-token disjointness (or
+validator invalidation).
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
