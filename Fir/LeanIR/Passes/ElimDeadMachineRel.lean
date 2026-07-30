@@ -7520,6 +7520,100 @@ structure SourceOnlyHeapClosureBinding
     ¬Reachable heap [.object (.heap location)]
       (ledger.owner rightLocation)
 
+/-- Static heap ownership well-formedness at the allocation frontier.
+Every stored cell and every heap-valued owned edge names an address strictly
+below `nextLocation`; in particular, no owned path can contain the next fresh
+allocation address. -/
+structure HeapOwnershipBelowFrontier
+    (runtime : RuntimeState) : Prop where
+  cell_lt : ∀ {location cell},
+    findCell? runtime.heap location = some cell →
+      location < runtime.nextLocation
+  owned_lt : ∀ {parent cell child},
+    findCell? runtime.heap parent = some cell →
+    Value.object (.heap child) ∈ cell.object.ownedValues.toList →
+      child < runtime.nextLocation
+
+/-- Every location reachable from a known heap root lies below the fresh
+frontier of an ownership-bounded heap. -/
+theorem HeapOwnershipBelowFrontier.reachable_lt
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (rootFound : ∃ cell,
+      findCell? runtime.heap root = some cell)
+    (reachable :
+      Reachable runtime.heap [.object (.heap root)] location) :
+    location < runtime.nextLocation := by
+  cases reachable with
+  | root member =>
+      have same : location = root := by
+        simpa using member
+      subst location
+      rcases rootFound with ⟨cell, found⟩
+      exact wellFormed.cell_lt found
+  | child parentReachable found member reference =>
+      rw [reference] at member
+      exact wellFormed.owned_lt found member
+
+/-- A known heap root in an ownership-bounded runtime cannot reach the next
+fresh allocation address. -/
+theorem HeapOwnershipBelowFrontier.frontierUnreachable
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (rootFound : ∃ cell,
+      findCell? runtime.heap root = some cell) :
+    ¬Reachable runtime.heap [.object (.heap root)]
+      runtime.nextLocation := by
+  intro reachable
+  exact Nat.lt_irrefl runtime.nextLocation
+    (wellFormed.reachable_lt rootFound reachable)
+
+/-- The initial empty runtime satisfies the static ownership bound. -/
+theorem HeapOwnershipBelowFrontier.empty :
+    HeapOwnershipBelowFrontier ({} : RuntimeState) := by
+  constructor
+  · intro location cell found
+    simp [findCell?] at found
+  · intro parent cell child found member
+    simp [findCell?] at found
+
+/-- Allocation preserves ownership-boundedness when every heap reference
+owned by the new object already lies below the old frontier. -/
+theorem HeapOwnershipBelowFrontier.alloc
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (ownedBelow : ∀ {child},
+      Value.object (.heap child) ∈ object.ownedValues.toList →
+        child < runtime.nextLocation)
+    (persistent : Bool) :
+    HeapOwnershipBelowFrontier
+      (alloc runtime object persistent).1 := by
+  constructor
+  · intro location cell found
+    by_cases fresh : location = runtime.nextLocation
+    · subst location
+      exact Nat.lt_succ_self runtime.nextLocation
+    · have oldFound :
+          findCell? runtime.heap location = some cell := by
+        simpa [Fir.LeanIR.Impure.alloc, findCell?, Ne.symm fresh] using found
+      exact Nat.lt_trans (wellFormed.cell_lt oldFound)
+        (Nat.lt_succ_self runtime.nextLocation)
+  · intro parent cell child found member
+    by_cases fresh : parent = runtime.nextLocation
+    · subst parent
+      have cellEq :
+          ({
+            object
+            persistent
+            rc := if persistent then 0 else 1
+          } : HeapCell) = cell := by
+        simpa [Fir.LeanIR.Impure.alloc, findCell?] using found
+      subst cell
+      exact Nat.lt_trans (ownedBelow member)
+        (Nat.lt_succ_self runtime.nextLocation)
+    · have oldFound :
+          findCell? runtime.heap parent = some cell := by
+        simpa [Fir.LeanIR.Impure.alloc, findCell?, Ne.symm fresh] using found
+      exact Nat.lt_trans (wellFormed.owned_lt oldFound member)
+        (Nat.lt_succ_self runtime.nextLocation)
+
 /-- A reset-token local carries the same source-only allocation capability in
 the form consumed by a later concrete-token `reuse`. -/
 structure SourceOnlyReuseTokenBinding
@@ -9545,6 +9639,23 @@ theorem LedgerAllocBothResult.heapClosureBinding_of_frontierUnreachable
     closure.pairedAllocation allocated.runtime.ledger
       allocated.extension mapping frontierUnreachable
   exact ledgerClosure.alloc frontierUnreachable leftObject persistent
+
+/-- Static ownership bounds discharge the fresh-frontier premise of the
+paired-allocation closure lifecycle theorem. A successful root lookup is the
+only dynamic witness required by this wrapper. -/
+theorem LedgerAllocBothResult.heapClosureBinding_of_heapOwnershipBelowFrontier
+    (allocated : LedgerAllocBothResult rho left right
+      leftExtra rightExtra leftObject rightObject persistent)
+    (ledger : TargetAllocationLedger rho right.nextLocation)
+    (closure :
+      SourceOnlyHeapClosureBinding ledger env binder location left.heap)
+    (wellFormed : HeapOwnershipBelowFrontier left)
+    (rootFound : ∃ cell,
+      findCell? left.heap location = some cell) :
+    SourceOnlyHeapClosureBinding allocated.runtime.ledger
+      env binder location (alloc left leftObject persistent).1.heap :=
+  allocated.heapClosureBinding_of_frontierUnreachable ledger closure
+    (wellFormed.frontierUnreachable rootFound)
 
 /-- Proof-relevant paired allocation result for a retained partial
 application closure. -/

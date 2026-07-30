@@ -5058,20 +5058,25 @@ theorem deletedCtorHeapClosureSurvivesPairedAllocation :
     simp [HeapObject.ownedValues] at member
   have closure :=
     objectBinding.closure_of_no_heap_children found noChildren
-  have frontierUnreachable :
-      ¬Reachable deletedCtorLifecycleSourceOnly.nextRuntime.heap
-        [.object (.heap 0)]
-        deletedCtorLifecycleSourceOnly.nextRuntime.nextLocation := by
-    intro reachable
-    have same :=
-      reachable_eq_of_no_heap_children found noChildren reachable
-    change (1 : Nat) = 0 at same
-    omega
+  have wellFormed :
+      HeapOwnershipBelowFrontier
+        deletedCtorLifecycleSourceOnly.nextRuntime := by
+    change HeapOwnershipBelowFrontier
+      (alloc ({} : RuntimeState)
+        (.ctor {
+          tag := oneFieldInfo.cidx
+          objectFields := #[.erased]
+          usizeFields := Array.replicate oneFieldInfo.usize 0
+          scalarFields := []
+        }) false).1
+    apply HeapOwnershipBelowFrontier.empty.alloc
+    intro child member
+    simp [HeapObject.ownedValues] at member
   exact
     deletedCtorLifecyclePaired
-      |>.heapClosureBinding_of_frontierUnreachable
+      |>.heapClosureBinding_of_heapOwnershipBelowFrontier
         deletedCtorLifecycleSourceOnly.runtime.ledger
-        closure frontierUnreachable
+        closure wellFormed ⟨_, found⟩
 
 /-- Bind the deleted constructor under the object local consumed by reset. -/
 noncomputable def deletedCtorLifecycleResetState : MachineState :=
