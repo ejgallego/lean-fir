@@ -4288,6 +4288,21 @@ def retainedNullaryFapState : MachineState :=
   { program := { decls := #[] }
     control := .code retainedNullaryFap }
 
+/-- The retained-call fixture starts from an empty heap, environment, and
+frame stack, so its complete source ownership carrier is immediate. -/
+theorem retainedNullaryFapSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier retainedNullaryFapState := by
+  exact {
+    heap := by
+      simpa [retainedNullaryFapState] using
+        HeapOwnershipBelowFrontier.empty
+    env := by
+      intro fvarId value found
+      simp [retainedNullaryFapState, lookup] at found
+    frames := by
+      exact trivial
+  }
+
 /-- Exact retained-call regression. The nullary full application pushes the
 paired bind continuation and enters named invocation on both machines while
 the target remains at allocation frontier zero with its empty ledger. -/
@@ -4343,6 +4358,58 @@ theorem retainedNullaryFapExactStepLedgerPreserved
       (usedBound := UsedSubset.refl neutralUsed)
       retainedNullaryFapState retainedNullaryFapState programs frames joins
       env runtime step
+
+/-- The same exact retained named-call edge preserves the complete source
+ownership carrier while pushing its bind continuation. -/
+theorem retainedNullaryFapExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedNullaryFapState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals retainedNullaryFapState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedNullaryFapState.program retainedNullaryFapState.program := by
+    simpa [retainedNullaryFapState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedNullaryFapState.frames retainedNullaryFapState.frames
+        [] [] := by
+    simpa [retainedNullaryFapState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 neutralUsed
+        retainedNullaryFapState.joins retainedNullaryFapState.joins := by
+    simpa [retainedNullaryFapState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        retainedNullaryFapState.env retainedNullaryFapState.env := by
+    simpa [retainedNullaryFapState] using
+      EnvRelOn.empty emptyAddressRenaming neutralUsed
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedNullaryFapState.runtime retainedNullaryFapState.runtime
+        (envRootsOn neutralUsed retainedNullaryFapState.env ++ [])
+        (envRootsOn neutralUsed retainedNullaryFapState.env ++ []) := by
+    simpa [retainedNullaryFapState] using
+      emptyRuntime_shadowRelated_of_roots
+        (envRootsOn_related
+          (EnvRelOn.empty emptyAddressRenaming neutralUsed))
+  simpa [retainedNullaryFapState, retainedNullaryFap,
+    retainedNullaryFapDecl, letDecl] using
+    retainedNullaryFapStepBinderReady
+      |>.match_retainedFapLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2)
+        (usedBound := UsedSubset.refl neutralUsed)
+        retainedNullaryFapState retainedNullaryFapState programs frames joins
+        env runtime retainedNullaryFapSourceMachineOwnershipBelowFrontier step
 
 /-- A retained one-field constructor forces the paired heap-allocation branch
 of the ledger-aware constructor matcher. -/
@@ -8123,6 +8190,24 @@ def unsafeInnerState : MachineState :=
     control := .code (.let deadCopyDecl (.return live))
     env := liveEnv }
 
+/-- The retained local-copy fixture has an empty heap and one erased
+environment value, hence a complete source ownership carrier. -/
+theorem unsafeInnerSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier unsafeInnerState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · exact {
+      heap := by
+        simpa [unsafeInnerState] using
+          HeapOwnershipBelowFrontier.empty
+      env := by
+        intro fvarId value found
+        simp [unsafeInnerState, liveEnv, Impure.bind, lookup] at found
+        cases found.2
+        intro location member
+        simp at member
+    }
+  · exact trivial
+
 def unsafeReturnState : MachineState :=
   { program := unsafeProgram
     control := .code (.return live)
@@ -8399,6 +8484,30 @@ theorem unsafeInnerExactStepPreserved
       SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter :=
   unsafeInnerExactMachineReadyAt.related.matchCodeStep_of_ready
     unsafeInnerExactMachineReadyAt rfl step
+
+/-- The exact retained local-copy edge also preserves complete source
+ownership while binding the already-owned environment value. -/
+theorem unsafeInnerExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals unsafeInnerState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals unsafeInnerState targetAfter ∧
+      SomeBinderReadyReachableMachineRelated 3 sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have sourceOwnership :
+      SourceMachineOwnershipBelowFrontier sourceAfter :=
+    unsafeInnerSourceMachineOwnershipBelowFrontier.retainedFVarLetStep
+      (fvarId := dead)
+      (binderName := dead.name)
+      (type := objType)
+      (function := live)
+      (arguments := #[])
+      (continuation := .return live)
+      (after := sourceAfter)
+      (by simpa [unsafeInnerState, deadCopyDecl, letDecl] using step)
+  rcases unsafeInnerExactStepPreserved externals step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, sourceOwnership⟩
 
 /-- Composed unsafe-retention regression: both source and target execute the
 live outer binding and the otherwise-dead but unsafe inner copy, preserving
