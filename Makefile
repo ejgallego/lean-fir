@@ -13,6 +13,7 @@ inspect:
 
 validate:
 	python3 scripts/test_validate_interpreters.py
+	node scripts/test_wasm_bit_exact_float_transport.mjs
 	node scripts/test_wasm_validation_externals.mjs
 	python3 scripts/validate_interpreters.py --plan validation-plans/native-lcnf.json
 	python3 scripts/validate_interpreters.py --verify-matrix _build/validation/matrix.json

@@ -3,6 +3,145 @@ import assert from "./wasm_assert.mjs";
 const MAX_TAGGED_PAYLOAD = 9223372036854775807n;
 const OBJECT_KINDS = new Set(["object", "tagged", "tobject"]);
 const SCALAR_KINDS = new Set(["uint8", "uint16", "uint32", "uint64"]);
+const BIT_EXACT_FLOAT_TRANSPORT_FIELDS =
+  ["encoding", "entry", "params", "result", "version"];
+const BIT_EXACT_FLOAT_TRANSPORT_ENCODING = "wasm-reinterpret-i32-i64";
+
+function transportKind(kind) {
+  if (kind === "float32") return "uint32";
+  if (kind === "float") return "uint64";
+  return kind;
+}
+
+function isFloatingKind(kind) {
+  return kind === "float32" || kind === "float";
+}
+
+function assertExactObjectFields(value, expected, context) {
+  assert.ok(value && typeof value === "object" && !Array.isArray(value),
+    `${context} must be an object`);
+  assert.deepStrictEqual(Object.keys(value).sort(), [...expected].sort(),
+    `${context} has unknown or missing fields`);
+}
+
+/**
+ * Validate the optional integer-lane facade advertised by compiler manifests.
+ *
+ * Floating signatures must advertise this capability: calling an f32/f64
+ * export through a JavaScript `number` can quiet signaling NaNs before the
+ * semantic host sees their bits. Non-floating signatures retain their original
+ * entry and physical ABI.
+ */
+export function validateBitExactFloatTransport(manifest) {
+  assert.ok(manifest && typeof manifest === "object" && !Array.isArray(manifest),
+    "manifest must be an object");
+  assert.equal(typeof manifest.entry, "string", "manifest entry must be a string");
+  assert.ok(manifest.entry.length > 0, "manifest entry must be nonempty");
+  assert.ok(Array.isArray(manifest.params), "manifest params must be an array");
+  assert.ok(manifest.params.every((kind) => typeof kind === "string"),
+    "manifest params must contain ABI kind names");
+  assert.equal(typeof manifest.result, "string", "manifest result must be a string");
+
+  const required = manifest.params.some(isFloatingKind) ||
+    isFloatingKind(manifest.result);
+  const descriptor = manifest.bitExactFloatTransport;
+  if (descriptor === undefined) {
+    assert.ok(!required,
+      "floating manifest requires bitExactFloatTransport");
+    return undefined;
+  }
+
+  assert.ok(required,
+    "non-floating manifest must not advertise bitExactFloatTransport");
+  assertExactObjectFields(descriptor, BIT_EXACT_FLOAT_TRANSPORT_FIELDS,
+    "bitExactFloatTransport");
+  assert.equal(descriptor.version, 1,
+    "unsupported bitExactFloatTransport version");
+  assert.equal(descriptor.encoding, BIT_EXACT_FLOAT_TRANSPORT_ENCODING,
+    "unsupported bitExactFloatTransport encoding");
+  assert.equal(typeof descriptor.entry, "string",
+    "bitExactFloatTransport entry must be a string");
+  assert.ok(descriptor.entry.length > 0,
+    "bitExactFloatTransport entry must be nonempty");
+  assert.notEqual(descriptor.entry, manifest.entry,
+    "bitExactFloatTransport entry must differ from the source entry");
+  assert.ok(Array.isArray(descriptor.params),
+    "bitExactFloatTransport params must be an array");
+  assert.deepStrictEqual(descriptor.params, manifest.params.map(transportKind),
+    "bitExactFloatTransport params do not match the semantic signature");
+  assert.equal(descriptor.result, transportKind(manifest.result),
+    "bitExactFloatTransport result does not match the semantic signature");
+  return descriptor;
+}
+
+/** Select the only browser-safe entry for a manifest scalar invocation. */
+export function manifestEntryName(manifest) {
+  return validateBitExactFloatTransport(manifest)?.entry ?? manifest.entry;
+}
+
+function transportScalar(value, semanticKind, physicalKind, maximum, context) {
+  assert.ok(value && typeof value === "object", `${context} must be an object`);
+  assert.equal(value.kind, "scalar", `${context} must be a scalar`);
+  assert.equal(value.scalarKind, semanticKind,
+    `${context} does not refine ${semanticKind}`);
+  assert.equal(typeof value.value, "bigint", `${context} bits must be a bigint`);
+  assert.ok(value.value >= 0n && value.value <= maximum,
+    `${context} bits are out of range: ${value.value}`);
+  return { kind: "scalar", scalarKind: physicalKind, value: value.value };
+}
+
+/**
+ * Encode one semantic manifest argument. Float bits travel through i32/i64;
+ * no JavaScript floating-point conversion occurs.
+ */
+export function encodeManifestArgument(host, manifest, index, value) {
+  const descriptor = validateBitExactFloatTransport(manifest);
+  assert.ok(host && typeof host.encode === "function",
+    "manifest host must provide encode(kind, value)");
+  assert.ok(Number.isInteger(index) && index >= 0 && index < manifest.params.length,
+    `manifest argument index is out of range: ${index}`);
+  const semanticKind = manifest.params[index];
+  if (semanticKind === "float32") {
+    return host.encode(descriptor.params[index],
+      transportScalar(value, "float32", "uint32", 0xffffffffn,
+        `manifest argument ${index}`));
+  }
+  if (semanticKind === "float") {
+    return host.encode(descriptor.params[index],
+      transportScalar(value, "float", "uint64", 0xffffffffffffffffn,
+        `manifest argument ${index}`));
+  }
+  return host.encode(semanticKind, value);
+}
+
+/**
+ * Decode a facade result back into its semantic kind while retaining the raw
+ * IEEE-754 payload as a bigint.
+ */
+export function decodeManifestResult(host, manifest, physicalResult) {
+  const descriptor = validateBitExactFloatTransport(manifest);
+  assert.ok(host && typeof host.decode === "function",
+    "manifest host must provide decode(kind, physical)");
+  if (manifest.result === "float32") {
+    const value = host.decode(descriptor.result, physicalResult);
+    return transportScalar(value, "uint32", "float32", 0xffffffffn,
+      "manifest result");
+  }
+  if (manifest.result === "float") {
+    const value = host.decode(descriptor.result, physicalResult);
+    return transportScalar(value, "uint64", "float", 0xffffffffffffffffn,
+      "manifest result");
+  }
+  return host.decode(manifest.result, physicalResult);
+}
+
+/** Produce the standard observation after exact manifest-result decoding. */
+export function observeManifestResult(host, manifest, physicalResult) {
+  assert.ok(host && typeof host.observationValue === "function",
+    "manifest host must provide observationValue(value)");
+  return host.observationValue(
+    decodeManifestResult(host, manifest, physicalResult));
+}
 
 function scalarTypeRepr(kind) {
   const typeName = kind === "usize"
@@ -1055,8 +1194,7 @@ export class SemanticHost {
     return seen;
   }
 
-  observation(resultKind, physicalResult) {
-    const value = this.decode(resultKind, physicalResult);
+  observationValue(value) {
     const reachable = this.reachableLocations(value);
     return {
       outcome: { kind: "returned", value: this.valueJson(value) },
@@ -1072,6 +1210,10 @@ export class SemanticHost {
       world: this.world,
       trace: this.trace,
     };
+  }
+
+  observation(resultKind, physicalResult) {
+    return this.observationValue(this.decode(resultKind, physicalResult));
   }
 
   faultObservation(fault) {
