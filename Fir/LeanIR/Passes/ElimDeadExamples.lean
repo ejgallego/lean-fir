@@ -6528,6 +6528,28 @@ theorem deletedObjectSetSourceMachineOwnershipBelowFrontier :
     }
   · trivial
 
+/-- The USize-write suffix has the same runtime, environment, and frames as
+the full deleted-write fixture, so only its active control changes. -/
+theorem deletedUSizeSetSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier
+      deletedUSizeSetSourceState := by
+  have bounded :=
+    deletedObjectSetSourceMachineOwnershipBelowFrontier.withControlAndJoins
+      deletedUSizeSetSourceState.control
+      deletedUSizeSetSourceState.joins
+  simpa [deletedObjectSetSourceState, deletedUSizeSetSourceState] using bounded
+
+/-- The packed-scalar suffix inherits the same complete source-machine
+ownership carrier. -/
+theorem deletedScalarSetSourceMachineOwnershipBelowFrontier :
+    SourceMachineOwnershipBelowFrontier
+      deletedScalarSetSourceState := by
+  have bounded :=
+    deletedObjectSetSourceMachineOwnershipBelowFrontier.withControlAndJoins
+      deletedScalarSetSourceState.control
+      deletedScalarSetSourceState.joins
+  simpa [deletedObjectSetSourceState, deletedScalarSetSourceState] using bounded
+
 /-- The reset fixture's source object and complete environment lie below the
 same single-cell frontier before recursive release begins. -/
 theorem deletedResetSourceMachineOwnershipBelowFrontier :
@@ -6719,6 +6741,142 @@ theorem deletedObjectSetExactStepOwnershipPreserved
       programs frames continuation joins env runtime
       (by simpa using deletedObjectSetReady)
       deletedObjectSetSourceMachineOwnershipBelowFrontier step)
+
+/-- The exact deleted-USize branch performs its source-only unboxed update
+while retaining the complete source ownership carrier. -/
+theorem deletedUSizeSetExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedUSizeSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        deletedWritesTargetState targetAfter ∧
+      BinderReadyReachableMachineRelated 4 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 4)
+        deletedUSizeSetSourceState.program
+        deletedWritesTargetState.program := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 4 emptyAddressRenaming
+        deletedUSizeSetSourceState.frames
+        deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 4 neutralUsed
+        (.sset dead 8 0 scalarField u8Type <| .return live)
+        (.return live) := by
+    simpa [deletedWritesAfter] using
+      (show BinderReadyShadowCodeGraph 4 neutralUsed
+          (.sset dead 8 0 scalarField u8Type <| .return live)
+          deletedWritesAfter from
+        ⟨2, neutralUsed, by omega, deletedScalarExactGraph,
+          UsedSubset.refl neutralUsed,
+          deletedScalarExactBinderReady⟩)
+  have joins :
+      BinderReadyShadowJoinEnvRelated 4 neutralUsed
+        deletedUSizeSetSourceState.joins
+        deletedWritesTargetState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedUSizeSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedUSizeSetSourceState.runtime
+        deletedWritesTargetState.runtime
+        (envRootsOn neutralUsed deletedUSizeSetSourceState.env ++ [])
+        (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedUSizeSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  simpa [deletedUSizeSetSourceState, deletedWritesTargetState,
+    deletedWritesAfter, withCodeControl] using
+    (match_deletedUSizeSetStep_of_ready_binderReady_withOwnership
+      (sourceState := deletedUSizeSetSourceState)
+      (targetState := deletedWritesTargetState)
+      (sourceContinuation :=
+        .sset dead 8 0 scalarField u8Type <| .return live)
+      (targetContinuation := .return live)
+      (object := dead)
+      (index := 1)
+      (field := usizeField)
+      programs frames continuation joins env runtime
+      (by simpa using deletedUSizeSetReady)
+      deletedUSizeSetSourceMachineOwnershipBelowFrontier step)
+
+/-- The exact deleted-scalar branch performs its source-only packed update
+while retaining the complete source ownership carrier. -/
+theorem deletedScalarSetExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals deletedScalarSetSourceState sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals
+        deletedWritesTargetState targetAfter ∧
+      BinderReadyReachableMachineRelated 4 emptyAddressRenaming
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 4)
+        deletedScalarSetSourceState.program
+        deletedWritesTargetState.program := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWritesProgramBinderReadyRelated
+  have frames :
+      BinderReadyReachableFramesRelated 4 emptyAddressRenaming
+        deletedScalarSetSourceState.frames
+        deletedWritesTargetState.frames [] [] := by
+    exact .nil
+  have continuation :
+      BinderReadyShadowCodeGraph 4 neutralUsed
+        (.return live) (.return live) := by
+    apply retainedLargeNatContinuationRun.toBinderReadyShadowCodeGraphAt
+    · omega
+    · exact UsedSubset.refl neutralUsed
+    · apply
+        retainedLargeNatContinuationRun.toGraph.binderReady_of_canonical
+        (index :=
+          Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+            Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty live)
+      · apply ScopedCodeWellFormedTree.ret
+        native_decide
+      · simp [codeBinderIds, BinderNamesUnique]
+  have joins :
+      BinderReadyShadowJoinEnvRelated 4 neutralUsed
+        deletedScalarSetSourceState.joins
+        deletedWritesTargetState.joins :=
+    BinderReadyShadowJoinEnvRelated.empty 4 neutralUsed
+  have env :
+      EnvRelOn emptyAddressRenaming neutralUsed
+        deletedScalarSetSourceState.env deletedWritesTargetState.env := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWriteEnvReachableRelated
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedScalarSetSourceState.runtime
+        deletedWritesTargetState.runtime
+        (envRootsOn neutralUsed deletedScalarSetSourceState.env ++ [])
+        (envRootsOn neutralUsed deletedWritesTargetState.env ++ []) := by
+    simpa [deletedScalarSetSourceState, deletedWritesTargetState] using
+      deletedWriteRuntimeRelated
+  simpa [deletedScalarSetSourceState, deletedWritesTargetState,
+    deletedWritesAfter, withCodeControl] using
+    (match_deletedScalarSetStep_of_ready_binderReady_withOwnership
+      (sourceState := deletedScalarSetSourceState)
+      (targetState := deletedWritesTargetState)
+      (sourceContinuation := .return live)
+      (targetContinuation := .return live)
+      (object := dead)
+      (width := 8)
+      (offset := 0)
+      (field := scalarField)
+      (type := u8Type)
+      programs frames continuation joins env runtime
+      (by simpa using deletedScalarSetReady)
+      deletedScalarSetSourceMachineOwnershipBelowFrontier step)
 
 /-- The concrete reset semantic step likewise retains the complete source
 carrier across recursive release and dead reuse-token binding. -/
