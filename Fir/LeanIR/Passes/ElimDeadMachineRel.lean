@@ -8719,6 +8719,65 @@ theorem isShared_resultBelowFrontier
   | erased => simp [isShared] at effect
   | reuseToken location? => simp [isShared] at effect
 
+/-- Literal evaluation either preserves the heap or allocates one leaf object,
+so it preserves the heap ownership frontier invariant. -/
+theorem HeapOwnershipBelowFrontier.literal
+    (bounded : HeapOwnershipBelowFrontier runtime)
+    (literalValue : LCNF.LitValue) :
+    HeapOwnershipBelowFrontier (literal runtime literalValue).1 := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · simpa [Fir.LeanIR.Impure.literal, small] using bounded
+      · simpa [Fir.LeanIR.Impure.literal, small] using
+          bounded.alloc
+            (object := .natural value)
+            (by simp [HeapObject.ownedValues])
+            false
+  | str value =>
+      simpa [Fir.LeanIR.Impure.literal] using
+        bounded.alloc
+          (object := .string value)
+          (by simp [HeapObject.ownedValues])
+          false
+  | uint8 value | uint16 value | uint32 value | uint64 value | usize value =>
+      simpa [Fir.LeanIR.Impure.literal] using bounded
+
+/-- A literal result is immediate or names the fresh cell allocated by that
+literal, and its source frontier never retreats. -/
+theorem literal_resultBelowFrontier
+    (runtime : RuntimeState) (literalValue : LCNF.LitValue) :
+    RuntimeValueBelowFrontier runtime
+      (literal runtime literalValue).1
+      (literal runtime literalValue).2 := by
+  cases literalValue with
+  | nat value =>
+      by_cases small : value ≤ maxTaggedPayload
+      · constructor
+        · simp [Fir.LeanIR.Impure.literal, small]
+        · intro location member
+          simp [Fir.LeanIR.Impure.literal, small] at member
+      · constructor
+        · simp [Fir.LeanIR.Impure.literal, small, alloc]
+        · intro location member
+          simp [Fir.LeanIR.Impure.literal, small, alloc] at member
+          subst location
+          simpa [Fir.LeanIR.Impure.literal, small, alloc] using
+            Nat.lt_succ_self runtime.nextLocation
+  | str value =>
+      constructor
+      · simp [Fir.LeanIR.Impure.literal, alloc]
+      · intro location member
+        simp [Fir.LeanIR.Impure.literal, alloc] at member
+        subst location
+        simpa [Fir.LeanIR.Impure.literal, alloc] using
+          Nat.lt_succ_self runtime.nextLocation
+  | uint8 value | uint16 value | uint32 value | uint64 value | usize value =>
+      constructor
+      · simp [Fir.LeanIR.Impure.literal]
+      · intro location member
+        simp [Fir.LeanIR.Impure.literal] at member
+
 /-- A successful cell replacement preserves the allocation frontier. -/
 theorem setCell_nextLocation_eq_of_ok
     (effect : setCell runtime location replacement = .ok result) :
@@ -10871,6 +10930,24 @@ theorem SourceMachineOwnershipBelowFrontier.bindValue
     bounded.env valueBound
   frames := bounded.frames
 
+/-- Literal evaluation preserves heap ownership, advances the frontier
+monotonically when it allocates, and binds a result below that frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.literalState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (literalValue : LCNF.LitValue) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime := (literal state.runtime literalValue).1
+        env := bind state.env binder
+          (literal state.runtime literalValue).2 } := by
+  have output := literal_resultBelowFrontier state.runtime literalValue
+  have afterRuntime :=
+    bounded.withRuntimeMonoFrontier
+      (bounded.heap.literal literalValue) output.frontier
+  simpa using
+    (afterRuntime.bindValue
+      (binder := binder) output.value)
+
 /-- Constructor allocation and its result binding lift from the local
 environment carrier to the whole machine by transporting every saved bind
 environment across the advanced frontier. -/
@@ -11555,6 +11632,70 @@ theorem SourceMachineOwnershipBelowFrontier.retainedIsSharedLetStep
               Bind.bind, Except.bind, Pure.pure, Except.pure]
           · exact isShared_resultBelowFrontier sharedRead
           · exact step
+
+/-- A retained literal binds either an immediate result or its fresh leaf
+allocation while preserving complete source-machine ownership. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedLiteralLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  have afterBounded :=
+    (bounded.literalState
+      (binder := fvarId) literalValue)
+      |>.withControlAndJoins (.code continuation) state.joins
+  apply afterBounded.ofStepNext _ step
+  simp [coreStep, evalLetValue, Pure.pure, Except.pure]
+
+/-- A retained constructor reads bounded arguments from the complete source
+environment, allocates or returns an immediate tag, and binds the result below
+the resulting frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedCtorLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize argumentsRead :
+    evalArgs state.env arguments = argumentsResult
+  cases argumentsResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok argumentValues =>
+      generalize allocation :
+        allocCtor state.runtime info argumentValues = allocationResult
+      cases allocationResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, argumentsRead, allocation, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, argumentsRead, allocation, fail,
+                Bind.bind, Except.bind] at transition
+      | ok result =>
+          obtain ⟨nextRuntime, value⟩ := result
+          have afterBounded :=
+            (bounded.allocCtorState
+              (binder := fvarId) argumentsRead allocation)
+              |>.withControlAndJoins
+                (.code continuation) state.joins
+          apply afterBounded.ofStepNext _ step
+          simp [coreStep, evalLetValue, argumentsRead, allocation,
+            Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
@@ -19444,6 +19585,46 @@ theorem match_retainedLiteralLetStep_binderReady
       sourceTransition targetTransition afterRelated
       (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained-literal matcher. -/
+theorem match_retainedLiteralLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .lit literalValue
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedLiteralLetStep_binderReady
+      sourceState targetState programs frames continuation joins env runtime
+      step with
+    ⟨larger, targetAfter, extension, reaches, related⟩
+  exact ⟨larger, targetAfter, extension, reaches, related,
+    ownership.retainedLiteralLetStep step⟩
+
 /-- Hereditary semantic-step form of a deleted literal let.  Its immediate
 or freshly allocated result is absent from all live roots, so the source
 advances while the target stutters at the already-selected continuation. -/
@@ -19670,6 +19851,64 @@ theorem ExactShadowCodeBinderReady.match_retainedLiteralLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env runtime step
+
+/-- Ownership-strengthened exact retained literal. -/
+theorem ExactShadowCodeBinderReady.match_retainedLiteralLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {literalValue : LCNF.LitValue}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.lit literalValue :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .lit literalValue
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.lit literalValue : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .lit literalValue
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .lit literalValue
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  exact match_retainedLiteralLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env runtime ownership step
 
 /-- Exact deleted-literal provenance supplies ambient binder absence and the
 hereditary continuation graph for its source-only allocation step. -/
@@ -20164,6 +20403,47 @@ theorem match_retainedCtorLetStep_binderReady
                 simp [evalLetValue, sourceArgumentsEq, allocCtor, arity,
                   Bind.bind, Except.bind] at evaluatedEq
 
+/-- Ownership-strengthened hereditary retained-constructor matcher. -/
+theorem match_retainedCtorLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedCtorLetStep_binderReady
+      sourceState targetState programs frames continuation joins env covered
+      runtime step with
+    ⟨larger, targetAfter, extension, reaches, related⟩
+  exact ⟨larger, targetAfter, extension, reaches, related,
+    ownership.retainedCtorLetStep step⟩
+
 /-- A deleted-constructor certificate selected by an exact compiler view
 preserves hereditary provenance whether it is discharged by generic
 runtime-neutrality or by a source-only garbage allocation. -/
@@ -20558,6 +20838,73 @@ theorem ExactShadowCodeBinderReady.match_retainedCtorLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env covered runtime step
+
+/-- Ownership-strengthened exact retained constructor. -/
+theorem ExactShadowCodeBinderReady.match_retainedCtorLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName : Name} {type : Expr}
+    {info : LCNF.CtorInfo}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.ctor info arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .ctor info arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .ctor info arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .ctor info arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.ctor info arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedCtorLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime ownership step
 
 /-- Exact deleted-constructor provenance supplies binder absence and the
 hereditary continuation graph; dynamic readiness justifies its source-only
