@@ -7590,6 +7590,71 @@ theorem EnvironmentBelowFrontier.bind
     exact @valueBound
   · exact bounded found
 
+/-- Binding a parameter/value prefix preserves complete environment
+ownership when every supplied value is below the current frontier. -/
+theorem EnvironmentBelowFrontier.bindPairs
+    (params : List (LCNF.Param .impure)) (values : List Value)
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (valuesBelow :
+      HeapLocationsBelowFrontier runtime values) :
+    EnvironmentBelowFrontier runtime
+      ((params.zip values).foldl
+        (fun next pair =>
+          Fir.LeanIR.Impure.bind next pair.1.fvarId pair.2) env) := by
+  induction values generalizing params env with
+  | nil =>
+      intro fvarId value found
+      apply bounded
+      simpa only [List.zip, List.zipWith, List.foldl_nil] using found
+  | cons value values recurse =>
+      cases params with
+      | nil =>
+          intro fvarId foundValue found
+          apply bounded
+          simpa only [List.zip, List.zipWith, List.foldl_nil] using found
+      | cons param params =>
+          simp only [List.zip, List.zipWith, List.foldl_cons]
+          have valueBelow :
+              HeapLocationsBelowFrontier runtime [value] := by
+            intro location member
+            simp only [List.mem_singleton] at member
+            subst value
+            apply valuesBelow
+            exact List.mem_cons_self
+          have tailBelow :
+              HeapLocationsBelowFrontier runtime values := by
+            intro location member
+            apply valuesBelow
+            exact List.mem_cons_of_mem value member
+          intro fvarId foundValue found
+          exact
+            (recurse params
+              (EnvironmentBelowFrontier.bind
+                (binder := param.fvarId) (value := value)
+                bounded valueBelow)
+              tailBelow) found
+
+/-- Successful join-parameter binding preserves the complete starting
+environment and installs only argument values already below the frontier. -/
+theorem EnvironmentBelowFrontier.bindParamsOver
+    (bounded : EnvironmentBelowFrontier runtime env)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
+    (effect :
+      Fir.LeanIR.Impure.bindParamsOver env params arguments =
+        .ok result) :
+    EnvironmentBelowFrontier runtime result := by
+  unfold Fir.LeanIR.Impure.bindParamsOver at effect
+  split at effect
+  · have resultEq := Except.ok.inj effect
+    subst result
+    intro fvarId value found
+    exact
+      (EnvironmentBelowFrontier.bindPairs
+        (runtime := runtime) (env := env)
+        params.toList arguments.toList bounded argumentsBelow) found
+  · simp at effect
+
 /-- Existing environment values remain bounded as allocation advances. -/
 theorem EnvironmentBelowFrontier.monoFrontier
     (bounded : EnvironmentBelowFrontier before env)
@@ -9291,6 +9356,124 @@ theorem HeapOwnershipBelowFrontier.setScalarField
   | erased => simp at effect
   | reuseToken location => simp at effect
 
+/-- Changing a constructor tag preserves every owned object edge and the
+fresh-frontier ownership bound. -/
+theorem HeapOwnershipBelowFrontier.setTag
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.setTag runtime object tag = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.setTag
+    Fir.LeanIR.Impure.modifyConstructor at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize constructorEq :
+    getConstructor runtime object = constructorResult at effect
+  cases constructorResult with
+  | error fault => simp at effect
+  | ok constructorResult =>
+      rcases constructorResult with ⟨location, cell, constructor⟩
+      have shape := getConstructor_shape_of_ok constructorEq
+      simp only at effect
+      apply wellFormed.setCell shape.2.1 _ effect
+      intro child member
+      apply wellFormed.owned_lt shape.2.1
+      simpa [shape.2.2.2, HeapObject.ownedValues] using member
+
+/-- Incrementing a live reference changes only its cell header, while a
+persistent reference is a runtime no-op. Both branches preserve ownership. -/
+theorem HeapOwnershipBelowFrontier.incLocation
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.incLocation runtime location amount = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  generalize cellEq :
+    getLiveCell runtime location = cellResult
+  cases cellResult with
+  | error fault =>
+      simp [Fir.LeanIR.Impure.incLocation, cellEq,
+        Bind.bind, Except.bind] at effect
+  | ok cell =>
+      have found :=
+        (getLiveCell_shape_of_ok cellEq).1
+      by_cases persistent : cell.persistent = true
+      · have noop :
+            Fir.LeanIR.Impure.incLocation runtime location amount =
+              .ok runtime := by
+          unfold Fir.LeanIR.Impure.incLocation
+          rw [cellEq]
+          simp only [Bind.bind, Except.bind]
+          rw [if_pos persistent]
+          rfl
+        rw [noop] at effect
+        have resultEq := Except.ok.inj effect
+        subst result
+        exact wellFormed
+      · apply wellFormed.setCell_sameObject
+          (replacement := { cell with rc := cell.rc + amount })
+          found rfl
+        simpa [Fir.LeanIR.Impure.incLocation, cellEq,
+          Bind.bind, Except.bind, persistent] using effect
+
+/-- A checked tagged increment is a no-op; an ordinary heap increment
+delegates to the header-only location law. -/
+theorem HeapOwnershipBelowFrontier.incValue
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.incValue runtime value amount check = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact wellFormed.incLocation
+            (by simpa [Fir.LeanIR.Impure.incValue] using effect)
+      | tagged payload =>
+          simp only [Fir.LeanIR.Impure.incValue] at effect
+          split at effect
+          · have resultEq := Except.ok.inj effect
+            subst result
+            exact wellFormed
+          · simp at effect
+  | usize value => simp [Fir.LeanIR.Impure.incValue] at effect
+  | scalar value => simp [Fir.LeanIR.Impure.incValue] at effect
+  | erased => simp [Fir.LeanIR.Impure.incValue] at effect
+  | reuseToken location? => simp [Fir.LeanIR.Impure.incValue] at effect
+
+/-- Deleting the erased sentinel is a no-op; deleting a live heap reference
+changes only its cell header and therefore preserves ownership. -/
+theorem HeapOwnershipBelowFrontier.deleteValue
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.deleteValue runtime value = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  cases value with
+  | erased =>
+      have resultEq := Except.ok.inj effect
+      subst result
+      exact wellFormed
+  | object reference =>
+      cases reference with
+      | heap location =>
+          unfold Fir.LeanIR.Impure.deleteValue at effect
+          simp only [Bind.bind, Except.bind] at effect
+          generalize cellEq :
+            getLiveCell runtime location = cellResult at effect
+          cases cellResult with
+          | error fault => simp at effect
+          | ok cell =>
+              simp only at effect
+              have found :=
+                (getLiveCell_shape_of_ok cellEq).1
+              exact wellFormed.setCell_sameObject
+                (replacement := { cell with rc := 0, live := false })
+                found rfl effect
+      | tagged payload =>
+          simp [Fir.LeanIR.Impure.deleteValue] at effect
+  | usize value => simp [Fir.LeanIR.Impure.deleteValue] at effect
+  | scalar value => simp [Fir.LeanIR.Impure.deleteValue] at effect
+  | reuseToken location? =>
+      simp [Fir.LeanIR.Impure.deleteValue] at effect
+
 /-- A recursive release changes only the ownership closure of its root and
 never changes the ownership graph itself. -/
 structure DecLocationFuelFrame
@@ -10088,6 +10271,68 @@ theorem HeapOwnershipBelowFrontier.decLocation
   wellFormed.transportOwnershipFrame
     (decLocation_frame_of_ok effect).ownership
     (decLocation_nextLocation_eq_of_ok effect)
+
+/-- One checked tagged decrement is a no-op; an ordinary heap decrement
+delegates to the recursive-release ownership law. -/
+theorem HeapOwnershipBelowFrontier.decValueOnce
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.decValueOnce runtime value check = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact wellFormed.decLocation
+            (by simpa [Fir.LeanIR.Impure.decValueOnce] using effect)
+      | tagged payload =>
+          simp only [Fir.LeanIR.Impure.decValueOnce] at effect
+          split at effect
+          · have resultEq := Except.ok.inj effect
+            subst result
+            exact wellFormed
+          · simp at effect
+  | usize value => simp [Fir.LeanIR.Impure.decValueOnce] at effect
+  | scalar value => simp [Fir.LeanIR.Impure.decValueOnce] at effect
+  | erased => simp [Fir.LeanIR.Impure.decValueOnce] at effect
+  | reuseToken location? =>
+      simp [Fir.LeanIR.Impure.decValueOnce] at effect
+
+/-- Repeated successful decrements preserve ownership across every prefix of
+the reference-count fold. -/
+theorem HeapOwnershipBelowFrontier.decValue
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.decValue runtime value amount check = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  unfold Fir.LeanIR.Impure.decValue at effect
+  have foldOwnership : ∀ (values : List Value)
+      (before after : RuntimeState),
+      HeapOwnershipBelowFrontier before →
+      values.foldlM (init := before) (fun next current =>
+        Fir.LeanIR.Impure.decValueOnce next current check) = .ok after →
+      HeapOwnershipBelowFrontier after := by
+    intro values
+    induction values with
+    | nil =>
+        intro before after beforeOwnership folded
+        have same := Except.ok.inj folded
+        subst after
+        exact beforeOwnership
+    | cons head tail recurse =>
+        intro before after beforeOwnership folded
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at folded
+        cases headEq :
+            Fir.LeanIR.Impure.decValueOnce before head check with
+        | error fault =>
+            rw [headEq] at folded
+            contradiction
+        | ok middle =>
+            rw [headEq] at folded
+            exact recurse middle after
+              (beforeOwnership.decValueOnce headEq) folded
+  exact foldOwnership
+    (List.replicate amount value) runtime result wellFormed effect
 
 /-- Releasing one reset field preserves the ownership bound. -/
 theorem HeapOwnershipBelowFrontier.releaseResetField
@@ -10897,6 +11142,55 @@ theorem SourceEnvironmentOwnershipBelowFrontier.setScalarFieldState
     (bounded.heap.setScalarField effect)
     (setScalarField_nextLocation_eq_of_ok effect)
 
+/-- Constructor-tag updates preserve the local source carrier at the fixed
+allocation frontier. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.setTagState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setTag state.runtime object tag = .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.setTag effect)
+    (setTag_nextLocation_eq_of_ok effect)
+
+/-- Reference-count increments preserve the complete local source carrier. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.incValueState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.incValue
+          state.runtime value amount check = .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.incValue effect)
+    (incValue_nextLocation_eq_of_ok effect)
+
+/-- Reference-count decrements preserve the complete local source carrier,
+including recursive releases. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.decValueState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.decValue
+          state.runtime value amount check = .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.decValue effect)
+    (decValue_nextLocation_eq_of_ok effect)
+
+/-- Compiler-owned deletion preserves the local source carrier whether it
+deletes a live heap cell or observes the erased sentinel. -/
+theorem SourceEnvironmentOwnershipBelowFrontier.deleteValueState
+    (bounded : SourceEnvironmentOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.deleteValue state.runtime value = .ok result) :
+    SourceEnvironmentOwnershipBelowFrontier
+      { state with runtime := result } :=
+  bounded.withRuntimeSameFrontier
+    (bounded.heap.deleteValue effect)
+    (deleteValue_nextLocation_eq_of_ok effect)
+
 /-- Reset also preserves the full source environment carrier: recursive
 release maintains heap ownership and every successful branch keeps the
 allocation frontier fixed. -/
@@ -11204,6 +11498,68 @@ theorem SourceMachineOwnershipBelowFrontier.setScalarFieldState
     (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
       (by
         rw [setScalarField_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Constructor-tag updates lift through every suspended bind environment at
+the unchanged allocation frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.setTagState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.setTag state.runtime object tag = .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.setTagState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [setTag_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Reference-count increments lift through the complete machine ownership
+carrier because they do not move the allocation frontier. -/
+theorem SourceMachineOwnershipBelowFrontier.incValueState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.incValue
+          state.runtime value amount check = .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.incValueState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [incValue_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Recursive decrements likewise preserve all current and suspended source
+environment bounds. -/
+theorem SourceMachineOwnershipBelowFrontier.decValueState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.decValue
+          state.runtime value amount check = .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.decValueState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [decValue_nextLocation_eq_of_ok effect]
+        exact Nat.le_refl _))
+
+/-- Compiler-owned deletion preserves the complete machine ownership
+carrier in both its live-reference and erased-sentinel branches. -/
+theorem SourceMachineOwnershipBelowFrontier.deleteValueState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      Fir.LeanIR.Impure.deleteValue state.runtime value = .ok result) :
+    SourceMachineOwnershipBelowFrontier
+      { state with runtime := result } := by
+  exact SourceMachineOwnershipBelowFrontier.ofEnvironment
+    (bounded.environment.deleteValueState effect)
+    (BindFrameEnvironmentsBelowFrontier.monoFrontier bounded.frames
+      (by
+        rw [deleteValue_nextLocation_eq_of_ok effect]
         exact Nat.le_refl _))
 
 /-- Reset's fixed frontier similarly lifts its local ownership proof through
