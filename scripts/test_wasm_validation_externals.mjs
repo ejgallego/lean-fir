@@ -334,6 +334,67 @@ function fixedWidthScalarValue(scalarKind, value) {
       validationExternals,
     ));
 
+  const mixedSchema = {
+    ctor: {
+      name: "Mixed.mk",
+      tag: 3,
+      fields: [
+        "nat",
+        "usize",
+        { bits: { width: 32 } },
+        "float32",
+        "float64",
+        "nat",
+      ],
+    },
+  };
+  const mixed = host.alloc({
+    kind: "ctor",
+    tag: 3n,
+    objectFields: [
+      { kind: "tagged", payload: 11n },
+      { kind: "tagged", payload: 12n },
+    ],
+    usizeFields: [0xffffffffffffffffn],
+    scalarFields: [
+      { width: 3, offset: 0, value: float64 },
+      {
+        width: 3,
+        offset: 12,
+        value: fixedWidthScalarValue("float32", 0x80000000n),
+      },
+      {
+        width: 3,
+        offset: 8,
+        value: fixedWidthScalarValue("uint32", 0xdeadbeefn),
+      },
+    ],
+  });
+  assert.deepStrictEqual(
+    semanticDatum(mixedSchema, mixed, host, "mixed constructor", validationExternals),
+    {
+      ctor: {
+        name: "Mixed.mk",
+        tag: 3,
+        fields: [
+          { nat: { value: "11" } },
+          { usize: { value: "18446744073709551615" } },
+          { bits: { width: 32, value: "3735928559" } },
+          { bits: { width: 32, value: "2147483648" } },
+          { bits: { width: 64, value: "9221140253039434428" } },
+          { nat: { value: "12" } },
+        ],
+      },
+    },
+  );
+  assert.throws(() => semanticDatum(
+    { ctor: { name: "Bad.mk", tag: 3, fields: [{ bits: { width: 24 } }] } },
+    mixed,
+    host,
+    "unsupported packed constructor",
+    validationExternals,
+  ));
+
   const invokeFloat = (name, args) =>
     invoke(validationExternalRegistry[name], host, args);
   assert.deepStrictEqual(

@@ -26,6 +26,81 @@ function jsonInteger(value, context) {
   return value.toString();
 }
 
+function constructorFieldKind(schema, context) {
+  if (schema === "usize") {
+    return { kind: "usize" };
+  }
+  if (schema === "float32") {
+    return { kind: "scalar", width: 4 };
+  }
+  if (schema === "float64") {
+    return { kind: "scalar", width: 8 };
+  }
+  if (schema && typeof schema === "object" && schema.bits !== undefined) {
+    const widths = new Map([[8, 1], [16, 2], [32, 4], [64, 8]]);
+    const width = widths.get(schema.bits.width);
+    assert.ok(width, `${context} uses unsupported packed scalar width ${schema.bits.width}`);
+    return { kind: "scalar", width };
+  }
+  return { kind: "object" };
+}
+
+function constructorSchemaLayout(schemas, context) {
+  const kinds = schemas.map((schema, index) =>
+    constructorFieldKind(schema, `${context} field ${index}`));
+  const totals = {
+    objectFields: 0,
+    usizeFields: 0,
+    scalarWidths: new Map([[1, 0], [2, 0], [4, 0], [8, 0]]),
+  };
+  for (const field of kinds) {
+    if (field.kind === "object") {
+      ++totals.objectFields;
+    } else if (field.kind === "usize") {
+      ++totals.usizeFields;
+    } else {
+      totals.scalarWidths.set(
+        field.width,
+        totals.scalarWidths.get(field.width) + 1,
+      );
+    }
+  }
+  const baseOffset = width => {
+    const count = candidate => totals.scalarWidths.get(candidate);
+    if (width === 8) return 0;
+    if (width === 4) return 8 * count(8);
+    if (width === 2) return 8 * count(8) + 4 * count(4);
+    return 8 * count(8) + 4 * count(4) + 2 * count(2);
+  };
+  const seen = {
+    objectFields: 0,
+    usizeFields: 0,
+    scalarWidths: new Map([[1, 0], [2, 0], [4, 0], [8, 0]]),
+  };
+  const fields = kinds.map(field => {
+    if (field.kind === "object") {
+      return { kind: "object", index: seen.objectFields++ };
+    }
+    if (field.kind === "usize") {
+      return { kind: "usize", index: seen.usizeFields++ };
+    }
+    const prior = seen.scalarWidths.get(field.width);
+    seen.scalarWidths.set(field.width, prior + 1);
+    return {
+      kind: "scalar",
+      slot: totals.objectFields + totals.usizeFields,
+      offset: baseOffset(field.width) + field.width * prior,
+    };
+  });
+  return {
+    fields,
+    objectFields: totals.objectFields,
+    usizeFields: totals.usizeFields,
+    scalarFields: [...totals.scalarWidths.values()]
+      .reduce((left, right) => left + right, 0),
+  };
+}
+
 export function semanticDatum(schema, value, host, context, validationExternals) {
   if (typeof schema === "string") {
     switch (schema) {
@@ -141,17 +216,41 @@ export function semanticDatum(schema, value, host, context, validationExternals)
       const object = host.liveCell(value.location).object;
       assert.equal(object.kind, "ctor", `${context} heap object must be a constructor`);
       assert.equal(object.tag, tag, `${context} constructor tag mismatch`);
-      assert.equal(object.objectFields.length, ctor.fields.length,
-        `${context} constructor field arity mismatch`);
-      assert.equal(object.usizeFields.length, 0, `${context} constructor has usize fields`);
-      assert.equal(object.scalarFields.length, 0, `${context} constructor has scalar fields`);
-      fields = ctor.fields.map((fieldSchema, index) => semanticDatum(
-        fieldSchema,
-        object.objectFields[index],
-        host,
-        `${context} field ${index}`,
-        validationExternals,
-      ));
+      const layout = constructorSchemaLayout(ctor.fields, context);
+      assert.equal(object.objectFields.length, layout.objectFields,
+        `${context} constructor object-field arity mismatch`);
+      assert.equal(object.usizeFields.length, layout.usizeFields,
+        `${context} constructor USize-field arity mismatch`);
+      assert.equal(object.scalarFields.length, layout.scalarFields,
+        `${context} constructor scalar-field arity mismatch`);
+      fields = ctor.fields.map((fieldSchema, index) => {
+        const storage = layout.fields[index];
+        let field;
+        if (storage.kind === "object") {
+          field = object.objectFields[storage.index];
+          assert.notEqual(field, undefined,
+            `${context} constructor object field ${storage.index} is missing`);
+        } else if (storage.kind === "usize") {
+          const usize = object.usizeFields[storage.index];
+          assert.notEqual(usize, undefined,
+            `${context} constructor USize field ${storage.index} is missing`);
+          field = { kind: "usize", value: usize };
+        } else {
+          const scalar = object.scalarFields.find(candidate =>
+            candidate.width === storage.slot && candidate.offset === storage.offset);
+          assert.ok(scalar,
+            `${context} constructor scalar field ` +
+            `[${storage.slot}, ${storage.offset}] is missing`);
+          field = scalar.value;
+        }
+        return semanticDatum(
+          fieldSchema,
+          field,
+          host,
+          `${context} field ${index}`,
+          validationExternals,
+        );
+      });
     }
     return { ctor: { name: ctor.name, tag: ctor.tag, fields } };
   }
