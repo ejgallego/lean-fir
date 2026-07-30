@@ -112,6 +112,14 @@ Cross-cutting W6.5 state:
   object-constructor, and scalar-`UInt8` cases—therefore admit arbitrary
   finite interleavings of every current facts-indexed direct, external-result,
   case, and no-result effect family under one certificate-free theorem.
+  Interprocedural calls are now a first-class constructor of the same
+  source-facing finite relation.
+  `ReuseCapacityCallLetRuntimeRefinesWithCost` exposes their exact outstanding
+  implementation boundary: production prefix recovery, checked execution,
+  validator fact transfer, immutable handler/descriptor tables, and residual
+  frame. Call-free endpoints use the false admission instance; a direct
+  declaration call becomes green only when the budgeted hereditary callee
+  adapter discharges this boundary.
   Validator-wide admission still waits on ordinary-token invalidation across
   unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated

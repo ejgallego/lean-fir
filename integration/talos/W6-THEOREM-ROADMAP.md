@@ -745,8 +745,15 @@ acceptance tests pass.
    and its object-constructor and scalar-`UInt8` variants consequently cover
    arbitrary finite interleavings of all four currently proved structural
    node families without target evidence.
-   The next structural boundary is to instantiate the same facts-indexed
-   contracts for calls and lazy-cache publication.
+   `ReuseCapacityBudgetedCodeEvaluates` now also contains a source-only call
+   constructor. `ReuseCapacityCallLetRuntimeRefinesWithCost` is its uniform
+   implementation condition: it derives the production direct-call or
+   closure-dispatch prefix and re-establishes the validator-selected fact map
+   and complete residual frame. Existing endpoints instantiate the vacuous
+   call family, so no earlier fragment is weakened.
+   The next theorem is the nonvacuous direct-declaration adapter from a
+   budgeted hereditary callee result; lazy-cache publication follows the same
+   result-step pattern afterward.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

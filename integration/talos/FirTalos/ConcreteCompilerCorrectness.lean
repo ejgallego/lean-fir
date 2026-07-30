@@ -15359,11 +15359,21 @@ def NoReuseCapacityExternalsSupported
     (_stepCost : Nat) : Prop :=
   False
 
+/-- Source admission predicate used when a facts-indexed fragment contains no
+interprocedural call result bindings. -/
+def NoReuseCapacityCallsSupported
+    (_sourceRuntime : RuntimeState) (_sourceEnv : Env)
+    (_decl : LCNF.LetDecl .impure) (_continuation : LCNF.Code .impure)
+    (_nextRuntime : RuntimeState) (_sourceValue : Value)
+    (_stepCost : Nat) : Prop :=
+  False
+
 /--
 Facts-indexed finite source evaluation for mixed direct declarations, external
-result bindings, selected case branches, and successful no-result effects.
+and call result bindings, selected case branches, and successful no-result
+effects.
 
-Both result-producing forms carry the authoritative validator transfer.
+All result-producing forms carry the authoritative validator transfer.
 Cases and effects retain the current fact map. The relation contains only
 source admission and executable source steps; production target code is
 recovered by the structural compiler theorem.
@@ -15376,6 +15386,9 @@ inductive ReuseCapacityBudgetedCodeEvaluates
     (ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop)
+    (CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
     (CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
     (EffectSupported : EffectSupportedPredicate)
@@ -15385,7 +15398,7 @@ inductive ReuseCapacityBudgetedCodeEvaluates
   | ret
       (sourceLookup : lookup sourceEnv result = some sourceValue) :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost facts
         sourceRuntime sourceEnv (.return result) facts sourceRuntime sourceEnv
         sourceValue 0
   | letValue
@@ -15397,11 +15410,12 @@ inductive ReuseCapacityBudgetedCodeEvaluates
         reuseCapacityLetFacts? facts decl = some nextFacts)
       (continued :
         ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported EffectSupported letCost nextFacts
-          nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
-          resultFacts resultRuntime resultEnv resultValue continuationCost) :
+          ExternalSupported CallSupported CaseSupported EffectSupported letCost
+          nextFacts nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+          continuation resultFacts resultRuntime resultEnv resultValue
+          continuationCost) :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost facts
         sourceRuntime sourceEnv (.let decl continuation) resultFacts
         resultRuntime resultEnv resultValue (letCost decl + continuationCost)
   | externalLet
@@ -15415,12 +15429,32 @@ inductive ReuseCapacityBudgetedCodeEvaluates
         reuseCapacityLetFacts? facts decl = some nextFacts)
       (continued :
         ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported EffectSupported letCost nextFacts
-          nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
-          resultFacts resultRuntime resultEnv resultValue continuationCost) :
+          ExternalSupported CallSupported CaseSupported EffectSupported letCost
+          nextFacts nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+          continuation resultFacts resultRuntime resultEnv resultValue
+          continuationCost) :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost facts
         sourceRuntime sourceEnv (.let decl continuation) resultFacts
+        resultRuntime resultEnv resultValue (stepCost + continuationCost)
+  | callLet
+      (supported :
+        CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost)
+      (sourceStep :
+        SourceCallLetResult context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer :
+        reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+          ExternalSupported CallSupported CaseSupported EffectSupported letCost
+          nextFacts nextRuntime (bind sourceEnv decl.fvarId sourceValue)
+          continuation resultFacts resultRuntime resultEnv resultValue
+          continuationCost) :
+      ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost
+        facts sourceRuntime sourceEnv (.let decl continuation) resultFacts
         resultRuntime resultEnv resultValue (stepCost + continuationCost)
   | caseOf
       (supported : CaseSupported sourceRuntime sourceEnv cases selected)
@@ -15428,11 +15462,11 @@ inductive ReuseCapacityBudgetedCodeEvaluates
         SourceCaseResult sourceRuntime sourceEnv cases selected)
       (continued :
         ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported EffectSupported letCost facts
-          sourceRuntime sourceEnv selected resultFacts resultRuntime resultEnv
-          resultValue requiredBytes) :
+          ExternalSupported CallSupported CaseSupported EffectSupported letCost
+          facts sourceRuntime sourceEnv selected resultFacts resultRuntime
+          resultEnv resultValue requiredBytes) :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost facts
         sourceRuntime sourceEnv (.cases cases) resultFacts resultRuntime
         resultEnv resultValue requiredBytes
   | effect
@@ -15443,11 +15477,11 @@ inductive ReuseCapacityBudgetedCodeEvaluates
           continuation)
       (continued :
         ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-          ExternalSupported CaseSupported EffectSupported letCost facts
-          nextRuntime sourceEnv continuation resultFacts resultRuntime resultEnv
-          resultValue requiredBytes) :
+          ExternalSupported CallSupported CaseSupported EffectSupported letCost
+          facts nextRuntime sourceEnv continuation resultFacts resultRuntime
+          resultEnv resultValue requiredBytes) :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost facts
         sourceRuntime sourceEnv code resultFacts resultRuntime resultEnv
         resultValue requiredBytes
 
@@ -15458,6 +15492,9 @@ theorem ReuseCapacityBudgetedCodeEvaluates.execEvaluates
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
     {CaseSupported :
@@ -15471,9 +15508,9 @@ theorem ReuseCapacityBudgetedCodeEvaluates.execEvaluates
     {resultValue : Value} {requiredBytes : Nat}
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported letCost facts
-        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
-        resultValue requiredBytes) :
+        ExternalSupported CallSupported CaseSupported EffectSupported letCost
+        facts sourceRuntime sourceEnv sourceCode resultFacts resultRuntime
+        resultEnv resultValue requiredBytes) :
     ExecEvaluates externals
       (sourceCodeState context sourceRuntime sourceEnv sourceCode)
       (ReturnedObservation resultRuntime resultValue) := by
@@ -15484,6 +15521,8 @@ theorem ReuseCapacityBudgetedCodeEvaluates.execEvaluates
       exact sourceLetResult_thenExecEvaluates sourceStep ih
   | externalLet _ sourceStep _ _ ih =>
       exact sourceExternalLetResult_thenExecEvaluates sourceStep ih
+  | callLet _ sourceStep _ _ ih =>
+      exact sourceCallLetResult_thenExecEvaluates sourceStep ih
   | caseOf _ sourceStep _ ih =>
       exact sourceCaseResult_thenExecEvaluates sourceStep ih
   | effect _ sourceStep _ ih =>
@@ -15549,6 +15588,88 @@ def ReuseCapacityExternalLetRuntimeRefinesWithCost
                 Invariant nextFacts (remainingBytes - stepCost) nextRuntime
                   (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
                   nextWitness
+
+/--
+Uniform facts-indexed interprocedural-call runtime law.
+
+The source-facing admission chooses a successful call and its allocation
+cost. The implementation law must recover the actual production call or
+closure-dispatch prefix, execute it, establish the validator-selected
+successor fact map, preserve immutable host tables, and re-establish the
+threaded resource invariant at the residual budget. This is a callee-family
+contract, not a per-call execution certificate.
+-/
+def ReuseCapacityCallLetRuntimeRefinesWithCost
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (externals : ExternalImpl)
+    (CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {resultIndex remainingBytes stepCost : Nat}
+      {witness : RefinementWitness},
+    CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost →
+      stepCost ≤ remainingBytes →
+      Invariant facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      SourceCallLetResult context externals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue →
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex →
+      ∃ nextStore nextLocals nextWitness nextFacts,
+        CallLetStepSimulates context sourceFunction module hostEnv externals
+          decl continuation targetValue sourceRuntime nextRuntime sourceEnv
+          sourceValue targetStore nextStore targetLocals nextLocals resultIndex
+          witness nextWitness ∧
+        nextStore.host.externals = targetStore.host.externals ∧
+          nextStore.host.closureDescriptors =
+              targetStore.host.closureDescriptors ∧
+            nextWitness.closureDescriptors = witness.closureDescriptors ∧
+              reuseCapacityLetFacts? facts decl = some nextFacts ∧
+                Invariant nextFacts (remainingBytes - stepCost) nextRuntime
+                  (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+                  nextWitness
+
+/-- The empty call family satisfies the facts-indexed call law vacuously. -/
+theorem reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals
+      NoReuseCapacityCallsSupported Invariant := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported
+  exact False.elim supported
 
 /--
 A facts-indexed external-result law lifts through closure-descriptor
@@ -15935,9 +16056,9 @@ theorem
         valueRelated⟩
 
 /--
-Certificate-free structural partial correctness for facts-indexed direct and
-external result bindings, selected case branches, and successful no-result
-effects.
+Certificate-free structural partial correctness for facts-indexed direct,
+external-result, and interprocedural-call bindings, selected case branches,
+and successful no-result effects.
 
 `CaseRuntimeRefines` is a uniform theorem about production compiler outputs.
 The source evaluation contains only source steps, validator transfer, and the
@@ -15964,6 +16085,9 @@ theorem
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {EffectSupported : EffectSupportedPredicate}
@@ -15981,9 +16105,9 @@ theorem
     {resultValue : Value} {requiredBytes : Nat}
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported directLetAllocationCost
-        facts sourceRuntime sourceEnv code resultFacts resultRuntime resultEnv
-        resultValue requiredBytes)
+        ExternalSupported CallSupported CaseSupported EffectSupported
+        directLetAllocationCost facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes)
     (adapted :
       CodeAdapted context sourceModule sourceFunction labels code targetCode)
     (localsAligned : LocalLayoutAligned context sourceFunction)
@@ -16004,6 +16128,10 @@ theorem
       ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
         sourceFunction labels target.wasmModule hosts.env externals
         ExternalSupported Frame)
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        CallSupported Frame)
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction labels
         target.wasmModule hosts.env CaseSupported)
@@ -16102,6 +16230,41 @@ theorem
       subst targetCode
       exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
         codeWP_externalLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @callLet callSourceRuntime callSourceEnv decl continuation callNextRuntime
+      callSourceValue stepCost facts nextFacts resultFacts resultRuntime
+      resultEnv resultValue continuationCost supported sourceStep transfer
+      continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ stepCost + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        callRuntimeRefines supported stepFits invariant sourceStep valueCompiled
+          valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost callNextRuntime
+            (bind callSourceEnv decl.fvarId callSourceValue) nextStore
+            nextLocals nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+        codeWP_callLet valueCompiled valueAdapted resultFound step
           continuationWP,
         resultInvariant, failureClear, valueRelated⟩
   | caseOf supported sourceStep continued ih =>
@@ -16507,6 +16670,9 @@ theorem
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
         RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
     {CaseSupported :
       RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
     {EffectSupported : EffectSupportedPredicate}
@@ -16522,9 +16688,9 @@ theorem
     {resultValue : Value} {requiredBytes : Nat}
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-        ExternalSupported CaseSupported EffectSupported directLetAllocationCost
-        facts sourceRuntime sourceEnv sourceCode resultFacts resultRuntime
-        resultEnv resultValue requiredBytes)
+        ExternalSupported CallSupported CaseSupported EffectSupported
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
     (invariant :
       Frame facts requiredBytes sourceRuntime sourceEnv initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness)
@@ -16542,6 +16708,10 @@ theorem
     (externalRuntimeRefines :
       ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
         sourceFunction [] target.wasmModule hosts.env externals ExternalSupported
+        Frame)
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env externals CallSupported
         Frame)
     (caseRuntimeRefines :
       CaseRuntimeRefines context sourceModule sourceFunction []
@@ -16565,8 +16735,8 @@ theorem
       exactWP, resultInvariant, failureClear, valueRelated⟩ :=
     spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
       spec.bodyAdapted spec.localsAligned invariant frameRelated
-      directRuntimeRefines externalRuntimeRefines caseRuntimeRefines
-      effectRuntimeRefines
+      directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+      caseRuntimeRefines effectRuntimeRefines
   have bodyWP :
       CodeWP context sourceModule sourceFunction [] target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
@@ -18736,7 +18906,8 @@ theorem
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
-        NoReuseCapacityExternalsSupported DefaultOnlyCaseSupported
+        NoReuseCapacityExternalsSupported NoReuseCapacityCallsSupported
+        DefaultOnlyCaseSupported
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
         resultFacts resultRuntime resultEnv resultValue requiredBytes)
@@ -18758,6 +18929,7 @@ theorem
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     caseRuntimeRefines_defaultOnly
     (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
@@ -18796,6 +18968,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         NoReuseCapacityExternalsSupported
+        NoReuseCapacityCallsSupported
         (ObjectConstructorCasesSupported context)
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
@@ -18818,6 +18991,7 @@ theorem
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_objectConstructorCases
     (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
@@ -18857,6 +19031,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         NoReuseCapacityExternalsSupported
+        NoReuseCapacityCallsSupported
         (ScalarUInt8CasesSupported context)
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
@@ -18879,6 +19054,7 @@ theorem
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_scalarUInt8Cases
     (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
@@ -19431,7 +19607,8 @@ theorem
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
-        (PureExternalSupported context externals) DefaultOnlyCaseSupported
+        (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported DefaultOnlyCaseSupported
         NoEffectsSupported directLetAllocationCost facts sourceRuntime sourceEnv
         sourceCode resultFacts resultRuntime resultEnv resultValue
         requiredBytes)
@@ -19454,6 +19631,7 @@ theorem
     (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     caseRuntimeRefines_defaultOnly (fun _ => effectRuntimeRefines_noEffects)
     parameterCount
 
@@ -19486,6 +19664,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported
         (ObjectConstructorCasesSupported context) NoEffectsSupported
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
         resultFacts resultRuntime resultEnv resultValue requiredBytes)
@@ -19508,6 +19687,7 @@ theorem
     (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_objectConstructorCases
     (fun _ => effectRuntimeRefines_noEffects) parameterCount
 
@@ -19540,6 +19720,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported
         (ScalarUInt8CasesSupported context) NoEffectsSupported
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
         resultFacts resultRuntime resultEnv resultValue requiredBytes)
@@ -19562,6 +19743,7 @@ theorem
     (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_scalarUInt8Cases
     (fun _ => effectRuntimeRefines_noEffects) parameterCount
 
@@ -19595,7 +19777,8 @@ theorem
     (evaluation :
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
-        (PureExternalSupported context externals) DefaultOnlyCaseSupported
+        (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported DefaultOnlyCaseSupported
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
         resultFacts resultRuntime resultEnv resultValue requiredBytes)
@@ -19619,6 +19802,7 @@ theorem
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
       externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     caseRuntimeRefines_defaultOnly
     (fun _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
@@ -19655,6 +19839,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported
         (ObjectConstructorCasesSupported context)
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
@@ -19679,6 +19864,7 @@ theorem
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
       externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_objectConstructorCases
     (fun _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal
@@ -19715,6 +19901,7 @@ theorem
       ReuseCapacityBudgetedCodeEvaluates context externals
         (ReuseBudgetedDirectSupported context)
         (PureExternalSupported context externals)
+        NoReuseCapacityCallsSupported
         (ScalarUInt8CasesSupported context)
         (OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
@@ -19739,6 +19926,7 @@ theorem
       externals)
     (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternalOwnership
       externals)
+    reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
     spec.caseRuntimeRefines_scalarUInt8Cases
     (fun _ =>
       spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal

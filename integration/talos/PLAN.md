@@ -4739,6 +4739,23 @@ families simultaneously. Their only execution premise is the finite
 source-facing evaluation; no target program, branch witness, or execution
 certificate appears in it.
 
+W6.6gw opens the interprocedural structural boundary.
+`ReuseCapacityBudgetedCodeEvaluates.callLet` adds successful source calls with
+only source admission, the finite source call step, response cost, and the
+validator-selected fact transfer. `ReuseCapacityCallLetRuntimeRefinesWithCost`
+states the exact reusable compiler theorem condition: recover the production
+direct-call or closure-dispatch prefix, execute it, preserve installed handler
+and descriptor tables, and re-establish the authoritative frame at the
+residual byte budget.
+
+The generic code-WP and whole-export theorems now consume this law directly;
+existing call-free clients use its vacuous instance. The next slice will
+derive a nonvacuous direct-declaration instance from a budgeted hereditary
+callee theorem. That callee theorem, rather than any caller-supplied target
+certificate, must provide ordinary-token persistence, witness/header
+transport, immutable-table preservation, and exact residual allocation
+headroom.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
