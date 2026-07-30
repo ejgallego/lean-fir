@@ -433,6 +433,46 @@ def worldAndTraceUpdated? : RunResult → Bool
 
 #guard worldAndTraceUpdated? (runMain externalProgram echoExternal)
 
+def capturedRcExternalDecl : LCNF.Decl .impure :=
+  decl `capturedRcExternal #[param x objType, param y u64Type] u64Type
+    (.extern { entries := [] })
+
+def capturedRcExternalCode : LCNF.Code .impure :=
+  .let (letDecl x objType (.lit (.str "captured"))) <|
+  .let (letDecl c objType (.pap `capturedRcExternal #[.fvar x])) <|
+  .inc c 1 true false <|
+  .let (letDecl y u64Type (.lit (.uint64 0))) <|
+  .let (letDecl r u64Type (.fvar c #[.fvar y])) <|
+  .return r
+
+def capturedRcExternalProgram : ImpureProgram :=
+  { decls := #[
+      capturedRcExternalDecl,
+      decl `main #[] u64Type (.code capturedRcExternalCode)] }
+
+def observeCapturedRcExternal : ExternalImpl where
+  call request runtime :=
+    match request.args[0]? with
+    | some value =>
+        match value with
+        | Value.object (ObjectRef.heap location) =>
+            match getLiveCell runtime location with
+            | .ok cell => .ok {
+                value := .scalar (.uint64 (UInt64.ofNat cell.rc))
+                heap := runtime.heap
+                nextLocation := runtime.nextLocation
+                world := runtime.world }
+            | .error fault => .error fault
+        | _ =>
+            .error (.externalFailure request.name
+              "expected a captured heap object")
+    | _ =>
+        .error (.externalFailure request.name
+          "expected a captured heap object")
+
+#guard returned? (runMain capturedRcExternalProgram observeCapturedRcExternal)
+  (.scalar (.uint64 2))
+
 end InterpreterExamples
 
 end Fir.LeanIR

@@ -339,7 +339,7 @@ inductive Step (externals : ExternalSpec) : MachineState → MachineState → Pr
   | external {before waiting : MachineState} {request : ExternalRequest}
       {response : ExternalResponse}
       (transition : coreStep before = .external request waiting)
-      (external : externals request before.runtime response) :
+      (external : externals request waiting.runtime response) :
       Step externals before (resumeExternal request waiting response)
 
 inductive Steps (externals : ExternalSpec) : Nat → MachineState → MachineState → Prop where
@@ -362,7 +362,7 @@ def executeStep (externals : ExternalImpl) (state : MachineState) : ExecResult :
   | .next state => .next state
   | .done observation => .done observation
   | .external request waiting =>
-      match externals.call request state.runtime with
+      match externals.call request waiting.runtime with
       | .ok response => .next (resumeExternal request waiting response)
       | .error fault => .done (observe waiting (.fault fault))
 
@@ -431,7 +431,7 @@ theorem executeStep_sound {externals : ExternalSpec} {implementation : ExternalI
     split at execution
     next response responseEq =>
       cases execution
-      exact .external transition (implements request before.runtime response responseEq)
+      exact .external transition (implements request waiting.runtime response responseEq)
     next fault responseEq => contradiction
 
 theorem execSteps_sound {specification : ExternalSpec} {implementation : ExternalImpl}
