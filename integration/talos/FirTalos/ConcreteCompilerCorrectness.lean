@@ -17121,18 +17121,12 @@ selected source branch; it carries no target program, branch index, or
 execution certificate.
 -/
 theorem
-    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn
-    {program : Fir.LeanIR.ImpureProgram}
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn
     {context : Fir.Wasm.Context}
-    {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
-    (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
     {labels : List FVarId}
     {externals : ExternalImpl}
     {DirectSupported :
@@ -17401,18 +17395,12 @@ costed operation consumes only its source-selected prefix, effects preserve
 the index, and the return therefore retains exactly `slack`.
 -/
 theorem
-    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack
-    {program : Fir.LeanIR.ImpureProgram}
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack
     {context : Fir.Wasm.Context}
-    {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
-    (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
     {labels : List FVarId}
     {externals : ExternalImpl}
     {DirectSupported :
@@ -17506,7 +17494,7 @@ theorem
     exact frameRelated related
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       targetWP, resultInvariant, failureClear, valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
       adapted localsAligned shiftedInvariant shiftedFrameRelated
       (directRuntimeRefines.shiftBudget slack)
       (externalRuntimeRefines.shiftBudget slack)
@@ -17532,18 +17520,12 @@ exact source result, target execution, final base frame, and all transports
 needed by `BudgetedCapacityPreservingSuccessfulDeclaration`.
 -/
 theorem
-    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelative
-    {program : Fir.LeanIR.ImpureProgram}
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelative
     {context : Fir.Wasm.Context}
-    {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
-    (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
     {labels : List FVarId}
     {externals : ExternalImpl}
     {DirectSupported :
@@ -17648,7 +17630,7 @@ theorem
     exact frameRelated related.1
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       targetWP, resultInvariant, failureClear, valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
       adapted localsAligned entryInvariant entryFrameRelated
       directRuntimeRefines externalRuntimeRefines callRuntimeRefines
       lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
@@ -17664,18 +17646,12 @@ proofs: exact source and target results, all entry-to-exit representation
 transports, and the caller's residual address-space budget survive together.
 -/
 theorem
-    ConcreteSupportedExport.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
-    {program : Fir.LeanIR.ImpureProgram}
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
     {context : Fir.Wasm.Context}
-    {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
-    (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
     {labels : List FVarId}
     {externals : ExternalImpl}
     {DirectSupported :
@@ -17781,7 +17757,7 @@ theorem
     exact frameRelated related.1
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       targetWP, resultInvariant, failureClear, valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack evaluation
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_withSlack evaluation
       adapted localsAligned entryInvariant entryFrameRelated
       directRuntimeRefines externalRuntimeRefines callRuntimeRefines
       lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
@@ -18235,7 +18211,7 @@ theorem
             callerTail) := by
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
       exactWP, resultInvariant, failureClear, valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_exactReturn evaluation
       spec.bodyAdapted spec.localsAligned invariant frameRelated
       directRuntimeRefines externalRuntimeRefines callRuntimeRefines
       lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines

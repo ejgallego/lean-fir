@@ -7035,6 +7035,56 @@ theorem
     generated resultKinds declarations).runtimeRefinesEntryRelative
 
 /--
+Static compiler/adaptor evidence for one generated declaration body.
+
+Unlike `ConcreteSupportedExport`, this boundary does not require an export
+name or an export-table entry. It is therefore the right recursive unit for
+ordinary internal calls and lazy initializers. Dynamic source and target
+executions remain outside the structure.
+-/
+structure ConcreteSupportedDeclaration
+    (context : Fir.Wasm.Context)
+    (sourceCode : LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (target : AdaptedModule) where
+  targetFunctionIndex : Nat
+  targetFunction : Wasm.Function
+  notImport : target.wasmModule.imports[targetFunctionIndex]? = none
+  targetFunctionFound :
+    target.wasmModule.funcs[
+        targetFunctionIndex - target.wasmModule.imports.length]? =
+      some targetFunction
+  bodyAdapted :
+    CodeAdapted context sourceModule sourceFunction [] sourceCode
+      targetFunction.body
+  localsAligned : LocalLayoutAligned context sourceFunction
+  singleResult : targetFunction.results.length = 1
+
+/-- Every supported export exposes its export-independent declaration body. -/
+def ConcreteSupportedExport.toSupportedDeclaration
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName) :
+    ConcreteSupportedDeclaration context sourceCode sourceModule sourceFunction
+      target := {
+  targetFunctionIndex := spec.targetFunctionIndex
+  targetFunction := spec.targetFunction
+  notImport := spec.notImport
+  targetFunctionFound := spec.targetFunctionFound
+  bodyAdapted := spec.bodyAdapted
+  localsAligned := spec.localsAligned
+  singleResult := spec.singleResult }
+
+/--
 Package the structural mixed-code theorem as one hereditary cache-aware
 declaration result.
 
@@ -7046,18 +7096,16 @@ the canonical store and lane. Thus callers receive one fixed execution result;
 the repeated proof supplies only resource evidence.
 -/
 theorem
-    ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
-    {program : Fir.LeanIR.ImpureProgram}
+    ConcreteSupportedDeclaration.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedDeclaration context sourceCode sourceModule
+        sourceFunction target)
     {sourceExternals : ExternalImpl}
     {DirectSupported :
       ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
@@ -7151,7 +7199,7 @@ theorem
   obtain ⟨sourceResult, resultStore, resultLocals, resultWitness, resultKind,
       physical, exactWP, resultInvariant, entryTransports, failureClear,
       valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
+    codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
       (slack := 0) evaluation spec.bodyAdapted spec.localsAligned initialExact
       (fun related => related.stateRelated) directRuntimeRefines
       externalRuntimeRefines callRuntimeRefines lazyRuntimeRefines
@@ -7206,7 +7254,7 @@ theorem
       invariant.withBudget (by simpa [budgetEq] using budget)
     obtain ⟨_, slackStore, slackLocals, slackWitness, slackKind,
         slackPhysical, slackWP, slackResultInvariant, _, _, _⟩ :=
-      spec.codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
+      codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack
         (slack := slack) evaluation spec.bodyAdapted spec.localsAligned
         slackInvariant (fun related => related.stateRelated)
         directRuntimeRefines externalRuntimeRefines callRuntimeRefines
