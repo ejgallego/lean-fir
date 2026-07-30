@@ -44,10 +44,11 @@ lake -d integration/talos env lean \
 make talos-check
 ```
 
-The proof-level witness is the explicit `tokenOrdinary` premise of
-`reuseStep_of_capacityEvidence`. It cannot be derived from the current
-`ReuseCapacityStateRelated`: that relation tracks the retained concrete header
-extent but not the source cell's persistence bit.
+The proof-level witness is the threaded `ReuseTokenOrdinaryRel` consumed by
+`reuseLetStep_of_capacity`. The successful reuse theorem now re-establishes
+that relation for its authoritative successor facts; it still cannot derive
+the input relation from `ReuseCapacityStateRelated`, because the latter tracks
+the retained concrete header extent but not the source cell's persistence bit.
 
 ## Expected semantics
 
@@ -86,9 +87,10 @@ ordinary replacement header is intentional and should not be weakened.
 
 ## Workaround
 
-The W6 operation theorem exposes `tokenOrdinary` explicitly. Compiler-level
-composition must retain that premise until the authoritative supported-domain
-validator establishes a stable reset-token protocol.
+W6 compiler composition threads `ReuseTokenOrdinaryRel` and proves successful
+reuse preserves it. Structural composition must still preserve or invalidate
+that relation at every unrelated intervening effect until the authoritative
+supported-domain validator establishes a stable reset-token protocol.
 
 ## Upstream tracking
 
@@ -96,6 +98,8 @@ none
 
 ## Resolution and regression
 
-Confirmed. Add a source-level reset-token validity transfer to the shared
-validator, then derive the ordinary source-cell fact from that transfer in the
+Confirmed and narrowed. Successful reuse now has source-level ordinary-cell
+preservation and authoritative fact-insertion transfer. Add reset-token
+validity invalidation/preservation to every other shared validator transfer,
+then derive the input ordinary source-cell fact compositionally in the
 certificate-free compiler state relation.

@@ -4459,6 +4459,24 @@ with result kind; this gap remains
 these two semantic obligations explicit rather than weakening the concrete
 runtime relation.
 
+W6.6ga turns the successful production reuse theorem into a complete
+fact-indexed resource step. Nonzero `reuseObject` preserves `heapCursor`, and
+the generic cursor transport rule consequently preserves any weakened
+address-space budget; the zero branch returns the exact
+`constructorAllocationBytes` remainder. On the source side, successful reuse
+preserves the persistence bit of every pre-existing ordinary cell, creates
+only ordinary fresh cells, and always returns an object rather than another
+reuse token. Therefore `ReuseTokenOrdinaryRel.bindReuse` transports every old
+retained-token obligation through the authoritative result-fact insertion,
+including aliases of the rewritten cell and previously dangling locations
+that coincide with a fresh allocation. `reuseLetStep_of_capacity` now returns
+the next fact relation, next ordinary-token relation, next local-frame
+alignment, and exact residual budget together. The ordinary-token bug is
+accordingly limited to unrelated intervening effects whose shared fact
+transfer fails to invalidate a retained token; successful reuse itself no
+longer loses the invariant. The provenance-sensitive `.tobject` gate remains
+the other coordinated validator obligation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

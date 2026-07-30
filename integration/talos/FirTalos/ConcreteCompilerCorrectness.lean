@@ -12825,9 +12825,10 @@ Production compilation/adaptation derives the token local, mixed
 local/erased field prefix, runtime import, and result local. Static capacity
 evidence plus its dynamic state relation derives zero versus retained
 execution; a representation-sensitive source budget constructs the fresh
-branch. The remaining `ReuseTokenOrdinaryRel` premise is the explicit shared
-protocol obligation tracked by
-`FIR-BUG-wasm-none-reuse-retained-token-ordinary`.
+branch. `ReuseTokenOrdinaryRel` is consumed as threaded source state and
+re-established after the successful reuse; the shared validator gap tracked
+by `FIR-BUG-wasm-none-reuse-retained-token-ordinary` is now confined to
+intervening operations that may make a retained-token alias persistent.
 -/
 theorem ConcreteSupportedExport.reuseLetStep_of_capacity
     {program : Fir.LeanIR.ImpureProgram}
@@ -12888,7 +12889,14 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
       reuseCapacityLetFacts? facts decl = some nextFacts ∧
       ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
         (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
-        nextWitness := by
+        nextWitness ∧
+      ReuseTokenOrdinaryRel nextFacts nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) ∧
+      ConcreteLocalFrameAligned sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness ∧
+      nextStore.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - directLetAllocationCost decl) := by
   rcases supported with
     ⟨tokenId, info, updateHeader, args, argumentCode, fieldKinds, resultKind,
       evidence, valueEq, tagFits, valueKind, tokenCompiled, argumentsCompiled,
@@ -12992,14 +13000,16 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
         ∃ heap word,
           reuseObject targetStore.host.runtime.heap Word32.zero info
               updateHeader fields.toArray =
-            .ok (heap, word) := by
+            .ok (heap, word) ∧
+          heap.AddressSpaceBudget
+            (remainingBytes - constructorAllocationBytes info) := by
     intro _
-    obtain ⟨heap, word, allocated, _⟩ :=
+    obtain ⟨heap, word, allocated, remainingBudget⟩ :=
       FirTalos.Concrete.MemoryState.FrontierInvariant.reuseObject_zero_eq_ok_of_budget
         related.stateRelated.1.heap.frontier info updateHeader fields.toArray
         fieldsArity tagFits' objectFieldsFit usizeFieldsFit scalarBytesFit
         budget freshCostFits
-    exact ⟨heap, word, allocated⟩
+    exact ⟨heap, word, allocated, remainingBudget⟩
   have tokenOrdinary :
       ∀ (location : Location) (cell : HeapCell),
         sourceToken = .reuseToken (some location) →
@@ -13023,20 +13033,24 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
           tokenLookup' found
   obtain ⟨heap, word, nextWitness, operation, transport, nextRuntimeRelated,
       valueRelated, capacityValue, witnessDescriptorsPreserved,
-      capacityTransport⟩ :=
+      capacityTransport, remainingBudget⟩ :=
     reuseStep_of_capacityEvidence related.stateRelated.1 argsLength decoded
       tokenCapacity capacityFitting fieldsArity semanticArity
       operationFacts.1.1.symm operationFacts.1.2 fieldRelated tagFits'
       objectFieldsFit usizeFieldsFit scalarBytesFit operationFacts.2
-      resultCompatible freshAllocated tokenOrdinary semanticReuse
+      resultCompatible budget freshAllocated tokenOrdinary semanticReuse
   obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
     spec.localsAligned resultCompiled
   rw [resultFound] at alignedResultFound
   injection alignedResultFound with resultIndexEq
   subst alignedResultIndex
-  obtain ⟨updated, targetSet⟩ :=
-    FirTalos.Correctness.locals_set?_exists
-      (localFrame.validIndex resultFound)
+  obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+    localFrame.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := replaceHeap targetStore heap)
+      (nextWitness := nextWitness)
+      (physical := .i32 (UInt32.ofNat word.value)) resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.reuseCall callFound
   have physicalParams :
@@ -13061,10 +13075,19 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
         (replaceHeap targetStore heap) updated nextWitness := by
     exact related.ofReuseLetStep step resultFound resultKindAt targetSet
       transport capacityTransport capacityValue
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel nextFacts nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa [nextFacts] using
+      ordinaryTokens.bindReuse
+        (nextEvidence := evidence.afterReuse info) semanticReuse
   exact ⟨replaceHeap targetStore heap, updated, nextWitness, nextFacts, step,
     by simp [replaceHeap, clearFailure],
     by simp [replaceHeap, clearFailure], witnessDescriptorsPreserved,
-    transfer, nextCapacity⟩
+    transfer, nextCapacity, nextOrdinary, nextFrameAligned, by
+      change heap.AddressSpaceBudget
+        (remainingBytes - directLetAllocationCost decl)
+      simpa [directLetAllocationCost, valueEq] using remainingBudget⟩
 
 /--
 Current mixed allocating structural fragment: local aliases, immediate

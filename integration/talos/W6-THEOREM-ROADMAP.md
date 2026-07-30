@@ -634,8 +634,15 @@ acceptance tests pass.
    representation branch, target index, or simulation certificate crosses
    the interface. The retained-zero empty-layout relation hole is fixed by
    `FIR-BUG-wasm-none-reuse-retained-zero-empty-result`.
+   The production theorem now also returns the exact residual budget, local
+   frame, and next ordinary-token relation. Fresh reuse spends the
+   representation-sensitive constructor cost, while retained reuse preserves
+   the heap cursor and therefore spends zero. Source reuse preserves every
+   existing ordinary cell's persistence bit, introduces only ordinary fresh
+   cells, and returns an object, so authoritative result-fact insertion
+   preserves `ReuseTokenOrdinaryRel`.
    Before reuse joins the structural direct family, coordinate two shared
-   validator fixes: stable ordinary-token provenance across effects
+   validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
    provenance-sensitive `.tobject` result-kind condition
    (`FIR-BUG-wasm-none-reuse-retained-result-kind`). Reuse the

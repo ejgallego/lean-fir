@@ -5611,6 +5611,7 @@ theorem reuseStep_some_of_refines
         nextRuntime ∧
       PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat address.value)) (.object (.heap location)) ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken (some location)) info updateHeader
           semanticFields = .ok (nextRuntime, .object (.heap location)) := by
@@ -5635,8 +5636,23 @@ theorem reuseStep_some_of_refines
     rcases resultKindSupported with rfl | rfl
     · exact .word32 exactRelated
     · exact .word32 exactRelated.object_to_tobject
+  obtain ⟨addressHeap, _, _, _, _, _⟩ :=
+    MemoryState.PrefixExtension.readLiveHeader_facts
+      initial.host.runtime.heap address header headerRead
+  have addressValueNeZero : address.value ≠ 0 := by
+    intro equal
+    have sentinel : address.classify = .sentinel := by
+      simp [Word32.classify, equal]
+    rw [sentinel] at addressHeap
+    contradiction
+  have addressZeroCheck : (address == Word32.zero) = false := by
+    change (address.value == 0) = false
+    simp [addressValueNeZero]
+  have cursor :
+      heap.heapCursor = initial.host.runtime.heap.heapCursor :=
+    reuseObject_nonzero_preserves_heapCursor addressZeroCheck concreteReuse
   refine ⟨heap, nextRuntime, ?_, transport, nextRuntimeRelated, valueRelated,
-    capacityTransport, semanticReuse⟩
+    cursor, capacityTransport, semanticReuse⟩
   simp [reuseStep, argsLength, decoded, concreteReuse, replaceHeap, clearFailure]
 
 /-- Constructor-tag mutation crosses the common checked-header gate before

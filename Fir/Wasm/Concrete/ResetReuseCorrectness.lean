@@ -118,6 +118,136 @@ theorem resetObject_preserves_heapCursor
             contradiction
   · simp at operation
 
+private theorem reuseObject_nonzero_tail_preserves_heapCursor
+    {state result : MemoryState} {token word : Word32} {tag : UInt32}
+    {info : LCNF.CtorInfo} {header : Header} {fields : Array Word32}
+    (operation :
+      (do
+        let objectFields ← uint32Field "object-field count" info.size
+        let usizeFields ← uint32Field "usize-field count" info.usize
+        let scalarBytes ← uint32Field "scalar byte count" info.ssize
+        let replacement : Header := {
+          header with
+          kind := .constructor
+          persistent := false
+          live := true
+          aux0 := tag
+          aux1 := objectFields
+          aux2 := usizeFields
+          aux3 := scalarBytes }
+        let memory ← liftMemory <|
+          state.memory.reuseConstructorMemory token
+            header.allocationBytes.toNat replacement fields.toList
+        return ({ state with memory }, token)) = .ok (result, word)) :
+    result.heapCursor = state.heapCursor := by
+  simp only [Bind.bind, Except.bind] at operation
+  cases objectFieldsResult :
+      uint32Field "object-field count" info.size with
+  | error failure =>
+      simp only [objectFieldsResult] at operation
+      contradiction
+  | ok objectFields =>
+      simp only [objectFieldsResult] at operation
+      cases usizeFieldsResult :
+          uint32Field "usize-field count" info.usize with
+      | error failure =>
+          simp only [usizeFieldsResult] at operation
+          contradiction
+      | ok usizeFields =>
+          simp only [usizeFieldsResult] at operation
+          cases scalarBytesResult :
+              uint32Field "scalar byte count" info.ssize with
+          | error failure =>
+              simp only [scalarBytesResult] at operation
+              contradiction
+          | ok scalarBytes =>
+              simp only [scalarBytesResult] at operation
+              cases memoryResult :
+                  liftMemory
+                    (state.memory.reuseConstructorMemory token
+                      header.allocationBytes.toNat
+                      { header with
+                        kind := .constructor
+                        persistent := false
+                        live := true
+                        aux0 := tag
+                        aux1 := objectFields
+                        aux2 := usizeFields
+                        aux3 := scalarBytes }
+                      fields.toList) with
+              | error failure =>
+                  simp only [memoryResult] at operation
+                  contradiction
+              | ok memory =>
+                  simp only [memoryResult, pure, Except.pure] at operation
+                  have pairEq := Except.ok.inj operation
+                  have resultEq : ({ state with memory } : MemoryState) =
+                      result := congrArg Prod.fst pairEq
+                  subst result
+                  rfl
+
+/--
+Successful in-place reuse rewrites bytes but never moves the concrete heap
+frontier. The zero-token allocation branch is intentionally excluded.
+-/
+theorem reuseObject_nonzero_preserves_heapCursor
+    {state result : MemoryState} {token word : Word32}
+    {info : LCNF.CtorInfo} {updateHeader : Bool}
+    {fields : Array Word32}
+    (nonzero : (token == Word32.zero) = false)
+    (operation :
+      reuseObject state token info updateHeader fields = .ok (result, word)) :
+    result.heapCursor = state.heapCursor := by
+  unfold reuseObject at operation
+  simp only [nonzero, Bool.false_eq_true, ↓reduceIte] at operation
+  simp only [Bind.bind, Except.bind] at operation
+  have tokenHeap : token.classify = .heap :=
+    Classical.byContradiction fun notHeap => by
+      rw [if_neg notHeap] at operation
+      contradiction
+  rw [if_pos tokenHeap] at operation
+  have arity : fields.size = info.size :=
+    Classical.byContradiction fun wrongArity => by
+      rw [if_neg wrongArity] at operation
+      contradiction
+  rw [if_pos arity] at operation
+  cases headerRead : liftMemory (state.readLiveHeader token) with
+  | error failure =>
+      simp only [headerRead] at operation
+      contradiction
+  | ok header =>
+      simp only [headerRead] at operation
+      have kind : header.kind == .constructor :=
+        Classical.byContradiction fun wrongKind => by
+          rw [if_neg wrongKind] at operation
+          contradiction
+      rw [if_pos kind] at operation
+      have fits :
+          (ConstructorLayout.ofInfo info).allocationBytes ≤
+            header.allocationBytes.toNat :=
+        Classical.byContradiction fun tooSmall => by
+          rw [if_neg tooSmall] at operation
+          contradiction
+      rw [if_pos fits] at operation
+      by_cases update : updateHeader = true
+      · rw [if_pos update] at operation
+        cases tagResult : uint32Field "constructor tag" info.cidx with
+        | error failure =>
+            simp only [tagResult] at operation
+            contradiction
+        | ok tag =>
+            simp only [tagResult] at operation
+            exact reuseObject_nonzero_tail_preserves_heapCursor
+              (state := state) (result := result) (token := token)
+              (word := word) (tag := tag) (info := info) (header := header)
+              (fields := fields) operation
+      · rw [if_neg update] at operation
+        simp only [pure, Except.pure] at operation
+        exact reuseObject_nonzero_tail_preserves_heapCursor
+          (state := state) (result := result) (token := token)
+          (word := word) (tag := header.aux0) (info := info)
+          (header := header) (fields := fields) operation
+
 /-- Explicit transition relation for the unique reset-to-reuse protocol.
 `LiveHeapRel` is required only before reset; the exact concrete and semantic
 reset equations name the temporary states without claiming that cleared

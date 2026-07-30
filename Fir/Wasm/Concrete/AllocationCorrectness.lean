@@ -124,6 +124,21 @@ theorem MemoryState.AddressSpaceBudget.weaken
     Nat.le_trans (Nat.add_le_add_left smaller state.heapCursor)
       budget.endWithinAddressSpace }
 
+/--
+An operation that leaves the allocation frontier unchanged preserves every
+address-space budget. This is the zero-cost resource rule for in-place heap
+updates such as successful nonzero-token constructor reuse.
+-/
+theorem MemoryState.AddressSpaceBudget.of_heapCursor_eq
+    {before after : MemoryState} {remainingBytes : Nat}
+    (budget : before.AddressSpaceBudget remainingBytes)
+    (cursor : after.heapCursor = before.heapCursor) :
+    after.AddressSpaceBudget remainingBytes := {
+  cursorPositive := by
+    simpa [cursor] using budget.cursorPositive
+  endWithinAddressSpace := by
+    simpa [cursor] using budget.endWithinAddressSpace }
+
 /-- One allocation's exact view of the reusable address-space budget. -/
 abbrev MemoryState.AllocationCapacity (state : MemoryState)
     (requestedBytes : Nat) : Prop :=

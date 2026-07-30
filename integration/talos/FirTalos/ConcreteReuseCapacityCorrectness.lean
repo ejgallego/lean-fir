@@ -842,6 +842,497 @@ def ReuseTokenOrdinaryRel (facts : ReuseCapacityFacts)
       findCell? sourceRuntime.heap location = some cell →
       cell.persistent = false
 
+private theorem alloc_ordinary_preserves_persistent_false
+    {before after : RuntimeState} {object : HeapObject}
+    {reference : ObjectRef} {location : Location}
+    {beforeCell afterCell : HeapCell}
+    (operation : alloc before object false = (after, reference))
+    (beforeFound : findCell? before.heap location = some beforeCell)
+    (beforeOrdinary : beforeCell.persistent = false)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  unfold alloc at operation
+  have afterEq :
+      ({ before with
+        heap :=
+          (before.nextLocation,
+            { object := object, rc := 1, persistent := false, live := true }) ::
+            before.heap
+        nextLocation := before.nextLocation + 1 } : RuntimeState) =
+        after :=
+    congrArg Prod.fst operation
+  subst after
+  by_cases same : before.nextLocation = location
+  · subst location
+    simp [findCell?] at afterFound
+    subst afterCell
+    rfl
+  · simp [findCell?, same, beforeFound] at afterFound
+    subst afterCell
+    exact beforeOrdinary
+
+private theorem allocCtor_preserves_persistent_false
+    {before after : RuntimeState} {info : LCNF.CtorInfo}
+    {args : Array Value} {result : Value} {location : Location}
+    {beforeCell afterCell : HeapCell}
+    (operation : allocCtor before info args = .ok (after, result))
+    (beforeFound : findCell? before.heap location = some beforeCell)
+    (beforeOrdinary : beforeCell.persistent = false)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  unfold allocCtor at operation
+  simp only [Bind.bind, Except.bind] at operation
+  by_cases wrongArity : args.size != info.size
+  · rw [if_pos wrongArity] at operation
+    contradiction
+  · rw [if_neg wrongArity] at operation
+    by_cases empty :
+        info.size == 0 && info.usize == 0 && info.ssize == 0
+    · rw [if_pos empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : before = after := congrArg Prod.fst pairEq
+      subst after
+      rw [beforeFound] at afterFound
+      have cellEq := Option.some.inj afterFound
+      subst afterCell
+      exact beforeOrdinary
+    · rw [if_neg empty] at operation
+      let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := args
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := [] }
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : (alloc before (.ctor object)).1 = after :=
+        congrArg Prod.fst pairEq
+      rw [← afterEq] at afterFound
+      exact alloc_ordinary_preserves_persistent_false
+        (before := before) (after := (alloc before (.ctor object)).1)
+        (object := .ctor object) (reference := (alloc before (.ctor object)).2)
+        (operation := rfl) beforeFound beforeOrdinary afterFound
+
+private theorem setCell_preserves_persistent_false
+    {before after : RuntimeState} {target location : Location}
+    {targetCell replacement beforeCell afterCell : HeapCell}
+    (targetFound : findCell? before.heap target = some targetCell)
+    (replacementPersistent :
+      replacement.persistent = targetCell.persistent)
+    (operation :
+      setCell before target replacement = .ok after)
+    (beforeFound : findCell? before.heap location = some beforeCell)
+    (beforeOrdinary : beforeCell.persistent = false)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  obtain ⟨expected, expectedOperation, targetAfter, frame, _, _, _, _, _⟩ :=
+    Fir.LeanIR.Impure.setCell_spec_of_find before target targetCell
+      replacement targetFound
+  rw [operation] at expectedOperation
+  have stateEq := Except.ok.inj expectedOperation
+  subst expected
+  by_cases same : location = target
+  · subst location
+    rw [targetFound] at beforeFound
+    have beforeCellEq := Option.some.inj beforeFound
+    subst beforeCell
+    rw [targetAfter] at afterFound
+    have afterCellEq := Option.some.inj afterFound
+    subst afterCell
+    rw [replacementPersistent]
+    exact beforeOrdinary
+  · rw [frame location same] at afterFound
+    rw [beforeFound] at afterFound
+    have afterCellEq := Option.some.inj afterFound
+    subst afterCell
+    exact beforeOrdinary
+
+private theorem except_bind_pure_pair_eq_ok
+    {ε α β : Type} {action : Except ε α}
+    {output actual : β} {result : α}
+    (operation :
+      (do
+        let value ← action
+        pure (value, output)) = .ok (result, actual)) :
+    ∃ value, action = .ok value ∧ value = result ∧ output = actual := by
+  cases action with
+  | error failure =>
+      simp only [Bind.bind, Except.bind] at operation
+      contradiction
+  | ok value =>
+      simp only [Bind.bind, Except.bind, pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      exact ⟨value, rfl, congrArg Prod.fst pairEq,
+        congrArg Prod.snd pairEq⟩
+
+/--
+Successful semantic constructor reuse never turns an ordinary pre-existing
+cell persistent. Fresh reuse either leaves the heap unchanged or prepends a
+new ordinary cell; retained reuse changes only the target object payload and
+keeps its ownership metadata.
+-/
+theorem reuse_preserves_persistent_false
+    {before after : RuntimeState} {token result : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool} {args : Array Value}
+    {location : Location} {beforeCell afterCell : HeapCell}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result))
+    (beforeFound : findCell? before.heap location = some beforeCell)
+    (beforeOrdinary : beforeCell.persistent = false)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  cases token with
+  | object reference => simp [reuse] at operation
+  | usize value => simp [reuse] at operation
+  | scalar value => simp [reuse] at operation
+  | erased => simp [reuse] at operation
+  | reuseToken location? =>
+      cases location? with
+      | none =>
+          unfold reuse at operation
+          exact allocCtor_preserves_persistent_false operation beforeFound
+            beforeOrdinary afterFound
+      | some target =>
+          unfold reuse at operation
+          simp only [Bind.bind, Except.bind] at operation
+          by_cases wrongArity : args.size != info.size
+          · rw [if_pos wrongArity] at operation
+            contradiction
+          · rw [if_neg wrongArity] at operation
+            cases targetFound : findCell? before.heap target with
+            | none =>
+                simp [getLiveCell, targetFound] at operation
+            | some targetCell =>
+                by_cases live : targetCell.live = true
+                · simp only [getLiveCell, targetFound, live, ↓reduceIte]
+                    at operation
+                  cases objectEq : targetCell.object with
+                  | ctor old =>
+                      simp only [objectEq] at operation
+                      obtain ⟨middle, setResult, afterEq, _⟩ :=
+                        except_bind_pure_pair_eq_ok operation
+                      subst middle
+                      exact setCell_preserves_persistent_false targetFound
+                        (by rfl) setResult beforeFound beforeOrdinary afterFound
+                  | closure function arity fixed =>
+                      simp [objectEq] at operation
+                  | boxed type value =>
+                      simp [objectEq] at operation
+                  | string value =>
+                      simp [objectEq] at operation
+                  | natural value =>
+                      simp [objectEq] at operation
+                  | integer value =>
+                      simp [objectEq] at operation
+                  | byteArray value =>
+                      simp [objectEq] at operation
+                  | «opaque» typeName =>
+                      simp [objectEq] at operation
+                · have dead : targetCell.live = false :=
+                    Bool.eq_false_of_not_eq_true live
+                  simp [getLiveCell, targetFound, dead] at operation
+
+private theorem allocCtor_result_is_object
+    {before after : RuntimeState} {info : LCNF.CtorInfo}
+    {args : Array Value} {result : Value}
+    (operation : allocCtor before info args = .ok (after, result)) :
+    ∃ reference, result = .object reference := by
+  unfold allocCtor at operation
+  simp only [Bind.bind, Except.bind] at operation
+  by_cases wrongArity : args.size != info.size
+  · rw [if_pos wrongArity] at operation
+    contradiction
+  · rw [if_neg wrongArity] at operation
+    by_cases empty :
+        info.size == 0 && info.usize == 0 && info.ssize == 0
+    · rw [if_pos empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      exact ⟨.tagged (UInt64.ofNat info.cidx),
+        (congrArg Prod.snd pairEq).symm⟩
+    · rw [if_neg empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      exact ⟨(alloc before
+          (.ctor {
+            tag := info.cidx
+            objectFields := args
+            usizeFields := Array.replicate info.usize 0
+            scalarFields := [] })).2,
+        (congrArg Prod.snd pairEq).symm⟩
+
+/-- Every successful semantic reuse returns an ordinary object value, never a
+new reuse token. This makes the validator's inserted result fact vacuous for
+the source ordinary-token relation. -/
+theorem reuse_result_is_object
+    {before after : RuntimeState} {token result : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool} {args : Array Value}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result)) :
+    ∃ reference, result = .object reference := by
+  cases token with
+  | object reference => simp [reuse] at operation
+  | usize value => simp [reuse] at operation
+  | scalar value => simp [reuse] at operation
+  | erased => simp [reuse] at operation
+  | reuseToken location? =>
+      cases location? with
+      | none =>
+          unfold reuse at operation
+          exact allocCtor_result_is_object operation
+      | some target =>
+          unfold reuse at operation
+          simp only [Bind.bind, Except.bind] at operation
+          by_cases wrongArity : args.size != info.size
+          · rw [if_pos wrongArity] at operation
+            contradiction
+          · rw [if_neg wrongArity] at operation
+            cases targetFound : findCell? before.heap target with
+            | none =>
+                simp [getLiveCell, targetFound] at operation
+            | some targetCell =>
+                by_cases live : targetCell.live = true
+                · simp only [getLiveCell, targetFound, live, ↓reduceIte]
+                    at operation
+                  cases objectEq : targetCell.object with
+                  | ctor old =>
+                      simp only [objectEq] at operation
+                      obtain ⟨_, _, _, resultEq⟩ :=
+                        except_bind_pure_pair_eq_ok operation
+                      exact ⟨.heap target, resultEq.symm⟩
+                  | closure function arity fixed =>
+                      simp [objectEq] at operation
+                  | boxed type value =>
+                      simp [objectEq] at operation
+                  | string value =>
+                      simp [objectEq] at operation
+                  | natural value =>
+                      simp [objectEq] at operation
+                  | integer value =>
+                      simp [objectEq] at operation
+                  | byteArray value =>
+                      simp [objectEq] at operation
+                  | «opaque» typeName =>
+                      simp [objectEq] at operation
+                · have dead : targetCell.live = false :=
+                    Bool.eq_false_of_not_eq_true live
+                  simp [getLiveCell, targetFound, dead] at operation
+
+private theorem alloc_missing_after_persistent_false
+    {before after : RuntimeState} {object : HeapObject}
+    {reference : ObjectRef} {location : Location} {afterCell : HeapCell}
+    (operation : alloc before object false = (after, reference))
+    (beforeMissing : findCell? before.heap location = none)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  unfold alloc at operation
+  have afterEq :
+      ({ before with
+        heap :=
+          (before.nextLocation,
+            { object := object, rc := 1, persistent := false, live := true }) ::
+            before.heap
+        nextLocation := before.nextLocation + 1 } : RuntimeState) =
+        after :=
+    congrArg Prod.fst operation
+  subst after
+  by_cases same : before.nextLocation = location
+  · subst location
+    simp [findCell?] at afterFound
+    subst afterCell
+    rfl
+  · simp [findCell?, same, beforeMissing] at afterFound
+
+private theorem allocCtor_missing_after_persistent_false
+    {before after : RuntimeState} {info : LCNF.CtorInfo}
+    {args : Array Value} {result : Value} {location : Location}
+    {afterCell : HeapCell}
+    (operation : allocCtor before info args = .ok (after, result))
+    (beforeMissing : findCell? before.heap location = none)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  unfold allocCtor at operation
+  simp only [Bind.bind, Except.bind] at operation
+  by_cases wrongArity : args.size != info.size
+  · rw [if_pos wrongArity] at operation
+    contradiction
+  · rw [if_neg wrongArity] at operation
+    by_cases empty :
+        info.size == 0 && info.usize == 0 && info.ssize == 0
+    · rw [if_pos empty] at operation
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : before = after := congrArg Prod.fst pairEq
+      subst after
+      rw [beforeMissing] at afterFound
+      contradiction
+    · rw [if_neg empty] at operation
+      let object : ConstructorObject := {
+        tag := info.cidx
+        objectFields := args
+        usizeFields := Array.replicate info.usize 0
+        scalarFields := [] }
+      simp only [pure, Except.pure] at operation
+      have pairEq := Except.ok.inj operation
+      have afterEq : (alloc before (.ctor object)).1 = after :=
+        congrArg Prod.fst pairEq
+      rw [← afterEq] at afterFound
+      exact alloc_missing_after_persistent_false
+        (before := before) (after := (alloc before (.ctor object)).1)
+        (object := .ctor object) (reference := (alloc before (.ctor object)).2)
+        (operation := rfl) beforeMissing afterFound
+
+private theorem setCell_missing_after_persistent_false
+    {before after : RuntimeState} {target location : Location}
+    {targetCell replacement afterCell : HeapCell}
+    (targetFound : findCell? before.heap target = some targetCell)
+    (operation : setCell before target replacement = .ok after)
+    (beforeMissing : findCell? before.heap location = none)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  obtain ⟨expected, expectedOperation, targetAfter, frame, _, _, _, _, _⟩ :=
+    Fir.LeanIR.Impure.setCell_spec_of_find before target targetCell replacement
+      targetFound
+  rw [operation] at expectedOperation
+  have stateEq := Except.ok.inj expectedOperation
+  subst expected
+  by_cases same : location = target
+  · subst location
+    rw [targetFound] at beforeMissing
+    contradiction
+  · rw [frame location same] at afterFound
+    rw [beforeMissing] at afterFound
+    contradiction
+
+private theorem reuse_missing_after_persistent_false
+    {before after : RuntimeState} {token result : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool} {args : Array Value}
+    {location : Location} {afterCell : HeapCell}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result))
+    (beforeMissing : findCell? before.heap location = none)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  cases token with
+  | object reference => simp [reuse] at operation
+  | usize value => simp [reuse] at operation
+  | scalar value => simp [reuse] at operation
+  | erased => simp [reuse] at operation
+  | reuseToken location? =>
+      cases location? with
+      | none =>
+          unfold reuse at operation
+          exact allocCtor_missing_after_persistent_false operation
+            beforeMissing afterFound
+      | some target =>
+          unfold reuse at operation
+          simp only [Bind.bind, Except.bind] at operation
+          by_cases wrongArity : args.size != info.size
+          · rw [if_pos wrongArity] at operation
+            contradiction
+          · rw [if_neg wrongArity] at operation
+            cases targetFound : findCell? before.heap target with
+            | none =>
+                simp [getLiveCell, targetFound] at operation
+            | some targetCell =>
+                by_cases live : targetCell.live = true
+                · simp only [getLiveCell, targetFound, live, ↓reduceIte]
+                    at operation
+                  cases objectEq : targetCell.object with
+                  | ctor old =>
+                      simp only [objectEq] at operation
+                      obtain ⟨middle, setResult, afterEq, _⟩ :=
+                        except_bind_pure_pair_eq_ok operation
+                      subst middle
+                      exact setCell_missing_after_persistent_false targetFound
+                        setResult beforeMissing afterFound
+                  | closure function arity fixed =>
+                      simp [objectEq] at operation
+                  | boxed type value =>
+                      simp [objectEq] at operation
+                  | string value =>
+                      simp [objectEq] at operation
+                  | natural value =>
+                      simp [objectEq] at operation
+                  | integer value =>
+                      simp [objectEq] at operation
+                  | byteArray value =>
+                      simp [objectEq] at operation
+                  | «opaque» typeName =>
+                      simp [objectEq] at operation
+                · have dead : targetCell.live = false :=
+                    Bool.eq_false_of_not_eq_true live
+                  simp [getLiveCell, targetFound, dead] at operation
+
+/--
+Pointwise form used by fact-map transport: if the old lookup is present it
+must be ordinary; if it is absent, successful reuse can only introduce it via
+fresh ordinary allocation.
+-/
+theorem reuse_preserves_ordinary_lookup
+    {before after : RuntimeState} {token result : Value}
+    {info : LCNF.CtorInfo} {updateHeader : Bool} {args : Array Value}
+    {location : Location} {afterCell : HeapCell}
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result))
+    (beforeOrdinary :
+      ∀ beforeCell,
+        findCell? before.heap location = some beforeCell →
+        beforeCell.persistent = false)
+    (afterFound : findCell? after.heap location = some afterCell) :
+    afterCell.persistent = false := by
+  cases beforeFound : findCell? before.heap location with
+  | none =>
+      exact reuse_missing_after_persistent_false operation beforeFound
+        afterFound
+  | some beforeCell =>
+      exact reuse_preserves_persistent_false operation beforeFound
+        (beforeOrdinary beforeCell beforeFound) afterFound
+
+/--
+The authoritative fact-map insertion performed after successful reuse
+preserves the ordinary-token relation. The inserted result is an object, so
+only differently named old token facts remain nonvacuous.
+-/
+theorem ReuseTokenOrdinaryRel.bindReuse
+    {facts : ReuseCapacityFacts} {resultId : FVarId}
+    {nextEvidence : ReuseCapacityEvidence}
+    {before after : RuntimeState} {sourceEnv : Env}
+    {token result : Value} {info : LCNF.CtorInfo}
+    {updateHeader : Bool} {args : Array Value}
+    (ordinary : ReuseTokenOrdinaryRel facts before sourceEnv)
+    (operation :
+      reuse before token info updateHeader args = .ok (after, result)) :
+    ReuseTokenOrdinaryRel
+      (insertReuseCapacityFact facts resultId nextEvidence) after
+      (Fir.LeanIR.Impure.bind sourceEnv resultId result) := by
+  intro tokenId available location cell tracked tokenLookup found
+  by_cases sameName : resultId.name = tokenId.name
+  · have resultLookup :
+        lookup (Fir.LeanIR.Impure.bind sourceEnv resultId result) tokenId =
+          some result := by
+      simp [Fir.LeanIR.Impure.bind, lookup, sameName]
+    rw [resultLookup] at tokenLookup
+    have resultToken : result = .reuseToken (some location) :=
+      Option.some.inj tokenLookup
+    obtain ⟨reference, resultObject⟩ := reuse_result_is_object operation
+    rw [resultObject] at resultToken
+    contradiction
+  · have oldTracked :
+        findReuseCapacityEvidence? facts tokenId =
+          some (.retainedAtLeast available) := by
+      rw [← findReuseCapacityEvidence?_insert_other facts resultId tokenId
+        nextEvidence sameName]
+      exact tracked
+    have oldLookup :
+        lookup sourceEnv tokenId = some (.reuseToken (some location)) := by
+      simpa [Fir.LeanIR.Impure.bind, lookup, sameName] using tokenLookup
+    exact reuse_preserves_ordinary_lookup operation
+      (fun beforeCell beforeFound =>
+        ordinary tokenId available location beforeCell oldTracked oldLookup
+          beforeFound)
+      found
+
 /-- The empty validator fact map adds no obligation to W6's ordinary state
 relation. This is the initial bridge for a validated function body. -/
 theorem StateRelated.withEmptyReuseCapacity
@@ -2417,13 +2908,15 @@ theorem reuseStep_some_of_capacityEvidence
         (.i32 (UInt32.ofNat address.value)) (.object (.heap location)) ∧
       ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
         resultKind (.word32 address) (.object (.heap location)) ∧
+      heap.heapCursor = initial.host.runtime.heap.heapCursor ∧
       HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
       reuse runtime (.reuseToken (some location)) info updateHeader
           semanticFields = .ok (nextRuntime, .object (.heap location)) := by
   have layoutFits :=
     capacityRelated.reuseToken_some_layoutFits capacityFitting headerRead
   obtain ⟨heap, nextRuntime, concreteStep, witnessTransport,
-      nextRuntimeRelated, physicalRelated, capacityTransport, semanticStep⟩ :=
+      nextRuntimeRelated, physicalRelated, cursor, capacityTransport,
+      semanticStep⟩ :=
     reuseStep_some_of_refines runtimeRelated argsLength decoded mapped found
       descriptor objectEq objectRelated headerRead headerKind refCount
       persistent ordinary cellLive layoutFits arity semanticArity
@@ -2444,8 +2937,8 @@ theorem reuseStep_some_of_capacityEvidence
     capacityRelated.object_afterReuse capacityFitting capacityTransport
       resultRelated
   exact ⟨heap, nextRuntime, concreteStep, witnessTransport,
-    nextRuntimeRelated, physicalRelated, resultCapacity, capacityTransport,
-    semanticStep⟩
+    nextRuntimeRelated, physicalRelated, resultCapacity, cursor,
+    capacityTransport, semanticStep⟩
 
 /--
 Certificate-free successful reuse refinement across all runtime branches.
@@ -2468,6 +2961,7 @@ theorem reuseStep_of_capacityEvidence
     {semanticFields : Array Value}
     {facts : ReuseCapacityFacts} {tokenId : FVarId}
     {evidence : ReuseCapacityEvidence}
+    {remainingBytes : Nat}
     (runtimeRelated :
       ConcreteRuntimeRel initial.host.runtime witness runtime)
     (argsLength : physicalArgs.length = fieldKinds.size + 1)
@@ -2493,11 +2987,15 @@ theorem reuseStep_of_capacityEvidence
     (resultRefines : (constructorKind info).refines resultKind = true)
     (resultCompatible :
       evidence = .emptyToken ∨ resultKind = .tobject)
+    (budget :
+      initial.host.runtime.heap.AddressSpaceBudget remainingBytes)
     (freshAllocated :
       sourceToken = .reuseToken none →
         ∃ heap word,
           reuseObject initial.host.runtime.heap Word32.zero info updateHeader
-            fields.toArray = .ok (heap, word))
+            fields.toArray = .ok (heap, word) ∧
+          heap.AddressSpaceBudget
+            (remainingBytes - constructorAllocationBytes info))
     (tokenOrdinary :
       ∀ (location : Location) (cell : HeapCell),
         sourceToken = .reuseToken (some location) →
@@ -2518,7 +3016,9 @@ theorem reuseStep_of_capacityEvidence
         ReuseCapacityValueRel heap nextWitness (evidence.afterReuse info)
           resultKind (.word32 word) sourceValue ∧
         nextWitness.closureDescriptors = witness.closureDescriptors ∧
-        HeaderCapacityTransport initial.host.runtime.heap heap witness := by
+        HeaderCapacityTransport initial.host.runtime.heap heap witness ∧
+        heap.AddressSpaceBudget
+          (remainingBytes - constructorAllocationBytes info) := by
   cases evidence with
   | emptyToken =>
       obtain ⟨tokenWordEq, sourceTokenEq⟩ :=
@@ -2526,7 +3026,7 @@ theorem reuseStep_of_capacityEvidence
       injection tokenWordEq with tokenWordEq
       subst tokenWord
       subst sourceToken
-      obtain ⟨heap, word, reused⟩ := freshAllocated rfl
+      obtain ⟨heap, word, reused, remainingBudget⟩ := freshAllocated rfl
       obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
           physicalRelated, nextCapacity, witnessDescriptors,
           capacityTransport⟩ :=
@@ -2536,14 +3036,14 @@ theorem reuseStep_of_capacityEvidence
           reused semanticStep
       exact ⟨heap, word, nextWitness, concreteStep, transport,
         nextRuntimeRelated, physicalRelated, nextCapacity,
-        witnessDescriptors, capacityTransport⟩
+        witnessDescriptors, capacityTransport, remainingBudget⟩
   | retainedAtLeast available =>
       rcases capacityRelated.retainedToken_cases with zero | retained
       · obtain ⟨tokenWordEq, sourceTokenEq⟩ := zero
         injection tokenWordEq with tokenWordEq
         subst tokenWord
         subst sourceToken
-        obtain ⟨heap, word, reused⟩ := freshAllocated rfl
+        obtain ⟨heap, word, reused, remainingBudget⟩ := freshAllocated rfl
         obtain ⟨nextWitness, concreteStep, transport, nextRuntimeRelated,
             physicalRelated, nextCapacity, witnessDescriptors,
             capacityTransport⟩ :=
@@ -2553,7 +3053,7 @@ theorem reuseStep_of_capacityEvidence
             reused semanticStep
         exact ⟨heap, word, nextWitness, concreteStep, transport,
           nextRuntimeRelated, physicalRelated, nextCapacity,
-          witnessDescriptors, capacityTransport⟩
+          witnessDescriptors, capacityTransport, remainingBudget⟩
       · obtain ⟨location, address, header, tokenWordEq, sourceTokenEq,
             tokenRelated, _rawHeaderRead, _headerOwned, _minimum⟩ :=
           retained
@@ -2588,7 +3088,7 @@ theorem reuseStep_of_capacityEvidence
                 subst semantic
                 obtain ⟨heap, actualRuntime, concreteStep, transport,
                     nextRuntimeRelated, physicalRelated, nextCapacity,
-                    capacityTransport, semanticExpected⟩ :=
+                    cursor, capacityTransport, semanticExpected⟩ :=
                   reuseStep_some_of_capacityEvidence runtimeRelated argsLength
                     decoded capacityRelated capacityFitting mapped found
                     descriptor objectEq objectRelated headerRead headerKind
@@ -2607,11 +3107,17 @@ theorem reuseStep_of_capacityEvidence
                 subst sourceValue
                 let nextWitness :=
                   witness.rebindConstructor address info fieldKinds
+                have remainingBudget :
+                    heap.AddressSpaceBudget
+                      (remainingBytes - constructorAllocationBytes info) :=
+                  MemoryState.AddressSpaceBudget.of_heapCursor_eq
+                    (budget.weaken (Nat.sub_le remainingBytes
+                      (constructorAllocationBytes info))) cursor
                 exact ⟨heap, address, nextWitness, concreteStep, transport,
                   nextRuntimeRelated, physicalRelated, nextCapacity, by
                     simp [nextWitness,
                       RefinementWitness.rebindConstructor],
-                  capacityTransport⟩
+                  capacityTransport, remainingBudget⟩
             | boxed descriptor relatedObjectEq objectRelated refCount
                 persistent cellLive =>
                 rw [objectEq] at relatedObjectEq
