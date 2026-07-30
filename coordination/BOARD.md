@@ -23,14 +23,14 @@ identities.
 - Validation's validated pre-record coordination head is `3ae6c37d`, with
   functional head `96eec154` on semantic base `fff91175` and coordination head
   `cfa17d81`. The current functional validation boundary on `main` is
-  `9f067817`; the combined proof/validation head is `9f067817`, so the long
-  validation branch is twenty-nine commits behind and one hundred twelve
+  `3853a923`; the combined proof/validation head is `3853a923`, so the long
+  validation branch is thirty-five commits behind and one hundred twelve
   commits ahead. Its older commits `a2907a66`,
-  `7c87e6ec`, `bb387042`, and `9171fdd6` have been superseded by current-main
-  landings `15b8727e`, `e08784b3`, `6ab2efed`, `e7f2b457`, and `9f067817`.
-  The next long-branch rebase drops their duplicated mechanisms; it preserves
-  the long-only Float/IO domain declarations as a later additive calibration
-  after their shared contracts land.
+  `7c87e6ec`, `bb387042`, `9171fdd6`, and `cb03e9ab` have been superseded by
+  current-main landings `15b8727e`, `e08784b3`, `6ab2efed`, `e7f2b457`,
+  `9f067817`, and `3853a923`. The next long-branch rebase drops their duplicated
+  mechanisms; it preserves the long-only Float/IO domain declarations as a
+  later additive calibration after their shared contracts land.
 - Rebased native/LCNF run
   `92b727e4a1d82ccfb3a9f419e28f9afd880ccd43ca1b1f0b985dcaa0874e19cb`
   passes 1,008/1,008. Immutable evidence
@@ -53,13 +53,14 @@ identities.
   All three edges are equal, all 1,162 compiler-product reads are confirmed by
   `strace`, and the 581 native-to-V8 cases meet the 581-case global oracle
   floor. The retained 67-case protocol-v4 float/mixed triangle is an additive
-  frontier, not the total real-engine baseline. Functional `main` at `9f067817`
-  passes the complete `make check`, including the same 581-case triangle and
-  its 590-case composed coverage index. The index now rederives exact
-  tag-to-case attribution from retained corpus evidence and enforces 30
-  per-tier semantic floors plus 94 conjunctive domains: all 2,809 required
-  tag-attributions and 1,469 domain memberships are present. Forty-six matching
-  source and V8 domains pin arithmetic boundaries, external families,
+  frontier, not the total real-engine baseline. Functional `main` at `3853a923`
+  passes the complete `make check`, including the same 581-case triangle plus
+  two source-only native/LCNF cases and its 592-case composed coverage index.
+  The index rederives exact tag-to-case attribution from retained corpus
+  evidence and enforces 31 per-tier semantic floors plus 95 conjunctive
+  domains: all 2,817 required tag-attributions and 1,473 domain memberships are
+  present. Forty-six matching source and V8 domains pin arithmetic boundaries,
+  external families,
   failures, closures/control flow, effects, ownership, mutation, and text/byte
   behavior; two direct-machine domains pin recursive release and reset/reuse.
   It also supplies enforceable `portable` and `exact` equivalence gates for two
@@ -73,22 +74,38 @@ identities.
   verification rejects symlinks, path escape, identity substitution, and
   disagreement with the fully verified source graph. The root gate now records
   comparison attestations only from that immutable snapshot and rechecks the
-  resulting aggregate offline. The rebased complete `make check` passes 121
-  harness tests, 581 native/LCNF cases, 9 direct cases, the 581-case
-  native/LCNF/V8 triangle, all 94 semantic domains, bug cards, trusted
+  resulting aggregate offline. The rebased complete `make check` passes 122
+  harness tests, 583 native/LCNF cases, 9 direct cases, the 581-case
+  native/LCNF/V8 triangle, all 95 semantic domains, bug cards, trusted
   assumptions, and placeholder policy. Its latest retained V8 receipt is
-  `84fe582b5f53a4189880f4f73367e8ccc08880b05710f5e09175e5d7e38d7fd2`;
-  run `063aed4632ad7f5b94739656b1936dcb611016c592b5c2ec330ffcf01e678ae2`
+  `633b6e1c270d0ab256a00aeb78ccfbfa0b888e44197ab9d63abcdf12c952bcaa`;
+  run `9ba9524a8afb46ae0380d70aa1527c165245ca7601431412388e6c4670ef5d12`
   names source evidence
-  `8ef80379af9e67c6d54f595d47bfadc5a14cdcdc7a1061bb6396081fd5ef53c1`
+  `da449e04c839a99359f31cf872e4c0f87f395a3f3b5cfa69d126504df92e84ee`
   and matrix
-  `e229ff1a41cd5c7b9a6be44438cc6a3fe29d1e4da1e9aceabfae51f0f2c6b543`.
+  `54b63ce79c5b913212ace835c1748c6e9e1e5d39353686ffc5098e8a8165ceb4`.
   The three-edge comparison envelope has stable contract
-  `10d6cc0ef81e62c01a6c9259ca73e33250d20aaa7eaaf1eb3b51ba5eb30e95f1`,
+  `0116c386ca1ebd555a850f882ba1c4bc1909c1a9e61c865e69c6cf861eaff1a5`,
   evidence
-  `ec0aab43e7f838e01eeb2aadb05a57831b8faf430f92bbd0e1793d230584fec3`,
+  `e40bc43dda69baf7ea70d223dca64eb251a3b50f6255578911382ec71706053d`,
   and 1,162 witnessed native-oracle comparisons under policy
   `e11ddcfc5fd9bff44f46a4eb593a47bb5905796c6ea48ab1661ab96e6d219e31`.
+- Current-main landing `3853a923` fixes
+  `FIR-BUG-impure-none-bool-entry-scalar-abi`: runner-supplied `Bool` arguments
+  now use Lean's unboxed `UInt8` final-LCNF entry ABI. Both Boolean values pass
+  native comparison through an exact compiler-generated
+  `box`/`pap`/`unbox`/branch trace. The pre-repair two-case run
+  `fcd103e5fdf020e697e49d2450a4088d46e3c595f413849cef04f18772ddfde5`
+  stops after `admin:invoke-name, form:box` with `expected-scalar`; immutable
+  evidence
+  `9b30f4e9e20272d6ca313d4a0bef3989514f4e79116e5c8db9fa497a0f2e6fb1`
+  records both mismatches before the fix. Strict plan-level `excludeTags`
+  now lets source-oracle coverage advance without pretending an unready
+  compiler case ran in V8; online and offline verification both reject a
+  selected excluded case. The two fixtures carry `wasm-generation-pending`
+  because W7's public compiler surface returns the typed `unsupportedCode`
+  error before emitting a product. This is an explicit future admission
+  handoff, not a request to overlap W7's active compiler work.
 - The first shared-contract commit in the long lane-4 stack, `7053d748`,
   passes the full Lean build, examples, harness tests, native/LCNF baseline,
   and direct tier in isolation. Its only `make check` stop is the W7-owned
@@ -124,15 +141,19 @@ identities.
   post-state heap freshness directly from the maintained source carrier, for
   both empty-target and target-ledger/source-only-closure shapes; the concrete
   reset/reuse client consumes the generic bridge.
-- W6 has advanced its committed head to `608aaaf1`, one hundred thirty-one
-  commits ahead and four behind functional `main`, with active dirty
-  concrete-runtime proof edits; no formal integration handoff has been
-  published. W7 is at `4f694470`, twenty-one commits ahead and fourteen behind
-  functional `main`, with active dirty generation-consumer migration edits and
-  a Float transport bug-card update.
+  The proof branch is now clean at candidate handoff `4e882842`, one commit
+  ahead of and aligned with functional `main`; it combines source ownership
+  with the exact target ledger and exercises the carrier on the concrete
+  reset/reuse client. Its prescribed check report and formal handoff are still
+  required before integration.
+- W6 has advanced its clean committed head to `e58ba9e8`, one hundred
+  thirty-three commits ahead of and aligned with functional `main`; no formal
+  integration handoff has been published. W7 is at `4f694470`, twenty-one
+  commits ahead and twenty behind functional `main`, with active dirty
+  generation-consumer migration edits and a Float transport bug-card update.
   Integration must not absorb any of those working trees; each lane runs its
   required checks, cleans, and sends the prescribed handoff before landing.
-- Current `main` at `8ad80ad3` releases the fail-closed
+- Released contract `8ad80ad3` supplies the fail-closed
   `bitExactFloatTransport` consumer contract independently of the queued Lean
   float stack. It selects an integer-lane Wasm facade, preserves all raw f32/f64
   bits as `BigInt`, rejects missing or malformed capabilities, and passes the
@@ -147,12 +168,12 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `main` | active | Main contains structured symbolic Wasm loops, Talos lowering, stack-safe resident String walkers, and the checked ledger-aware LCNF correctness endpoint at `6d61e0aa`. The retained-prefix reset/reuse client at `5b9bead7` reaches `LoweringCorrect`; `3f720ba4` extracts environment/ledger laws, `5a437fae` derives reset/reuse operational shapes plus finite-path invariant transport, `3744edf1` adds source-only allocation lifecycle transport, `0041d70c` carries exact heap-binding/reset-token provenance, `7ecdc33b` derives all three deleted-write heap shapes from successful runtime effects, `44b1c2ff` composes those facts into the full root-aware write-readiness contract, `8c6ea3e6` does the same for both reuse-token branches, `475b642b` frames recursive release/reset inside the operand's original owned closure and derives the target-ledger owner frame, `cd09942c` makes that closure certificate compositional across environment, heap, ledger, and paired-allocation transitions, `f29b5a90` derives fresh-frontier exclusion from a reusable heap ownership bound, `7ebfb53c` preserves the bound through replacement, recursive release, reset, and concrete-token reuse, `67183055` derives installed-value bounds from checked evaluation, `b05c62d5` separates target liveness from complete source-environment ownership at deleted operations, `fd4f531f` carries the local ownership invariant through allocation/reuse result binding, `15092e7c` extends it through exact hereditary bind/apply restoration with complete saved bind environments, `ba52212b` preserves it through cache persistence and the checked three-way yielded dispatcher, `a43b7f4c` carries the whole-machine invariant through both deleted-reuse token branches, `1cef5df2`/`23898302` extend and check it for deleted constructor allocation, object-field writes, and reset, `8bde8037`/`475451b9` complete and check deleted-write ownership for absolute-slot `USize` and packed-scalar updates, `597b57ea`/`633d259d` preserve and check retained named/local application ownership across bind-frame pushes and nullary local aliasing, `51494be3`/`89d6a99e` preserve and check root-free retained erased, `USize`, and scalar result binding, `b535c662`/`61fe8259` preserve and check retained object projection, unbox, and sharedness reads, `8e144c34`/`0a5aa2f5` preserve and check retained heap-backed literal and constructor allocation ownership, `6f708f42`/`588146ac` preserve and check retained partial-application closure and heap-box allocation ownership, `0d333649`/`997a8928` complete the retained-family ownership matrix with heap reset plus both reuse-token branches, `fbf34a80`/`fff91175` complete and check source, exact-shadow, and reachable active-code ownership dispatch, `88c85852`/`991c36ee` preserve and check every internal named-invocation successor, and `7c0bb6c3`/`28aa7930` recover closure fixed-argument bounds and complete the ownership-strengthened dispatcher for every internal control. Validation at `9f067817` now gates all 581 native-oracle V8 cases through immutable source receipts and offline-verifiable comparison attestations while the long-only IO/Float frontier remains isolated | Eight isolated shared-contract domains remain queued: float representation, closure ownership, argument aliases, process termination, effectful native-oracle actions, source-entry result boundaries, Lean IO-error normalization, and native source-stream capture. The last four are validation infrastructure; W7/V8 consumes them only when compiler-generated cases are ready. W7's float consumers and fresh V8 execution are complete; integration is now gated by proof-owned `takeClosureApplication`/float-box consumers and W6's concrete float layout/refinement handoff |
-| Lean pass proof | pass-proof owner | `proof/simpcase` | active | Functional head `83bdedd5` is on `main`. It factors source-owned reset readiness into generic local-shape bridges: reset preserves `HeapOwnershipBelowFrontier`, and the maintained source carrier discharges post-reset freshness for both empty targets and target-ledger/source-only-closure shapes. The checked concrete reset/reuse endpoint consumes this bridge and still reaches whole-program `LoweringCorrect`. The proof worktree is clean and aligned with `main` at this checkpoint. | Build the missing combined source-owned plus target-allocation-ledger exact relation and contract. The current source-owned contract carries source heap ownership but forgets the exact target owner ledger; the ledger contract retains target ownership but does not carry source ownership. Prove source ownership preservation independently over structural source steps, package both carriers in one non-lockstep simulation, and exercise it on a nonempty-target reset/reuse client before replacing finite fixture graphs with compiler static/local-shape invariants. After lane 4 rebases its shared contracts, also re-probe the focused `SimpCaseRelation` and `AlphaEqvCode` consumers rather than assuming their historical locations remain exact. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Committed head `608aaaf1`, four commits behind functional `main`, resolves closure candidates at mapped addresses after deriving cache-aware candidate coverage; the worktree has active next-slice concrete-runtime proof edits | Clean the current slice, run the required Talos checks, and publish a formal handoff before integration. Float32/Float boxed-kind codes, packed storage/projection/mutation support, resolver support, `HeapRefinement` cases, and the closure-application audit remain W6-owned; W6 owns implementation-to-concrete-host theorems, not validation adapters or the W7 compiler |
-| W7 generation | generation owner | `wasm/generation` | active | Committed head `4f694470`, fourteen commits behind functional `main`, consumes exact float manifest transport; the worktree has active dirty migration edits across source examples, artifact clients, browser/concrete runners, checks, and the signaling-NaN bug card. Earlier clean checkpoints expose the canonical integer-lane f32/f64 facade and versioned `bitExactFloatTransport` capability. | Finish and clean the current consumer migration, run the required artifact/Talos checks, and publish its handoff before rebase or integration. The queued Lean float/closure stack still needs proof-owned `AlphaEqvCode` adaptation and W6 concrete refinement before the final artifact becomes `linked/accepted`. |
+| Integration | integration owner | `main` | active | Main contains structured symbolic Wasm loops, Talos lowering, stack-safe resident String walkers, and the checked ledger-aware LCNF correctness endpoint at `6d61e0aa`. The retained-prefix reset/reuse client at `5b9bead7` reaches `LoweringCorrect`; `3f720ba4` extracts environment/ledger laws, `5a437fae` derives reset/reuse operational shapes plus finite-path invariant transport, `3744edf1` adds source-only allocation lifecycle transport, `0041d70c` carries exact heap-binding/reset-token provenance, `7ecdc33b` derives all three deleted-write heap shapes from successful runtime effects, `44b1c2ff` composes those facts into the full root-aware write-readiness contract, `8c6ea3e6` does the same for both reuse-token branches, `475b642b` frames recursive release/reset inside the operand's original owned closure and derives the target-ledger owner frame, `cd09942c` makes that closure certificate compositional across environment, heap, ledger, and paired-allocation transitions, `f29b5a90` derives fresh-frontier exclusion from a reusable heap ownership bound, `7ebfb53c` preserves the bound through replacement, recursive release, reset, and concrete-token reuse, `67183055` derives installed-value bounds from checked evaluation, `b05c62d5` separates target liveness from complete source-environment ownership at deleted operations, `fd4f531f` carries the local ownership invariant through allocation/reuse result binding, `15092e7c` extends it through exact hereditary bind/apply restoration with complete saved bind environments, `ba52212b` preserves it through cache persistence and the checked three-way yielded dispatcher, `a43b7f4c` carries the whole-machine invariant through both deleted-reuse token branches, `1cef5df2`/`23898302` extend and check it for deleted constructor allocation, object-field writes, and reset, `8bde8037`/`475451b9` complete and check deleted-write ownership for absolute-slot `USize` and packed-scalar updates, `597b57ea`/`633d259d` preserve and check retained named/local application ownership across bind-frame pushes and nullary local aliasing, `51494be3`/`89d6a99e` preserve and check root-free retained erased, `USize`, and scalar result binding, `b535c662`/`61fe8259` preserve and check retained object projection, unbox, and sharedness reads, `8e144c34`/`0a5aa2f5` preserve and check retained heap-backed literal and constructor allocation ownership, `6f708f42`/`588146ac` preserve and check retained partial-application closure and heap-box allocation ownership, `0d333649`/`997a8928` complete the retained-family ownership matrix with heap reset plus both reuse-token branches, `fbf34a80`/`fff91175` complete and check source, exact-shadow, and reachable active-code ownership dispatch, `88c85852`/`991c36ee` preserve and check every internal named-invocation successor, and `7c0bb6c3`/`28aa7930` recover closure fixed-argument bounds and complete the ownership-strengthened dispatcher for every internal control. Validation at `3853a923` gates 583 native/LCNF cases and all 581 compiler-admitted V8 cases through immutable receipts, offline comparison attestations, and strict plan admission fences while the long-only IO/Float frontier remains isolated | Eight isolated shared-contract domains remain queued: float representation, closure ownership, argument aliases, process termination, effectful native-oracle actions, source-entry result boundaries, Lean IO-error normalization, and native source-stream capture. The last four are validation infrastructure; W7/V8 consumes them only when compiler-generated cases are ready. The two Bool closure fixtures are explicitly tagged `wasm-generation-pending`; W7 need not overlap its active compiler slice, and later admission only removes that fence after external-engine checks. W7's float consumers and fresh V8 execution are complete; integration is now gated by proof-owned `takeClosureApplication`/float-box consumers and W6's concrete float layout/refinement handoff |
+| Lean pass proof | pass-proof owner | `proof/simpcase` | candidate handoff | Clean committed head `4e882842` is one commit ahead of and aligned with functional `main`. It packages source ownership together with the exact target allocation ledger in the non-lockstep simulation, proves preservation across the selected structural paths, and exercises the combined carrier on a nonempty-target reset/reuse client. | Publish the formal handoff with exact checks before integration. Once it lands, dependent lanes rebase; lane 4 re-probes the long-stack `SimpCaseRelation` and `AlphaEqvCode` consumers, while the proof lane can replace finite fixture graphs with compiler static/local-shape invariants. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | candidate handoff | Clean committed head `e58ba9e8`, one hundred thirty-three commits ahead of and aligned with functional `main`, separates declaration correctness from exports and advances the cache-aware concrete reuse proof stack. | Run/report the required full and Talos checks and publish a formal handoff before integration. Float32/Float boxed-kind codes, packed storage/projection/mutation support, resolver support, `HeapRefinement` cases, and the closure-application audit remain W6-owned; W6 owns implementation-to-concrete-host theorems, not validation adapters or the W7 compiler. |
+| W7 generation | generation owner | `wasm/generation` | active | Committed head `4f694470`, twenty commits behind functional `main`, consumes exact float manifest transport; the worktree has active dirty migration edits across source examples, artifact clients, browser/concrete runners, checks, and the signaling-NaN bug card. Earlier clean checkpoints expose the canonical integer-lane f32/f64 facade and versioned `bitExactFloatTransport` capability. | Finish and clean the current consumer migration, run the required artifact/Talos checks, and publish its handoff before rebase or integration. The two new Bool capture cases are only a future `wasm-generation-pending` admission probe and require no overlap now. The queued Lean float/closure stack still needs proof-owned `AlphaEqvCode` adaptation and W6 concrete refinement before the final artifact becomes `linked/accepted`. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
-| Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81`, with validated functional head `96eec154` on semantic base `fff91175`, is twenty-nine commits behind and one hundred twelve ahead of current `main`. Its 1,008-case native/LCNF run and 9-case direct-machine run verify offline with zero findings; the composed long-stack index retains 1,017 comparisons, 9,939 interpreter steps, 193 semantic-tag floors, and 152 semantic domains. Current-main extractions `e08784b3`, `6ab2efed`, `e7f2b457`, and `9f067817` independently land retained-corpus attribution, 30 semantic floors, 94 conjunctive domains, immutable comparison binding, stable evidence receipts, and the enforced 581-case native-oracle attestation gate. | The next long-branch rebase drops duplicated mechanisms from `a2907a66`, `7c87e6ec`, `bb387042`, and `9171fdd6`, already superseded by `15b8727e`, `e08784b3`, `6ab2efed`, `e7f2b457`, and `9f067817`; it retains long-only Float/IO domains as an additive post-contract calibration. Shared float, closure, alias, termination, IO, and stream-capture contracts remain isolated and require the recorded proof/W6/W7 handoffs before integration. |
+| Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81`, with validated functional head `96eec154` on semantic base `fff91175`, is thirty-five commits behind and one hundred twelve ahead of functional `main` at `3853a923`. Its 1,008-case native/LCNF run and 9-case direct-machine run verify offline with zero findings; the composed long-stack index retains 1,017 comparisons, 9,939 interpreter steps, 193 semantic-tag floors, and 152 semantic domains. Current-main extractions `e08784b3`, `6ab2efed`, `e7f2b457`, `9f067817`, and `3853a923` independently land retained-corpus attribution, immutable evidence/attestations, the Bool scalar entry ABI, 31 semantic floors, 95 conjunctive domains, 583 native/LCNF cases, and the enforced 581-case native-oracle V8 gate. | The next long-branch rebase drops duplicated mechanisms from `a2907a66`, `7c87e6ec`, `bb387042`, `9171fdd6`, and `cb03e9ab`, already superseded by `15b8727e`, `e08784b3`, `6ab2efed`, `e7f2b457`, `9f067817`, and `3853a923`; it retains long-only Float/IO domains as an additive post-contract calibration. Shared float, closure, alias, termination, IO, and stream-capture contracts remain isolated and require the recorded proof/W6/W7 handoffs before integration. |
 
 ## Resident-helper bridge
 
