@@ -3679,6 +3679,64 @@ example
   generated.select kindEq targetEq paramsEq cacheEq
 
 /--
+Reachability disjointness is one sufficient implementation of the minimal
+facts-aware cache-publication boundary. The compiler theorem itself consumes
+the transport, so an alias-invalidating fact analysis may discharge the same
+boundary without proving a stronger all-location persistence property.
+-/
+example
+    {facts : ReuseCapacityFacts}
+    {resultId : FVarId}
+    {runtime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Value}
+    (declaration : Name)
+    (disjoint :
+      ReuseTokenPublicationDisjoint facts runtime sourceEnv result) :
+    ReuseTokenOrdinaryBindTransport facts resultId runtime
+      (runtime.setGlobal declaration result) sourceEnv result :=
+  ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration disjoint
+
+/--
+The hereditary theorem for a lazy initializer returns ordinary declaration
+correctness and the exact evolved cache table together. This is the recursive
+induction result consumed by nested miss publication, not a target execution
+certificate supplied by the caller.
+-/
+example
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {initialWitness resultWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultKind : AbiKind}
+    {resultValue : Value}
+    {physical : Wasm.Value}
+    {stepCost : Nat}
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule sourceFunction module hostEnv sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode targetFunction
+        functionIndex initial afterCall initialWitness resultWitness parameters
+        resultKind resultValue physical stepCost) :
+    BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+          sourceFunction module hostEnv sourceExternals sourceRuntime
+          resultRuntime sourceEnv sourceCode targetFunction functionIndex
+          initial afterCall initialWitness resultWitness parameters resultKind
+          resultValue physical stepCost ∧
+      LazyCacheGlobalsRel resultWitness sourceModule resultRuntime afterCall :=
+  ⟨callee.declaration, callee.cacheTable⟩
+
+/--
 Executable witness for
 `FIR-BUG-wasm-none-lazy-cache-result-refinement`.
 

@@ -5078,6 +5078,39 @@ initializer equation remains.
 shape threaded by lowering, making context-side cache-name alignment
 definitional as well.
 
+W6.6gzp closes the hereditary whole-cache miss composition.
+`BudgetedCapacityPreservingSuccessfulDeclarationWithCache` is the recursive
+declaration theorem for code that may evaluate lazy globals: it pairs the
+existing budgeted declaration refinement with the exact
+`LazyCacheGlobalsRel` at the callee's semantic runtime, representation
+witness, and concrete post-store. This is an induction hypothesis over the
+generated declaration environment, not a per-execution target certificate.
+
+`StateRelated.bindAfterCacheSet` derives the caller's complete post-binding
+state relation from the hereditary callee relation, concrete `cacheSet`,
+compiler-derived result local/kind facts, and the checked local write. The
+lazy-miss theorem therefore no longer accepts an opaque `nextRelated`
+premise. Its fundamental ownership premise is now only
+`ReuseTokenOrdinaryBindTransport` across semantic publication; proved
+reachability disjointness remains one sufficient adapter, while a future
+alias-invalidating fact transfer may implement the same boundary directly.
+
+Finally, `miss_of_cachedDeclaration_cacheSet` composes the recursive callee,
+concrete cache publication, generated value/flag writes, resource transports,
+and evolved table into one result containing both the exact budgeted miss and
+the successor whole-cache invariant. Nested initializer execution may change
+any cache slot; no unchanged-cache premise is used.
+
+The remaining uniform implementation work is now declaration-environment
+induction rather than another caller-side cache lemma. Its miss branch must
+select the generated callee/import operations, obtain the cache-aware
+hereditary declaration result, and establish the facts-aware publication
+transport. Independently, integration still owes the universal validator
+accessor, and the shared lowering bug
+`FIR-BUG-wasm-none-lazy-cache-result-refinement` still prevents deriving
+result-kind alignment for every source program currently admitted by
+`lowerSupported`.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

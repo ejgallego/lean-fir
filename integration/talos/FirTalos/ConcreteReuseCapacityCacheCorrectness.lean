@@ -298,6 +298,78 @@ theorem cacheSetStep_preserves_mappedHeaderCapacity_of_related
   simpa [replaceRuntime, clearFailure] using capacity
 
 /--
+Concrete cache publication plus the checked caller-local write reconstructs
+the complete post-binding state relation.
+
+The callee supplies the related pre-publication runtime and witness
+transport. `cacheSetStep_of_refines` constructs the semantic `setGlobal`
+transition; the generated Wasm global writes leave the host unchanged.
+Consequently callers provide only compiler-derived local index/kind facts,
+not an opaque post-state relation.
+-/
+theorem StateRelated.bindAfterCacheSet
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime callRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial afterCall afterCache valueStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {initialWitness callWitness : RefinementWitness}
+    {result : FVarId}
+    {declaration : Name}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {sourceValue : Value}
+    {cacheSlot : ConcreteGlobalSlot}
+    {valueIndex flagIndex resultIndex : Nat}
+    (initialRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals
+        initialWitness)
+    (calleeRelated :
+      ConcreteRuntimeRel afterCall.host.runtime callWitness callRuntime)
+    (witnessTransport :
+      WitnessTransport initialWitness callWitness)
+    (valueRelated :
+      PhysicalValueRel callWitness kind physical sourceValue)
+    (cacheFound :
+      afterCall.host.runtime.globals.find? declaration = some cacheSlot)
+    (cacheKindEq : cacheSlot.kind = kind)
+    (cacheDescriptorsEq :
+      afterCall.host.closureDescriptors = callWitness.closureDescriptors)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueStoreEq :
+      valueStore = writeWasmGlobal afterCache valueIndex physical)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (resultKindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+        some kind)
+    (targetSet :
+      locals.set? resultIndex physical = some nextLocals) :
+    StateRelated sourceFunction
+      (callRuntime.setGlobal declaration sourceValue)
+      (bind sourceEnv result sourceValue)
+      (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
+      callWitness := by
+  obtain ⟨runtimeAfter, implementationOperation, runtimeRelated, _, _⟩ :=
+    cacheSetStep_of_refines calleeRelated valueRelated cacheFound cacheKindEq
+      cacheDescriptorsEq
+  rw [operation] at implementationOperation
+  have afterCacheEq :
+      afterCache = replaceRuntime afterCall runtimeAfter := by
+    injection implementationOperation
+  subst afterCache
+  apply initialRelated.bindAfterTransport witnessTransport
+  · simpa [writeWasmGlobal, valueStoreEq] using runtimeRelated
+  · simp only [writeWasmGlobal, valueStoreEq, replaceRuntime]
+    rfl
+  · exact resultFound
+  · exact resultKindAt
+  · exact valueRelated
+  · exact targetSet
+
+/--
 Recursive persistence leaves every semantic cell outside the published
 root's original ownership closure unchanged.
 
@@ -1116,6 +1188,45 @@ structure LazyCacheGlobalsRel
               (·.results[0]?) = some kind ∧
             LazyCacheSlotRel witness runtime store declaration kind
               (2 * index) (2 * index + 1)
+
+/--
+Hereditary declaration correctness for code that may evaluate lazy globals.
+
+The ordinary budgeted declaration theorem accounts for the source and target
+execution, returned value, resources, and immutable host tables. This
+cache-aware theorem additionally returns the evolved whole-cache relation at
+the exact callee post-state. It is an induction hypothesis over generated
+declarations, not a caller-provided execution certificate: nested lazy
+initializers may populate any generated slot before the caller publishes its
+own result.
+-/
+structure BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (sourceExternals : ExternalImpl)
+    (sourceRuntime resultRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceCode : LCNF.Code .impure)
+    (targetFunction : Wasm.Function)
+    (functionIndex : Nat)
+    (initial afterCall : Wasm.Store Host)
+    (initialWitness resultWitness : RefinementWitness)
+    (parameters : List Wasm.Value)
+    (resultKind : AbiKind)
+    (resultValue : Value)
+    (physical : Wasm.Value)
+    (stepCost : Nat) : Prop where
+  declaration :
+    BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+      sourceFunction module hostEnv sourceExternals sourceRuntime resultRuntime
+      sourceEnv sourceCode targetFunction functionIndex initial afterCall
+      initialWitness resultWitness parameters resultKind resultValue physical
+      stepCost
+  cacheTable :
+    LazyCacheGlobalsRel resultWitness sourceModule resultRuntime afterCall
 
 theorem LazyCacheGlobalsRel.layout
     {witness : RefinementWitness}
@@ -2640,11 +2751,13 @@ publication closes the complete lazy miss resource boundary.
 
 The declaration consumes the path's allocation cost. `cacheSet` may update
 persistence metadata and semantic globals but must preserve already mapped
-header extents. The source post-state is the exact semantic publication, and
-retained reuse tokens must be disjoint from the published ownership closure.
-Its exact heap-frontier preservation is proved from the implementation, so
-the residual address-space budget and the two Wasm `global.set`s require no
-additional resource premise.
+header extents. The source post-state is the exact semantic publication.
+The only ordinary-token premise is the facts-aware transport across result
+publication and binding; reachability disjointness and alias-invalidating
+fact transfer are sufficient implementations of that boundary. Exact
+heap-frontier preservation is proved from the implementation, so the residual
+address-space budget and the two Wasm `global.set`s require no additional
+resource premise.
 -/
 theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
@@ -2719,15 +2832,17 @@ theorem
     (flagGlobal :
       valueStore.globals.globals[flagIndex]? = some oldFlag)
     (distinct : valueIndex ≠ flagIndex)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some kind)
     (targetSet :
       locals.set? resultIndex physical = some nextLocals)
-    (nextRelated :
-      StateRelated callerFunction nextRuntime
-        (bind sourceEnv decl.fvarId sourceValue)
-        (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
-        callWitness)
-    (publicationDisjoint :
-      ReuseTokenPublicationDisjoint facts callRuntime sourceEnv sourceValue)
+    (publicationOrdinary :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
+        (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
     (resultKindEq : resultKind = kind)
     (cacheFound :
       afterCall.host.runtime.globals.find? declaration = some cacheSlot)
@@ -2763,6 +2878,19 @@ theorem
       declarationParams declarationBody sourceStep
       callee.capacityPreserving.successful.sourceResult).2
   subst nextRuntime
+  have nextRelated :
+      StateRelated callerFunction
+        (callRuntime.setGlobal declaration sourceValue)
+        (bind sourceEnv decl.fvarId sourceValue)
+        (writeWasmGlobal valueStore flagIndex (.i32 1)) nextLocals
+        callWitness :=
+    initialRelated.bindAfterCacheSet
+      callee.capacityPreserving.successful.runtimeRelated
+      callee.capacityPreserving.witnessTransport
+      (by simpa [resultKindEq] using
+        callee.capacityPreserving.successful.valueRelated)
+      cacheFound cacheKindEq cacheDescriptorsEq operation valueStoreEq
+      resultFound resultKindAt targetSet
   apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
     declValue initialRelated cacheTable initializerFound signature flagIndexEq
     callee.capacityPreserving.successful.cachedBody
@@ -2772,8 +2900,8 @@ theorem
     resultCount operation valueGlobal valueStoreEq flagGlobal distinct
     targetSet nextRelated
   · intro ordinary
-    exact ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration
-      publicationDisjoint (ordinary.transport callee.ordinaryTransport)
+    exact publicationOrdinary
+      (ordinary.transport callee.ordinaryTransport)
   · exact callee.capacityPreserving.witnessTransport
   · apply callee.capacityPreserving.capacityTransport.transAcross
       callee.capacityPreserving.witnessTransport
@@ -2911,6 +3039,166 @@ theorem
   exact step.withPublishedCacheTable
     (cacheTable.afterCacheSet operation) initializerFound signature runtimeEq
     valueRelated valueStoreEq
+
+/--
+Close a generated lazy miss and its successor whole-cache invariant from one
+cache-aware hereditary declaration theorem.
+
+The callee may populate arbitrary lazy globals while it executes. Its
+hereditary result returns that evolved table at `afterCall`; concrete
+`cacheSet` preserves the Wasm lanes, and the generated value/flag suffix
+publishes the selected slot. This is the recursive miss theorem required by
+the uniform compiler proof: no caller-supplied target execution certificate
+or unchanged-cache premise remains.
+-/
+theorem
+    BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {calleeCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {kind resultKind : AbiKind}
+    {declarationId cacheSetId : Nat}
+    {imp : Wasm.ImportDecl}
+    {cacheSlot : ConcreteGlobalSlot}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial afterCall afterCache valueStore : Wasm.Store Host}
+    {locals nextLocals : Wasm.Locals}
+    {initialWitness callWitness : RefinementWitness}
+    {physical oldValue oldFlag : Wasm.Value}
+    {cacheIndex resultIndex stepCost : Nat}
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (declValue : decl.value = .fap declaration #[])
+    (initialRelated :
+      StateRelated callerFunction sourceRuntime sourceEnv initial locals
+        initialWitness)
+    (cacheTable :
+      LazyCacheGlobalsRel initialWitness sourceModule sourceRuntime initial)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (kindEq :
+      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) =
+        some cacheIndex)
+    (declarationFound :
+      context.program.findDecl? declaration = some sourceDeclaration)
+    (declarationParams : sourceDeclaration.params = #[])
+    (declarationBody : sourceDeclaration.value = .code calleeCode)
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule calleeFunction module hostEnv sourceExternals
+        sourceRuntime callRuntime [] calleeCode targetFunction declarationId
+        initial afterCall initialWitness callWitness [] resultKind sourceValue
+        physical stepCost)
+    (importFound :
+      module.imports[cacheSetId]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : cacheSetId < module.imports.length)
+    (contractFound :
+      spec.contracts[cacheSetId]? =
+        some (cacheSetContract declaration kind))
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueGlobal :
+      afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue)
+    (valueStoreEq :
+      valueStore =
+        writeWasmGlobal afterCache (2 * cacheIndex + 1) physical)
+    (flagGlobal :
+      valueStore.globals.globals[2 * cacheIndex]? = some oldFlag)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some kind)
+    (targetSet :
+      locals.set? resultIndex physical = some nextLocals)
+    (publicationOrdinary :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
+        (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
+    (resultKindEq : resultKind = kind)
+    (cacheFound :
+      afterCall.host.runtime.globals.find? declaration = some cacheSlot)
+    (cacheKindEq : cacheSlot.kind = kind)
+    (cacheDescriptorsEq :
+      afterCall.host.closureDescriptors = callWitness.closureDescriptors)
+    (publicationExternals :
+      (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)).host.externals =
+        afterCall.host.externals)
+    (publicationDescriptors :
+      (writeWasmGlobal valueStore (2 * cacheIndex)
+          (.i32 1)).host.closureDescriptors =
+        afterCall.host.closureDescriptors) :
+    BudgetedCapacityPreservingLazyStep .miss facts context callerFunction module
+          hostEnv sourceExternals decl continuation
+          [.globalGet (2 * cacheIndex),
+            .iff 0 0 [] [
+              .call declarationId,
+              .call cacheSetId,
+              .globalSet (2 * cacheIndex + 1),
+              .const 1,
+              .globalSet (2 * cacheIndex)],
+            .globalGet (2 * cacheIndex + 1)]
+          sourceRuntime nextRuntime sourceEnv sourceValue initial
+          (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) locals
+          nextLocals resultIndex initialWitness callWitness physical stepCost ∧
+      LazyCacheGlobalsRel callWitness sourceModule nextRuntime
+        (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) := by
+  have paramsEq : sourceDeclaration.params.isEmpty = true := by
+    simp [declarationParams]
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq declarationFound paramsEq cacheEq
+  have publicationRuntimeEq :
+      nextRuntime = callRuntime.setGlobal declaration sourceValue :=
+    (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
+      declarationParams declarationBody sourceStep
+      callee.declaration.capacityPreserving.successful.sourceResult).2
+  have step :
+      BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
+        module hostEnv sourceExternals decl continuation
+        [.globalGet (2 * cacheIndex),
+          .iff 0 0 [] [
+            .call declarationId,
+            .call cacheSetId,
+            .globalSet (2 * cacheIndex + 1),
+            .const 1,
+            .globalSet (2 * cacheIndex)],
+          .globalGet (2 * cacheIndex + 1)]
+        sourceRuntime nextRuntime sourceEnv sourceValue initial
+        (writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)) locals
+        nextLocals resultIndex initialWitness callWitness physical stepCost :=
+    BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
+      sourceStep declValue initialRelated cacheTable generated kindEq cacheEq
+      rfl declarationFound declarationParams declarationBody
+      callee.declaration importFound hostSatisfies importInBounds contractFound
+      parameterCount resultCount operation valueGlobal valueStoreEq flagGlobal
+      (by omega) resultFound resultKindAt targetSet publicationOrdinary
+      resultKindEq cacheFound cacheKindEq cacheDescriptorsEq
+      publicationExternals publicationDescriptors
+  exact step.withCacheSetPublishedTable callee.cacheTable operation
+    initializerFound signature publicationRuntimeEq
+    (by simpa [resultKindEq] using
+      callee.declaration.capacityPreserving.successful.valueRelated)
+    valueStoreEq
 
 /--
 A budgeted lazy result re-establishes the canonical mixed facts-indexed
