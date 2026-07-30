@@ -7795,6 +7795,49 @@ theorem HeapOwnershipBelowFrontier.transportOwnershipFrame
           (wellFormed.owned_lt foundBefore ?_) frontier.symm
         simpa [objectRead] using member
 
+/-- Persistence changes only cell metadata, so the ownership graph and its
+fresh-frontier bound are unchanged. -/
+theorem HeapOwnershipBelowFrontier.markPersistent
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (value : Value) :
+    HeapOwnershipBelowFrontier (runtime.markPersistent value) := by
+  apply wellFormed.transportOwnershipFrame
+  · cases value with
+    | object reference =>
+        cases reference with
+        | tagged payload =>
+            exact HeapOwnershipFrame.refl runtime.heap
+        | heap location =>
+            simpa [RuntimeState.markPersistent] using
+              heapOwnershipFrame_markPersistentLocationFuel
+                (runtime.heap.length + 1) runtime.heap location
+    | usize | scalar | erased | reuseToken =>
+        exact HeapOwnershipFrame.refl runtime.heap
+  · simp
+
+/-- Installing a global changes the global root set after persistence but
+does not change the ownership graph or allocation frontier. -/
+theorem HeapOwnershipBelowFrontier.setGlobal
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (name : Name) (value : Value) :
+    HeapOwnershipBelowFrontier (runtime.setGlobal name value) := by
+  have persisted := wellFormed.markPersistent value
+  constructor
+  · intro location cell found
+    have foundPersisted :
+        findCell? (runtime.markPersistent value).heap location =
+          some cell := by
+      simpa [RuntimeState.setGlobal] using found
+    simpa [RuntimeState.setGlobal] using
+      persisted.cell_lt foundPersisted
+  · intro parent cell child found member
+    have foundPersisted :
+        findCell? (runtime.markPersistent value).heap parent =
+          some cell := by
+      simpa [RuntimeState.setGlobal] using found
+    simpa [RuntimeState.setGlobal] using
+      persisted.owned_lt foundPersisted member
+
 /-- Every location reachable from a known heap root lies below the fresh
 frontier of an ownership-bounded heap. -/
 theorem HeapOwnershipBelowFrontier.reachable_lt
@@ -10563,6 +10606,46 @@ theorem SourceMachineOwnershipBelowFrontier.restoreApplyFrame
   heap := bounded.heap
   env := @bounded.env
   frames := bounded.frames
+
+/-- Restoring a cache frame persists and installs the yielded global without
+changing the allocation frontier or any heap ownership edge. The cache head
+contains no saved environment, so the bounded tail stack is exposed directly. -/
+theorem SourceMachineOwnershipBelowFrontier.restoreCacheFrame
+    {state : MachineState} (name : Name)
+    (frames : List Frame) (value : Value)
+    (bounded :
+      SourceMachineOwnershipBelowFrontier
+        { state with
+          frames := .cache name :: frames
+          control := .yielded value }) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime := state.runtime.setGlobal name value
+        frames := frames
+        control := .yielded value } := by
+  constructor
+  · exact bounded.heap.setGlobal name value
+  · exact EnvironmentBelowFrontier.monoFrontier
+      (@bounded.env) (by simp [RuntimeState.setGlobal])
+  · exact BindFrameEnvironmentsBelowFrontier.monoFrontier
+      bounded.frames (by simp [RuntimeState.setGlobal])
+
+/-- If a concrete internal transition has a certified successor, any semantic
+`Step` from the same state reaches that successor; an external-step witness is
+impossible against the concrete `.next` result. -/
+theorem SourceMachineOwnershipBelowFrontier.ofStepNext
+    (bounded : SourceMachineOwnershipBelowFrontier expected)
+    (transition : coreStep before = .next expected)
+    (step : Step externals before after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  cases step with
+  | internal actual =>
+      rw [transition] at actual
+      cases actual
+      exact bounded
+  | external actual externalProof =>
+      rw [transition] at actual
+      contradiction
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
 needed to distinguish paired target allocations from source-only compiler
@@ -29304,6 +29387,179 @@ theorem coreStep_yieldedCache_binderReadyReachableRelated
     sourceFrameRoots, targetFrameRoots,
     programs, .yielded value, frames, by simpa using nextRuntime⟩
 
+/-- Cache-frame restoration also preserves the complete source ownership
+carrier. Persistence changes metadata only, global insertion does not allocate,
+and the cache head contains no saved source environment. -/
+theorem coreStep_yieldedCache_binderReadyReachableRelated_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceFrames targetFrames sourceFrameRoots targetFrameRoots)
+    (value : ValueRel rho sourceValue targetValue)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ([sourceValue] ++ sourceFrameRoots)
+      ([targetValue] ++ targetFrameRoots))
+    (ownership :
+      SourceMachineOwnershipBelowFrontier
+        { sourceState with
+          frames := .cache name :: sourceFrames
+          control := .yielded sourceValue }) :
+    let sourceAfter := {
+      sourceState with
+      runtime := sourceState.runtime.setGlobal name sourceValue
+      frames := sourceFrames
+      control := .yielded sourceValue }
+    let targetAfter := {
+      targetState with
+      runtime := targetState.runtime.setGlobal name targetValue
+      frames := targetFrames
+      control := .yielded targetValue }
+    coreStep { sourceState with
+        frames := .cache name :: sourceFrames
+        control := .yielded sourceValue } = .next sourceAfter ∧
+      coreStep { targetState with
+        frames := .cache name :: targetFrames
+        control := .yielded targetValue } = .next targetAfter ∧
+      BinderReadyReachableMachineRelated fuel rho
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  dsimp only
+  rcases coreStep_yieldedCache_binderReadyReachableRelated
+      sourceState targetState programs frames value runtime with
+    ⟨sourceStep, targetStep, related⟩
+  exact ⟨sourceStep, targetStep, related,
+    ownership.restoreCacheFrame name sourceFrames sourceValue⟩
+
+/-- Every nonterminal yielded source step preserves the complete ownership
+carrier. The exact runtime relation publishes the yielded control value; the
+carrier supplies complete environments for bind frames. -/
+theorem SourceMachineOwnershipBelowFrontier.matchYieldedStep
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (runtime : ShadowRuntimeRel rho source.runtime targetRuntime
+      ([sourceValue] ++ sourceFrameRoots) targetRoots)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have valueBound :
+      HeapLocationsBelowFrontier source.runtime [sourceValue] := by
+    intro location member
+    simp only [List.mem_singleton] at member
+    apply runtime.leftRuntimeRootsBelowFrontier
+    simp only [runtimeRoots, List.mem_append, List.mem_cons,
+      List.mem_nil_iff, or_false]
+    exact Or.inl (Or.inl (Or.inl member))
+  cases sourceFrames : source.frames with
+  | nil =>
+      have done : coreStep source =
+          .done (observe source (.returned sourceValue)) := by
+        simp [coreStep, sourceControl, sourceFrames]
+      cases step with
+      | internal transition =>
+          rw [done] at transition
+          contradiction
+      | external transition externalProof =>
+          rw [done] at transition
+          contradiction
+  | cons sourceHead sourceTail =>
+      cases sourceHead with
+      | bind binder continuation savedEnv savedJoins =>
+          have sourceSame : { source with
+              frames :=
+                .bind binder continuation savedEnv savedJoins :: sourceTail
+              control := .yielded sourceValue } = source := by
+            cases source
+            simp_all
+          have beforeOwnership :
+              SourceMachineOwnershipBelowFrontier
+                { source with
+                  frames :=
+                    .bind binder continuation savedEnv savedJoins :: sourceTail
+                  control := .yielded sourceValue } := by
+            simpa only [sourceSame] using ownership
+          have afterOwnership :=
+            beforeOwnership.restoreBindFrame binder continuation
+              savedEnv savedJoins sourceTail sourceValue valueBound
+          have transition : coreStep source =
+              .next { source with
+                env := bind savedEnv binder sourceValue
+                joins := savedJoins
+                frames := sourceTail
+                control := .code continuation } := by
+            simp [coreStep, sourceControl, sourceFrames]
+          exact afterOwnership.ofStepNext transition step
+      | apply arguments =>
+          have sourceSame : { source with
+              frames := .apply arguments :: sourceTail
+              control := .yielded sourceValue } = source := by
+            cases source
+            simp_all
+          have beforeOwnership :
+              SourceMachineOwnershipBelowFrontier
+                { source with
+                  frames := .apply arguments :: sourceTail
+                  control := .yielded sourceValue } := by
+            simpa only [sourceSame] using ownership
+          have afterOwnership :=
+            beforeOwnership.restoreApplyFrame
+              arguments sourceTail sourceValue
+          have transition : coreStep source =
+              .next { source with
+                frames := sourceTail
+                control := .invokeValue sourceValue arguments } := by
+            simp [coreStep, sourceControl, sourceFrames]
+          exact afterOwnership.ofStepNext transition step
+      | cache name =>
+          have sourceSame : { source with
+              frames := .cache name :: sourceTail
+              control := .yielded sourceValue } = source := by
+            cases source
+            simp_all
+          have beforeOwnership :
+              SourceMachineOwnershipBelowFrontier
+                { source with
+                  frames := .cache name :: sourceTail
+                  control := .yielded sourceValue } := by
+            simpa only [sourceSame] using ownership
+          have afterOwnership :=
+            beforeOwnership.restoreCacheFrame
+              name sourceTail sourceValue
+          have transition : coreStep source =
+              .next { source with
+                runtime := source.runtime.setGlobal name sourceValue
+                frames := sourceTail
+                control := .yielded sourceValue } := by
+            simp [coreStep, sourceControl, sourceFrames]
+          exact afterOwnership.ofStepNext transition step
+
+/-- A hereditary exact machine relation exposes the yielded value as the
+first source runtime root, so the source ownership carrier can use the generic
+three-frame preservation theorem. -/
+theorem SomeBinderReadyReachableMachineRelated.sourceOwnership_matchYieldedStep
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases related with ⟨rho, sourceControlRoots, targetControlRoots,
+    sourceFrameRoots, targetFrameRoots, programs, control, frames, runtime⟩
+  cases targetControl : target.control with
+  | code targetCode =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [sourceControl, targetControl] at control
+      cases control
+  | yielded targetValue =>
+      rw [sourceControl, targetControl] at control
+      cases control with
+      | yielded value =>
+          exact ownership.matchYieldedStep runtime sourceControl step
+
 /-- State-level yielded advance that retains exact provenance through bind,
 apply, and cache frame restoration.  An empty stack is terminal. -/
 theorem SomeBinderReadyReachableMachineRelated.matchYieldedStep
@@ -29426,6 +29682,26 @@ theorem SomeBinderReadyReachableMachineRelated.matchYieldedStep
                             ⟨targetPath, finalRelated⟩
                           exact ⟨_, by simpa only [targetSame] using targetPath,
                             ⟨rho, finalRelated⟩⟩
+
+/-- The checked yielded dispatcher preserves hereditary compiler provenance
+and the complete source ownership carrier in one client-facing result. -/
+theorem SomeBinderReadyReachableMachineRelated.matchYieldedStep_withOwnership
+    (related :
+      SomeBinderReadyReachableMachineRelated fuel source target)
+    (ownership : SourceMachineOwnershipBelowFrontier source)
+    (sourceControl : source.control = .yielded sourceValue)
+    (step : Step externals source sourceAfter) :
+    ∃ targetAfter,
+      NonLockstep.Reaches externals target targetAfter ∧
+      SomeBinderReadyReachableMachineRelated fuel
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have afterOwnership :=
+    related.sourceOwnership_matchYieldedStep
+      ownership sourceControl step
+  rcases related.matchYieldedStep sourceControl step with
+    ⟨targetAfter, targetPath, afterRelated⟩
+  exact ⟨targetAfter, targetPath, afterRelated, afterOwnership⟩
 
 /-- Ledger-aware yielded advance. Bind and apply restoration only rearrange
 published roots; cache restoration may mark a returned object persistent but

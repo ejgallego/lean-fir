@@ -5207,6 +5207,107 @@ theorem deletedReuseYieldedBindOwnershipPreserved :
       joins deletedReuseNoneEnvReachableRelated ValueRel.erased
       runtime ownership)
 
+/-- Cache restoration over the same source-only heap persists and publishes
+the yielded value without allocating or disturbing complete source bounds. -/
+noncomputable def deletedReuseYieldedCacheSourceState : MachineState :=
+  { deletedReuseNoneSourceState with
+    runtime := deletedReuseNoneLedgerResult.nextRuntime
+    control := .yielded .erased
+    frames := [.cache `main] }
+
+def deletedReuseYieldedCacheTargetState : MachineState :=
+  { deletedReuseTargetState with
+    control := .yielded .erased
+    frames := [.cache `main] }
+
+noncomputable def deletedReuseYieldedCacheSourceAfter : MachineState :=
+  { deletedReuseNoneSourceState with
+    runtime :=
+      deletedReuseNoneLedgerResult.nextRuntime.setGlobal `main .erased
+    control := .yielded .erased
+    frames := [] }
+
+def deletedReuseYieldedCacheTargetAfter : MachineState :=
+  { deletedReuseTargetState with
+    runtime := deletedReuseTargetState.runtime.setGlobal `main .erased
+    control := .yielded .erased
+    frames := [] }
+
+/-- Exact cache-frame restoration keeps hereditary compiler provenance and
+the complete source machine ownership carrier across persistence/global
+installation, even when the source heap contains compiler-only garbage. -/
+theorem deletedReuseYieldedCacheOwnershipPreserved :
+    coreStep deletedReuseYieldedCacheSourceState =
+        .next deletedReuseYieldedCacheSourceAfter ∧
+      coreStep deletedReuseYieldedCacheTargetState =
+        .next deletedReuseYieldedCacheTargetAfter ∧
+      BinderReadyReachableMachineRelated 2 emptyAddressRenaming
+        deletedReuseYieldedCacheSourceAfter
+        deletedReuseYieldedCacheTargetAfter ∧
+      SourceMachineOwnershipBelowFrontier
+        deletedReuseYieldedCacheSourceAfter := by
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        [] [] [] [] :=
+    BinderReadyReachableFramesRelated.nil
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseTargetState.runtime
+        [.erased] [.erased] := by
+    apply
+      deletedReuseNoneLedgerResult.runtime.runtime.prependErased.restrictExtra
+        (.cons ValueRel.erased .nil)
+    · intro value member
+      simp only [List.mem_singleton] at member
+      subst value
+      simp
+    · intro value member
+      simp only [List.mem_singleton] at member
+      subst value
+      simp
+  have resultBound :=
+    deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.heap
+      |>.reuseResultBelowFrontier
+        deletedReuseNoneLedgerResult.effect
+  have sourceEnvBound :
+      EnvironmentBelowFrontier
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseNoneSourceState.env := by
+    exact EnvironmentBelowFrontier.monoFrontier
+      (before := deletedReuseNoneSourceState.runtime)
+      (after := deletedReuseNoneLedgerResult.nextRuntime)
+      (env := deletedReuseNoneSourceState.env)
+      deletedReuseNoneSourceEnvironmentOwnershipBelowFrontier.env
+      resultBound.frontier
+  have ownership :
+      SourceMachineOwnershipBelowFrontier
+        deletedReuseYieldedCacheSourceState := by
+    refine {
+      heap := deletedReuseNoneOwnershipBelowFrontier
+      env := ?_
+      frames := ?_
+    }
+    · change EnvironmentBelowFrontier
+        deletedReuseNoneLedgerResult.nextRuntime
+        deletedReuseNoneSourceState.env
+      exact sourceEnvBound
+    · trivial
+  simpa [deletedReuseYieldedCacheSourceState,
+    deletedReuseYieldedCacheTargetState,
+    deletedReuseYieldedCacheSourceAfter,
+    deletedReuseYieldedCacheTargetAfter,
+    deletedReuseNoneSourceState,
+    deletedReuseTargetState] using
+    (coreStep_yieldedCache_binderReadyReachableRelated_withOwnership
+      (name := `main)
+      (sourceState :=
+        { deletedReuseNoneSourceState with
+          runtime := deletedReuseNoneLedgerResult.nextRuntime })
+      (targetState := deletedReuseTargetState)
+      deletedReuseSomeProgramBinderReadyRelated frames ValueRel.erased
+      runtime ownership)
+
 /-- The deleted-write fixture starts from the same ownership invariant: its
 single constructor cell owns only the erased value. -/
 theorem deletedWriteSourceOwnershipBelowFrontier :
