@@ -13809,6 +13809,221 @@ theorem
       | float64Bits valueRelated => cases valueRelated
 
 /--
+Successful typed unboxing preserves the facts-indexed reuse frame. The source
+heap and concrete heap are unchanged, so the destination fact is erased while
+all older capacity facts and ordinary-token obligations cross reflexively.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_unbox
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => UnboxSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ invariant sourceStep valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨objectId, objectKind, kind, valueEq, resultTypeEq, valueKind,
+      objectCompiled, objectRefines, resultCompiled, kindCompatible⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  obtain ⟨sourceObject, rfl, sourceLookup, unboxed⟩ :=
+    sourceLetResult_unbox_eq valueEq resultTypeEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId,
+          .call (.runtime (.unbox kind.abiKind))] :=
+    compileLetValue_unbox valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId])
+      (operation := .unbox kind.abiKind) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          have compatible := kindCompatible sourceLookup unboxed
+          obtain ⟨scalar, unboxObjectRelated, concreteRead, sourceValueEq⟩ :=
+            FirTalos.Concrete.ConcreteRuntimeRel.unboxFacts_of_sourceCompatible
+              related.stateRelated.1 objectRelated compatible unboxed
+          subst sourceValue
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            frameAligned.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv := bind sourceEnv decl.fvarId scalar.semanticValue)
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := physicalOfLane scalar.lane) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.unboxCall callFound
+          have step :=
+            letStepSimulates_unbox (context := context) valueEq resultTypeEq
+              sourceLookup unboxed related.stateRelated resultFound
+              resultKindAt hObject unboxObjectRelated concreteRead imported
+              spec.hostsSatisfy inBounds contracted params results targetSet
+          have nextRelated :
+              ReuseCapacityStateRelated
+                (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+                nextRuntime
+                (bind sourceEnv decl.fvarId scalar.semanticValue)
+                (clearFailure targetStore) updated witness :=
+            related.ofHeapPreservingLetStepErase step resultFound targetSet
+              (WitnessTransport.refl witness) (by simp [clearFailure])
+          have nextOrdinary :
+              ReuseTokenOrdinaryRel
+                (eraseReuseCapacityFact facts decl.fvarId) nextRuntime
+                (bind sourceEnv decl.fvarId scalar.semanticValue) :=
+            ordinaryTokens.eraseBind
+              (OrdinaryPersistenceTransport.refl nextRuntime)
+          have transfer :
+              reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) := by
+            simp [reuseCapacityLetFacts?, valueEq]
+          have costZero : directLetAllocationCost decl = 0 := by
+            simp [directLetAllocationCost, valueEq]
+          exact ⟨clearFailure targetStore, updated, witness,
+            eraseReuseCapacityFact facts decl.fvarId, step,
+            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            nextRelated, nextOrdinary, nextFrameAligned,
+            by simpa [costZero, clearFailure] using budget⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
+Successful sharing observations preserve the facts-indexed reuse frame. They
+only inspect ownership state and clear the concrete failure slot.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_isShared
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => IsSharedSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported _ invariant sourceStep valueCompiled valueAdapted resultFound
+  rcases supported with
+    ⟨objectId, objectKind, valueEq, valueKind, objectCompiled, objectRefines,
+      resultCompiled⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  obtain ⟨sourceObject, shared, rfl, rfl, sourceLookup, evaluated⟩ :=
+    sourceLetResult_isShared_eq valueEq sourceStep
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet objectId, .call (.runtime .isShared)] :=
+    compileLetValue_isShared valueEq valueKind objectCompiled
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  obtain ⟨indices, callIndex, objectFound, callFound, targetValueEq⟩ :=
+    instructions_localGets_call_eq
+      (fvarIds := [objectId]) (operation := .isShared) valueAdapted
+  cases objectFound with
+  | cons objectFound noMore =>
+      cases noMore
+      subst targetValue
+      obtain ⟨alignedObjectIndex, alignedObjectFound, objectKindAt⟩ :=
+        spec.localsAligned objectCompiled
+      rw [objectFound] at alignedObjectFound
+      injection alignedObjectFound with objectIndexEq
+      subst alignedObjectIndex
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨objectPhysical, hObject, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup objectFound objectKindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          obtain ⟨updated, targetSet, nextFrameAligned⟩ :=
+            frameAligned.set?
+              (nextRuntime := nextRuntime)
+              (nextEnv :=
+                bind sourceEnv decl.fvarId (.scalar (.uint8 shared)))
+              (nextStore := clearFailure targetStore)
+              (nextWitness := witness)
+              (physical := .i32 (UInt32.ofNat shared.toNat)) resultFound
+          obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+            spec.isSharedCall callFound
+          have step :=
+            letStepSimulates_isShared (context := context) valueEq sourceLookup
+              evaluated related.stateRelated resultFound resultKindAt hObject
+              objectRelated imported spec.hostsSatisfy inBounds contracted
+              params results targetSet
+          have nextRelated :
+              ReuseCapacityStateRelated
+                (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+                nextRuntime
+                (bind sourceEnv decl.fvarId (.scalar (.uint8 shared)))
+                (clearFailure targetStore) updated witness :=
+            related.ofHeapPreservingLetStepErase step resultFound targetSet
+              (WitnessTransport.refl witness) (by simp [clearFailure])
+          have nextOrdinary :
+              ReuseTokenOrdinaryRel
+                (eraseReuseCapacityFact facts decl.fvarId) nextRuntime
+                (bind sourceEnv decl.fvarId (.scalar (.uint8 shared))) :=
+            ordinaryTokens.eraseBind
+              (OrdinaryPersistenceTransport.refl nextRuntime)
+          have transfer :
+              reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) := by
+            simp [reuseCapacityLetFacts?, valueEq]
+          have costZero : directLetAllocationCost decl = 0 := by
+            simp [directLetAllocationCost, valueEq]
+          exact ⟨clearFailure targetStore, updated, witness,
+            eraseReuseCapacityFact facts decl.fvarId, step,
+            by simp [clearFailure], by simp [clearFailure], rfl, transfer,
+            nextRelated, nextOrdinary, nextFrameAligned,
+            by simpa [costZero, clearFailure] using budget⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
+/--
 Nonempty constructor allocation inserts the validator's exact constructor
 capacity fact while preserving every older fact and ordinary token.
 -/
@@ -14475,15 +14690,17 @@ family.
 -/
 def ReuseReadOnlySupported (context : Fir.Wasm.Context)
     (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure) : Prop :=
-  ReuseAliasSupported context facts decl ∨
+  (ReuseAliasSupported context facts decl ∨
     (ImmediateLiteralSupported context decl ∨
       (USizeProjectionSupported context decl ∨
         (ObjectProjectionSupported context decl ∨
-          ScalarProjectionSupported context decl)))
+          ScalarProjectionSupported context decl)))) ∨
+    (UnboxSupported context decl ∨ IsSharedSupported context decl)
 
 /--
-Reuse, aliases, immediate literals, and all three successful projection
-families share one facts-indexed production runtime law.
+Reuse, aliases, immediate literals, all three successful projection families,
+typed unboxing, and sharing observations share one facts-indexed production
+runtime law.
 -/
 theorem
     ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnly
@@ -14506,12 +14723,13 @@ theorem
   change
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
-      (fun facts decl =>
-        ReuseAliasSupported context facts decl ∨
-          (ImmediateLiteralSupported context decl ∨
-            (USizeProjectionSupported context decl ∨
-              (ObjectProjectionSupported context decl ∨
-                ScalarProjectionSupported context decl))))
+    (fun facts decl =>
+      (ReuseAliasSupported context facts decl ∨
+        (ImmediateLiteralSupported context decl ∨
+          (USizeProjectionSupported context decl ∨
+            (ObjectProjectionSupported context decl ∨
+              ScalarProjectionSupported context decl)))) ∨
+        (UnboxSupported context decl ∨ IsSharedSupported context decl))
       directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction)
   have objectScalar :
       ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
@@ -14560,18 +14778,49 @@ theorem
             ScalarProjectionSupported context decl))
       spec.reuseCapacityDirectLetRuntimeRefinesWithCost_immediateLiteral
       projections
+  have reuseAndReaders :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (fun facts decl =>
+          ReuseAliasSupported context facts decl ∨
+            (ImmediateLiteralSupported context decl ∨
+              (USizeProjectionSupported context decl ∨
+                (ObjectProjectionSupported context decl ∨
+                  ScalarProjectionSupported context decl))))
+        directLetAllocationCost
+        (ConcreteReuseCapacityFrame sourceFunction) :=
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.or
+      (Left := ReuseAliasSupported context)
+      (Right := fun _ decl =>
+        ImmediateLiteralSupported context decl ∨
+          (USizeProjectionSupported context decl ∨
+            (ObjectProjectionSupported context decl ∨
+              ScalarProjectionSupported context decl)))
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseAlias
+      immediateAndProjections
+  have unboxAndShared :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (fun _ decl =>
+          UnboxSupported context decl ∨ IsSharedSupported context decl)
+        directLetAllocationCost
+        (ConcreteReuseCapacityFrame sourceFunction) :=
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.or
+      (Left := fun _ decl => UnboxSupported context decl)
+      (Right := fun _ decl => IsSharedSupported context decl)
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_unbox
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_isShared
   intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
     targetValue targetStore targetLocals resultIndex remainingBytes witness
     supported stepFits invariant sourceStep valueCompiled valueAdapted
     resultFound
   cases supported with
-  | inl reuseOrAlias =>
-      exact spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseAlias
-        reuseOrAlias stepFits invariant sourceStep valueCompiled valueAdapted
-        resultFound
-  | inr immediateOrProjection =>
-      exact immediateAndProjections immediateOrProjection stepFits invariant
-        sourceStep valueCompiled valueAdapted resultFound
+  | inl reuseOrReader =>
+      exact reuseAndReaders reuseOrReader stepFits invariant sourceStep
+        valueCompiled valueAdapted resultFound
+  | inr unboxOrShared =>
+      exact unboxAndShared unboxOrShared stepFits invariant sourceStep
+        valueCompiled valueAdapted resultFound
 
 /--
 Finite whole-export partial correctness for arbitrary interleavings of reuse

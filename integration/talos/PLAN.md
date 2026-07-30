@@ -4507,15 +4507,13 @@ finite generated export without a target certificate. Further direct and
 effect families join by proving this same source transport plus the already
 isolated witness/header-capacity transport.
 
-W6.6gd widens that first mixed endpoint to the complete heap-preserving direct
-family. Immediate integer/`USize` literals and successful `USize`, object, and
-packed-scalar projections each preserve the facts relation, ordinary-token
-relation, exact local frame, and address-space budget while deriving their
-production compiler/adapter code. `ReuseReadOnlySupported` composes those laws
-with reuse and aliases; `correctReuseReadOnlyCode` proves arbitrary finite
-interleavings through the actual generated export. The next widening step is
-allocating direct results, whose existing prefix/header transport must be
-paired with source ordinary-persistence for fresh cells.
+W6.6gd widens that first mixed endpoint to the heap-preserving literal and
+projection core. Immediate integer/`USize` literals and successful `USize`,
+object, and packed-scalar projections each preserve the facts relation,
+ordinary-token relation, exact local frame, and address-space budget while
+deriving their production compiler/adapter code. `ReuseReadOnlySupported`
+composes those laws with reuse and aliases; `correctReuseReadOnlyCode` proves
+arbitrary finite interleavings through the actual generated export.
 
 W6.6ge opens that allocating boundary with nonempty constructors.
 `OrdinaryPersistenceTransport` is now reflexive, transitive, and instantiated
@@ -4529,6 +4527,15 @@ facts to insert the validator-selected constructor bound, and
 `correctReuseReadOnlyConstructorCode` proves arbitrary finite interleavings
 of reuse, the read-only direct family, and nonempty allocation. Natural,
 String, and boxed ordinary results are the next allocating families.
+
+W6.6gf closes the remaining heap-preserving direct readers. Successful typed
+unboxing and `isShared` now instantiate the same facts-indexed law: both erase
+only the destination fact, preserve every older header-capacity fact, carry
+ordinary-token provenance by reflexive source transport, and consume zero
+address-space budget. `ReuseReadOnlySupported` and therefore
+`correctReuseReadOnlyConstructorCode` now include these representation- and
+ownership-sensitive observations. The next widening step remains Natural,
+String, and boxed ordinary allocation.
 
 ## Parallel agent packages
 
