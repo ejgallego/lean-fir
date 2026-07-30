@@ -26,6 +26,67 @@ def ConcreteGlobals.find? : ConcreteGlobals → Lean.Name → Option ConcreteGlo
   | slot :: rest, name =>
       if slot.name = name then some slot else find? rest name
 
+/-- Ordered static name/kind view of the concrete global table. Runtime cache
+writes may change `value?`, but they must never change this layout. -/
+def ConcreteGlobals.staticLayout (globals : ConcreteGlobals) :
+    List (Lean.Name × AbiKind) :=
+  globals.map fun slot => (slot.name, slot.kind)
+
+@[simp] theorem ConcreteGlobals.staticLayout_declare
+    (declarations : List (Lean.Name × AbiKind)) :
+    (ConcreteGlobals.declare declarations).staticLayout = declarations := by
+  induction declarations with
+  | nil => rfl
+  | cons declaration rest ih =>
+      rcases declaration with ⟨name, kind⟩
+      change
+        ConcreteGlobals.staticLayout
+            ({ name := name, kind := kind } ::
+              ConcreteGlobals.declare rest) =
+          (name, kind) :: rest
+      simp only [ConcreteGlobals.staticLayout, List.map_cons]
+      change
+        (name, kind) ::
+            ConcreteGlobals.staticLayout
+              (ConcreteGlobals.declare rest) =
+          (name, kind) :: rest
+      rw [ih]
+
+/-- A unique static declaration has a concrete slot at its retained ABI kind,
+independently of whether the slot has already been initialized. -/
+theorem ConcreteGlobals.find?_of_staticLayout_mem
+    {globals : ConcreteGlobals} {name : Lean.Name} {kind : AbiKind}
+    (unique : (globals.staticLayout.map Prod.fst).Nodup)
+    (member : (name, kind) ∈ globals.staticLayout) :
+    ∃ slot,
+      globals.find? name = some slot ∧
+        slot.kind = kind := by
+  induction globals with
+  | nil =>
+      simp [ConcreteGlobals.staticLayout] at member
+  | cons head rest ih =>
+      simp only [ConcreteGlobals.staticLayout, List.map_cons,
+        List.nodup_cons] at unique
+      simp only [ConcreteGlobals.staticLayout, List.map_cons,
+        List.mem_cons] at member
+      rcases member with headEq | tailMember
+      · have nameEq : head.name = name :=
+          congrArg Prod.fst headEq.symm
+        have kindEq : head.kind = kind :=
+          congrArg Prod.snd headEq.symm
+        subst name
+        subst kind
+        exact ⟨head, by simp [ConcreteGlobals.find?], rfl⟩
+      · have headNe : head.name ≠ name := by
+          intro nameEq
+          apply unique.1
+          rw [nameEq]
+          apply List.mem_map.mpr
+          exact ⟨(name, kind), tailMember, rfl⟩
+        obtain ⟨slot, found, kindEq⟩ :=
+          ih unique.2 tailMember
+        exact ⟨slot, by simp [ConcreteGlobals.find?, headNe, found], kindEq⟩
+
 theorem ConcreteGlobals.find_declare_uninitialized
     {declarations : List (Lean.Name × AbiKind)} {name : Lean.Name}
     {slot : ConcreteGlobalSlot}
@@ -68,6 +129,43 @@ def ConcreteGlobals.write : ConcreteGlobals → Lean.Name → AbiKind → LaneVa
       else do
         let rest ← write rest name kind value
         return slot :: rest
+
+/-- Successful cache writes preserve the complete ordered static declaration
+layout; only the selected slot's optional value changes. -/
+theorem ConcreteGlobals.staticLayout_write
+    {before after : ConcreteGlobals} {name : Lean.Name}
+    {kind : AbiKind} {value : LaneValue}
+    (operation : before.write name kind value = .ok after) :
+    after.staticLayout = before.staticLayout := by
+  induction before generalizing after with
+  | nil =>
+      simp [ConcreteGlobals.write] at operation
+  | cons head rest ih =>
+      unfold ConcreteGlobals.write at operation
+      split at operation
+      · split at operation
+        · injection operation with afterEq
+          subst after
+          rfl
+        · contradiction
+      · simp only [Bind.bind, Except.bind] at operation
+        cases tailOperation :
+            ConcreteGlobals.write rest name kind value with
+        | error failure =>
+            rw [tailOperation] at operation
+            contradiction
+        | ok tailAfter =>
+            rw [tailOperation] at operation
+            have afterEq : head :: tailAfter = after :=
+              Except.ok.inj operation
+            subst after
+            change
+              (head.name, head.kind) ::
+                  ConcreteGlobals.staticLayout tailAfter =
+                (head.name, head.kind) ::
+                  ConcreteGlobals.staticLayout rest
+            exact congrArg (List.cons (head.name, head.kind))
+              (ih tailOperation)
 
 /-- A declared slot with the expected ABI kind makes the checked write
 succeed, identifies the updated slot, and frames every other generated
@@ -372,6 +470,36 @@ def ConcreteRuntimeState.writeGlobal (state : ConcreteRuntimeState)
   let heap ← persistGlobalValue state.heap kind value descriptors
   let globals ← state.globals.write name kind value
   return { state with heap, globals }
+
+/-- Full concrete cache publication preserves the ordered static global
+layout. Persistence may update heap metadata, while the checked global write
+changes only the selected slot's optional value. -/
+theorem ConcreteRuntimeState.writeGlobal_preserves_staticLayout
+    {before after : ConcreteRuntimeState} {name : Lean.Name}
+    {kind : AbiKind} {value : LaneValue}
+    {descriptors : ClosureDescriptorTable}
+    (operation :
+      before.writeGlobal name kind value descriptors = .ok after) :
+    after.globals.staticLayout = before.globals.staticLayout := by
+  unfold ConcreteRuntimeState.writeGlobal at operation
+  cases heapOperation :
+      persistGlobalValue before.heap kind value descriptors with
+  | error failure =>
+      rw [heapOperation] at operation
+      contradiction
+  | ok heap =>
+      rw [heapOperation] at operation
+      simp only [Bind.bind, Except.bind] at operation
+      cases globalsOperation : before.globals.write name kind value with
+      | error failure =>
+          rw [globalsOperation] at operation
+          contradiction
+      | ok globals =>
+          rw [globalsOperation] at operation
+          have afterEq : { before with heap, globals } = after :=
+            Except.ok.inj operation
+          subst after
+          exact ConcreteGlobals.staticLayout_write globalsOperation
 
 /-- `LiveHeapRel` depends only on the semantic heap and allocation cursor;
 globals, world, and trace can therefore change in the layered runtime without

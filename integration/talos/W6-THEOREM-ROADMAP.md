@@ -893,12 +893,20 @@ acceptance tests pass.
    canonical program invariant. It derives the concrete host result, evolved
    physical-lane bounds, both Wasm global writes, the destination-local write,
    and immutable host tables instead of accepting those execution artifacts
-   from the declaration environment. The remaining concrete host-slot
-   lookup/kind premise identifies a missing static component of the
-   whole-cache invariant: production `cacheDeclarations` creates one such
-   typed slot per initializer, and concrete global writes must preserve that
-   layout. Add that component before stating the final declaration-environment
-   induction theorem.
+   from the declaration environment.
+   `ConcreteGlobals.staticLayout` now records the ordered static name/kind
+   table independently of cached values. Declaration is exact, concrete
+   global writes preserve it, and `cacheSetStep_preserves_hostStaticLayout`
+   lifts that result through the executable host call.
+   `LazyCacheGlobalsRel` retains the canonical
+   `host.runtime.globals.staticLayout = cacheDeclarations source` equation
+   from production initialization through host and Wasm publication.
+   Singleton initializer signatures show that `cacheDeclarations` preserves
+   the exact initializer-name order; checked initializer uniqueness therefore
+   lets `hostSlot` derive the selected concrete slot and kind.
+   `miss_of_cachedDeclarationFrame` no longer accepts `cacheFound` or
+   `cacheKindEq`. Its remaining work belongs to the recursive generated
+   declaration-environment induction, not another runtime cache premise.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source

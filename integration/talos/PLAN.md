@@ -5111,15 +5111,24 @@ writes. The declaration-environment induction therefore no longer supplies
 `afterCache`, `valueStore`, `nextLocals`, old lane values, the concrete host
 operation, or publication table equalities.
 
-The remaining runtime-shaped premise is exact and static: the host runtime
-must retain a declared slot of the generated signature kind for each
-initializer. The production initial host constructs precisely that table via
-`cacheDeclarations`; extend the canonical whole-cache invariant with this
-host-slot layout and prove that concrete global writes preserve it. That will
-remove `cacheFound`/`cacheKindEq` before defining the recursive
-declaration-environment induction theorem. The other genuine induction inputs
-are generated callee/import selection, the cache-aware hereditary declaration
-result, and facts-aware semantic publication transport.
+W6.6gzr closes that concrete host-slot boundary.
+`ConcreteGlobals.staticLayout` exposes the ordered `(name, AbiKind)` table
+independently of optional cached values. `staticLayout_declare` proves the
+production declaration constructor exact, while `staticLayout_write` and
+`ConcreteRuntimeState.writeGlobal_preserves_staticLayout` show that successful
+publication changes only the selected optional value even when recursive
+persistence updates heap metadata.
+
+`cacheSetStep_preserves_hostStaticLayout` lifts the frame through the
+executable Talos host call. `LazyCacheGlobalsRel.hostLayout` retains the exact
+`cacheDeclarations source` equation from `adaptedInitial`, ordinary transport,
+host publication, and the generated Wasm-global suffix.
+Validator-derived singleton signatures prove that `cacheDeclarations` keeps
+every initializer name in order; initializer uniqueness therefore makes its
+name projection duplicate-free. `LazyCacheGlobalsRel.hostSlot` uses those
+facts to derive the selected concrete slot and its exact signature kind.
+`miss_of_cachedDeclarationFrame` consequently no longer accepts
+`cacheFound` or `cacheKindEq`.
 
 The remaining uniform implementation work is now declaration-environment
 induction rather than another caller-side cache lemma. Its miss branch must

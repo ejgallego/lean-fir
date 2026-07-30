@@ -246,6 +246,36 @@ theorem cacheSetStep_preserves_wasmGlobals
           subst after
           rfl
 
+/-- A successful concrete cache host call preserves the ordered declaration
+layout of its named, typed host slots. Only the selected slot's optional
+value and reachable heap persistence metadata may change. -/
+theorem cacheSetStep_preserves_hostStaticLayout
+    {declaration : Name} {kind : AbiKind}
+    {initial after : Wasm.Store Host} {physical : Wasm.Value}
+    (operation :
+      cacheSetStep declaration kind initial [physical] =
+        .Return [physical] after) :
+    after.host.runtime.globals.staticLayout =
+      initial.host.runtime.globals.staticLayout := by
+  unfold cacheSetStep at operation
+  cases decoded : decodePhysicalLane kind physical with
+  | error failure =>
+      simp [decoded, trap] at operation
+  | ok lane =>
+      cases published :
+          (clearFailure initial).host.runtime.writeGlobal declaration kind lane
+            (clearFailure initial).host.closureDescriptors with
+      | error failure =>
+          simp [decoded, published, trap] at operation
+      | ok runtime =>
+          simp only [decoded, published] at operation
+          have storeEq :
+              replaceRuntime (clearFailure initial) runtime = after := by
+            injection operation
+          subst after
+          simpa [replaceRuntime, clearFailure] using
+            ConcreteRuntimeState.writeGlobal_preserves_staticLayout published
+
 /-- The complete cache-publication suffix preserves every residual address
 space budget. The host cache write preserves the heap cursor, while both
 generated Wasm global writes preserve the host definitionally. -/
@@ -875,6 +905,100 @@ theorem LazyCacheValidationFacts.layout
     LazyCacheTableLayout source :=
   LazyCacheTableLayout.ofSignatures checked.signatures
 
+/-- One typed concrete-host declaration selected by the same signature query
+used by `cacheDeclarations`. Keeping this helper proof-local exposes the
+static list algebra without introducing another runtime representation. -/
+private def cacheDeclaration?
+    (source : Fir.Wasm.Module) (declaration : Name) :
+    Option (Name × AbiKind) := do
+  let signature ← source.callSignature? (.declaration declaration)
+  let kind ← signature.results[0]?
+  return (declaration, kind)
+
+private theorem cacheDeclarations_eq_filterMap
+    (source : Fir.Wasm.Module) :
+    cacheDeclarations source =
+      source.initializers.toList.filterMap (cacheDeclaration? source) := by
+  rfl
+
+private theorem cacheDeclaration?_eq_some_of_signature
+    {source : Fir.Wasm.Module}
+    {declaration : Name}
+    {kind : AbiKind}
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind) :
+    cacheDeclaration? source declaration = some (declaration, kind) := by
+  unfold cacheDeclaration?
+  cases signatureFound :
+      source.callSignature? (.declaration declaration) with
+  | none =>
+      simp [signatureFound] at signature
+  | some found =>
+      cases resultFound : found.results[0]? with
+      | none =>
+          simp [signatureFound, resultFound] at signature
+      | some foundKind =>
+          simp [signatureFound, resultFound] at signature
+          subst foundKind
+          simp [resultFound]
+
+/-- Under the validator's singleton-signature condition, filtering the
+initializers into typed host declarations drops no name and preserves their
+exact order. -/
+private theorem cacheDeclarationNames_aux
+    (source : Fir.Wasm.Module)
+    (names : List Name)
+    (signatures :
+      ∀ {declaration : Name},
+        declaration ∈ names →
+          ∃ kind,
+            (source.callSignature? (.declaration declaration)).bind
+                (·.results[0]?) = some kind) :
+    (names.filterMap (cacheDeclaration? source)).map Prod.fst = names := by
+  induction names with
+  | nil =>
+      rfl
+  | cons head rest ih =>
+      obtain ⟨headKind, headSignature⟩ :=
+        signatures (declaration := head) (by simp)
+      have headSelected :
+          cacheDeclaration? source head = some (head, headKind) :=
+        cacheDeclaration?_eq_some_of_signature headSignature
+      have restSignatures :
+          ∀ {declaration : Name},
+            declaration ∈ rest →
+              ∃ kind,
+                (source.callSignature? (.declaration declaration)).bind
+                    (·.results[0]?) = some kind :=
+        fun {declaration} member =>
+          signatures (declaration := declaration) (by simp [member])
+      simp [headSelected, ih restSignatures]
+
+private theorem cacheDeclarations_names
+    {source : Fir.Wasm.Module}
+    (signatures : LazyCacheInitializerSignatures source) :
+    (cacheDeclarations source).map Prod.fst =
+      source.initializers.toList := by
+  rw [cacheDeclarations_eq_filterMap]
+  exact
+    cacheDeclarationNames_aux source source.initializers.toList signatures
+
+private theorem cacheDeclarations_mem_of_signature
+    {source : Fir.Wasm.Module}
+    {declaration : Name}
+    {kind : AbiKind}
+    (initializerMember :
+      declaration ∈ source.initializers.toList)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind) :
+    (declaration, kind) ∈ cacheDeclarations source := by
+  rw [cacheDeclarations_eq_filterMap]
+  apply List.mem_filterMap.mpr
+  exact ⟨declaration, initializerMember,
+    cacheDeclaration?_eq_some_of_signature signature⟩
+
 /--
 The one uniform fact the integration-owned symbolic validator must expose for
 generated lazy caches.
@@ -1166,9 +1290,12 @@ inductive LazyCacheSlotRel
 Whole generated lazy-cache table relation.
 
 Besides a pointwise empty/populated relation, `semanticCovered` rules out
-semantic cache entries for which lowering emitted no physical slot. This is
-the state invariant that can be threaded through the program proof rather
-than rediscovering one isolated populated slot at each cache hit.
+semantic cache entries for which lowering emitted no physical slot.
+`hostLayout` retains the ordered named/type declarations used by the concrete
+`cacheSet` host, so every generated initializer has its host slot without a
+per-call lookup premise. This is the state invariant that can be threaded
+through the program proof rather than rediscovering one isolated populated
+slot at each cache hit.
 -/
 structure LazyCacheGlobalsRel
     (witness : RefinementWitness)
@@ -1176,6 +1303,8 @@ structure LazyCacheGlobalsRel
     (runtime : RuntimeState)
     (store : Wasm.Store Host) : Prop where
   checked : LazyCacheValidationFacts source
+  hostLayout :
+    store.host.runtime.globals.staticLayout = cacheDeclarations source
   semanticCovered :
     ∀ {declaration : Name} {value : Value},
       findGlobal? runtime.globals declaration = some value →
@@ -1237,6 +1366,48 @@ theorem LazyCacheGlobalsRel.layout
     LazyCacheTableLayout source :=
   related.checked.layout
 
+/-- The selected generated initializer has a concrete named host slot at its
+checked singleton result kind. Slot existence follows from the canonical
+ordered host layout and validator uniqueness, rather than from a dynamic
+caller premise. -/
+theorem LazyCacheGlobalsRel.hostSlot
+    {witness : RefinementWitness}
+    {source : Fir.Wasm.Module}
+    {runtime : RuntimeState}
+    {store : Wasm.Store Host}
+    {index : Nat}
+    {declaration : Name}
+    {kind : AbiKind}
+    (related : LazyCacheGlobalsRel witness source runtime store)
+    (initializerFound :
+      source.initializers[index]? = some declaration)
+    (signature :
+      (source.callSignature? (.declaration declaration)).bind
+          (·.results[0]?) = some kind) :
+    ∃ slot,
+      store.host.runtime.globals.find? declaration = some slot ∧
+        slot.kind = kind := by
+  have initializerMember :
+      declaration ∈ source.initializers.toList := by
+    simpa using Array.mem_of_getElem? initializerFound
+  have declarationMember :
+      (declaration, kind) ∈ cacheDeclarations source :=
+    cacheDeclarations_mem_of_signature initializerMember signature
+  have hostMember :
+      (declaration, kind) ∈
+        store.host.runtime.globals.staticLayout := by
+    rw [related.hostLayout]
+    exact declarationMember
+  have initializerNodup : source.initializers.toList.Nodup :=
+    (listAllUnique_eq_true_iff_nodup
+      source.initializers.toList).mp related.checked.initializerUnique
+  have hostNamesUnique :
+      (store.host.runtime.globals.staticLayout.map Prod.fst).Nodup := by
+    rw [related.hostLayout,
+      cacheDeclarations_names related.checked.signatures]
+    exact initializerNodup
+  exact ConcreteGlobals.find?_of_staticLayout_mem hostNamesUnique hostMember
+
 /-- The generated flag at a checked cache index is zero in Talos's initial
 store whenever the adapted target carries the canonical global declarations. -/
 theorem initialStore_cacheFlag_zero
@@ -1296,6 +1467,8 @@ theorem LazyCacheGlobalsRel.empty
     {store : Wasm.Store Host}
     (checked : LazyCacheValidationFacts source)
     (runtimeEmpty : runtime.globals = [])
+    (hostLayout :
+      store.host.runtime.globals.staticLayout = cacheDeclarations source)
     (flagsEmpty :
       ∀ {index : Nat} {declaration : Name},
         source.initializers[index]? = some declaration →
@@ -1308,6 +1481,7 @@ theorem LazyCacheGlobalsRel.empty
     LazyCacheGlobalsRel witness source runtime store := by
   refine {
     checked
+    hostLayout
     semanticCovered := ?_
     slots := ?_ }
   · intro declaration value found
@@ -1339,6 +1513,7 @@ theorem LazyCacheGlobalsRel.adaptedInitial
       target.wasmModule.globals = FirTalos.globalDecls source := by
     rw [targetEq]
   apply LazyCacheGlobalsRel.empty checked rfl
+  · simp [initialStore, initialHost]
   · intro index declaration found
     obtain ⟨kind, _, flagKind, _⟩ := checked.layout.slot found
     exact initialStore_cacheFlag_zero targetGlobals flagKind
@@ -1424,11 +1599,15 @@ theorem LazyCacheGlobalsRel.transport
       afterRuntime.globals = beforeRuntime.globals)
     (storeGlobals :
       afterStore.globals.globals = beforeStore.globals.globals)
+    (hostStaticLayout :
+      afterStore.host.runtime.globals.staticLayout =
+        beforeStore.host.runtime.globals.staticLayout)
     (related :
       LazyCacheGlobalsRel beforeWitness source beforeRuntime beforeStore) :
     LazyCacheGlobalsRel afterWitness source afterRuntime afterStore := by
   refine {
     checked := related.checked
+    hostLayout := hostStaticLayout.trans related.hostLayout
     semanticCovered := ?_
     slots := ?_ }
   · intro declaration value found
@@ -1458,6 +1637,7 @@ theorem LazyCacheGlobalsRel.afterCacheSet
     LazyCacheGlobalsRel witness source runtime afterStore :=
   related.transport (WitnessTransport.refl witness) rfl
     (cacheSetStep_preserves_wasmGlobals operation)
+    (cacheSetStep_preserves_hostStaticLayout operation)
 
 /-- A semantic cache hit forces the corresponding whole-table slot into its
 populated branch and recovers the exact physical lane required by generated
@@ -1616,6 +1796,8 @@ theorem LazyCacheGlobalsRel.publish
       valueStoreEq flagAfterValue valueFlagDistinct
   refine {
     checked := related.checked
+    hostLayout := by
+      simpa [writeWasmGlobal, valueStoreEq] using related.hostLayout
     semanticCovered := ?_
     slots := ?_ }
   · intro other value found
@@ -3468,8 +3650,9 @@ dynamic publication artifact: the concrete `cacheSet` result, the pre-existing
 physical value/flag lanes, both generated global writes, the caller-local
 write, and the immutable host tables. Callers retain only the static
 compiler/adapter selections, the hereditary declaration theorem, the
-facts-aware semantic publication transport, and the concrete host slot's
-static name/kind lookup.
+facts-aware semantic publication transport, and the declaration result-kind
+alignment. The concrete host slot's name and kind are derived from the
+whole-cache invariant.
 -/
 theorem
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
@@ -3490,7 +3673,6 @@ theorem
     {kind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
-    {cacheSlot : ConcreteGlobalSlot}
     {sourceRuntime callRuntime nextRuntime : RuntimeState}
     {sourceEnv : Env}
     {sourceValue : Value}
@@ -3542,10 +3724,7 @@ theorem
     (publicationOrdinary :
       ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
         (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
-    (resultKindEq : resultKind = kind)
-    (cacheFound :
-      afterCall.host.runtime.globals.find? declaration = some cacheSlot)
-    (cacheKindEq : cacheSlot.kind = kind) :
+    (resultKindEq : resultKind = kind) :
     ∃ nextStore nextLocals,
       BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
             module hostEnv sourceExternals decl continuation
@@ -3564,6 +3743,11 @@ theorem
   rcases invariant with
     ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩,
       descriptorAgreement⟩, initialCache⟩
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq declarationFound
+      (by simp [declarationParams]) cacheEq
+  obtain ⟨cacheSlot, cacheFound, cacheKindEq⟩ :=
+    callee.cacheTable.hostSlot initializerFound signature
   have valueRelated :
       PhysicalValueRel callWitness kind physical sourceValue := by
     simpa [resultKindEq] using
@@ -3582,9 +3766,6 @@ theorem
       cacheSetStep declaration kind afterCall [physical] =
         .Return [physical] afterCache := by
     simpa [afterCache] using operation
-  obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq declarationFound
-      (by simp [declarationParams]) cacheEq
   obtain ⟨oldFlag, oldValue, flagAfterCall, valueAfterCall⟩ :=
     callee.cacheTable.slotLanesPresent initializerFound signature
   have valueAfterCache :
