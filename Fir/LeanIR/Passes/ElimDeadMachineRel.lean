@@ -8778,6 +8778,140 @@ theorem literal_resultBelowFrontier
       · intro location member
         simp [Fir.LeanIR.Impure.literal] at member
 
+/-- Primitive allocation advances the frontier once and returns exactly its
+fresh address, hence its result is below the resulting frontier. -/
+theorem alloc_resultBelowFrontier
+    (runtime : RuntimeState) (object : HeapObject)
+    (persistent : Bool := false) :
+    RuntimeValueBelowFrontier runtime
+      (alloc runtime object persistent).1
+      (.object (alloc runtime object persistent).2) := by
+  constructor
+  · simp [Fir.LeanIR.Impure.alloc]
+  · intro location member
+    simp [Fir.LeanIR.Impure.alloc] at member
+    subst location
+    simp [Fir.LeanIR.Impure.alloc]
+
+/-- A partial-application closure owns only its evaluated fixed arguments, so
+their frontier bound is exactly the premise needed by primitive allocation. -/
+theorem HeapOwnershipBelowFrontier.allocClosure
+    (bounded : HeapOwnershipBelowFrontier runtime)
+    (arguments : Array Value)
+    (argumentsBelow :
+      HeapLocationsBelowFrontier runtime arguments.toList)
+    (name : Name) (arity : Nat) :
+    HeapOwnershipBelowFrontier
+      (Fir.LeanIR.Impure.alloc runtime
+        (.closure name arity arguments)).1 := by
+  apply bounded.alloc
+  intro child member
+  apply argumentsBelow
+  simpa [HeapObject.ownedValues] using member
+
+/-- Successful boxing either leaves an immediate tagged result or allocates
+one leaf boxed cell whose scalar/`USize` payload contains no heap address. -/
+theorem HeapOwnershipBelowFrontier.box
+    (bounded : HeapOwnershipBelowFrontier runtime)
+    (effect :
+      Fir.LeanIR.Impure.box runtime type input =
+        .ok (result, value)) :
+    HeapOwnershipBelowFrontier result := by
+  cases input with
+  | scalar scalar =>
+      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        exact bounded
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        simpa using
+          bounded.alloc
+            (object := .boxed type (.scalar scalar))
+            (by simp [HeapObject.ownedValues])
+            false
+  | usize word =>
+      by_cases small : word.toNat ≤ maxTaggedPayload
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        exact bounded
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        simpa using
+          bounded.alloc
+            (object := .boxed type (.usize word))
+            (by simp [HeapObject.ownedValues])
+            false
+  | object reference | erased | reuseToken location? =>
+      simp [Fir.LeanIR.Impure.box, Bind.bind, Except.bind] at effect
+
+/-- A successful box result is immediate at the old frontier or names the
+fresh cell allocated by the heap-backed representation branch. -/
+theorem box_resultBelowFrontier
+    (effect :
+      Fir.LeanIR.Impure.box runtime type input =
+        .ok (result, value)) :
+    RuntimeValueBelowFrontier runtime result value := by
+  cases input with
+  | scalar scalar =>
+      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        constructor
+        · exact Nat.le_refl _
+        · intro location member
+          simp at member
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        exact alloc_resultBelowFrontier runtime
+          (.boxed type (.scalar scalar))
+  | usize word =>
+      by_cases small : word.toNat ≤ maxTaggedPayload
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        constructor
+        · exact Nat.le_refl _
+        · intro location member
+          simp at member
+      · have normalized := effect
+        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+          Pure.pure, Except.pure] at normalized
+        rcases normalized with ⟨valueEq, runtimeEq⟩
+        subst value
+        subst result
+        exact alloc_resultBelowFrontier runtime
+          (.boxed type (.usize word))
+  | object reference | erased | reuseToken location? =>
+      simp [Fir.LeanIR.Impure.box, Bind.bind, Except.bind] at effect
+
 /-- A successful cell replacement preserves the allocation frontier. -/
 theorem setCell_nextLocation_eq_of_ok
     (effect : setCell runtime location replacement = .ok result) :
@@ -10968,6 +11102,59 @@ theorem SourceMachineOwnershipBelowFrontier.allocCtorState
     (BindFrameEnvironmentsBelowFrontier.monoFrontier
       bounded.frames output.frontier)
 
+/-- Partial-application closure allocation owns exactly the evaluated fixed
+arguments. Complete environment ownership bounds those arguments, while the
+monotone frontier transports every saved bind environment. -/
+theorem SourceMachineOwnershipBelowFrontier.allocClosureState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (evaluated :
+      evalArgs state.env argumentExprs = .ok arguments)
+    (name : Name) (arity : Nat) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime :=
+          (alloc state.runtime
+            (.closure name arity arguments)).1
+        env := bind state.env binder
+          (.object
+            (alloc state.runtime
+              (.closure name arity arguments)).2) } := by
+  have output :=
+    alloc_resultBelowFrontier state.runtime
+      (.closure name arity arguments)
+  have argumentsBelow :
+      HeapLocationsBelowFrontier
+        state.runtime arguments.toList :=
+    EnvironmentBelowFrontier.of_evalArgs
+      (@bounded.env) argumentExprs arguments evaluated
+  have afterRuntime :=
+    bounded.withRuntimeMonoFrontier
+      (bounded.heap.allocClosure
+        arguments argumentsBelow name arity)
+      output.frontier
+  simpa using
+    (afterRuntime.bindValue
+      (binder := binder) output.value)
+
+/-- Boxing a successful scalar/`USize` input either keeps the frontier or
+advances it once; in both cases the result binding and all saved environments
+remain ownership-bounded. -/
+theorem SourceMachineOwnershipBelowFrontier.boxState
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (effect :
+      box state.runtime type input = .ok (result, value)) :
+    SourceMachineOwnershipBelowFrontier
+      { state with
+        runtime := result
+        env := bind state.env binder value } := by
+  have output := box_resultBelowFrontier effect
+  have afterRuntime :=
+    bounded.withRuntimeMonoFrontier
+      (bounded.heap.box effect) output.frontier
+  simpa using
+    (afterRuntime.bindValue
+      (binder := binder) output.value)
+
 /-- Object-field replacement leaves the frontier fixed, so its local
 environment/heap law transports every suspended bind environment unchanged. -/
 theorem SourceMachineOwnershipBelowFrontier.setObjectFieldState
@@ -11695,6 +11882,114 @@ theorem SourceMachineOwnershipBelowFrontier.retainedCtorLetStep
                 (.code continuation) state.joins
           apply afterBounded.ofStepNext _ step
           simp [coreStep, evalLetValue, argumentsRead, allocation,
+            Bind.bind, Except.bind, Pure.pure, Except.pure]
+
+/-- A successful retained partial application allocates a closure whose owned
+fixed arguments were read from the completely bounded source environment. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedPapLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name argumentExprs
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize argumentsRead :
+    evalArgs state.env argumentExprs = argumentsResult
+  cases argumentsResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, argumentsRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok arguments =>
+      generalize declarationRead :
+        state.program.findDecl? name = declarationResult
+      cases declarationResult with
+      | none =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, argumentsRead,
+                declarationRead, fail, Bind.bind, Except.bind]
+                at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, argumentsRead,
+                declarationRead, fail, Bind.bind, Except.bind]
+                at transition
+      | some declaration =>
+          by_cases underapplied :
+              arguments.size < declaration.params.size
+          · have afterBounded :=
+              (bounded.allocClosureState
+                (binder := fvarId) argumentsRead
+                name declaration.params.size)
+                |>.withControlAndJoins
+                  (.code continuation) state.joins
+            apply afterBounded.ofStepNext _ step
+            simp [coreStep, evalLetValue, argumentsRead,
+              declarationRead, if_neg (Nat.not_le_of_lt underapplied),
+              Bind.bind, Except.bind, Pure.pure, Except.pure]
+          · have applied :
+                declaration.params.size ≤ arguments.size :=
+              Nat.le_of_not_gt underapplied
+            cases step with
+            | internal transition =>
+                simp [coreStep, evalLetValue, argumentsRead,
+                  declarationRead, if_pos applied, fail,
+                  Bind.bind, Except.bind] at transition
+            | external transition externalProof =>
+                simp [coreStep, evalLetValue, argumentsRead,
+                  declarationRead, if_pos applied, fail,
+                  Bind.bind, Except.bind] at transition
+
+/-- A retained box binds either an immediate tagged object or its fresh leaf
+allocation while preserving complete machine ownership. -/
+theorem SourceMachineOwnershipBelowFrontier.retainedBoxLetStep
+    (bounded : SourceMachineOwnershipBelowFrontier state)
+    (step : Step externals
+      { state with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } continuation) }
+      after) :
+    SourceMachineOwnershipBelowFrontier after := by
+  generalize inputRead :
+    lookupValue state.env input = inputResult
+  cases inputResult with
+  | error fault =>
+      cases step with
+      | internal transition =>
+          simp [coreStep, evalLetValue, inputRead, fail,
+            Bind.bind, Except.bind] at transition
+      | external transition externalProof =>
+          simp [coreStep, evalLetValue, inputRead, fail,
+            Bind.bind, Except.bind] at transition
+  | ok inputValue =>
+      generalize boxed :
+        box state.runtime boxedType inputValue = boxResult
+      cases boxResult with
+      | error fault =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, evalLetValue, inputRead, boxed, fail,
+                Bind.bind, Except.bind] at transition
+          | external transition externalProof =>
+              simp [coreStep, evalLetValue, inputRead, boxed, fail,
+                Bind.bind, Except.bind] at transition
+      | ok result =>
+          obtain ⟨nextRuntime, value⟩ := result
+          have afterBounded :=
+            (bounded.boxState
+              (binder := fvarId) boxed)
+              |>.withControlAndJoins
+                (.code continuation) state.joins
+          apply afterBounded.ofStepNext _ step
+          simp [coreStep, evalLetValue, inputRead, boxed,
             Bind.bind, Except.bind, Pure.pure, Except.pure]
 
 /-- Reachable-runtime correspondence strengthened with the allocation history
@@ -25333,6 +25628,49 @@ theorem match_retainedBoxLetStep_binderReady
                   sourceTransition targetTransition afterRelated
                   (by simpa [sourceCurrent] using step)⟩
 
+/-- Ownership-strengthened hereditary retained-box matcher. -/
+theorem match_retainedBoxLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (inputMember : used.contains input = true)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedBoxLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      inputMember runtime step with
+    ⟨larger, targetAfter, extension, reaches, related⟩
+  exact ⟨larger, targetAfter, extension, reaches, related,
+    ownership.retainedBoxLetStep step⟩
+
 /-- Hereditary deleted-box matcher.  Dynamic readiness distinguishes a
 runtime-neutral tagged result from a source-only unreachable allocation; the
 target stutters in either case. -/
@@ -25653,6 +25991,69 @@ theorem ExactShadowCodeBinderReady.match_retainedBoxLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env inputMember runtime step
+
+/-- Ownership-strengthened exact retained box. -/
+theorem ExactShadowCodeBinderReady.match_retainedBoxLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId input : FVarId} {binderName : Name}
+    {resultType boxedType : Expr}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.box boxedType input :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.box boxedType input : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type := resultType,
+          value := .box boxedType input
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type := resultType,
+            value := .box boxedType input
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have inputMember : ambient.contains input = true :=
+    usedBound input (by simp [collectLetValue])
+  exact match_retainedBoxLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env inputMember runtime ownership step
 
 /-- Exact deleted box provenance supplies binder absence and the hereditary
 continuation; dynamic readiness justifies either a tagged result or its
@@ -26393,6 +26794,47 @@ theorem match_retainedPapLetStep_binderReady
                       simp [sourceCurrent, coreStep, evaluatedFault, fail]
                     exact (noStep done).elim
 
+/-- Ownership-strengthened hereditary retained-partial-application matcher. -/
+theorem match_retainedPapLetStep_binderReady_withOwnership
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (continuation : BinderReadyShadowCodeGraph fuel used
+      sourceContinuation targetContinuation)
+    (joins : BinderReadyShadowJoinEnvRelated fuel used
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho used sourceState.env targetState.env)
+    (covered : ArgsCovered used arguments)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn used sourceState.env ++ sourceFrameRoots)
+      (envRootsOn used targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  rcases match_retainedPapLetStep_binderReady
+      sourceState targetState programs frames continuation joins env
+      covered runtime step with
+    ⟨larger, targetAfter, extension, reaches, related⟩
+  exact ⟨larger, targetAfter, extension, reaches, related,
+    ownership.retainedPapLetStep step⟩
+
 /-- Hereditary deleted-partial-application matcher.  Any dynamic certificate
 either supplies a runtime-neutral value or the successful source-only closure
 allocation whose result remains unreachable from every live root. -/
@@ -26827,6 +27269,72 @@ theorem ExactShadowCodeBinderReady.match_retainedPapLetStep
     sourceState targetState programs frames
     (ready.letRetained_continuationGraph fuelBound usedBound)
     joins env covered runtime step
+
+/-- Ownership-strengthened exact retained partial application. -/
+theorem ExactShadowCodeBinderReady.match_retainedPapLetStep_withOwnership
+    {initial continuationUsed ambient : UsedLocals}
+    {nextFuel fuel : Nat}
+    {sourceContinuation targetContinuation : LCNF.Code .impure}
+    {fvarId : FVarId} {binderName name : Name} {type : Expr}
+    {arguments : Array (LCNF.Arg .impure)}
+    {continuation :
+      ExactShadowCodeRun nextFuel initial continuationUsed
+        sourceContinuation targetContinuation}
+    {keep :
+      fvarId ∈ continuationUsed ∨
+        safeToElim (LCNF.LetValue.pap name arguments :
+          LCNF.LetValue .impure) = false}
+    (ready :
+      ExactShadowCodeBinderReady ambient
+        (ExactShadowCodeView.letRetained
+          (declaration := {
+            fvarId, binderName, type, value := .pap name arguments
+          }) continuation keep))
+    (fuelBound : nextFuel + 1 ≤ fuel)
+    (usedBound : UsedSubset
+      (collectLetValue continuationUsed
+        (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure)) ambient)
+    (sourceState targetState : MachineState)
+    (programs : ProgramRelated (BinderReadyShadowCodeRelated fuel)
+      sourceState.program targetState.program)
+    (frames : BinderReadyReachableFramesRelated fuel rho
+      sourceState.frames targetState.frames sourceFrameRoots targetFrameRoots)
+    (joins : BinderReadyShadowJoinEnvRelated fuel ambient
+      sourceState.joins targetState.joins)
+    (env : EnvRelOn rho ambient sourceState.env targetState.env)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      (envRootsOn ambient sourceState.env ++ sourceFrameRoots)
+      (envRootsOn ambient targetState.env ++ targetFrameRoots))
+    (ownership : SourceMachineOwnershipBelowFrontier sourceState)
+    (step : Step externals
+      { sourceState with
+        control := .code (.let {
+          fvarId, binderName, type, value := .pap name arguments
+        } sourceContinuation) }
+      sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends rho larger ∧
+      NonLockstep.Reaches externals
+        { targetState with
+          control := .code (.let {
+            fvarId, binderName, type, value := .pap name arguments
+          } targetContinuation) }
+        targetAfter ∧
+      BinderReadyReachableMachineRelated fuel larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have covered : ArgsCovered ambient arguments := by
+    have valueCovered :
+        LetValueCovered ambient
+          (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure) :=
+      (collectLetValue_covers continuationUsed
+        (LCNF.LetValue.pap name arguments : LCNF.LetValue .impure)).mono
+        usedBound
+    simpa [LetValueCovered] using valueCovered
+  exact match_retainedPapLetStep_binderReady_withOwnership
+    sourceState targetState programs frames
+    (ready.letRetained_continuationGraph fuelBound usedBound)
+    joins env covered runtime ownership step
 
 /-- Exact deleted partial-application provenance supplies binder absence and
 the hereditary continuation; dynamic readiness justifies its source-only
