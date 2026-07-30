@@ -61,6 +61,15 @@ ABI drift separately. Setting `FIR_BROWSER` additionally serves the artifact
 with cross-origin-isolation headers and runs the same Init/Std surface in a
 headless browser.
 
+`build-emscripten.sh` is the reusable form of that pipeline. It accepts an
+entry Lean module, zero or more additional source modules, explicit C exports,
+and an optional zero-argument `IO UInt32` start action. It discovers the
+generated module initializer instead of guessing its encoded C name, links
+the pinned full runtime/Init/Std cone, and exports
+`fir_lcnf_c_initialize` as the mandatory host entry point. Requested exports
+must be valid C identifiers present in the generated code; misspellings fail
+the build before linking.
+
 The WASI artifact is intentionally a Preview 1 core-module reactor. It links
 the heap, core, and scalar fixtures against ABI 3 of a single-threaded subset
 of the pinned Lean C ABI. The subset uses the official `lean.h` object layout
@@ -149,6 +158,24 @@ bash integration/lcnf-c-wasm/check-primary.sh
 FIR_BROWSER=google-chrome \
   bash integration/lcnf-c-wasm/check-emscripten.sh
 ```
+
+To build a module for Node or a cross-origin-isolated browser:
+
+```sh
+bash integration/lcnf-c-wasm/build-emscripten.sh \
+  --root integration/lcnf-c-wasm \
+  --out-dir _build/my-module \
+  --export fir_lcnf_c_runtime_checksum \
+  --start fir_lcnf_c_runtime_probe \
+  integration/lcnf-c-wasm/RuntimeSmoke.lean
+```
+
+Import the emitted ES module, instantiate it, and call
+`module._fir_lcnf_c_initialize()` once before any requested export. A nonzero
+result reports module-initialization or start-action failure. The public
+exports use their declared Lean C ABI; scalar `@[export]` functions are the
+simplest host boundary. Use `--extra-source` for local generated modules that
+must be linked with the entry module.
 
 ## Running the experimental WASI profile
 

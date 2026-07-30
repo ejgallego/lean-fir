@@ -2,20 +2,31 @@
 
 #include <lean/lean.h>
 
-void lean_initialize_runtime_module(void);
-lean_object * initialize_RuntimeSmoke(uint8_t builtin);
-lean_object * fir_lcnf_c_runtime_probe(void);
+#ifndef FIR_LCNF_C_MODULE_INITIALIZER
+#error "FIR_LCNF_C_MODULE_INITIALIZER must name the generated Lean initializer"
+#endif
 
-LEAN_EXPORT uint32_t fir_lcnf_c_runtime_initialize(void) {
-    static uint32_t result = UINT32_MAX;
+void lean_initialize_runtime_module(void);
+void lean_io_mark_end_initialization(void);
+lean_object * FIR_LCNF_C_MODULE_INITIALIZER(uint8_t builtin);
+
+#ifdef FIR_LCNF_C_IO_START
+lean_object * FIR_LCNF_C_IO_START(void);
+#endif
+
+LEAN_EXPORT uint32_t fir_lcnf_c_initialize(void) {
+    static uint8_t attempted = 0;
+    static uint32_t result = 0;
     lean_object * io_result;
 
-    if (result != UINT32_MAX) {
+    if (attempted) {
         return result;
     }
+    attempted = 1;
 
     lean_initialize_runtime_module();
-    io_result = initialize_RuntimeSmoke(/* builtin */ 1);
+    io_result = FIR_LCNF_C_MODULE_INITIALIZER(/* builtin */ 1);
+    lean_io_mark_end_initialization();
     if (lean_io_result_is_error(io_result)) {
         lean_io_result_show_error(io_result);
         lean_dec(io_result);
@@ -24,7 +35,8 @@ LEAN_EXPORT uint32_t fir_lcnf_c_runtime_initialize(void) {
     }
     lean_dec(io_result);
 
-    io_result = fir_lcnf_c_runtime_probe();
+#ifdef FIR_LCNF_C_IO_START
+    io_result = FIR_LCNF_C_IO_START();
     if (lean_io_result_is_error(io_result)) {
         lean_io_result_show_error(io_result);
         lean_dec(io_result);
@@ -33,5 +45,8 @@ LEAN_EXPORT uint32_t fir_lcnf_c_runtime_initialize(void) {
     }
     result = lean_unbox_uint32(lean_io_result_get_value(io_result));
     lean_dec(io_result);
+#else
+    result = 0;
+#endif
     return result;
 }

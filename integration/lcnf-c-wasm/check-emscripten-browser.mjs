@@ -18,7 +18,7 @@ try {
   const module = await createModule({
     printErr: (line) => stderr.push(String(line)),
   });
-  const initializationCode = module._fir_lcnf_c_runtime_initialize();
+  const initializationCode = module._fir_lcnf_c_initialize();
   if (initializationCode !== 0) {
     throw new Error(`runtime initialization failed with ${initializationCode}`);
   }

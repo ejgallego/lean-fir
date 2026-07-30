@@ -33,7 +33,7 @@ const module = await createModule({
 });
 const heapChecksum = module._fir_lcnf_c_heap_checksum;
 const runtimeChecksum = module._fir_lcnf_c_runtime_checksum;
-const runtimeInitialize = module._fir_lcnf_c_runtime_initialize;
+const runtimeInitialize = module._fir_lcnf_c_initialize;
 
 if (typeof heapChecksum !== "function") {
   throw new Error("expected fir_lcnf_c_heap_checksum export");
@@ -42,7 +42,7 @@ if (typeof runtimeChecksum !== "function") {
   throw new Error("expected fir_lcnf_c_runtime_checksum export");
 }
 if (typeof runtimeInitialize !== "function") {
-  throw new Error("expected fir_lcnf_c_runtime_initialize export");
+  throw new Error("expected fir_lcnf_c_initialize export");
 }
 
 const initializationCode = runtimeInitialize();
