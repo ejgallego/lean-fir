@@ -7736,6 +7736,78 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
       nextInvariant⟩
 
 /--
+Current-to-successor representation transports shared by result-producing
+and no-result runtime operations.
+
+These are properties of one concrete helper execution, not target-execution
+certificates. They are exactly the monotone representation and cache-state
+facts needed to compose an operation inside a hereditary generated
+declaration proof.
+-/
+structure RuntimeStepTransports
+    (sourceRuntime nextRuntime : RuntimeState)
+    (targetStore nextStore : Wasm.Store Host)
+    (witness nextWitness : RefinementWitness) : Prop where
+  witnessTransport : WitnessTransport witness nextWitness
+  capacity :
+    HeaderCapacityTransport targetStore.host.runtime.heap
+      nextStore.host.runtime.heap witness
+  ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime
+  sourceGlobals : nextRuntime.globals = sourceRuntime.globals
+  wasmGlobals :
+    nextStore.globals.globals = targetStore.globals.globals
+  hostStaticLayout :
+    nextStore.host.runtime.globals.staticLayout =
+      targetStore.host.runtime.globals.staticLayout
+
+/-- A local-only runtime step has reflexive representation transports. -/
+theorem RuntimeStepTransports.refl
+    (runtime : RuntimeState) (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    RuntimeStepTransports runtime runtime store store witness witness := {
+  witnessTransport := WitnessTransport.refl witness
+  capacity :=
+    HeaderCapacityTransport.refl store.host.runtime.heap witness
+  ordinary := OrdinaryPersistenceTransport.refl runtime
+  sourceGlobals := rfl
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/-- Clearing structured failure metadata preserves every cache and
+representation component. -/
+theorem RuntimeStepTransports.clearFailure
+    (runtime : RuntimeState) (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    RuntimeStepTransports runtime runtime store (clearFailure store)
+      witness witness := {
+  witnessTransport := WitnessTransport.refl witness
+  capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
+  ordinary := OrdinaryPersistenceTransport.refl runtime
+  sourceGlobals := rfl
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/-- Heap replacement transports cache state whenever the semantic operation
+and representation proof supply their monotone source/heap facts. -/
+theorem RuntimeStepTransports.replaceHeap
+    {sourceRuntime nextRuntime : RuntimeState}
+    {store : Wasm.Store Host} {heap : MemoryState}
+    {witness nextWitness : RefinementWitness}
+    (witnessTransport : WitnessTransport witness nextWitness)
+    (capacity :
+      HeaderCapacityTransport store.host.runtime.heap heap witness)
+    (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (sourceGlobals : nextRuntime.globals = sourceRuntime.globals) :
+    RuntimeStepTransports sourceRuntime nextRuntime store
+      (replaceHeap store heap) witness nextWitness := {
+  witnessTransport
+  capacity
+  ordinary
+  sourceGlobals
+  wasmGlobals := rfl
+  hostStaticLayout := rfl }
+
+/--
 Uniform runtime condition for one successful no-result effect node.
 
 The source admission and executable source step contain no target evidence.
@@ -7780,6 +7852,230 @@ def EffectRuntimeRefines
           nextStore.host.externals = targetStore.host.externals ∧
             Invariant remainingBytes nextRuntime sourceEnv nextStore targetLocals
               nextWitness
+
+/--
+Representation transports returned by a no-result effect law.
+
+Effects additionally retain both closure-descriptor tables. Those equalities
+are needed by the entry-relative hereditary frame but are not part of the
+cache-table transport itself.
+-/
+structure EffectStepTransports
+    (sourceRuntime nextRuntime : RuntimeState)
+    (targetStore nextStore : Wasm.Store Host)
+    (witness nextWitness : RefinementWitness) : Prop
+    extends RuntimeStepTransports sourceRuntime nextRuntime targetStore
+      nextStore witness nextWitness where
+  hostDescriptors :
+    nextStore.host.closureDescriptors =
+      targetStore.host.closureDescriptors
+  witnessDescriptors :
+    nextWitness.closureDescriptors = witness.closureDescriptors
+
+/-- Identity effects preserve the complete transport package reflexively. -/
+theorem EffectStepTransports.refl
+    (runtime : RuntimeState) (store : Wasm.Store Host)
+    (witness : RefinementWitness) :
+    EffectStepTransports runtime runtime store store witness witness := {
+  toRuntimeStepTransports := RuntimeStepTransports.refl runtime store witness
+  hostDescriptors := rfl
+  witnessDescriptors := rfl }
+
+/-- Same-witness heap effects preserve physical globals, cache layout, and
+both immutable descriptor tables. -/
+theorem EffectStepTransports.replaceHeap
+    {sourceRuntime nextRuntime : RuntimeState}
+    {store : Wasm.Store Host} {heap : MemoryState}
+    {witness : RefinementWitness}
+    (capacity :
+      HeaderCapacityTransport store.host.runtime.heap heap witness)
+    (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (sourceGlobals : nextRuntime.globals = sourceRuntime.globals) :
+    EffectStepTransports sourceRuntime nextRuntime store
+      (replaceHeap store heap) witness witness := {
+  toRuntimeStepTransports :=
+    RuntimeStepTransports.replaceHeap (WitnessTransport.refl witness) capacity
+      ordinary sourceGlobals
+  hostDescriptors := rfl
+  witnessDescriptors := rfl }
+
+/--
+Transport-strengthened no-result effect condition.
+
+The executable prefix and invariant are the same as in `EffectRuntimeRefines`;
+the additional current-to-successor package retains the representation,
+capacity, ordinaryness, and global-table facts needed by cache-aware
+hereditary composition.
+-/
+def EffectRuntimeRefinesWithTransports
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (hostEnv : Wasm.HostEnv Host)
+    (EffectSupported : EffectSupportedPredicate)
+    (Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop) : Prop :=
+  ∀ {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : LCNF.Code .impure}
+      {target : Wasm.Program}
+      {targetStore : Wasm.Store Host}
+      {targetLocals : Wasm.Locals}
+      {remainingBytes : Nat}
+      {witness : RefinementWitness},
+    EffectSupported sourceRuntime sourceEnv code continuation nextRuntime →
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation →
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness →
+      Invariant remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness →
+      CodeAdapted context sourceModule sourceFunction labels code target →
+      ∃ targetRest nextStore nextWitness,
+        CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest ∧
+          EffectStepSimulates context sourceModule sourceFunction labels module
+            hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+            targetRest targetStore nextStore targetLocals witness nextWitness ∧
+          nextStore.host.externals = targetStore.host.externals ∧
+            EffectStepTransports sourceRuntime nextRuntime targetStore nextStore
+                witness nextWitness ∧
+              Invariant remainingBytes nextRuntime sourceEnv nextStore
+                targetLocals nextWitness
+
+/-- Forgetting representation transports recovers the structural effect law. -/
+theorem EffectRuntimeRefinesWithTransports.runtimeRefines
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : EffectSupportedPredicate}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (runtimeRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv Supported Invariant) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv Supported Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, _transports, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated invariant adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved, nextInvariant⟩
+
+/-- Transport-strengthened effect families compose by disjoint union. -/
+theorem EffectRuntimeRefinesWithTransports.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {left right : EffectSupportedPredicate}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (leftRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv left Invariant)
+    (rightRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv right Invariant) :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels module hostEnv (EffectSupportedOr left right) Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  cases supported with
+  | left supported =>
+      exact leftRefines supported sourceStep stateRelated invariant adapted
+  | right supported =>
+      exact rightRefines supported sourceStep stateRelated invariant adapted
+
+/-- Exact external-table preservation threads any handler-table invariant. -/
+theorem EffectRuntimeRefinesWithTransports.preservingExternalInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : EffectSupportedPredicate}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    {ExternalInvariant : ConcreteExternalImpl → Prop}
+    (runtimeRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv Supported Invariant) :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels module hostEnv Supported
+      (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness =>
+        Invariant remainingBytes sourceRuntime sourceEnv targetStore
+            targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, transports, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated invariant.1 adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved, transports, nextInvariant, by
+      simpa [externalsPreserved] using invariant.2⟩
+
+/-- Transport a strengthened effect law across equivalent frame shapes. -/
+theorem EffectRuntimeRefinesWithTransports.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : EffectSupportedPredicate}
+    {Old New :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (runtimeRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv Supported Old)
+    (toOld :
+      ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness,
+        New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness →
+          Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness)
+    (toNew :
+      ∀ remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness,
+        Old remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness →
+          New remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness) :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels module hostEnv Supported New := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, transports, nextInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated
+      (toOld remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+        witness invariant)
+      adapted
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved, transports,
+    toNew remainingBytes nextRuntime sourceEnv nextStore targetLocals
+      nextWitness nextInvariant⟩
 
 /-- The empty effect family satisfies every invariant vacuously. -/
 theorem effectRuntimeRefines_noEffects
@@ -8227,6 +8523,37 @@ The production compiler inversion recovers the continuation target. Source and
 concrete execution then both take a no-op step, preserving runtime, store,
 locals, witness, externals, trace, and the unchanged allocation budget.
 -/
+theorem effectRuntimeRefinesWithTransports_persistentOwnership
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels module hostEnv PersistentOwnershipEffectSupported Invariant := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported _sourceStep stateRelated
+    invariant adapted
+  cases supported with
+  | inc =>
+      have continuationAdapted := CodeAdapted.incPersistent_eq adapted
+      exact ⟨target, targetStore, witness, continuationAdapted,
+        effectStepSimulates_inc_persistent stateRelated continuationAdapted,
+        rfl, EffectStepTransports.refl sourceRuntime targetStore witness,
+        invariant⟩
+  | dec =>
+      have continuationAdapted := CodeAdapted.decPersistent_eq adapted
+      exact ⟨target, targetStore, witness, continuationAdapted,
+        effectStepSimulates_dec_persistent stateRelated continuationAdapted,
+        rfl, EffectStepTransports.refl sourceRuntime targetStore witness,
+        invariant⟩
+
+/-- Forgetting the reflexive transport package recovers the original
+persistent-effect law. -/
 theorem effectRuntimeRefines_persistentOwnership
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -8238,21 +8565,9 @@ theorem effectRuntimeRefines_persistentOwnership
       Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
         RefinementWitness → Prop} :
     EffectRuntimeRefines context sourceModule sourceFunction labels module
-      hostEnv PersistentOwnershipEffectSupported Invariant := by
-  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
-    targetLocals remainingBytes witness supported _sourceStep stateRelated
-    invariant adapted
-  cases supported with
-  | inc =>
-      have continuationAdapted := CodeAdapted.incPersistent_eq adapted
-      exact ⟨target, targetStore, witness, continuationAdapted,
-        effectStepSimulates_inc_persistent stateRelated continuationAdapted,
-        rfl, invariant⟩
-  | dec =>
-      have continuationAdapted := CodeAdapted.decPersistent_eq adapted
-      exact ⟨target, targetStore, witness, continuationAdapted,
-        effectStepSimulates_dec_persistent stateRelated continuationAdapted,
-        rfl, invariant⟩
+      hostEnv PersistentOwnershipEffectSupported Invariant :=
+  EffectRuntimeRefinesWithTransports.runtimeRefines
+    effectRuntimeRefinesWithTransports_persistentOwnership
 
 /--
 Ordinary reference-count increment implements the generic effect condition
@@ -13361,42 +13676,15 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_reset
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
-/--
-Current-to-successor representation transports for one direct `let`.
-
-These are properties of the concrete helper execution, not a target execution
-certificate. They expose exactly the monotone representation and cache-state
-facts needed to compose a direct operation inside a hereditary generated
-declaration proof.
--/
-structure DirectLetStepTransports
-    (sourceRuntime nextRuntime : RuntimeState)
-    (targetStore nextStore : Wasm.Store Host)
-    (witness nextWitness : RefinementWitness) : Prop where
-  witnessTransport : WitnessTransport witness nextWitness
-  capacity :
-    HeaderCapacityTransport targetStore.host.runtime.heap
-      nextStore.host.runtime.heap witness
-  ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime
-  sourceGlobals : nextRuntime.globals = sourceRuntime.globals
-  wasmGlobals :
-    nextStore.globals.globals = targetStore.globals.globals
-  hostStaticLayout :
-    nextStore.host.runtime.globals.staticLayout =
-      targetStore.host.runtime.globals.staticLayout
+/-- Direct `let` compatibility name for the shared runtime transport package. -/
+abbrev DirectLetStepTransports := RuntimeStepTransports
 
 /-- A direct local-only step has reflexive representation transports. -/
 theorem DirectLetStepTransports.refl
     (runtime : RuntimeState) (store : Wasm.Store Host)
     (witness : RefinementWitness) :
-    DirectLetStepTransports runtime runtime store store witness witness := {
-  witnessTransport := WitnessTransport.refl witness
-  capacity :=
-    HeaderCapacityTransport.refl store.host.runtime.heap witness
-  ordinary := OrdinaryPersistenceTransport.refl runtime
-  sourceGlobals := rfl
-  wasmGlobals := rfl
-  hostStaticLayout := rfl }
+    DirectLetStepTransports runtime runtime store store witness witness :=
+  RuntimeStepTransports.refl runtime store witness
 
 /-- Clearing structured failure metadata preserves every cache and
 representation component used by a direct reader. -/
@@ -13404,13 +13692,8 @@ theorem DirectLetStepTransports.clearFailure
     (runtime : RuntimeState) (store : Wasm.Store Host)
     (witness : RefinementWitness) :
     DirectLetStepTransports runtime runtime store (clearFailure store)
-      witness witness := {
-  witnessTransport := WitnessTransport.refl witness
-  capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
-  ordinary := OrdinaryPersistenceTransport.refl runtime
-  sourceGlobals := rfl
-  wasmGlobals := rfl
-  hostStaticLayout := rfl }
+      witness witness :=
+  RuntimeStepTransports.clearFailure runtime store witness
 
 /-- Heap replacement transports the cache state whenever the semantic
 operation and representation proof supply their monotone source/heap facts. -/
@@ -13424,13 +13707,9 @@ theorem DirectLetStepTransports.replaceHeap
     (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
     (sourceGlobals : nextRuntime.globals = sourceRuntime.globals) :
     DirectLetStepTransports sourceRuntime nextRuntime store
-      (replaceHeap store heap) witness nextWitness := {
-  witnessTransport
-  capacity
-  ordinary
-  sourceGlobals
-  wasmGlobals := rfl
-  hostStaticLayout := rfl }
+      (replaceHeap store heap) witness nextWitness :=
+  RuntimeStepTransports.replaceHeap witnessTransport capacity ordinary
+    sourceGlobals
 
 /--
 Certificate-free compiler composition for one successful capacity-validated
@@ -18698,7 +18977,7 @@ The concrete step changes only heap memory and retains the same witness, so
 closure-descriptor agreement is unchanged.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryIncrement_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18711,8 +18990,9 @@ theorem
       ConcreteSupportedExport program context sourceCode sourceModule
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
-    EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (OrdinaryIncrementEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -18738,10 +19018,17 @@ theorem
           ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
             (replaceHeap targetStore heap) targetLocals witness :=
         capacityRelated.ofReplaceHeapEffectStep step capacity
+      have ordinaryTransport :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        incValue_ordinaryPersistenceTransport updated
       have nextOrdinary :
           ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
-        ordinaryTokens.transport
-          (incValue_ordinaryPersistenceTransport updated)
+        ordinaryTokens.transport ordinaryTransport
+      have sourceGlobals :
+          nextRuntime.globals = sourceRuntime.globals := by
+        rcases incValue_heapOnly updated with ⟨semanticHeap, runtimeEq⟩
+        subst nextRuntime
+        rfl
       have nextBudget : heap.AddressSpaceBudget remainingBytes := by
         constructor
         · simpa [cursor] using budget.cursorPositive
@@ -18752,17 +19039,16 @@ theorem
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        EffectStepTransports.replaceHeap capacity ordinaryTransport
+          sourceGlobals,
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
 
-/--
-Recursive ordinary decrement preserves the ownership-strengthened reuse
-frame. The existing executable theorem owns descriptor-guided release and
-mapped-header transport; the source fuel induction owns ordinary persistence.
--/
+/-- Compatibility view of ordinary increment without the explicit transport
+package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDecrement_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryIncrement_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18776,7 +19062,35 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
+      target.wasmModule hosts.env (OrdinaryIncrementEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_ordinaryIncrement_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+Recursive ordinary decrement preserves the ownership-strengthened reuse
+frame. The existing executable theorem owns descriptor-guided release and
+mapped-header transport; the source fuel induction owns ordinary persistence.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryDecrement_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (OrdinaryDecrementEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -18802,10 +19116,15 @@ theorem
           ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
             (replaceHeap targetStore heap) targetLocals witness :=
         capacityRelated.ofReplaceHeapEffectStep step capacity
+      have ordinaryTransport :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        decValue_ordinaryPersistenceTransport updated
       have nextOrdinary :
           ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
-        ordinaryTokens.transport
-          (decValue_ordinaryPersistenceTransport updated)
+        ordinaryTokens.transport ordinaryTransport
+      have sourceGlobals :
+          nextRuntime.globals = sourceRuntime.globals :=
+        (decValue_runtimeAux updated).globals
       have nextBudget : heap.AddressSpaceBudget remainingBytes := by
         constructor
         · simpa [cursor] using budget.cursorPositive
@@ -18816,17 +19135,16 @@ theorem
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        EffectStepTransports.replaceHeap capacity ordinaryTransport
+          sourceGlobals,
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
 
-/--
-Successful explicit deletion preserves the ownership-strengthened reuse
-frame. The erased sentinel is an identity; ordinary deletion changes only one
-cell's reference count/liveness and preserves mapped capacity.
--/
+/-- Compatibility view of ordinary decrement without the explicit transport
+package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDelete_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDecrement_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18840,7 +19158,35 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
+      target.wasmModule hosts.env (OrdinaryDecrementEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_ordinaryDecrement_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+Successful explicit deletion preserves the ownership-strengthened reuse
+frame. The erased sentinel is an identity; ordinary deletion changes only one
+cell's reference count/liveness and preserves mapped capacity.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryDelete_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (OrdinaryDeleteEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -18865,10 +19211,15 @@ theorem
           ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv
             (replaceHeap targetStore heap) targetLocals witness :=
         capacityRelated.ofReplaceHeapEffectStep step capacity
+      have ordinaryTransport :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        deleteValue_ordinaryPersistenceTransport updated
       have nextOrdinary :
           ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
-        ordinaryTokens.transport
-          (deleteValue_ordinaryPersistenceTransport updated)
+        ordinaryTokens.transport ordinaryTransport
+      have sourceGlobals :
+          nextRuntime.globals = sourceRuntime.globals :=
+        (deleteValue_runtimeAux updated).globals
       have nextBudget : heap.AddressSpaceBudget remainingBytes := by
         constructor
         · simpa [cursor] using budget.cursorPositive
@@ -18879,19 +19230,15 @@ theorem
         simpa [replaceHeap, clearFailure] using invariant.2
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        EffectStepTransports.replaceHeap capacity ordinaryTransport
+          sourceGlobals,
         ⟨⟨nextCapacity, nextOrdinary, frameAligned, by
           change heap.AddressSpaceBudget remainingBytes
           exact nextBudget⟩, nextAgreement⟩⟩
 
-/--
-Constructor-tag mutation preserves the ownership-strengthened reuse frame.
-
-The concrete header write transports mapped allocation capacity without
-moving the heap frontier. The source constructor rewrite retains the target
-cell's persistence bit, so every tracked ordinary reuse token remains valid.
--/
+/-- Compatibility view of explicit deletion without the transport package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_constructorTag_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_ordinaryDelete_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18905,7 +19252,37 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (ConstructorTagEffectSupported context)
+      target.wasmModule hosts.env (OrdinaryDeleteEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_ordinaryDelete_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+Constructor-tag mutation preserves the ownership-strengthened reuse frame.
+
+The concrete header write transports mapped allocation capacity without
+moving the heap frontier. The source constructor rewrite retains the target
+cell's persistence bit, so every tracked ordinary reuse token remains valid.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_constructorTag_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (ConstructorTagEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -18926,24 +19303,28 @@ theorem
           stateRelated objectCompiled objectFound kindAt callFound
           continuationAdapted imported supportedExport.hostsSatisfy inBounds
           contracted params results found live objectEq tagFits
+      have ordinaryTransport :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        setTag_ordinaryPersistenceTransport updated
+      have sourceGlobals :
+          nextRuntime.globals = sourceRuntime.globals :=
+        (setTag_runtimeAux updated).globals
       have nextInvariant :
           ConcreteReuseCapacityOwnershipFrame sourceFunction facts
             remainingBytes nextRuntime sourceEnv
             (replaceHeap targetStore heap) targetLocals witness :=
         invariant.ofReplaceHeapEffectStep step capacity
-          (setTag_ordinaryPersistenceTransport updated) cursor
+          ordinaryTransport cursor
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        EffectStepTransports.replaceHeap capacity ordinaryTransport
+          sourceGlobals,
         nextInvariant⟩
 
-/--
-FVar object-field mutation preserves the ownership-strengthened reuse frame.
-The production proof derives the object and field locals, descriptor slot, and
-concrete binary call; the generic constructor rewrite and effect-frame
-transports retain every facts-indexed reuse obligation.
--/
+/-- Compatibility view of constructor-tag mutation without the explicit
+transport package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_objectFieldFVar_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_constructorTag_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18957,7 +19338,36 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (ObjectFieldFVarEffectSupported context)
+      target.wasmModule hosts.env (ConstructorTagEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_constructorTag_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+FVar object-field mutation preserves the ownership-strengthened reuse frame.
+The production proof derives the object and field locals, descriptor slot, and
+concrete binary call; the generic constructor rewrite and effect-frame
+transports retain every facts-indexed reuse obligation.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_objectFieldFVar_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (ObjectFieldFVarEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -19012,26 +19422,31 @@ theorem
               supportedExport.hostsSatisfy inBounds contracted params results
               found live objectEq descriptorFound indexValid
               fieldDescriptorKindAt
+          have ordinaryTransport :
+              OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+            modifyConstructor_ordinaryPersistenceTransport updated
+          have sourceGlobals :
+              nextRuntime.globals = sourceRuntime.globals :=
+            (setObjectField_runtimeAux updated).globals
           have nextInvariant :
               ConcreteReuseCapacityOwnershipFrame sourceFunction facts
                 remainingBytes nextRuntime sourceEnv
                 (replaceHeap targetStore heap) targetLocals witness :=
             invariant.ofReplaceHeapEffectStep step capacity
-              (modifyConstructor_ordinaryPersistenceTransport updated) cursor
+              ordinaryTransport cursor
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
             continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            EffectStepTransports.replaceHeap capacity ordinaryTransport
+              sourceGlobals,
             nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
-/--
-Compiler-erased object-field mutation preserves the same facts-indexed frame.
-Production inversion recovers the canonical zero payload, while the source
-operation remains the same constructor-payload rewrite.
--/
+/-- Compatibility view of FVar object-field mutation without the explicit
+transport package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_objectFieldErased_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_objectFieldFVar_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19045,7 +19460,35 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
+      target.wasmModule hosts.env (ObjectFieldFVarEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_objectFieldFVar_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+Compiler-erased object-field mutation preserves the same facts-indexed frame.
+Production inversion recovers the canonical zero payload, while the source
+operation remains the same constructor-payload rewrite.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_objectFieldErased_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (ObjectFieldErasedEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -19095,27 +19538,31 @@ theorem
               supportedExport.hostsSatisfy inBounds contracted params results
               found live objectEq descriptorFound indexValid
               fieldDescriptorKindAt
+          have ordinaryTransport :
+              OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+            modifyConstructor_ordinaryPersistenceTransport updated
+          have sourceGlobals :
+              nextRuntime.globals = sourceRuntime.globals :=
+            (setObjectField_runtimeAux updated).globals
           have nextInvariant :
               ConcreteReuseCapacityOwnershipFrame sourceFunction facts
                 remainingBytes nextRuntime sourceEnv
                 (replaceHeap targetStore heap) targetLocals witness :=
             invariant.ofReplaceHeapEffectStep step capacity
-              (modifyConstructor_ordinaryPersistenceTransport updated) cursor
+              ordinaryTransport cursor
           exact ⟨targetRest, replaceHeap targetStore heap, witness,
             continuationAdapted, step, by simp [replaceHeap, clearFailure],
+            EffectStepTransports.replaceHeap capacity ordinaryTransport
+              sourceGlobals,
             nextInvariant⟩
       | word64 valueRelated => cases valueRelated
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
-/--
-`USize` field mutation preserves the ownership-strengthened reuse frame.
-Production inversion recovers both typed locals and the installed binary
-setter; the checked constructor rewrite retains ordinary-token provenance and
-the exact heap frontier.
--/
+/-- Compatibility view of erased object-field mutation without the explicit
+transport package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_usizeField_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_objectFieldErased_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19129,7 +19576,36 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (USizeFieldEffectSupported context)
+      target.wasmModule hosts.env (ObjectFieldErasedEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_objectFieldErased_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+`USize` field mutation preserves the ownership-strengthened reuse frame.
+Production inversion recovers both typed locals and the installed binary
+setter; the checked constructor rewrite retains ordinary-token provenance and
+the exact heap frontier.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_usizeField_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (USizeFieldEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -19152,24 +19628,28 @@ theorem
           fieldFound objectKindAt fieldKindAt callFound continuationAdapted
           imported supportedExport.hostsSatisfy inBounds contracted params
           results found live objectEq slotStart slotEnd
+      have ordinaryTransport :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        setUSizeSlot_ordinaryPersistenceTransport updated
+      have sourceGlobals :
+          nextRuntime.globals = sourceRuntime.globals :=
+        (setUSizeSlot_runtimeAux updated).globals
       have nextInvariant :
           ConcreteReuseCapacityOwnershipFrame sourceFunction facts
             remainingBytes nextRuntime sourceEnv
             (replaceHeap targetStore heap) targetLocals witness :=
         invariant.ofReplaceHeapEffectStep step capacity
-          (setUSizeSlot_ordinaryPersistenceTransport updated) cursor
+          ordinaryTransport cursor
       exact ⟨targetRest, replaceHeap targetStore heap, witness,
         continuationAdapted, step, by simp [replaceHeap, clearFailure],
+        EffectStepTransports.replaceHeap capacity ordinaryTransport
+          sourceGlobals,
         nextInvariant⟩
 
-/--
-Supported packed-integer field mutation preserves the
-ownership-strengthened reuse frame. Descriptor/layout reasoning selects the
-installed width-specific setter; the generic source and target transports
-retain every reuse fact across its checked payload write.
--/
+/-- Compatibility view of `USize` mutation without the explicit transport
+package. -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefines_scalarField_reuseCapacityOwnership
+    ConcreteSupportedExport.effectRuntimeRefines_usizeField_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19183,7 +19663,36 @@ theorem
         sourceFunction target hosts exportName)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefines context sourceModule sourceFunction labels
-      target.wasmModule hosts.env (ScalarFieldEffectSupported context)
+      target.wasmModule hosts.env (USizeFieldEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_usizeField_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
+
+/--
+Supported packed-integer field mutation preserves the
+ownership-strengthened reuse frame. Descriptor/layout reasoning selects the
+installed width-specific setter; the generic source and target transports
+retain every reuse fact across its checked payload write.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_scalarField_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (ScalarFieldEffectSupported context)
       (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
   intro sourceRuntime nextRuntime sourceEnv code continuation targetCode
     targetStore targetLocals remainingBytes witness supported _sourceStep
@@ -19242,19 +19751,51 @@ theorem
                 supportedExport.hostsSatisfy inBounds contracted params results
                 found live objectEq descriptorFound historySafe slotIndexEq
                 fieldFits
+            have ordinaryTransport :
+                OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+              setScalarField_ordinaryPersistenceTransport updated
+            have sourceGlobals :
+                nextRuntime.globals = sourceRuntime.globals :=
+              (setScalarField_runtimeAux updated).globals
             have nextInvariant :
                 ConcreteReuseCapacityOwnershipFrame sourceFunction facts
                   remainingBytes nextRuntime sourceEnv
                   (replaceHeap targetStore heap) targetLocals witness :=
               invariant.ofReplaceHeapEffectStep step capacity
-                (setScalarField_ordinaryPersistenceTransport updated) cursor
+                ordinaryTransport cursor
             exact ⟨targetRest, replaceHeap targetStore heap, witness,
               continuationAdapted, step, by
                 simp [replaceHeap, clearFailure],
+              EffectStepTransports.replaceHeap capacity ordinaryTransport
+                sourceGlobals,
               nextInvariant⟩
       | word64 objectRelated => cases objectRelated
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
+
+/-- Compatibility view of packed-scalar mutation without the explicit
+transport package. -/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_scalarField_reuseCapacityOwnership
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (supportedExport :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ScalarFieldEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.runtimeRefines
+  exact
+    supportedExport.effectRuntimeRefinesWithTransports_scalarField_reuseCapacityOwnership
+      (labels := labels) (facts := facts)
 
 /-- The ownership prefix proved for facts-indexed reuse: compiler-erased
 persistent operations, ordinary increment, and recursive decrement. -/
@@ -19540,6 +20081,133 @@ theorem
         (labels := labels) (facts := facts))
   apply
     EffectRuntimeRefines.mapInvariant
+      (Old := fun remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness =>
+        ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+              sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals)
+      (New := ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals facts)
+      preserved
+  · intro remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+      witness invariant
+    change
+      (ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          targetStore.host.closureDescriptors =
+            witness.closureDescriptors) ∧
+        ExternalInvariant targetStore.host.externals
+    exact ⟨⟨invariant.1.1, invariant.2⟩, invariant.1.2⟩
+  · intro remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+      witness invariant
+    change
+      (ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+            sourceRuntime sourceEnv targetStore targetLocals witness ∧
+          ExternalInvariant targetStore.host.externals) ∧
+        targetStore.host.closureDescriptors = witness.closureDescriptors
+    exact ⟨⟨invariant.1.1, invariant.2⟩, invariant.1.2⟩
+
+/--
+The complete production effect family exposes one uniform representation
+transport package.
+
+This is the transport-strengthened counterpart of
+`effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation`. Its proof is
+pure operation-family composition: no target execution, cache slot, or
+per-program certificate is supplied by a caller.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ConcreteReuseCapacityOwnershipFrame sourceFunction facts) := by
+  apply EffectRuntimeRefinesWithTransports.or
+  · apply EffectRuntimeRefinesWithTransports.or
+    · apply EffectRuntimeRefinesWithTransports.or
+      · exact effectRuntimeRefinesWithTransports_persistentOwnership
+      · apply EffectRuntimeRefinesWithTransports.or
+        · exact
+            spec.effectRuntimeRefinesWithTransports_ordinaryIncrement_reuseCapacityOwnership
+        · apply EffectRuntimeRefinesWithTransports.or
+          · exact
+              spec.effectRuntimeRefinesWithTransports_ordinaryDecrement_reuseCapacityOwnership
+          · exact
+              spec.effectRuntimeRefinesWithTransports_ordinaryDelete_reuseCapacityOwnership
+    · exact
+        spec.effectRuntimeRefinesWithTransports_constructorTag_reuseCapacityOwnership
+  · apply EffectRuntimeRefinesWithTransports.or
+    · apply EffectRuntimeRefinesWithTransports.or
+      · apply EffectRuntimeRefinesWithTransports.or
+        · exact
+            spec.effectRuntimeRefinesWithTransports_objectFieldFVar_reuseCapacityOwnership
+        · exact
+            spec.effectRuntimeRefinesWithTransports_objectFieldErased_reuseCapacityOwnership
+      · exact
+          spec.effectRuntimeRefinesWithTransports_usizeField_reuseCapacityOwnership
+    · exact
+        spec.effectRuntimeRefinesWithTransports_scalarField_reuseCapacityOwnership
+
+/--
+The transport-strengthened production effect family retains all installed
+pure-external handler laws in the canonical ownership frame.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation_pureExternal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId} {facts : ReuseCapacityFacts} :
+    EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+      labels target.wasmModule hosts.env
+      (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+        externals facts) := by
+  let ExternalInvariant : ConcreteExternalImpl → Prop :=
+    fun concrete =>
+      concrete.IntegerResultRefines externals ∧
+        FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            concrete externals ∧
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            concrete externals
+  have preserved :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels target.wasmModule hosts.env
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        (fun remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+            witness =>
+          ConcreteReuseCapacityOwnershipFrame sourceFunction facts
+                remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+                witness ∧
+            ExternalInvariant targetStore.host.externals) :=
+    EffectRuntimeRefinesWithTransports.preservingExternalInvariant
+      (Invariant := ConcreteReuseCapacityOwnershipFrame sourceFunction facts)
+      (ExternalInvariant := ExternalInvariant)
+      (spec.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation
+        (labels := labels) (facts := facts))
+  apply
+    EffectRuntimeRefinesWithTransports.mapInvariant
       (Old := fun remainingBytes sourceRuntime sourceEnv targetStore
           targetLocals witness =>
         ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes

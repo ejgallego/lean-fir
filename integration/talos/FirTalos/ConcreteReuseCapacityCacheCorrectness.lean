@@ -3789,6 +3789,100 @@ theorem
     (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
     (fun supported => supported.reuseCapacityLetFacts? _)
 
+/--
+Lift any transport-strengthened no-result effect family through both the
+whole-cache invariant and one fixed execution entry.
+
+Effects do not bind a destination or change the validator fact map. Their
+transport package proves that both cache global tables and the host cache
+layout are unchanged, while its witness/header/ordinaryness and descriptor
+facts extend the hereditary entry relation. The result is the ordinary
+structural effect law over the entry-relative cache frame; callers provide an
+operation-family theorem, never a target execution.
+-/
+theorem
+    EffectRuntimeRefinesWithTransports.reuseCapacityEntryRelativeCache
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {EffectSupported : EffectSupportedPredicate}
+    {facts : ReuseCapacityFacts}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    (runtimeRefines :
+      EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
+        labels module hostEnv EffectSupported
+        (ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+          externals facts)) :
+    EffectRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv EffectSupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts) := by
+  intro sourceRuntime nextRuntime sourceEnv code continuation target targetStore
+    targetLocals remainingBytes witness supported sourceStep stateRelated
+    invariant adapted
+  rcases invariant with
+    ⟨⟨baseInvariant, cacheTable⟩, entryTransports⟩
+  obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+      externalsPreserved, transports, nextBaseInvariant⟩ :=
+    runtimeRefines supported sourceStep stateRelated baseInvariant adapted
+  have nextCache :
+      LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
+    cacheTable.transport transports.witnessTransport transports.sourceGlobals
+      transports.wasmGlobals transports.hostStaticLayout
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness :=
+    entryTransports.step transports.witnessTransport transports.capacity
+      transports.ordinary externalsPreserved transports.hostDescriptors
+      transports.witnessDescriptors
+  exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+    externalsPreserved,
+    ⟨⟨nextBaseInvariant, nextCache⟩, nextEntry⟩⟩
+
+/--
+The complete production no-result family instantiates the entry-relative
+whole-cache effect law.
+
+This is the effect premise consumed by hereditary generated declaration
+proofs. All execution, compiler inversion, and representation transport come
+from the reusable production operation theorems.
+-/
+theorem
+    ConcreteSupportedExport.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId}
+    {facts : ReuseCapacityFacts}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts) :=
+  EffectRuntimeRefinesWithTransports.reuseCapacityEntryRelativeCache
+    (spec.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation_pureExternal
+      externals)
+
 /-- Lift an existing canonical entry frame to the cache-augmented invariant
 for the production adapter/Talos initial store. -/
 theorem ConcreteReuseCapacityCacheFrame.adaptedInitial

@@ -5325,6 +5325,38 @@ callee's evolved cache table, while cache-neutral effects can use an explicit
 unchanged-global transport package. Production internal-function selection
 and source-structural completeness still follow those lifts.
 
+W6.6h closes the complete current no-result effect family over the
+entry-relative cache frame. `RuntimeStepTransports` is now the common
+cache-neutral representation package shared by direct and effect operations.
+`EffectStepTransports` extends it with exact host- and witness-descriptor
+preservation, and `EffectRuntimeRefinesWithTransports` retains that package
+through source-family union, handler-table invariants, and equivalent frame
+presentations.
+
+Every production effect leaf constructs the strengthened result:
+compiler-erased persistent operations use reflexive transports; increment,
+recursive decrement, deletion, tag mutation, object-field mutation, `USize`
+mutation, and every supported packed-scalar mutation use their exact
+same-witness heap transports. `RuntimeAuxEq` supplies the semantic-global
+fact uniformly, including new reusable deletion and constructor-mutation
+corollaries. Physical Wasm globals, the concrete host cache layout, and both
+descriptor tables are definitionally unchanged by the concrete heap
+replacement.
+
+`EffectRuntimeRefinesWithTransports.reuseCapacityEntryRelativeCache`
+transports `LazyCacheGlobalsRel`, preserves the unchanged validator fact map,
+rebuilds the canonical pure-external ownership frame, and extends all six
+entry transports. The production theorem
+`effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache`
+and its contract guard close the complete current effect premise without
+adding target evidence to source admission.
+
+The remaining operation-family lifts are interprocedural call and lazy-cache.
+Both must consume the evolved cache relation returned by hereditary execution;
+they cannot use the cache-neutral unchanged-global adapter. Production
+internal-function selection and source-structural completeness still follow
+those lifts before the generated declaration induction can be constructed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

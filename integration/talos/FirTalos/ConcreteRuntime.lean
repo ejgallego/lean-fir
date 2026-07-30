@@ -3853,6 +3853,33 @@ theorem decValue_runtimeAux
   apply List.foldlM_runtimeAux (operation := operation)
   exact fun stepOperation => decValueOnce_runtimeAux stepOperation
 
+/-- Successful explicit deletion changes only the semantic heap. The erased
+reset sentinel is an identity, and an ordinary object deletion is one
+`setCell` update. -/
+theorem deleteValue_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    (operation : deleteValue before value = .ok after) :
+    RuntimeAuxEq before after := by
+  cases value with
+  | erased =>
+      have runtimeEq : before = after := Except.ok.inj operation
+      subst after
+      exact RuntimeAuxEq.refl _
+  | object reference =>
+      cases reference with
+      | tagged payload => simp [deleteValue] at operation
+      | heap location =>
+          unfold deleteValue at operation
+          cases read : getLiveCell before location with
+          | error failure =>
+              simp only [read, Bind.bind, Except.bind] at operation
+              contradiction
+          | ok cell =>
+              simp only [read, Bind.bind, Except.bind] at operation
+              exact setCell_runtimeAux operation
+  | usize value | scalar value | reuseToken value =>
+      simp [deleteValue] at operation
+
 /-- Constructor allocation changes only the semantic heap and next-location
 counter, so the auxiliary runtime observations are exact frames. -/
 theorem allocCtor_runtimeAux
@@ -5902,6 +5929,51 @@ theorem modifyConstructor_heapOnly
       | ok nextObject =>
           simp only [changed] at updated
           exact setCell_heapOnly updated
+
+/-- Constructor payload mutation preserves globals, world, and external trace. -/
+theorem modifyConstructor_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    {modify : ConstructorObject → Except RuntimeFault ConstructorObject}
+    (updated : modifyConstructor before value modify = .ok after) :
+    RuntimeAuxEq before after := by
+  rcases modifyConstructor_heapOnly updated with ⟨heap, rfl⟩
+  exact ⟨rfl, rfl, rfl⟩
+
+/-- Object-field mutation preserves every nonheap semantic runtime component. -/
+theorem setObjectField_runtimeAux
+    {before after : RuntimeState} {value field : Value} {index : Nat}
+    (updated : setObjectField before value index field = .ok after) :
+    RuntimeAuxEq before after := by
+  unfold setObjectField at updated
+  exact modifyConstructor_runtimeAux updated
+
+/-- Constructor-tag mutation preserves every nonheap semantic runtime component. -/
+theorem setTag_runtimeAux
+    {before after : RuntimeState} {value : Value} {tag : Nat}
+    (updated : setTag before value tag = .ok after) :
+    RuntimeAuxEq before after := by
+  unfold setTag at updated
+  exact modifyConstructor_runtimeAux updated
+
+/-- `USize`-slot mutation preserves every nonheap semantic runtime component. -/
+theorem setUSizeSlot_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    {slot : Nat} {field : UInt64}
+    (updated :
+      setUSizeSlot before value slot (.usize field) = .ok after) :
+    RuntimeAuxEq before after := by
+  unfold setUSizeSlot at updated
+  exact modifyConstructor_runtimeAux updated
+
+/-- Packed-scalar mutation preserves every nonheap semantic runtime component. -/
+theorem setScalarField_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    {width offset : Nat} {field : ScalarValue}
+    (updated :
+      setScalarField before value width offset (.scalar field) = .ok after) :
+    RuntimeAuxEq before after := by
+  unfold setScalarField at updated
+  exact modifyConstructor_runtimeAux updated
 
 /-- Successful concrete constructor-tag mutation refines the semantic heap
 update and preserves all nonheap runtime components. -/

@@ -3762,6 +3762,39 @@ example
     externals
 
 /--
+The complete production no-result effect family is available over the same
+entry-relative whole-cache frame. Ownership operations and every admitted
+constructor mutation preserve cache globals and extend all hereditary entry
+transports without a caller-supplied target execution.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {labels : List FVarId}
+    {facts : ReuseCapacityFacts}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    EffectRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env
+      (OwnershipTagAndAllFieldMutationEffectSupported context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts) :=
+  spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
+    externals
+
+/--
 The hereditary theorem for a lazy initializer returns ordinary declaration
 correctness and the exact evolved cache table together. This is the recursive
 induction result consumed by nested miss publication, not a target execution

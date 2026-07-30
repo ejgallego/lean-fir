@@ -1018,7 +1018,21 @@ acceptance tests pass.
    `reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache` theorem and
    contract guard close the complete current direct family without target
    evidence.
-   Next lift each admitted call, lazy, and effect runtime family over the
+   `RuntimeStepTransports` now names the cache-neutral representation facts
+   shared by direct and effect operations.
+   `EffectStepTransports` adds both descriptor-table equalities, while
+   `EffectRuntimeRefinesWithTransports` composes the package uniformly through
+   every admitted source effect family. Persistent ownership, increment,
+   recursive decrement, deletion, tag mutation, both object-field forms,
+   `USize`, and every supported packed-scalar mutation all construct that
+   package from their production compiler/runtime proofs.
+   `EffectRuntimeRefinesWithTransports.reuseCapacityEntryRelativeCache`
+   transports the complete cache table and extends the fixed-entry relation.
+   Its production
+   `effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache`
+   theorem and contract guard close the current no-result effect family
+   without target evidence.
+   Next lift each admitted call and lazy runtime family over the
    entry-relative cache frame. Calls and lazy misses consume an evolved cache
    relation from their recursive callee; they must not use the
    unchanged-global adapter.
