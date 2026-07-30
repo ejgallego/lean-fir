@@ -5720,6 +5720,204 @@ theorem deletedBoxHeapResultSourceOnly :
       deletedBoxLedgerResult.runtime.ledger 0 :=
   deletedBoxLedgerResult.heapSourceOnly 0 (by rfl)
 
+/-- A retained heap reset keeps its token result live.  The concrete object
+owns one erased field, so resetting that field exercises the successful
+heap-backed branch without introducing another ordinary heap root. -/
+def retainedResetDecl : LCNF.LetDecl .impure :=
+  letDecl reuseTokenVar objType (.reset 1 resetObjectVar)
+
+def retainedResetCode : LCNF.Code .impure :=
+  .let retainedResetDecl (.return reuseTokenVar)
+
+def retainedResetContinuationUsed : UsedLocals :=
+  ({} : UsedLocals).insert reuseTokenVar
+
+def retainedResetUsed : UsedLocals :=
+  retainedResetContinuationUsed.insert resetObjectVar
+
+theorem retainedResetShadowRun :
+    shadowCode? 2 {} retainedResetCode =
+      some (retainedResetCode, retainedResetUsed) := by
+  simp [retainedResetCode, retainedResetDecl,
+    retainedResetContinuationUsed, retainedResetUsed, letDecl,
+    shadowCode?, safeToElim, collectLetValue,
+    reuseTokenVar, resetObjectVar]
+
+def retainedResetContinuationRun :
+    ExactShadowCodeRun 1 {} retainedResetContinuationUsed
+      (.return reuseTokenVar) (.return reuseTokenVar) where
+  result := by
+    simp [shadowCode?, retainedResetContinuationUsed]
+
+theorem retainedResetStepBinderReady :
+    ExactShadowCodeBinderReady retainedResetUsed
+      (ExactShadowCodeView.letRetained
+        (declaration := retainedResetDecl)
+        retainedResetContinuationRun
+        (Or.inl (by
+          simp [retainedResetDecl, letDecl,
+            retainedResetContinuationUsed]))) := by
+  apply ExactShadowCodeBinderReady.letRetained
+  apply ExactShadowCodeView.binderReady
+    (index :=
+      Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.pushVar
+        Fir.LeanIR.Passes.SimpCaseScopedBridge.ScopeIndex.empty
+        reuseTokenVar)
+  · apply ScopedCodeWellFormedTree.ret
+    native_decide
+  · exact CodeBinderList.ret
+  · simp [BinderNamesUnique]
+  · simp [BinderAbsenceTransfers]
+
+def retainedResetEnv : Env :=
+  bind [] resetObjectVar (.object (.heap 0))
+
+def retainedResetState : MachineState :=
+  { program := { decls := #[] }
+    control := .code retainedResetCode
+    env := retainedResetEnv
+    runtime := deletedWriteSourceRuntime }
+
+theorem retainedResetSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedResetState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · constructor
+    · simpa [retainedResetState, deletedWriteSourceRuntime, alloc] using
+        (HeapOwnershipBelowFrontier.empty.alloc
+          (object := .ctor deletedWriteObject)
+          (by
+            simp [HeapObject.ownedValues, deletedWriteObject])
+          false)
+    · have objectBelow :
+          HeapLocationsBelowFrontier deletedWriteSourceRuntime
+            [.object (.heap 0)] := by
+        intro location member
+        have locationEq : location = 0 := by
+          simpa using member
+        subst location
+        simp [deletedWriteSourceRuntime, alloc]
+      change EnvironmentBelowFrontier
+        deletedWriteSourceRuntime retainedResetEnv
+      intro fvarId value found
+      unfold retainedResetEnv Fir.LeanIR.Impure.bind at found
+      simp only [lookup] at found
+      split at found
+      · have valueEq := Option.some.inj found
+        subst value
+        exact @objectBelow
+      · simp at found
+  · exact trivial
+
+/-- Exact retained-reset regression: both sides clear the paired constructor,
+bind related concrete reuse tokens, and preserve complete source ownership. -/
+theorem retainedResetExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedResetState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedResetState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have objects :
+      HeapObjectRel emptyAddressRenaming
+        (.ctor deletedWriteObject) (.ctor deletedWriteObject) := by
+    apply HeapObjectRel.ctor
+    · rfl
+    · change ListRel (ValueRel emptyAddressRenaming)
+        [.erased] [.erased]
+      exact .cons .erased .nil
+    · rfl
+    · rfl
+  let base : LedgerShadowRuntimeRel emptyAddressRenaming
+      ({} : RuntimeState) ({} : RuntimeState) [.erased] [.erased] := {
+    runtime :=
+      emptyRuntime_shadowRelated_of_roots
+        (ListRel.cons ValueRel.erased ListRel.nil)
+    ledger := TargetAllocationLedger.empty emptyAddressRenaming
+  }
+  let paired := base.allocBoth
+      objects
+      (by
+        intro value member
+        apply extra_subset_runtimeRoots
+        simpa [HeapObject.ownedValues, deletedWriteObject] using member)
+      (by
+        intro value member
+        apply extra_subset_runtimeRoots
+        simpa [HeapObject.ownedValues, deletedWriteObject] using member)
+      false
+  have objectValues :
+      ValueRel paired.larger
+        (.object (.heap 0)) (.object (.heap 0)) := by
+    simpa [alloc] using paired.values
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedResetState.program retainedResetState.program := by
+    simpa [retainedResetState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 paired.larger
+        retainedResetState.frames retainedResetState.frames [] [] := by
+    simpa [retainedResetState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 paired.larger
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedResetUsed
+        retainedResetState.joins retainedResetState.joins := by
+    simpa [retainedResetState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedResetUsed
+  have env :
+      EnvRelOn paired.larger retainedResetUsed
+        retainedResetState.env retainedResetState.env := by
+    simpa [retainedResetState, retainedResetEnv] using
+      (EnvRelOn.empty paired.larger retainedResetUsed).bindBoth
+        (binder := resetObjectVar) objectValues
+  have runtime :
+      ShadowRuntimeRel paired.larger
+        retainedResetState.runtime retainedResetState.runtime
+        (envRootsOn retainedResetUsed retainedResetState.env ++ [])
+        (envRootsOn retainedResetUsed retainedResetState.env ++ []) := by
+    have rootsSubset : RootSubset
+        (envRootsOn retainedResetUsed retainedResetState.env)
+        [.object (.heap 0), .erased] := by
+      intro value member
+      have valueEq : value = .object (.heap 0) := by
+        symm
+        simpa [retainedResetState, retainedResetEnv,
+          retainedResetUsed, retainedResetContinuationUsed,
+          envRootsOn, Impure.bind, lookup, reuseTokenVar,
+          resetObjectVar] using member
+      subst value
+      simp
+    have restricted :=
+      paired.runtime.runtime.restrictExtra
+        (envRootsOn_related env) rootsSubset rootsSubset
+    simpa [retainedResetState, deletedWriteSourceRuntime,
+      List.append_nil] using restricted
+  have usedBound :
+      UsedSubset
+        (collectLetValue retainedResetContinuationUsed
+          (LCNF.LetValue.reset 1 resetObjectVar :
+            LCNF.LetValue .impure))
+        retainedResetUsed := by
+    simpa [collectLetValue, retainedResetUsed] using
+      UsedSubset.refl retainedResetUsed
+  rcases
+      retainedResetStepBinderReady
+        |>.match_retainedResetLetStep_withOwnership
+          (fuelBound := Nat.le_refl 2) usedBound
+          retainedResetState retainedResetState programs frames joins env
+          runtime retainedResetSourceOwnership step with
+    ⟨targetAfter, path, related, ownership⟩
+  exact ⟨paired.larger, targetAfter, paired.extension,
+    by
+      simpa [retainedResetState, retainedResetCode,
+        retainedResetDecl, letDecl] using path,
+    related, ownership⟩
+
 /-- A retained failed reuse keeps the token live in the ambient set and uses
 its result in the continuation. -/
 def retainedReuseNoneUsed : UsedLocals :=
@@ -5861,6 +6059,97 @@ theorem retainedReuseNoneExactStepLedgerPreserved
       (fuelBound := Nat.le_refl 2) usedBound
       retainedReuseNoneState retainedReuseNoneState programs frames joins env
       tokenRead argumentsRead (by rfl) runtime step
+
+/-- The retained missing-token state has no ordinary heap addresses before
+reuse allocates its result. -/
+theorem retainedReuseNoneSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedReuseNoneState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · constructor
+    · simpa [retainedReuseNoneState] using
+        HeapOwnershipBelowFrontier.empty
+    · have tokenBelow :
+          HeapLocationsBelowFrontier ({} : RuntimeState)
+            [.reuseToken none] := by
+        intro location member
+        simp at member
+      have extended :
+          EnvironmentBelowFrontier ({} : RuntimeState)
+            (bind [] reuseTokenVar (.reuseToken none)) :=
+        EnvironmentBelowFrontier.bind
+          (binder := reuseTokenVar) (value := .reuseToken none)
+          EnvironmentBelowFrontier.empty tokenBelow
+      intro fvarId value found
+      apply @extended fvarId value
+      simpa [retainedReuseNoneState, retainedReuseNoneEnv] using found
+  · exact trivial
+
+/-- Exact retained failed-reuse regression: the fallback constructor
+allocation extends the paired address map and preserves complete ownership. -/
+theorem retainedReuseNoneExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedReuseNoneState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedReuseNoneState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedReuseNoneState.program retainedReuseNoneState.program := by
+    simpa [retainedReuseNoneState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+        retainedReuseNoneState.frames retainedReuseNoneState.frames [] [] := by
+    simpa [retainedReuseNoneState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 emptyAddressRenaming
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedReuseNoneUsed
+        retainedReuseNoneState.joins retainedReuseNoneState.joins := by
+    simpa [retainedReuseNoneState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedReuseNoneUsed
+  have env :
+      EnvRelOn emptyAddressRenaming retainedReuseNoneUsed
+        retainedReuseNoneState.env retainedReuseNoneState.env := by
+    simpa [retainedReuseNoneState, retainedReuseNoneEnv] using
+      (EnvRelOn.empty emptyAddressRenaming retainedReuseNoneUsed).bindBoth
+        (binder := reuseTokenVar) ValueRel.reuseNone
+  have runtime :
+      ShadowRuntimeRel emptyAddressRenaming
+        retainedReuseNoneState.runtime retainedReuseNoneState.runtime
+        (envRootsOn retainedReuseNoneUsed retainedReuseNoneState.env ++ [])
+        (envRootsOn retainedReuseNoneUsed retainedReuseNoneState.env ++ []) := by
+    simpa [retainedReuseNoneState] using
+      emptyRuntime_shadowRelated_of_roots (envRootsOn_related env)
+  have retainedReady :
+      RetainedLetReadyAt retainedReuseNoneState
+        (runtimeRoots retainedReuseNoneState.runtime
+          (envRootsOn retainedReuseNoneUsed retainedReuseNoneState.env ++ []))
+        (.reuse reuseTokenVar oneFieldInfo true #[.erased]) := by
+    intro location tokenRead
+    simp [retainedReuseNoneState, retainedReuseNoneEnv,
+      lookupValue, Impure.bind, lookup, reuseTokenVar] at tokenRead
+  have usedBound :
+      UsedSubset
+        (collectLetValue neutralUsed
+          (LCNF.LetValue.reuse reuseTokenVar oneFieldInfo true #[.erased] :
+            LCNF.LetValue .impure))
+        retainedReuseNoneUsed := by
+    simpa [collectLetValue, collectArgs, collectArgList, collectArg,
+      retainedReuseNoneUsed] using
+      UsedSubset.refl retainedReuseNoneUsed
+  simpa [retainedReuseNoneState, retainedReuseNoneCode,
+    retainedReuseNoneDecl, letDecl] using
+    retainedReuseNoneStepBinderReady
+      |>.match_retainedReuseLetStep_withOwnership
+        (fuelBound := Nat.le_refl 2) usedBound
+        retainedReuseNoneState retainedReuseNoneState programs frames joins
+        env retainedReady runtime retainedReuseNoneSourceOwnership step
 
 /-- The deleted failed-reuse fixture's source-only constructor allocation
 retains the empty target owner ledger. -/
@@ -6769,6 +7058,50 @@ theorem retainedReuseSomeReady :
       simp [retainedReuseSomeState, retainedReuseSomeEnv,
         Impure.bind, lookup, reuseArgVar, reuseTokenVar])
 
+/-- Before concrete reuse, both the ordinary argument root and every saved
+environment value lie below the one-cell allocation frontier. -/
+theorem retainedReuseSomeSourceOwnership :
+    SourceMachineOwnershipBelowFrontier retainedReuseSomeState := by
+  apply SourceMachineOwnershipBelowFrontier.ofEnvironment
+  · constructor
+    · simpa [retainedReuseSomeState, retainedReuseSomeRuntime, alloc] using
+        (HeapOwnershipBelowFrontier.empty.alloc
+          (object := .ctor retainedReuseSomeInitialObject)
+          (by
+            simp [HeapObject.ownedValues,
+              retainedReuseSomeInitialObject])
+          false)
+    · have objectBelow :
+          HeapLocationsBelowFrontier retainedReuseSomeRuntime
+            [.object (.heap 0)] := by
+        intro location member
+        have locationEq : location = 0 := by
+          simpa using member
+        subst location
+        simp [retainedReuseSomeRuntime, alloc]
+      have tokenBelow :
+          HeapLocationsBelowFrontier retainedReuseSomeRuntime
+            [.reuseToken (some 0)] := by
+        intro location member
+        simp at member
+      have objectEnv :
+          EnvironmentBelowFrontier retainedReuseSomeRuntime
+            (bind [] reuseArgVar (.object (.heap 0))) :=
+        EnvironmentBelowFrontier.bind
+          (binder := reuseArgVar) (value := .object (.heap 0))
+          EnvironmentBelowFrontier.empty objectBelow
+      have fullEnv :
+          EnvironmentBelowFrontier retainedReuseSomeRuntime
+            (bind (bind [] reuseArgVar (.object (.heap 0)))
+              reuseTokenVar (.reuseToken (some 0))) :=
+        EnvironmentBelowFrontier.bind
+          (binder := reuseTokenVar) (value := .reuseToken (some 0))
+          objectEnv tokenBelow
+      intro fvarId value found
+      apply @fullEnv fvarId value
+      simpa [retainedReuseSomeState, retainedReuseSomeEnv] using found
+  · exact trivial
+
 /-- Exact retained existing-address regression: both sides overwrite their
 paired live cell, expose any larger hidden renaming chosen by the mature
 runtime theorem, and transport the target owner ledger at frontier `1`. -/
@@ -6899,6 +7232,113 @@ theorem retainedReuseSomeExactStepLedgerPreserved
       simpa [retainedReuseSomeState, retainedReuseSomeCode,
         retainedReuseSomeDecl, letDecl] using path,
     related⟩
+
+/-- Exact retained concrete-token regression: the in-place overwrite keeps
+the one-cell frontier fixed and preserves complete source ownership. -/
+theorem retainedReuseSomeExactStepOwnershipPreserved
+    (externals : ExternalSpec) {sourceAfter : MachineState}
+    (step : Step externals retainedReuseSomeState sourceAfter) :
+    ∃ larger targetAfter,
+      RenamingExtends emptyAddressRenaming larger ∧
+      NonLockstep.Reaches externals retainedReuseSomeState targetAfter ∧
+      BinderReadyReachableMachineRelated 2 larger
+        sourceAfter targetAfter ∧
+      SourceMachineOwnershipBelowFrontier sourceAfter := by
+  have initialObjects :
+      HeapObjectRel emptyAddressRenaming
+        (.ctor retainedReuseSomeInitialObject)
+        (.ctor retainedReuseSomeInitialObject) := by
+    apply HeapObjectRel.ctor
+    · rfl
+    · change ListRel (ValueRel emptyAddressRenaming) [] []
+      exact .nil
+    · rfl
+    · rfl
+  let paired := LedgerShadowRuntimeRel.empty.allocBoth
+      initialObjects
+      (by
+        simp [RootSubset, HeapObject.ownedValues,
+          retainedReuseSomeInitialObject])
+      (by
+        simp [RootSubset, HeapObject.ownedValues,
+          retainedReuseSomeInitialObject])
+      false
+  have objectValues :
+      ValueRel paired.larger
+        (.object (.heap 0)) (.object (.heap 0)) := by
+    simpa [alloc] using paired.values
+  have mapping : paired.larger.forward 0 = some 0 := by
+    cases objectValues with
+    | heap mapping => exact mapping
+  have programs :
+      ProgramRelated (BinderReadyShadowCodeRelated 2)
+        retainedReuseSomeState.program retainedReuseSomeState.program := by
+    simpa [retainedReuseSomeState, ProgramRelated] using
+      (ListRel.nil :
+        ListRel (DeclRelated (BinderReadyShadowCodeRelated 2)) [] [])
+  have frames :
+      BinderReadyReachableFramesRelated 2 paired.larger
+        retainedReuseSomeState.frames retainedReuseSomeState.frames [] [] := by
+    simpa [retainedReuseSomeState] using
+      (BinderReadyReachableFramesRelated.nil :
+        BinderReadyReachableFramesRelated 2 paired.larger
+          [] [] [] [])
+  have joins :
+      BinderReadyShadowJoinEnvRelated 2 retainedReuseSomeUsed
+        retainedReuseSomeState.joins retainedReuseSomeState.joins := by
+    simpa [retainedReuseSomeState] using
+      BinderReadyShadowJoinEnvRelated.empty 2 retainedReuseSomeUsed
+  have env :
+      EnvRelOn paired.larger retainedReuseSomeUsed
+        retainedReuseSomeState.env retainedReuseSomeState.env := by
+    simpa [retainedReuseSomeState, retainedReuseSomeEnv] using
+      ((EnvRelOn.empty paired.larger retainedReuseSomeUsed).bindBoth
+        (binder := reuseArgVar) objectValues).bindBoth
+          (binder := reuseTokenVar) (.reuseSome mapping)
+  have published :
+      ShadowRuntimeRel paired.larger
+        retainedReuseSomeState.runtime retainedReuseSomeState.runtime
+        [.reuseToken (some 0), .object (.heap 0)]
+        [.reuseToken (some 0), .object (.heap 0)] := by
+    simpa [retainedReuseSomeState, retainedReuseSomeRuntime, alloc] using
+      paired.runtime.runtime.prependNonHeap (.reuseSome mapping)
+        (by intro location impossible; cases impossible)
+        (by intro location impossible; cases impossible)
+  have runtime :
+      ShadowRuntimeRel paired.larger
+        retainedReuseSomeState.runtime retainedReuseSomeState.runtime
+        (envRootsOn retainedReuseSomeUsed retainedReuseSomeState.env ++ [])
+        (envRootsOn retainedReuseSomeUsed retainedReuseSomeState.env ++ []) := by
+    simpa only [List.append_nil] using
+      published.restrictExtra (envRootsOn_related env)
+        (by
+          simpa [retainedReuseSomeState] using
+            retainedReuseSomeEnvRootsSubset)
+        (by
+          simpa [retainedReuseSomeState] using
+            retainedReuseSomeEnvRootsSubset)
+  have usedBound :
+      UsedSubset
+        (collectLetValue retainedReuseSomeContinuationUsed
+          (LCNF.LetValue.reuse reuseTokenVar oneFieldInfo true
+            #[.fvar reuseArgVar] : LCNF.LetValue .impure))
+        retainedReuseSomeUsed := by
+    simpa [collectLetValue, collectArgs, collectArgList, collectArg,
+      retainedReuseSomeContinuationUsed, retainedReuseSomeUsed] using
+      UsedSubset.refl retainedReuseSomeUsed
+  rcases
+      retainedReuseSomeStepBinderReady
+        |>.match_retainedReuseLetStep_withOwnership
+          (fuelBound := Nat.le_refl 2) usedBound
+          retainedReuseSomeState retainedReuseSomeState programs frames joins
+          env retainedReuseSomeReady runtime
+          retainedReuseSomeSourceOwnership step with
+    ⟨larger, targetAfter, extension, path, related, ownership⟩
+  exact ⟨larger, targetAfter, paired.extension.trans extension,
+    by
+      simpa [retainedReuseSomeState, retainedReuseSomeCode,
+        retainedReuseSomeDecl, letDecl] using path,
+    related, ownership⟩
 
 /-- The three deleted-write fixtures obtain their local heap shapes by
 inverting the successful runtime operations, rather than by restating cell
