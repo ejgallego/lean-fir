@@ -1125,11 +1125,26 @@ an old heap-cell witness to prove that the selected address precedes the new
 source frontier. A focused regression allocates a deleted constructor first,
 then adds an unrelated retained source/target pair, and proves that the
 earlier address remains outside the enlarged target ledger. This removes the
-allocation-order reconstruction from future clients. The remaining static
-work is to preserve which environment bindings and reset tokens name those
-certified addresses, and to derive write/reset/reuse local shapes from the
-compiler's typing and ownership invariants along arbitrary checked
-executions.
+allocation-order reconstruction from future clients. The next static step was
+to preserve which environment bindings and reset tokens name those certified
+addresses.
+
+The binding-provenance layer lands at `0041d70c`.
+`SourceOnlyHeapBinding` and `SourceOnlyReuseTokenBinding` combine an exact
+environment lookup with the address's source-only ledger certificate. Generic
+laws publish either capability under its own binder, preserve it across an
+unrelated binding, and transport it to any later ledger for which the address
+remains source-only. The operational
+`reset_reuseSome_location_eq_of_ok` theorem proves that a successful reset's
+concrete token names exactly its heap-object operand;
+`DeletedResetLocalReadyAt.sourceOnlyReuseTokenBinding` consequently transfers
+the heap binding into the exact successor token binding. A focused lifecycle
+regression allocates a deleted constructor, binds it as the reset operand,
+derives the concrete reset-token binding, and preserves that token provenance
+after a later paired source/target allocation enlarges the owner ledger.
+The remaining static work is now compiler typing/local-shape preservation:
+derive the write/reset/reuse operands and successful local evaluation facts
+along arbitrary checked executions rather than enumerating fixture states.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1203,7 +1218,9 @@ now discharge aligned checked entry contracts. The remaining compiler-client
 work is to replace finite fixture enumeration with general static
 preservation lemmas. The local nonempty-ledger edge proof lands at
 `5a42dff6`, its checked whole-program lift lands at `5b9bead7`, and the first
-environment/ledger owner-preservation extraction lands at `3f720ba4`.
+environment/ledger owner-preservation extraction lands at `3f720ba4`;
+source-only allocation lifecycle transport lands at `3744edf1`, and exact
+heap-binding/reset-token provenance lands at `0041d70c`.
 `deadNullaryFapStaticPremisesButNotCorrect` proves in the kernel that
 `ProgramElimDeadWellFormed` plus a successful transparent traversal cannot
 imply correctness: the well-formed nullary-`.fap` counterexample has an
@@ -1248,10 +1265,11 @@ the existing nullary-`.fap` semantic discrepancy.
    write/reset/reuse. Environment/ledger transport, finite-path invariant
    induction, successful reset/reuse operational shapes, source-only
    allocation entry certificates, and lifecycle transport across
-   same-frontier operations and paired allocations are extracted. Arbitrary
-   checked entries must still preserve the environment binding/reset-token
-   provenance selecting those addresses and derive the local operation shapes
-   without finite execution-graph enumeration.
+   same-frontier operations and paired allocations, plus exact heap-binding
+   and reset-token provenance, are extracted. Arbitrary checked entries must
+   still derive and preserve the compiler typing/ownership facts that imply
+   each local write/reset/reuse shape, without finite execution-graph
+   enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
