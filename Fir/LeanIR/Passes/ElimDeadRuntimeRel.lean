@@ -9944,6 +9944,52 @@ theorem ShadowRuntimeRel.reuseNoneLeftGarbage
     ⟨nextRuntime, value, allocated, next⟩
   exact ⟨nextRuntime, value, by simpa [reuse] using allocated, next⟩
 
+/-- Computational witness for the pre-write heap shape exposed by a
+successful concrete-token reuse. -/
+structure ReuseSomeSuccessShape (runtime : RuntimeState)
+    (location : Location) (info : LCNF.CtorInfo)
+    (arguments : Array Value) where
+  cell : HeapCell
+  oldObject : ConstructorObject
+  found : findCell? runtime.heap location = some cell
+  live : cell.live = true
+  objectEq : cell.object = .ctor oldObject
+  arity : arguments.size = info.size
+
+/-- A successful concrete-token reuse exposes the pre-write live constructor
+cell and verifies the compiler arity condition.  This is the operational
+heap-shape fact needed by deleted-reuse clients; it follows from evaluation
+rather than from fixture-specific heap reduction. -/
+def reuseSome_success_shape
+    (effect :
+      reuse runtime (.reuseToken (some location)) info updateHeader arguments =
+        .ok result) :
+    ReuseSomeSuccessShape runtime location info arguments := by
+  unfold reuse at effect
+  simp only [Bind.bind, Except.bind] at effect
+  by_cases arity : arguments.size = info.size
+  · rw [if_neg (by simp [arity])] at effect
+    generalize liveEq :
+        getLiveCell runtime location = liveResult at effect
+    cases liveResult with
+    | error fault =>
+        simp at effect
+    | ok cell =>
+        have liveSpec := getLiveCell_spec liveEq
+        cases objectEq : cell.object <;>
+          simp [objectEq] at effect
+        case ctor oldObject =>
+          exact {
+            cell
+            oldObject
+            found := liveSpec.1
+            live := liveSpec.2
+            objectEq
+            arity
+          }
+  · rw [if_pos (by simpa using arity)] at effect
+    contradiction
+
 /-- Reusing an existing compiler-owned cell changes only that cell.  When the
 cell is outside the published reachable subgraph, the target may stutter. -/
 theorem ShadowRuntimeRel.reuseSomeLeftUnreachable

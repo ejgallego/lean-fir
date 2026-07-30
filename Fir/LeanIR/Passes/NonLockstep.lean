@@ -33,6 +33,23 @@ theorem Reaches.trans
       rcases ih second with ⟨tailCount, combined⟩
       exact ⟨tailCount + 1, .step head combined⟩
 
+/-- A predicate containing the initial state and closed under one semantic
+step contains every finitely reachable state.  Compiler clients can expose
+their local heap/control invariant once, without repeating induction over the
+hidden step count carried by `Reaches`. -/
+theorem Reaches.invariant
+    {predicate : MachineState → Prop}
+    (path : Reaches externals initial state)
+    (initialReady : predicate initial)
+    (preserved : ∀ {before after},
+      predicate before → Step externals before after → predicate after) :
+    predicate state := by
+  rcases path with ⟨count, execution⟩
+  induction execution with
+  | refl => exact initialReady
+  | step head tail ih =>
+      exact ih (preserved initialReady head)
+
 /-- A reachable prefix can be prepended to a terminating evaluation. -/
 theorem evaluatesState_of_reaches
     (path : Reaches externals before after)

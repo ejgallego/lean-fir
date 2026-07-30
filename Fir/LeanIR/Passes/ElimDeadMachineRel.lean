@@ -10906,6 +10906,32 @@ structure DeletedReuseSomeLocalReadyAt (state : MachineState)
   objectEq : cell.object = .ctor oldObject
   arity : values.size = info.size
 
+/-- Successful concrete-token evaluation supplies the live constructor shape
+and arity fields of deleted-reuse readiness.  Clients retain only the static
+environment lookups; they no longer inspect the heap representation
+separately from the interpreter operation that consumes it. -/
+def DeletedReuseSomeLocalReadyAt.of_reuseEffect
+    {values : Array Value}
+    (tokenRead : lookupValue state.env token =
+      .ok (.reuseToken (some location)))
+    (argumentsRead : evalArgs state.env arguments = .ok values)
+    (effect :
+      reuse state.runtime (.reuseToken (some location))
+          info updateHeader values = .ok result) :
+    DeletedReuseSomeLocalReadyAt state token info arguments location := by
+  let shape := reuseSome_success_shape effect
+  exact {
+    cell := shape.cell
+    oldObject := shape.oldObject
+    values
+    tokenRead
+    argumentsRead
+    found := shape.found
+    live := shape.live
+    objectEq := shape.objectEq
+    arity := shape.arity
+  }
+
 /-- Add root exclusion to a locally valid concrete-token reuse. -/
 theorem DeletedReuseSomeLocalReadyAt.deletedReadyAt
     (shape : DeletedReuseSomeLocalReadyAt
@@ -11098,6 +11124,53 @@ structure DeletedResetLocalReadyAt (state : MachineState)
   objectRead : lookupValue state.env object = .ok objectValue
   effect : reset state.runtime count objectValue =
     .ok (nextRuntime, token)
+
+/-- A successful interpreter evaluation of a reset let contains its complete
+root-independent readiness certificate.  This keeps compiler clients tied to
+the actual evaluation that advances their execution invariant rather than a
+second, separately reduced copy of the heap operation. -/
+def DeletedResetLocalReadyAt.of_evalLetValue
+    {nextRuntime : RuntimeState} {tokenValue : Value}
+    (evaluated :
+      evalLetValue state {
+        fvarId
+        binderName
+        type
+        value := .reset count object
+      } = .ok (nextRuntime, .value tokenValue)) :
+    DeletedResetLocalReadyAt state count object := by
+  simp only [evalLetValue] at evaluated
+  generalize objectRead :
+      lookupValue state.env object = objectResult at evaluated
+  cases objectResult with
+  | error fault =>
+      simp [Bind.bind, Except.bind, Functor.map, Except.map] at evaluated
+  | ok objectValue =>
+      simp only [Bind.bind, Except.bind] at evaluated
+      generalize resetEffect :
+          reset state.runtime count objectValue = resetResult at evaluated
+      cases resetResult with
+      | error fault =>
+          simp [Functor.map, Except.map] at evaluated
+      | ok pair =>
+          rcases pair with ⟨computedRuntime, computedToken⟩
+          have pairEq := Except.ok.inj evaluated
+          have runtimeEq : computedRuntime = nextRuntime :=
+            congrArg Prod.fst pairEq
+          have actionEq :
+              LetAction.value computedToken = LetAction.value tokenValue :=
+            congrArg Prod.snd pairEq
+          have tokenEq : computedToken = tokenValue :=
+            LetAction.value.inj actionEq
+          subst nextRuntime
+          subst tokenValue
+          exact {
+            objectValue
+            token := computedToken
+            nextRuntime := computedRuntime
+            objectRead
+            effect := resetEffect
+          }
 
 /-- Add an independently proved reachable-runtime frame to a successful local
 reset outcome. -/

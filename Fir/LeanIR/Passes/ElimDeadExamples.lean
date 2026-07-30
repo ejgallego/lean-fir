@@ -3712,32 +3712,19 @@ theorem nonemptyLedgerResetEffect :
 def nonemptyLedgerResetLocalReady :
     DeletedResetLocalReadyAt
       nonemptyLedgerResetState 1 resetObjectVar := by
-  refine {
-    objectValue := .object (.heap 1)
-    token := .reuseToken (some 1)
-    nextRuntime := nonemptyLedgerResetRuntime
-    objectRead := ?_
-    effect := ?_
-  }
-  · simp [nonemptyLedgerResetState, nonemptyLedgerResetEnv,
-      nonemptyLedgerRetainedEnv, lookupValue, Impure.bind, lookup,
-      resetObjectVar, live]
-  · simpa [nonemptyLedgerResetState] using nonemptyLedgerResetEffect
+  apply DeletedResetLocalReadyAt.of_evalLetValue
+      (fvarId := dead)
+      (binderName := dead.name)
+      (type := objType)
+      (nextRuntime := nonemptyLedgerResetRuntime)
+      (tokenValue := .reuseToken (some 1))
+  rfl
 
 def nonemptyLedgerReuseLocalReady :
     DeletedReuseSomeLocalReadyAt nonemptyLedgerReuseState
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  refine {
-    cell := nonemptyLedgerClearedCell
-    oldObject := nonemptyLedgerClearedObject
-    values := #[.erased]
-    tokenRead := ?_
-    argumentsRead := ?_
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    arity := rfl
-  }
+  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      (values := #[.erased]) (updateHeader := true)
   · simp [nonemptyLedgerReuseState, nonemptyLedgerReuseEnv,
       nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
       lookupValue, Impure.bind, lookup,
@@ -3747,6 +3734,7 @@ def nonemptyLedgerReuseLocalReady :
       evalArgs, evalArg, Impure.bind, lookup,
       reuseTokenVar, reuseArgVar, resetObjectVar, live]
     rfl
+  · rfl
 
 /-- Nonempty-ledger reset/reuse ownership regression. The ledger records
 target owner `0`; reset and concrete reuse operate on source-only location
@@ -5001,21 +4989,15 @@ noncomputable def deletedReuseSomeLedgerRuntime :
 
 def deletedReuseSomeLocalReady :
     DeletedReuseSomeLocalReadyAt deletedReuseSomeSourceState
-      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 where
-  cell := { object := .ctor deletedWriteObject }
-  oldObject := deletedWriteObject
-  values := #[.erased]
-  tokenRead := by
-    simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 := by
+  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      (values := #[.erased]) (updateHeader := true)
+  · simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
       lookupValue, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
-  argumentsRead := by
-    simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
+  · simp [deletedReuseSomeSourceState, deletedReuseSomeSourceEnv,
       evalArgs, evalArg, Impure.bind, lookup, reuseTokenVar, reuseArgVar]
     rfl
-  found := rfl
-  live := rfl
-  objectEq := rfl
-  arity := rfl
+  · rfl
 
 theorem deletedReuseSomeLedgerSourceOnly :
     SourceOnlyUnderTargetLedger
@@ -9156,37 +9138,13 @@ theorem closedWritesSourceReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState closedWritesBeforeProgram `main arguments) state) :
     ClosedWritesSourceReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        ClosedWritesSourceReachable arguments before →
-          ClosedWritesSourceReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih (closedWritesSourceReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry closedWritesSourceReachable_step
 
 theorem closedWritesTargetReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState closedWritesAfterProgram `main arguments) state) :
     ClosedWritesTargetReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        ClosedWritesTargetReachable arguments before →
-          ClosedWritesTargetReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih (closedWritesTargetReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry closedWritesTargetReachable_step
 
 /-- Inductive exact-pair ownership contract for the complete closed fixture.
 Related entry arguments may differ, but the target's zero allocation frontier
@@ -10229,19 +10187,13 @@ def closedConcreteReuseResetLocalReady :
     DeletedResetLocalReadyAt
       (closedConcreteReuseSourceResetState arguments)
       1 resetObjectVar := by
-  refine {
-    objectValue := .object (.heap 0)
-    token := .reuseToken (some 0)
-    nextRuntime := closedConcreteReuseResetRuntime
-    objectRead := ?_
-    effect := ?_
-  }
-  · simp [closedConcreteReuseSourceResetState,
-      closedConcreteReuseObjectEnv, closedReuseLiveEnv,
-      lookupValue, Impure.bind, lookup,
-      resetObjectVar, live]
-  · simpa [closedConcreteReuseSourceResetState] using
-      closedConcreteReuseResetEffect
+  apply DeletedResetLocalReadyAt.of_evalLetValue
+      (fvarId := reuseTokenVar)
+      (binderName := reuseTokenVar.name)
+      (type := objType)
+      (nextRuntime := closedConcreteReuseResetRuntime)
+      (tokenValue := .reuseToken (some 0))
+  rfl
 
 /-- The related target's empty allocation frontier excludes the source-only
 constructor from every actual control/frame root decomposition.  Resetting
@@ -10333,17 +10285,8 @@ def closedConcreteReuseLocalReady :
     DeletedReuseSomeLocalReadyAt
       (closedConcreteReuseSourceReuseState arguments)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 0 := by
-  refine {
-    cell := closedConcreteReuseResetCell
-    oldObject := closedConcreteReuseResetObject
-    values := #[.erased]
-    tokenRead := ?_
-    argumentsRead := ?_
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    arity := rfl
-  }
+  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      (values := #[.erased]) (updateHeader := true)
   · simp [closedConcreteReuseSourceReuseState,
       closedConcreteReuseArgEnv, closedConcreteReuseTokenEnv,
       closedConcreteReuseObjectEnv, closedReuseLiveEnv,
@@ -10355,6 +10298,7 @@ def closedConcreteReuseLocalReady :
       evalArgs, evalArg, Impure.bind, lookup,
       reuseTokenVar, reuseArgVar, resetObjectVar]
     rfl
+  · rfl
 
 theorem closedConcreteReuseReady_of_shadowRuntime
     (target : MachineState)
@@ -10583,40 +10527,16 @@ theorem closedConcreteReuseSourceReachable_of_reaches
       (initialState closedConcreteReuseBeforeProgram `main arguments)
       state) :
     ClosedConcreteReuseSourceReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        ClosedConcreteReuseSourceReachable arguments before →
-          ClosedConcreteReuseSourceReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih
-          (closedConcreteReuseSourceReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry
+    closedConcreteReuseSourceReachable_step
 
 theorem closedConcreteReuseTargetReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState closedConcreteReuseAfterProgram `main arguments)
       state) :
     ClosedConcreteReuseTargetReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        ClosedConcreteReuseTargetReachable arguments before →
-          ClosedConcreteReuseTargetReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih
-          (closedConcreteReuseTargetReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry
+    closedConcreteReuseTargetReachable_step
 
 /-- Exact ownership contract for the one-cell reset/reuse branch. -/
 def closedConcreteReuseExactOwnershipContract
@@ -11162,20 +11082,7 @@ theorem closedOwnedReuseSourceReachable_of_reaches
       (initialState closedOwnedReuseBeforeProgram `main arguments)
       state) :
     ClosedOwnedReuseSourceReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        ClosedOwnedReuseSourceReachable arguments before →
-          ClosedOwnedReuseSourceReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih
-          (closedOwnedReuseSourceReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry closedOwnedReuseSourceReachable_step
 
 /-- The owned-child target is definitionally the already audited one-let
 target, so its exact finite graph and empty-frontier shape are reused. -/
@@ -11196,19 +11103,13 @@ def closedOwnedReuseResetLocalReady :
     DeletedResetLocalReadyAt
       (closedOwnedReuseSourceResetState arguments)
       1 resetObjectVar := by
-  refine {
-    objectValue := .object (.heap 1)
-    token := .reuseToken (some 1)
-    nextRuntime := closedOwnedReuseResetRuntime
-    objectRead := ?_
-    effect := ?_
-  }
-  · simp [closedOwnedReuseSourceResetState,
-      closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
-      closedReuseLiveEnv, lookupValue, Impure.bind, lookup,
-      resetObjectVar, resetChildVar, live]
-  · simpa [closedOwnedReuseSourceResetState] using
-      closedOwnedReuseResetEffect
+  apply DeletedResetLocalReadyAt.of_evalLetValue
+      (fvarId := reuseTokenVar)
+      (binderName := reuseTokenVar.name)
+      (type := objType)
+      (nextRuntime := closedOwnedReuseResetRuntime)
+      (tokenValue := .reuseToken (some 1))
+  rfl
 
 theorem closedOwnedReuseResetReady_of_shadowRuntime
     (target : MachineState)
@@ -11296,17 +11197,8 @@ def closedOwnedReuseLocalReady :
     DeletedReuseSomeLocalReadyAt
       (closedOwnedReuseSourceReuseState arguments)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  refine {
-    cell := closedOwnedReuseClearedParentCell
-    oldObject := closedOwnedReuseClearedParentObject
-    values := #[.erased]
-    tokenRead := ?_
-    argumentsRead := ?_
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    arity := rfl
-  }
+  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      (values := #[.erased]) (updateHeader := true)
   · simp [closedOwnedReuseSourceReuseState,
       closedOwnedReuseArgEnv, closedOwnedReuseTokenEnv,
       closedOwnedReuseObjectEnv, closedOwnedReuseChildEnv,
@@ -11318,6 +11210,7 @@ def closedOwnedReuseLocalReady :
       closedReuseLiveEnv, evalArgs, evalArg, Impure.bind, lookup,
       reuseTokenVar, reuseArgVar, resetObjectVar, resetChildVar]
     rfl
+  · rfl
 
 theorem closedOwnedReuseReady_of_shadowRuntime
     (target : MachineState)
@@ -12776,35 +12669,21 @@ def retainedPrefixReuseResetLocalReady
     DeletedResetLocalReadyAt
       (retainedPrefixReuseSourceResetState arguments)
       1 resetObjectVar := by
-  refine {
-    objectValue := .object (.heap 1)
-    token := .reuseToken (some 1)
-    nextRuntime := nonemptyLedgerResetRuntime
-    objectRead := ?_
-    effect := ?_
-  }
-  · simp [retainedPrefixReuseSourceResetState,
-      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-      lookupValue, Impure.bind, lookup, resetObjectVar, live]
-  · simpa [retainedPrefixReuseSourceResetState] using
-      nonemptyLedgerResetEffect
+  apply DeletedResetLocalReadyAt.of_evalLetValue
+      (fvarId := reuseTokenVar)
+      (binderName := reuseTokenVar.name)
+      (type := objType)
+      (nextRuntime := nonemptyLedgerResetRuntime)
+      (tokenValue := .reuseToken (some 1))
+  rfl
 
 def retainedPrefixReuseLocalReady
     (arguments : Array Value) :
     DeletedReuseSomeLocalReadyAt
       (retainedPrefixReuseSourceReuseState arguments)
       reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
-  refine {
-    cell := nonemptyLedgerClearedCell
-    oldObject := nonemptyLedgerClearedObject
-    values := #[.erased]
-    tokenRead := ?_
-    argumentsRead := ?_
-    found := rfl
-    live := rfl
-    objectEq := rfl
-    arity := rfl
-  }
+  apply DeletedReuseSomeLocalReadyAt.of_reuseEffect
+      (values := #[.erased]) (updateHeader := true)
   · simp [retainedPrefixReuseSourceReuseState,
       nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
       nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
@@ -12816,6 +12695,7 @@ def retainedPrefixReuseLocalReady
       evalArgs, evalArg, Impure.bind, lookup,
       reuseTokenVar, reuseArgVar, resetObjectVar, live]
     rfl
+  · rfl
 
 /-- Exact owner zero follows from the retained live root and the ledger's
 reverse-map law. -/
@@ -13294,40 +13174,16 @@ theorem retainedPrefixReuseSourceReachable_of_reaches
       (initialState retainedPrefixReuseBeforeProgram `main arguments)
       state) :
     RetainedPrefixReuseSourceReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        RetainedPrefixReuseSourceReachable arguments before →
-          RetainedPrefixReuseSourceReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih
-          (retainedPrefixReuseSourceReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry
+    retainedPrefixReuseSourceReachable_step
 
 theorem retainedPrefixReuseTargetReachable_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState retainedPrefixReuseAfterProgram `main arguments)
       state) :
     RetainedPrefixReuseTargetReachable arguments state := by
-  rcases path with ⟨count, steps⟩
-  have preserves : ∀ {count before after},
-      Steps externals count before after →
-        RetainedPrefixReuseTargetReachable arguments before →
-          RetainedPrefixReuseTargetReachable arguments after := by
-    intro count before after execution
-    induction execution with
-    | refl state =>
-        exact fun ready => ready
-    | step head tail ih =>
-        intro ready
-        exact ih
-          (retainedPrefixReuseTargetReachable_step ready head)
-  exact preserves steps .entry
+  exact path.invariant .entry
+    retainedPrefixReuseTargetReachable_step
 
 /-- Checked whole-program client of the ledger-exact ownership endpoint with
 a genuinely nonempty target owner table at reset and reuse. -/
