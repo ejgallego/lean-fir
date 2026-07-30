@@ -7508,6 +7508,18 @@ structure SourceOnlyHeapBinding
     lookupValue env binder = .ok (.object (.heap location))
   sourceOnly : SourceOnlyUnderTargetLedger ledger location
 
+/-- A source-only reset operand owns no source allocation represented by the
+target ledger. Unlike parent-only provenance, this hereditary certificate
+also excludes target owners from every recursively released child closure. -/
+structure SourceOnlyHeapClosureBinding
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (env : Env) (binder : FVarId) (location : Location)
+    (heap : Heap) : Prop where
+  binding : SourceOnlyHeapBinding ledger env binder location
+  ownerUnreachable : ∀ rightLocation, rightLocation < rightFrontier →
+    ¬Reachable heap [.object (.heap location)]
+      (ledger.owner rightLocation)
+
 /-- A reset-token local carries the same source-only allocation capability in
 the form consumed by a later concrete-token `reuse`. -/
 structure SourceOnlyReuseTokenBinding
@@ -8032,6 +8044,623 @@ theorem deleteValue_nextLocation_eq_of_ok
   | usize value => simp [deleteValue] at effect
   | scalar value => simp [deleteValue] at effect
   | reuseToken location? => simp [deleteValue] at effect
+
+/-- Reachability from a reachable singleton root composes with the ambient
+root set. -/
+theorem reachable_trans_singleton
+    (headReachable : Reachable heap roots parent)
+    (tailReachable :
+      Reachable heap [.object (.heap parent)] location) :
+    Reachable heap roots location := by
+  induction tailReachable with
+  | @root rootLocation member =>
+      have same : rootLocation = parent := by
+        simpa using member
+      subst rootLocation
+      exact headReachable
+  | child parentReachable found member reference recurse =>
+      exact .child recurse found member reference
+
+/-- A successful same-object cell update preserves the ownership graph. -/
+theorem setCell_heapOwnershipFrame_of_ok
+    (found : findCell? runtime.heap location = some current)
+    (objectEq : replacement.object = current.object)
+    (effect : setCell runtime location replacement = .ok result) :
+    HeapOwnershipFrame runtime.heap result.heap := by
+  obtain ⟨actual, actualEffect, actualFound, frame,
+      _length, _nextLocation, _globals, _world, _trace⟩ :=
+    setCell_spec_of_find runtime location current replacement found
+  rw [effect] at actualEffect
+  have same : result = actual := Except.ok.inj actualEffect
+  subst actual
+  exact heapOwnershipFrame_replace found actualFound frame objectEq
+
+/-- A successful cell update leaves every other lookup unchanged. -/
+theorem setCell_findCell_eq_of_ne_of_ok
+    (found : findCell? runtime.heap location = some current)
+    (effect : setCell runtime location replacement = .ok result)
+    (different : other ≠ location) :
+    findCell? result.heap other = findCell? runtime.heap other := by
+  obtain ⟨actual, actualEffect, _actualFound, frame,
+      _length, _nextLocation, _globals, _world, _trace⟩ :=
+    setCell_spec_of_find runtime location current replacement found
+  rw [effect] at actualEffect
+  have same : result = actual := Except.ok.inj actualEffect
+  subst actual
+  exact frame other different
+
+/-- A recursive release changes only the ownership closure of its root and
+never changes the ownership graph itself. -/
+structure DecLocationFuelFrame
+    (before after : RuntimeState) (root : Location) : Prop where
+  ownership : HeapOwnershipFrame before.heap after.heap
+  lookupFrame : ∀ location,
+    ¬Reachable before.heap [.object (.heap root)] location →
+      findCell? after.heap location = findCell? before.heap location
+
+/-- Successful recursive release preserves every cell outside the original
+ownership closure of its root. -/
+theorem decLocationFuel_frame_of_ok
+    (effect : decLocationFuel fuel runtime location = .ok result) :
+    DecLocationFuelFrame runtime result location := by
+  induction fuel generalizing runtime result location with
+  | zero =>
+      simp [decLocationFuel] at effect
+  | succ fuel fuelIH =>
+      generalize cellEq : getLiveCell runtime location = cellResult
+      cases cellResult with
+      | error fault =>
+          simp [decLocationFuel, cellEq, Bind.bind, Except.bind] at effect
+      | ok cell =>
+          have found : findCell? runtime.heap location = some cell :=
+            (getLiveCell_shape_of_ok cellEq).1
+          by_cases persistent : cell.persistent = true
+          · have noop :
+                decLocationFuel (fuel + 1) runtime location =
+                    .ok runtime := by
+              simp only [decLocationFuel, cellEq, Bind.bind, Except.bind]
+              rw [if_pos persistent]
+              rfl
+            rw [noop] at effect
+            have resultEq := Except.ok.inj effect
+            subst result
+            exact {
+              ownership := .refl runtime.heap
+              lookupFrame := by
+                intro other _unreachable
+                rfl
+            }
+          · by_cases zero : cell.rc = 0
+            · simp [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                persistent, zero] at effect
+            · by_cases above : 1 < cell.rc
+              · have setEffect :
+                    setCell runtime location
+                        { cell with rc := cell.rc - 1 } = .ok result := by
+                  simpa [decLocationFuel, cellEq, Bind.bind, Except.bind,
+                    persistent, zero, above] using effect
+                refine {
+                  ownership :=
+                    setCell_heapOwnershipFrame_of_ok
+                      (replacement :=
+                        { cell with rc := cell.rc - 1 })
+                      found rfl setEffect
+                  lookupFrame := ?_
+                }
+                intro other unreachable
+                have different : other ≠ location := by
+                  intro same
+                  subst other
+                  exact unreachable (.root (by simp))
+                exact setCell_findCell_eq_of_ne_of_ok
+                  found setEffect different
+              · simp only [decLocationFuel, cellEq, Bind.bind,
+                  Except.bind] at effect
+                rw [if_neg persistent, if_neg zero, if_neg above] at effect
+                generalize parentEq :
+                  setCell runtime location
+                      { cell with rc := 0, live := false } =
+                    parentResult at effect
+                cases parentResult with
+                | error fault =>
+                    simp at effect
+                | ok parent =>
+                    dsimp only at effect
+                    have parentOwnership :
+                        HeapOwnershipFrame runtime.heap parent.heap :=
+                      setCell_heapOwnershipFrame_of_ok
+                        (replacement :=
+                          { cell with rc := 0, live := false })
+                        found rfl parentEq
+                    have parentLookup :
+                        ∀ other,
+                          ¬Reachable runtime.heap
+                            [.object (.heap location)] other →
+                            findCell? parent.heap other =
+                              findCell? runtime.heap other := by
+                      intro other unreachable
+                      have different : other ≠ location := by
+                        intro same
+                        subst other
+                        exact unreachable (.root (by simp))
+                      exact setCell_findCell_eq_of_ne_of_ok
+                        found parentEq different
+                    rw [← Array.foldlM_toList] at effect
+                    have foldFrame :
+                        ∀ (items : List Value) (before after : RuntimeState),
+                          (∀ value, value ∈ items →
+                            value ∈ cell.object.ownedValues.toList) →
+                          HeapOwnershipFrame runtime.heap before.heap →
+                          (∀ other,
+                            ¬Reachable runtime.heap
+                              [.object (.heap location)] other →
+                              findCell? before.heap other =
+                                findCell? runtime.heap other) →
+                          items.foldlM (init := before) (fun next value =>
+                            match value with
+                            | .object (.heap child) =>
+                                decLocationFuel fuel next child
+                            | _ => .ok next) = .ok after →
+                          DecLocationFuelFrame runtime after location := by
+                      intro items
+                      induction items with
+                      | nil =>
+                          intro before after _members ownership lookup folded
+                          have same := Except.ok.inj folded
+                          subst after
+                          exact ⟨ownership, lookup⟩
+                      | cons head tail tailIH =>
+                          intro before after members ownership lookup folded
+                          simp only [List.foldlM_cons, Bind.bind,
+                            Except.bind] at folded
+                          have tailMembers :
+                              ∀ value, value ∈ tail →
+                                value ∈
+                                  cell.object.ownedValues.toList := by
+                            intro value member
+                            exact members value
+                              (List.mem_cons_of_mem head member)
+                          cases head with
+                          | object reference =>
+                              cases reference with
+                              | tagged payload =>
+                                  simp only at folded
+                                  exact tailIH before after tailMembers
+                                    ownership lookup folded
+                              | heap child =>
+                                  dsimp only at folded
+                                  generalize childEq :
+                                      decLocationFuel fuel before child =
+                                        childResult at folded
+                                  cases childResult with
+                                  | error fault =>
+                                      simp at folded
+                                  | ok middle =>
+                                      simp only at folded
+                                      have childFrame :=
+                                        fuelIH childEq
+                                      have childMember :
+                                          .object (.heap child) ∈
+                                            cell.object.ownedValues.toList :=
+                                        members _ List.mem_cons_self
+                                      have childReachable :
+                                          Reachable runtime.heap
+                                            [.object (.heap location)]
+                                            child :=
+                                        .child (.root (by simp)) found
+                                          childMember rfl
+                                      have childUnreachable :
+                                          ∀ other,
+                                            ¬Reachable runtime.heap
+                                              [.object (.heap location)]
+                                              other →
+                                            ¬Reachable before.heap
+                                              [.object (.heap child)]
+                                              other := by
+                                        intro other unreachable reachable
+                                        have originalReachable :=
+                                          ownership.symm.reachable reachable
+                                        exact unreachable
+                                          (reachable_trans_singleton
+                                            childReachable originalReachable)
+                                      have middleLookup :
+                                          ∀ other,
+                                            ¬Reachable runtime.heap
+                                              [.object (.heap location)]
+                                              other →
+                                            findCell? middle.heap other =
+                                              findCell? runtime.heap other := by
+                                        intro other unreachable
+                                        exact
+                                          (childFrame.lookupFrame other
+                                            (childUnreachable other
+                                              unreachable)).trans
+                                            (lookup other unreachable)
+                                      exact tailIH middle after tailMembers
+                                        (ownership.trans
+                                          childFrame.ownership)
+                                        middleLookup folded
+                          | usize value =>
+                              simp only at folded
+                              exact tailIH before after tailMembers
+                                ownership lookup folded
+                          | scalar value =>
+                              simp only at folded
+                              exact tailIH before after tailMembers
+                                ownership lookup folded
+                          | erased =>
+                              simp only at folded
+                              exact tailIH before after tailMembers
+                                ownership lookup folded
+                          | reuseToken location? =>
+                              simp only at folded
+                              exact tailIH before after tailMembers
+                                ownership lookup folded
+                    exact foldFrame cell.object.ownedValues.toList
+                      parent result (fun _ member => member)
+                      parentOwnership parentLookup effect
+
+/-- Closure-local runtime frame for an arbitrary list of ownership roots. -/
+structure OwnershipClosureFrame
+    (before after : RuntimeState) (roots : List Value) : Prop where
+  ownership : HeapOwnershipFrame before.heap after.heap
+  lookupFrame : ∀ location,
+    ¬Reachable before.heap roots location →
+      findCell? after.heap location = findCell? before.heap location
+
+/-- The fuel-bounded singleton-root frame in its general root-list form. -/
+theorem DecLocationFuelFrame.ownershipClosureFrame
+    (frame : DecLocationFuelFrame before after location) :
+    OwnershipClosureFrame before after
+      [.object (.heap location)] :=
+  ⟨frame.ownership, frame.lookupFrame⟩
+
+/-- Public recursive release preserves every cell outside the released
+object's original ownership closure. -/
+theorem decLocation_frame_of_ok
+    (effect : decLocation runtime location = .ok result) :
+    OwnershipClosureFrame runtime result
+      [.object (.heap location)] := by
+  exact
+    (decLocationFuel_frame_of_ok
+      (effect := by simpa [decLocation] using effect))
+      |>.ownershipClosureFrame
+
+/-- Reachability is monotone in its root list. -/
+theorem reachable_mono_roots
+    (subset : ∀ value, value ∈ smaller → value ∈ larger)
+    (reachable : Reachable heap smaller location) :
+    Reachable heap larger location := by
+  induction reachable with
+  | root member =>
+      exact .root (subset _ member)
+  | child parentReachable found member reference recurse =>
+      exact .child recurse found member reference
+
+/-- Values owned by one live heap cell are all reachable from that cell's
+singleton root. Reachability from any such value therefore composes back to
+the owning object. -/
+theorem reachable_of_owned_roots
+    (found : findCell? heap owner = some cell)
+    (subset : ∀ value, value ∈ roots →
+      value ∈ cell.object.ownedValues.toList)
+    (reachable : Reachable heap roots location) :
+    Reachable heap [.object (.heap owner)] location := by
+  induction reachable with
+  | @root rootLocation member =>
+      exact .child (.root (by simp)) found
+        (subset (.object (.heap rootLocation)) member) rfl
+  | child parentReachable childFound member reference recurse =>
+      exact .child recurse childFound member reference
+
+/-- A singleton ownership root with no heap-valued owned fields reaches only
+itself. -/
+theorem reachable_eq_of_no_heap_children
+    (found : findCell? heap owner = some cell)
+    (noChildren : ∀ child,
+      Value.object (.heap child) ∉ cell.object.ownedValues.toList)
+    (reachable :
+      Reachable heap [.object (.heap owner)] location) :
+    location = owner := by
+  induction reachable with
+  | @root rootLocation member =>
+      simpa using member
+  | child parentReachable childFound member reference recurse =>
+      rename_i parent child parentCell value
+      have parentEq : parent = owner := recurse
+      subst parent
+      rw [found] at childFound
+      have same := Option.some.inj childFound
+      subst parentCell
+      subst value
+      exact (noChildren _ member).elim
+
+/-- Parent-only source provenance is hereditary for leaf heap objects. -/
+theorem SourceOnlyHeapBinding.closure_of_no_heap_children
+    (binding : SourceOnlyHeapBinding ledger env binder location)
+    (found : findCell? heap location = some cell)
+    (noChildren : ∀ child,
+      Value.object (.heap child) ∉ cell.object.ownedValues.toList) :
+    SourceOnlyHeapClosureBinding ledger env binder location heap := {
+  binding
+  ownerUnreachable := by
+    intro rightLocation bounded reachable
+    exact binding.sourceOnly rightLocation bounded
+      (reachable_eq_of_no_heap_children found noChildren reachable)
+}
+
+/-- Releasing one reset field changes only the ownership closure rooted at
+that field. Successful non-heap cases are runtime-neutral. -/
+theorem releaseResetField_frame_of_ok
+    (effect : releaseResetField runtime value = .ok result) :
+    OwnershipClosureFrame runtime result [value] := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact decLocation_frame_of_ok
+            (effect := by
+              simpa [releaseResetField, decValueOnce] using effect)
+      | tagged payload =>
+          have same : runtime = result := by
+            simpa [releaseResetField, decValueOnce] using effect
+          subst result
+          exact {
+            ownership := .refl runtime.heap
+            lookupFrame := by
+              intro other _unreachable
+              rfl
+          }
+  | erased =>
+      have same : runtime = result := by
+        simpa [releaseResetField] using effect
+      subst result
+      exact {
+        ownership := .refl runtime.heap
+        lookupFrame := by
+          intro other _unreachable
+          rfl
+      }
+  | usize value =>
+      simp [releaseResetField, decValueOnce] at effect
+  | scalar value =>
+      simp [releaseResetField, decValueOnce] at effect
+  | reuseToken location? =>
+      simp [releaseResetField, decValueOnce] at effect
+
+/-- Folding reset-field releases changes only the union of the original
+ownership closures rooted at those fields. Earlier releases preserve the
+ownership graph, so later closure checks may be transported back to the
+original heap. -/
+theorem releaseResetFields_frame_of_ok
+    (effect :
+      Array.foldlM (fun next field => releaseResetField next field)
+        runtime fields = .ok result) :
+    OwnershipClosureFrame runtime result fields.toList := by
+  rw [← Array.foldlM_toList] at effect
+  have foldFrame : ∀ (values : List Value)
+      (before after : RuntimeState),
+      values.foldlM (init := before)
+          (fun next field => releaseResetField next field) = .ok after →
+        OwnershipClosureFrame before after values := by
+    intro values
+    induction values with
+    | nil =>
+        intro before after folded
+        have same := Except.ok.inj folded
+        subst after
+        exact {
+          ownership := .refl before.heap
+          lookupFrame := by
+            intro location _unreachable
+            rfl
+        }
+    | cons head tail recurse =>
+        intro before after folded
+        simp only [List.foldlM_cons, Bind.bind, Except.bind] at folded
+        cases headEq : releaseResetField before head with
+        | error fault =>
+            rw [headEq] at folded
+            contradiction
+        | ok middle =>
+            rw [headEq] at folded
+            have headFrame :=
+              releaseResetField_frame_of_ok headEq
+            have tailFrame :=
+              recurse middle after folded
+            exact {
+              ownership :=
+                headFrame.ownership.trans tailFrame.ownership
+              lookupFrame := by
+                intro location unreachable
+                have headUnreachable :
+                    ¬Reachable before.heap [head] location := by
+                  intro reachable
+                  exact unreachable
+                    (reachable_mono_roots
+                      (smaller := [head]) (larger := head :: tail)
+                      (by
+                        intro value member
+                        have same : value = head := by
+                          simpa only [List.mem_singleton] using member
+                        subst value
+                        exact List.mem_cons_self)
+                      reachable)
+                have tailUnreachable :
+                    ¬Reachable middle.heap tail location := by
+                  intro reachable
+                  have beforeReachable :=
+                    headFrame.ownership.symm.reachable reachable
+                  exact unreachable
+                    (reachable_mono_roots
+                      (smaller := tail) (larger := head :: tail)
+                      (by
+                        intro value member
+                        exact List.mem_cons_of_mem head member)
+                      beforeReachable)
+                exact
+                  (tailFrame.lookupFrame location tailUnreachable).trans
+                    (headFrame.lookupFrame location headUnreachable)
+            }
+  exact foldFrame fields.toList runtime result effect
+
+/-- A successful heap-object reset preserves every heap lookup outside the
+operand's original ownership closure. In the unique-object branch, clearing
+the parent only removes ownership edges, and recursive release is confined
+to the extracted field roots. -/
+theorem reset_findCell_eq_of_unreachable_of_ok
+    (effect :
+      reset runtime count (.object (.heap owner)) =
+        .ok (result, token))
+    (unreachable :
+      ¬Reachable runtime.heap [.object (.heap owner)] location) :
+    findCell? result.heap location =
+      findCell? runtime.heap location := by
+  unfold reset at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize cellEq :
+    getLiveCell runtime owner = cellResult at effect
+  cases cellResult with
+  | error fault =>
+      simp at effect
+  | ok cell =>
+      have found :
+          findCell? runtime.heap owner = some cell :=
+        (getLiveCell_shape_of_ok cellEq).1
+      simp only at effect
+      by_cases shared : cell.persistent || cell.rc != 1
+      · rw [if_pos shared] at effect
+        generalize decEq :
+          decLocation runtime owner = decResult at effect
+        cases decResult with
+        | error fault =>
+            simp at effect
+        | ok nextRuntime =>
+            have pairEq := Except.ok.inj effect
+            have runtimeEq : nextRuntime = result :=
+              congrArg Prod.fst pairEq
+            subst result
+            exact
+              (decLocation_frame_of_ok decEq).lookupFrame
+                location unreachable
+      · rw [if_neg shared] at effect
+        generalize objectEq : cell.object = heapObject at effect
+        cases heapObject with
+        | ctor object =>
+            simp only at effect
+            by_cases tooMany : count > object.objectFields.size
+            · rw [if_pos tooMany] at effect
+              simp at effect
+            · rw [if_neg tooMany] at effect
+              let cleared :=
+                object.objectFields.mapIdx fun index field =>
+                  if index < count then
+                    .object (.tagged 0)
+                  else field
+              let replacement : HeapCell :=
+                { cell with object := .ctor {
+                    object with objectFields := cleared } }
+              generalize setEq :
+                setCell runtime owner replacement = setResult at effect
+              cases setResult with
+              | error fault =>
+                  simp at effect
+              | ok parent =>
+                  simp only at effect
+                  generalize foldEq :
+                    Array.foldlM
+                        (fun next field =>
+                          releaseResetField next field)
+                        parent
+                        (object.objectFields.extract 0 count) =
+                      foldResult at effect
+                  cases foldResult with
+                  | error fault =>
+                      simp at effect
+                  | ok finalRuntime =>
+                      have pairEq := Except.ok.inj effect
+                      have runtimeEq : finalRuntime = result :=
+                        congrArg Prod.fst pairEq
+                      subst result
+                      obtain ⟨actual, actualEffect, parentFound,
+                          parentLookup, _length, _nextLocation,
+                          _globals, _world, _trace⟩ :=
+                        setCell_spec_of_find runtime owner cell
+                          replacement found
+                      rw [setEq] at actualEffect
+                      have parentEq : parent = actual :=
+                        Except.ok.inj actualEffect
+                      subst actual
+                      have different : location ≠ owner := by
+                        intro same
+                        subst location
+                        exact unreachable (.root (by simp))
+                      have releasedUnreachable :
+                          ¬Reachable parent.heap
+                            (object.objectFields.extract 0 count).toList
+                            location := by
+                        intro reachable
+                        have replacementOwned : ∀ {child},
+                            Value.object (.heap child) ∈
+                                replacement.object.ownedValues.toList →
+                              Value.object (.heap child) ∈
+                                  cell.object.ownedValues.toList ∨
+                                Reachable runtime.heap
+                                  (object.objectFields.extract 0 count).toList
+                                  child := by
+                          intro child member
+                          left
+                          have clearedMember :
+                              Value.object (.heap child) ∈
+                                cleared.toList := by
+                            simpa [replacement,
+                              HeapObject.ownedValues] using member
+                          have oldMember :=
+                            heap_mem_of_mem_clearPrefix
+                              object.objectFields clearedMember
+                          simpa [objectEq,
+                            HeapObject.ownedValues] using oldMember
+                        have beforeReachable :
+                            Reachable runtime.heap
+                              (object.objectFields.extract 0 count).toList
+                              location :=
+                          reachable_replace_of_ownedValues_rooted
+                            found parentFound parentLookup
+                              replacementOwned reachable
+                        have releasedSubset : ∀ value,
+                            value ∈
+                                (object.objectFields.extract 0 count).toList →
+                              value ∈
+                                cell.object.ownedValues.toList := by
+                          intro value member
+                          have oldMember :=
+                            array_mem_of_mem_extract
+                              object.objectFields member
+                          simpa [objectEq,
+                            HeapObject.ownedValues] using oldMember
+                        exact unreachable
+                          (reachable_of_owned_roots found
+                            releasedSubset beforeReachable)
+                      have releaseFrame :=
+                        releaseResetFields_frame_of_ok foldEq
+                      exact
+                        (releaseFrame.lookupFrame location
+                            releasedUnreachable).trans
+                          (parentLookup location different)
+        | closure fixed =>
+            simp at effect
+        | boxed type value =>
+            simp at effect
+        | string value =>
+            simp at effect
+        | natural value =>
+            simp at effect
+        | integer value =>
+            simp at effect
+        | byteArray value =>
+            simp at effect
+        | «opaque» value =>
+            simp at effect
 
 /-- Recursive reference-count release only rewrites existing heap cells.
 Every successful fuel-bounded execution therefore preserves the allocation
@@ -12005,6 +12634,29 @@ theorem DeletedResetLocalReadyAt.deletedReadyAt
   .mk shape.objectValue shape.token shape.nextRuntime
     shape.objectRead shape.effect frame
 
+/-- A hereditary source-only reset binding discharges the target-ledger owner
+frame directly from the successful interpreter effect. -/
+theorem
+    DeletedResetLocalReadyAt.ownerFrame_of_sourceOnlyHeapClosureBinding
+    (shape : DeletedResetLocalReadyAt state count object)
+    (ledger : TargetAllocationLedger rho rightFrontier)
+    (closure :
+      SourceOnlyHeapClosureBinding ledger state.env object
+        objectLocation state.runtime.heap) :
+    ∀ rightLocation, rightLocation < rightFrontier →
+      findCell? shape.nextRuntime.heap (ledger.owner rightLocation) =
+        findCell? state.runtime.heap (ledger.owner rightLocation) := by
+  have objectEq :
+      shape.objectValue = .object (.heap objectLocation) := by
+    have bindingRead := closure.binding.read
+    rw [shape.objectRead] at bindingRead
+    exact Except.ok.inj bindingRead
+  have effect := shape.effect
+  rw [objectEq] at effect
+  intro rightLocation bounded
+  exact reset_findCell_eq_of_unreachable_of_ok effect
+    (closure.ownerUnreachable rightLocation bounded)
+
 /-- A target allocation ledger turns preservation of its source owners into a
 complete reachable-runtime frame. Every reachable source cell maps below the
 target frontier, where the ledger identifies its exact source owner; changes
@@ -12076,6 +12728,32 @@ theorem
   shape.deletedReadyAt
     (related.leftRuntimeReachableFrame_of_targetAllocationLedger
       ledger nextLocationEq globalsEq worldEq traceEq ownerFrame afterFresh)
+
+/-- Compiler-facing reset bridge. The successful effect supplies frontier
+preservation, while a hereditary source-only binding supplies the full ledger
+owner frame; clients retain only the ordinary non-heap and freshness facts. -/
+theorem
+    DeletedResetLocalReadyAt.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure
+    (shape : DeletedResetLocalReadyAt state count object)
+    (related : ShadowRuntimeRel rho state.runtime target
+      sourceExtra targetExtra)
+    (ledger : TargetAllocationLedger rho target.nextLocation)
+    (closure :
+      SourceOnlyHeapClosureBinding ledger state.env object
+        objectLocation state.runtime.heap)
+    (globalsEq : shape.nextRuntime.globals = state.runtime.globals)
+    (worldEq : shape.nextRuntime.world = state.runtime.world)
+    (traceEq : shape.nextRuntime.trace = state.runtime.trace)
+    (afterFresh : ∀ location,
+      shape.nextRuntime.nextLocation ≤ location →
+        findCell? shape.nextRuntime.heap location = none) :
+    DeletedResetReadyAt state
+      (runtimeRoots state.runtime sourceExtra) count object :=
+  shape.deletedReadyAt_of_targetAllocationLedger related ledger
+    (reset_nextLocation_eq_of_ok shape.effect)
+    globalsEq worldEq traceEq
+    (shape.ownerFrame_of_sourceOnlyHeapClosureBinding ledger closure)
+    afterFresh
 
 /-- If a related target has never allocated, no source heap cell can occur in
 the active roots.  Any reset outcome that preserves non-heap observables and

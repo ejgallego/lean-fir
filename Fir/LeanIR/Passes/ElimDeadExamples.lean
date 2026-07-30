@@ -3740,11 +3740,6 @@ theorem nonemptyTargetAllocationLedger_resetReuseReady :
       false
   let sourceOnlyRuntime :=
     paired.runtime.allocLeftGarbage (.ctor deletedWriteObject) false
-  have mapping : paired.larger.forward 0 = some 0 := by
-    have values := paired.values
-    simp [alloc] at values
-    cases values with
-    | heap mapped => exact mapped
   have fresh : paired.larger.forward 1 = none := by
     apply paired.runtime.runtime.leftMappingFresh
     simp [alloc]
@@ -3757,28 +3752,34 @@ theorem nonemptyTargetAllocationLedger_resetReuseReady :
         [.object (.heap 0)] [.object (.heap 0)] := by
     simpa [nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
       nonemptyLedgerPairedRuntime, alloc] using sourceOnlyRuntime.runtime
-  have ownerZero : sourceOnlyRuntime.ledger.owner 0 = 0 := by
-    have ledgerMapped :=
-      sourceOnlyRuntime.ledger.reverseMapped 0 (by
-        simp [nonemptyLedgerTargetRuntime,
-          nonemptyLedgerPairedRuntime, alloc])
-    have inverse := paired.larger.leftInverse mapping
-    rw [inverse] at ledgerMapped
-    exact (Option.some.inj ledgerMapped).symm
-  have ownerFrame : ∀ rightLocation,
-      rightLocation < nonemptyLedgerTargetRuntime.nextLocation →
-      findCell? nonemptyLedgerResetRuntime.heap
-          (sourceOnlyRuntime.ledger.owner rightLocation) =
-        findCell? nonemptyLedgerSourceRuntime.heap
-          (sourceOnlyRuntime.ledger.owner rightLocation) := by
-    intro rightLocation bounded
-    have rightZero : rightLocation = 0 := by
-      change rightLocation < 1 at bounded
-      exact Nat.le_antisymm
-        (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
-    subst rightLocation
-    rw [ownerZero]
+  have objectBinding :
+      SourceOnlyHeapBinding sourceOnlyRuntime.ledger
+        nonemptyLedgerResetState.env resetObjectVar 1 := {
+    read := by
+      simp [nonemptyLedgerResetState, nonemptyLedgerResetEnv,
+        nonemptyLedgerRetainedEnv, lookupValue, Impure.bind, lookup,
+        resetObjectVar, live]
+    sourceOnly
+  }
+  have found :
+      findCell? nonemptyLedgerSourceRuntime.heap 1 =
+        some ({ object := .ctor deletedWriteObject } : HeapCell) := by
     rfl
+  have noChildren : ∀ child,
+      Value.object (.heap child) ∉
+        ({ object := .ctor deletedWriteObject } :
+          HeapCell).object.ownedValues.toList := by
+    intro child member
+    simp [HeapObject.ownedValues, deletedWriteObject] at member
+  have closure :
+      SourceOnlyHeapClosureBinding sourceOnlyRuntime.ledger
+        nonemptyLedgerResetState.env resetObjectVar 1
+        nonemptyLedgerSourceRuntime.heap :=
+    objectBinding.closure_of_no_heap_children found noChildren
+  have ownerFrame :=
+    nonemptyLedgerResetLocalReady
+      |>.ownerFrame_of_sourceOnlyHeapClosureBinding
+        sourceOnlyRuntime.ledger closure
   have afterFresh : ∀ location,
       nonemptyLedgerResetRuntime.nextLocation ≤ location →
         findCell? nonemptyLedgerResetRuntime.heap location = none := by
@@ -3803,7 +3804,9 @@ theorem nonemptyTargetAllocationLedger_resetReuseReady :
         (runtimeRoots nonemptyLedgerSourceRuntime
           [.object (.heap 0)])
         1 resetObjectVar :=
-    nonemptyLedgerResetLocalReady.deletedReadyAt frame
+    nonemptyLedgerResetLocalReady
+      |>.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure
+        related sourceOnlyRuntime.ledger closure rfl rfl rfl afterFresh
   have relatedAfter :
       ShadowRuntimeRel paired.larger
         nonemptyLedgerResetRuntime nonemptyLedgerTargetRuntime
@@ -12802,17 +12805,20 @@ def retainedPrefixReuseResetLocalReady
       (tokenValue := .reuseToken (some 1))
   rfl
 
-/-- The successful reset publishes its source-only object address as the
-concrete token capability consumed after the intervening argument binding. -/
-theorem retainedPrefixReuseTokenBinding
+/-- The reset operand is not merely source-only: its complete owned closure
+is disjoint from every target-ledger owner. This example is a leaf, so the
+hereditary fact follows from the ordinary binding and its empty heap-child
+set. -/
+theorem retainedPrefixReuseResetClosureBinding
     (arguments : Array Value)
     (ledger :
       TargetAllocationLedger rho
         nonemptyLedgerTargetRuntime.nextLocation)
     (sourceOnly : SourceOnlyUnderTargetLedger ledger 1) :
-    SourceOnlyReuseTokenBinding ledger
-      (retainedPrefixReuseSourceReuseState arguments).env
-      reuseTokenVar 1 := by
+    SourceOnlyHeapClosureBinding ledger
+      (retainedPrefixReuseSourceResetState arguments).env
+      resetObjectVar 1
+      (retainedPrefixReuseSourceResetState arguments).runtime.heap := by
   have objectBinding :
       SourceOnlyHeapBinding ledger
         (retainedPrefixReuseSourceResetState arguments).env
@@ -12824,10 +12830,29 @@ theorem retainedPrefixReuseTokenBinding
         resetObjectVar, live]
     sourceOnly
   }
+  apply objectBinding.closure_of_no_heap_children
+      (cell := ({ object := .ctor deletedWriteObject } : HeapCell))
+  · rfl
+  · intro child member
+    simp [HeapObject.ownedValues, deletedWriteObject] at member
+
+/-- The successful reset publishes its source-only object address as the
+concrete token capability consumed after the intervening argument binding. -/
+theorem retainedPrefixReuseTokenBinding
+    (arguments : Array Value)
+    (ledger :
+      TargetAllocationLedger rho
+        nonemptyLedgerTargetRuntime.nextLocation)
+    (sourceOnly : SourceOnlyUnderTargetLedger ledger 1) :
+    SourceOnlyReuseTokenBinding ledger
+      (retainedPrefixReuseSourceReuseState arguments).env
+      reuseTokenVar 1 := by
+  have closure :=
+    retainedPrefixReuseResetClosureBinding arguments ledger sourceOnly
   have tokenBinding :=
     (retainedPrefixReuseResetLocalReady arguments)
       |>.sourceOnlyReuseTokenBinding
-        objectBinding rfl reuseTokenVar
+        closure.binding rfl reuseTokenVar
   have tokenEq :
       (retainedPrefixReuseResetLocalReady arguments).token =
         .reuseToken (some 1) := rfl
@@ -12864,32 +12889,6 @@ theorem retainedPrefixReuseSourceOnlyAtOne
       (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
   subst rightLocation
   simpa [ownerZero]
-
-theorem retainedPrefixReuseResetOwnerFrame
-    (ledger :
-      TargetAllocationLedger rho nonemptyLedgerTargetRuntime.nextLocation)
-    (ownerZero : ledger.owner 0 = 0) :
-    ∀ rightLocation,
-      rightLocation < nonemptyLedgerTargetRuntime.nextLocation →
-      findCell? nonemptyLedgerResetRuntime.heap
-          (ledger.owner rightLocation) =
-        findCell? nonemptyLedgerSourceRuntime.heap
-          (ledger.owner rightLocation) := by
-  apply ledger.ownerFrame_of_owner_lt (leftFrontier := 1)
-  · intro rightLocation bounded
-    have rightZero : rightLocation = 0 := by
-      change rightLocation < 1 at bounded
-      exact Nat.le_antisymm
-        (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
-    subst rightLocation
-    simpa [ownerZero]
-  · intro leftLocation bounded
-    have leftZero : leftLocation = 0 := by
-      change leftLocation < 1 at bounded
-      exact Nat.le_antisymm
-        (Nat.le_of_lt_succ bounded) (Nat.zero_le leftLocation)
-    subst leftLocation
-    rfl
 
 theorem retainedPrefixReuseResetFresh :
     ∀ location,
@@ -12969,20 +12968,28 @@ theorem retainedPrefixReuseResetPairReady_ledger
             have ownerZero : ledger.owner 0 = 0 :=
               retainedPrefixReuseOwnerZero mapping (by
                 simpa [retainedPrefixReuseTargetReturnState] using ledger)
-            have ownerFrame :
-                ∀ rightLocation,
-                  rightLocation <
-                      (retainedPrefixReuseTargetReturnState
-                        targetArguments).runtime.nextLocation →
-                  findCell? nonemptyLedgerResetRuntime.heap
-                      (ledger.owner rightLocation) =
-                    findCell? nonemptyLedgerSourceRuntime.heap
-                      (ledger.owner rightLocation) := by
-              simpa [retainedPrefixReuseTargetReturnState] using
-                retainedPrefixReuseResetOwnerFrame
-                  (by
-                    simpa [retainedPrefixReuseTargetReturnState] using ledger)
-                  ownerZero
+            have sourceOnly :
+                SourceOnlyUnderTargetLedger ledger 1 := by
+              intro rightLocation bounded
+              have rightZero : rightLocation = 0 := by
+                change rightLocation < 1 at bounded
+                exact Nat.le_antisymm
+                  (Nat.le_of_lt_succ bounded)
+                  (Nat.zero_le rightLocation)
+              subst rightLocation
+              simpa [ownerZero]
+            have closure :
+                SourceOnlyHeapClosureBinding ledger
+                  (retainedPrefixReuseSourceResetState
+                    sourceArguments).env
+                  resetObjectVar 1
+                  (retainedPrefixReuseSourceResetState
+                    sourceArguments).runtime.heap := by
+              exact retainedPrefixReuseResetClosureBinding
+                sourceArguments
+                (by
+                  simpa [retainedPrefixReuseTargetReturnState] using ledger)
+                sourceOnly
             have resetReady :
                 DeletedResetReadyAt
                   (retainedPrefixReuseSourceResetState sourceArguments)
@@ -12997,13 +13004,11 @@ theorem retainedPrefixReuseResetPairReady_ledger
               by
                 apply
                   (retainedPrefixReuseResetLocalReady sourceArguments)
-                    |>.deletedReadyAt_of_targetAllocationLedger
-                      runtime ledger
+                    |>.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure
+                      runtime ledger closure
                 · rfl
                 · rfl
                 · rfl
-                · rfl
-                · exact ownerFrame
                 · exact retainedPrefixReuseResetFresh
             have removed :
                 DeletedLetReadyAt
