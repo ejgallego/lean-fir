@@ -1252,10 +1252,28 @@ lookup plus the ownership bound replaces the earlier client-supplied
 reachability exclusion. The deleted-constructor/retained-allocation regression
 now constructs the bound from `empty` and `alloc` and no longer proves
 freshness by enumerating the leaf fixture's reachable paths. The next
-lifecycle step is to preserve this bound through the mutation, release,
-reset, and reuse operations performed by checked compiler executions, and then
-package it with the machine readiness invariant so non-leaf compiler-owned
-graphs receive the same closure certificate.
+lifecycle step is to preserve this bound through checked heap operations and
+then package it with the machine readiness invariant so non-leaf
+compiler-owned graphs receive the same closure certificate.
+
+The nonallocating ownership lifecycle lands at `7ebfb53c`.
+`HeapOwnershipBelowFrontier.transportOwnershipFrame` carries the bound across
+any ownership-graph frame with an unchanged allocation frontier. The generic
+`setCell` law handles arbitrary replacement objects whose heap references are
+already below the frontier; its header-only specialization needs no new
+address premise. These laws lift through fuel-bounded and public recursive
+release, individual and folded reset-field release, the complete shared and
+unique-constructor reset branches, and concrete-token reuse.
+
+The unique reset proof checks that prefix clearing introduces only tagged
+sentinels before applying the recursive-release fold. Concrete reuse exposes
+the one remaining static premise directly: every heap argument installed in
+the replacement constructor lies below the current frontier. The lifecycle
+reset regression now reuses its allocation-derived ownership bound and the
+successful reset effect, without reducing the result heap again. Remaining
+work is to derive the argument/address premise from checked environment
+typing, add direct wrappers for the object-field-write and failed-token
+allocation branches, and thread the bound through general checked execution.
 
 The first compiler-facing policy is now explicit as well.
 `NullarySafeShadowCodeRun` mirrors the transparent traversal while rejecting
@@ -1395,12 +1413,14 @@ the existing nullary-`.fap` semantic discrepancy.
    outside their original owned closures, and the target-ledger reset bridge
    consumes an explicit hereditary source-only closure certificate.
    `HeapOwnershipBelowFrontier` now derives fresh-frontier exclusion for
-   arbitrary owned paths and is initialized and preserved by allocation.
-   Next preserve the bound through mutation, recursive release, reset, and
-   reuse, then carry it and the compositional closure certificate through
-   checked executions. Arbitrary checked entries must still derive and
-   preserve these compiler typing/ownership facts without finite
-   execution-graph enumeration.
+   arbitrary owned paths and is initialized and preserved by allocation,
+   generic cell replacement, recursive release, complete reset, and
+   concrete-token reuse. Next derive the installed-value address premise from
+   checked environment typing, cover object-field writes and failed-token
+   allocation directly, then carry the bound and compositional closure
+   certificate through checked executions. Arbitrary checked entries must
+   still derive and preserve these compiler typing/ownership facts without
+   finite execution-graph enumeration.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
