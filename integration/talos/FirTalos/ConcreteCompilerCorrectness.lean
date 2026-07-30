@@ -7485,8 +7485,10 @@ simulation. In addition to the ordinary external step and residual invariant,
 it exposes the checked destination write and the three semantic transports
 that were already constructed internally by the concrete implementation:
 old values remain related, old owned headers retain their extents, and
-ordinary source cells remain ordinary. No translated program or numeric
-target index is supplied by the caller.
+ordinary source cells remain ordinary. It also retains exact preservation of
+the semantic globals, physical Wasm globals, and concrete host global layout,
+so clients can transport a generated lazy-cache table across the call. No
+translated program or numeric target index is supplied by the caller.
 -/
 def ExternalLetRuntimeRefinesWithCostAndTransports
     (context : Fir.Wasm.Context)
@@ -7541,9 +7543,14 @@ def ExternalLetRuntimeRefinesWithCostAndTransports
                   HeaderCapacityTransport targetStore.host.runtime.heap
                     nextStore.host.runtime.heap witness ∧
                     OrdinaryPersistenceTransport sourceRuntime nextRuntime ∧
-                      Invariant (remainingBytes - stepCost) nextRuntime
-                        (bind sourceEnv decl.fvarId sourceValue) nextStore
-                        nextLocals nextWitness
+                      nextRuntime.globals = sourceRuntime.globals ∧
+                        nextStore.globals.globals =
+                          targetStore.globals.globals ∧
+                          nextStore.host.runtime.globals.staticLayout =
+                            targetStore.host.runtime.globals.staticLayout ∧
+                            Invariant (remainingBytes - stepCost) nextRuntime
+                              (bind sourceEnv decl.fvarId sourceValue) nextStore
+                              nextLocals nextWitness
 
 /-- Forget the reuse-specific transports and recover the ordinary structural
 external runtime law. -/
@@ -7574,7 +7581,8 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
   obtain ⟨nextStore, nextLocals, nextWitness, _resultPhysical, step,
       externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, _localUpdate, _witnessTransport,
-      _capacityTransport, _ordinaryTransport, nextInvariant⟩ :=
+      _capacityTransport, _ordinaryTransport, _runtimeGlobals,
+      _storeGlobals, _hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant sourceStep stateRelated
       valueCompiled valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, step, externalsPreserved,
@@ -7658,13 +7666,15 @@ theorem
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
+      hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant.1 sourceStep stateRelated
       valueCompiled valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
     localUpdate, witnessTransport, capacityTransport, ordinaryTransport,
-    nextInvariant, by simpa [externalsPreserved] using invariant.2⟩
+    runtimeGlobals, storeGlobals, hostStaticLayout, nextInvariant,
+    by simpa [externalsPreserved] using invariant.2⟩
 
 /-- Transport a strengthened external law across a pointwise equivalent
 threaded invariant. -/
@@ -7706,7 +7716,8 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
+      hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
       (toOld remainingBytes sourceRuntime sourceEnv targetStore targetLocals
         witness invariant)
@@ -7714,6 +7725,7 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
   exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
     localUpdate, witnessTransport, capacityTransport, ordinaryTransport,
+    runtimeGlobals, storeGlobals, hostStaticLayout,
     toNew (remainingBytes - stepCost) nextRuntime
       (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
       nextInvariant⟩
@@ -10785,6 +10797,10 @@ theorem
     by simp [nextStore, replaceRuntime, clearFailure],
     witnessExtension.closureDescriptors, localUpdate, witnessTransport,
     capacityTransport, ordinaryTransport,
+    by simp [semanticExternalRuntimeAfter],
+    by simp [nextStore, replaceRuntime, clearFailure],
+    by simp [nextStore, response, replaceRuntime, clearFailure,
+      ConcreteRuntimeState.applyExternalResponse],
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
@@ -11047,6 +11063,10 @@ theorem
     by simp [nextStore, replaceRuntime, clearFailure],
     witnessExtension.closureDescriptors, localUpdate, witnessTransport,
     capacityTransport, ordinaryTransport,
+    by simp [semanticExternalRuntimeAfter],
+    by simp [nextStore, replaceRuntime, clearFailure],
+    by simp [nextStore, response, replaceRuntime, clearFailure,
+      ConcreteRuntimeState.applyExternalResponse],
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
@@ -11303,6 +11323,10 @@ theorem
     by simp [nextStore, replaceRuntime, clearFailure], rfl,
     localUpdate, WitnessTransport.refl witness, capacityTransport,
     ordinaryTransport,
+    by simp [semanticExternalRuntimeAfter],
+    by simp [nextStore, replaceRuntime, clearFailure],
+    by simp [nextStore, response, replaceRuntime, clearFailure,
+      ConcreteRuntimeState.applyExternalResponse],
     ⟨⟨by simpa [requestEq] using updatedFrame, nextBudget⟩,
       nextImplementation⟩⟩
 
@@ -16292,7 +16316,8 @@ theorem
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, nextInvariant⟩ :=
+      capacityTransport, ordinaryTransport, _runtimeGlobals, _storeGlobals,
+      _hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
       ⟨⟨frameAligned, budget⟩, integerImplementation,
         naturalImplementation, scalarImplementation⟩

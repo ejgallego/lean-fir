@@ -995,9 +995,20 @@ acceptance tests pass.
    `CodeWP`, and all six entry transports. This discharges the hereditary
    declaration contract's residual-budget uniformity requirement without
    target determinism or target-execution certificates.
-   Next lift each admitted direct, external, call, lazy, and effect runtime
-   family over the entry-relative cache frame, using the operation packages'
-   existing current-to-successor transports and the common `step` theorem.
+   The transport-strengthened pure-external boundary now also exposes exact
+   preservation of semantic globals, physical Wasm globals, and the concrete
+   host cache layout. Its
+   `reuseCapacityEntryRelativeCache` theorem transports the whole generated
+   cache table, rebuilds the canonical ownership frame, and composes all six
+   entry transports. The production
+   `reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache`
+   theorem closes the pure `Nat`/`Int`/scalar external family for hereditary
+   cached bodies without adding target evidence.
+   Next lift each admitted direct, call, lazy, and effect runtime family over
+   the entry-relative cache frame, using the operation packages' existing
+   current-to-successor transports and the common `step` theorem. Calls and
+   lazy misses consume an evolved cache relation from their recursive callee;
+   they must not use the unchanged-global adapter.
    Then derive production internal-function selection and construct
    `LazyCacheInternalHereditaryDeclarationInduction` recursively for the
    generated declaration environment. Do not reintroduce a

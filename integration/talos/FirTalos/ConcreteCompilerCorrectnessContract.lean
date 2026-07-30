@@ -3698,6 +3698,37 @@ example
   ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration disjoint
 
 /--
+The production pure-external family is directly available over the canonical
+whole-cache frame with transports accumulated from a fixed declaration
+entry. This is the exact structural premise used by hereditary body proofs;
+the caller supplies no target execution.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) :=
+  spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+    externals
+
+/--
 The hereditary theorem for a lazy initializer returns ordinary declaration
 correctness and the exact evolved cache table together. This is the recursive
 induction result consumed by nested miss publication, not a target execution

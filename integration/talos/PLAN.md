@@ -5277,6 +5277,29 @@ The residual address-space field is now supplied by W6.6gzx. The remaining
 items are module-level compiler/runtime obligations, not call-site execution
 certificates.
 
+W6.6gzy closes the first entry-relative cache operation family. The
+transport-strengthened pure-external boundary now retains three facts that
+its concrete `Nat`, `Int`, and scalar implementations already satisfy:
+semantic globals are unchanged, physical Wasm globals are unchanged, and the
+concrete host cache layout is unchanged. These are representation-state
+facts, not target executions or certificates.
+
+`ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityEntryRelativeCache`
+uses them to transport the complete `LazyCacheGlobalsRel`, reconstruct the
+reuse-capacity/pure-external/ownership frame, and compose the six
+`ReuseCapacityCodeEntryTransports` fields. The production theorem
+`reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache`
+therefore supplies the exact external-family premise required by the
+entry-relative structural theorem for a cached internal body. Its contract
+guard fixes that public surface.
+
+The remaining operation-family lift is now direct, interprocedural call,
+lazy-cache, and no-result effect. Calls and lazy misses must return the
+evolved cache table from their hereditary callee result rather than claim
+that cache globals are unchanged. Production internal-function selection and
+the source-structural completeness step still follow those family lifts
+before `LazyCacheInternalHereditaryDeclarationInduction` can be constructed.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -3560,6 +3560,143 @@ def ConcreteReuseCapacityCacheFrame
       witness ∧
     LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore
 
+/--
+Lift the transport-strengthened pure-external family through both the
+whole-cache invariant and one fixed execution entry.
+
+Pure result handlers may allocate a fresh `Nat`, `Int`, or scalar
+representation, but they preserve the semantic global table, the physical
+Wasm globals, and the concrete host's static cache layout. Those three facts
+transport `LazyCacheGlobalsRel`; the existing witness, header-capacity,
+ordinaryness, and immutable-table facts extend
+`ReuseCapacityCodeEntryTransports`. Thus external calls can occur inside a
+hereditary cached declaration without weakening or rediscovering the cache
+relation.
+-/
+theorem
+    ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityEntryRelativeCache
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    (runtimeRefines :
+      ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported
+        (ConcreteBudgetedPureExternalFrame sourceFunction externals))
+    (factsTransfer :
+      ∀ {facts : ReuseCapacityFacts}
+          {sourceRuntime nextRuntime : RuntimeState}
+          {sourceEnv : Env} {decl : LCNF.LetDecl .impure}
+          {continuation : LCNF.Code .impure}
+          {sourceValue : Value} {stepCost : Nat},
+        ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+            sourceValue stepCost →
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId)) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals ExternalSupported
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  rcases invariant with
+    ⟨⟨⟨⟨⟨capacityRelated, ordinaryTokens, frameAligned, budget⟩,
+          integerImplementation, naturalImplementation,
+          scalarImplementation⟩, descriptorAgreement⟩, cacheTable⟩,
+      entryTransports⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, localUpdate, witnessTransport,
+      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
+      hostStaticLayout, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      ⟨⟨frameAligned, budget⟩, integerImplementation,
+        naturalImplementation, scalarImplementation⟩
+      sourceStep capacityRelated.1 valueCompiled valueAdapted resultFound
+  rcases nextInvariant with
+    ⟨⟨nextFrameAligned, nextBudget⟩, nextIntegerImplementation,
+      nextNaturalImplementation, nextScalarImplementation⟩
+  let nextFacts := eraseReuseCapacityFact facts decl.fvarId
+  have nextCapacity :
+      ReuseCapacityStateRelated nextFacts sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness := by
+    simpa [nextFacts] using
+      capacityRelated.eraseResult step.2.2.1 resultFound localUpdate
+        witnessTransport capacityTransport
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel nextFacts nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa [nextFacts] using ordinaryTokens.eraseBind ordinaryTransport
+  have nextDescriptorAgreement :
+      nextStore.host.closureDescriptors =
+        nextWitness.closureDescriptors :=
+    hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans witnessDescriptorsPreserved.symm)
+  have nextCache :
+      LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore :=
+    cacheTable.transport witnessTransport runtimeGlobals storeGlobals
+      hostStaticLayout
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness :=
+    entryTransports.step witnessTransport capacityTransport ordinaryTransport
+      externalsPreserved hostDescriptorsPreserved
+      witnessDescriptorsPreserved
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    factsTransfer supported,
+    ⟨⟨⟨⟨nextCapacity, nextOrdinary, nextFrameAligned, nextBudget⟩,
+          nextIntegerImplementation, nextNaturalImplementation,
+          nextScalarImplementation⟩, nextDescriptorAgreement⟩, nextCache⟩,
+      nextEntry⟩
+
+/--
+Production pure externals instantiate the entry-relative whole-cache law.
+
+This is the external operation-family argument expected by
+`codeWP_of_reuseCapacityBudgetedCodeEvaluates_entryRelativeWithSlack` when a
+generated internal declaration is proved from its actual compiler output.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    (externals : ExternalImpl)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env externals
+      (PureExternalSupported context externals)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness) :=
+  ExternalLetRuntimeRefinesWithCostAndTransports.reuseCapacityEntryRelativeCache
+    (spec.externalLetRuntimeRefinesWithCostAndTransports_pureExternal externals)
+    (fun supported => supported.reuseCapacityLetFacts? _)
+
 /-- Lift an existing canonical entry frame to the cache-augmented invariant
 for the production adapter/Talos initial store. -/
 theorem ConcreteReuseCapacityCacheFrame.adaptedInitial
