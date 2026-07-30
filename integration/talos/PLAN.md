@@ -4661,6 +4661,19 @@ facts-indexed direct/reuse operation with the complete current ownership, tag,
 object, `USize`, and packed-integer mutation families. Float setters remain
 outside the concrete runtime fragment.
 
+W6.6gq opens the facts-indexed control-flow frontier.
+`ReuseCapacityCaseEffectCodeEvaluates` adds selected case nodes to the same
+source-only finite evaluation relation: entering the selected branch retains
+the authoritative fact map, source runtime/environment, and remaining byte
+budget. The generic
+`codeWP_of_reuseCapacityCaseEffectCodeEvaluates_exactReturn` consumes the
+existing `CaseRuntimeRefines` implementation law and reconstructs the target
+case chain from the production compiler. Its first instance,
+`correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases`, proves
+the strongest current facts-indexed direct/effect endpoint under arbitrary
+nesting of default-only cases. Object-constructor and scalar case chains are
+the next control-flow instances.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

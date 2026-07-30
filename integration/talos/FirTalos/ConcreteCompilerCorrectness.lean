@@ -14765,6 +14765,109 @@ theorem ReuseCapacityEffectCodeEvaluates.execEvaluates
       exact sourceEffectResult_thenExecEvaluates sourceStep ih
 
 /--
+Facts-indexed finite source evaluation extended with selected case branches
+and successful no-result effects.
+
+A case node does not change the authoritative reuse facts, source runtime,
+source environment, or allocation budget before entering its selected branch.
+The relation records only source admission and the executable source branch
+selection; target case code is recovered later from the production compiler.
+-/
+inductive ReuseCapacityCaseEffectCodeEvaluates
+    (context : Fir.Wasm.Context)
+    (DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
+    (EffectSupported : EffectSupportedPredicate)
+    (letCost : LCNF.LetDecl .impure → Nat) :
+    ReuseCapacityFacts → RuntimeState → Env → LCNF.Code .impure →
+      ReuseCapacityFacts → RuntimeState → Env → Value → Nat → Prop where
+  | ret
+      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv
+        (.return result) facts sourceRuntime sourceEnv sourceValue 0
+  | letValue
+      (supported : DirectSupported facts decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (transfer :
+        reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+          CaseSupported EffectSupported letCost nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv
+        (.let decl continuation) resultFacts resultRuntime resultEnv resultValue
+        (letCost decl + continuationCost)
+  | caseOf
+      (supported : CaseSupported sourceRuntime sourceEnv cases selected)
+      (sourceStep :
+        SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+          CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv
+          selected resultFacts resultRuntime resultEnv resultValue
+          requiredBytes) :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv
+        (.cases cases) resultFacts resultRuntime resultEnv resultValue
+        requiredBytes
+  | effect
+      (supported :
+        EffectSupported sourceRuntime sourceEnv code continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+          CaseSupported EffectSupported letCost facts nextRuntime sourceEnv
+          continuation resultFacts resultRuntime resultEnv resultValue
+          requiredBytes) :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv code
+        resultFacts resultRuntime resultEnv resultValue requiredBytes
+
+/--
+The case/effect-extended facts-indexed relation denotes an exact finite
+interpreter run.
+-/
+theorem ReuseCapacityCaseEffectCodeEvaluates.execEvaluates
+    {context : Fir.Wasm.Context}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported letCost facts sourceRuntime sourceEnv
+        sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) := by
+  induction evaluation with
+  | ret sourceLookup =>
+      exact (CodeEvaluates.ret sourceLookup).execEvaluates externals
+  | letValue _ sourceStep _ _ ih =>
+      exact sourceLetResult_thenExecEvaluates sourceStep ih
+  | caseOf _ sourceStep _ ih =>
+      exact sourceCaseResult_thenExecEvaluates sourceStep ih
+  | effect _ sourceStep _ ih =>
+      exact sourceEffectResult_thenExecEvaluates sourceStep ih
+
+/--
 Certificate-free structural partial correctness for arbitrary finite
 successful reuse-only spines.
 
@@ -14988,6 +15091,158 @@ theorem
       subst targetCode
       exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
         codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | effect supported sourceStep continued ih =>
+      obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+          nextInvariant⟩ :=
+        effectRuntimeRefines _ supported sourceStep
+          (frameRelated invariant).stateRelated invariant adapted
+      obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted nextInvariant
+      exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+        codeWP_effect step continuationWP, resultInvariant, failureClear,
+        valueRelated⟩
+
+/--
+Certificate-free structural partial correctness for facts-indexed direct
+declarations, selected case branches, and successful no-result effects.
+
+`CaseRuntimeRefines` is a uniform theorem about production compiler outputs.
+The source evaluation contains only the selected source branch; it carries no
+target program, branch index, or execution certificate.
+-/
+theorem
+    ConcreteSupportedExport.codeWP_of_reuseCapacityCaseEffectCodeEvaluates_exactReturn
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported directLetAllocationCost facts
+        sourceRuntime sourceEnv code resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost Frame)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env EffectSupported
+          (Frame facts)) :
+    ∃ resultStore resultLocals resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness [] (ExactReturnControlPost resultStore physical) ∧
+        Frame resultFacts 0 resultRuntime resultEnv resultStore resultLocals
+          resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing targetCode initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      have stateRelated := (frameRelated invariant).stateRelated
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst targetCode
+      exact ⟨initial, locals, witness, kind, physical,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
+        invariant, stateRelated.2.1, valueRelated⟩
+  | @letValue facts decl letSourceRuntime letSourceEnv letNextRuntime
+      letSourceValue nextFacts continuation resultFacts resultRuntime resultEnv
+      resultValue continuationCost supported sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          directLetAllocationCost decl ≤
+            directLetAllocationCost decl + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        directRuntimeRefines supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost letNextRuntime
+            (bind letSourceEnv decl.fvarId letSourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | caseOf supported sourceStep continued ih =>
+      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
+        caseRuntimeRefines supported sourceStep
+          (frameRelated invariant).stateRelated adapted
+      obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih selectedAdapted invariant
+      exact ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+        lift [] (ExactReturnControlPost resultStore physical)
+          (by
+            intro continuation returned
+            subst continuation
+            rfl)
           continuationWP,
         resultInvariant, failureClear, valueRelated⟩
   | effect supported sourceStep continued ih =>
@@ -15320,6 +15575,119 @@ theorem
     spec.codeWP_of_reuseCapacityEffectCodeEvaluates_exactReturn evaluation
       spec.bodyAdapted spec.localsAligned invariant frameRelated
       directRuntimeRefines effectRuntimeRefines
+  have bodyWP :
+      CodeWP context sourceModule sourceFunction [] target.wasmModule
+        hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
+        initial (spec.targetFunction.toLocals parameters.reverse)
+        initialWitness []
+        (ConcreteFunctionBodyPost spec.targetFunction
+          (parameters ++ callerTail)
+          (ExactReturnPost resultStore physical callerTail)) := by
+    apply exactWP.conseq
+    intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
+      ← parameterCount]
+  have parameterPrefix :
+      (parameters ++ callerTail).take spec.targetFunction.numParams =
+        parameters := by
+    rw [← parameterCount]
+    simp
+  have targetTerminates :
+      Wasm.TerminatesWith hosts.env target.wasmModule
+        spec.targetFunctionIndex initial (parameters ++ callerTail)
+        (ExactReturnPost resultStore physical callerTail) := by
+    apply CodeWP.toConcreteTerminatesWith spec.notImport
+      spec.targetFunctionFound
+    simpa [parameterPrefix] using bodyWP
+  refine
+    ⟨evaluation.execEvaluates, resultKind,
+      spec.targetFunctionIndex, spec.exported, ?_⟩
+  obtain ⟨fuelBound, terminates⟩ := targetTerminates
+  refine ⟨fuelBound, fun fuel enoughFuel => ?_⟩
+  obtain ⟨results, final, executed, finalEq, resultsEq⟩ :=
+    terminates fuel enoughFuel
+  subst final
+  subst results
+  exact ⟨physical :: callerTail, resultStore, executed, resultWitness, physical,
+    (frameRelated resultInvariant).stateRelated.1, failureClear, valueRelated,
+    rfl⟩
+
+/--
+Whole-export finite partial correctness for facts-indexed direct code,
+selected case branches, and successful no-result effects.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseCapacityCaseEffectCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context DirectSupported
+        CaseSupported EffectSupported directLetAllocationCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (invariant :
+      Frame facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost Frame)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction []
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction []
+          target.wasmModule hosts.env EffectSupported
+          (Frame facts))
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) := by
+  obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
+      exactWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityCaseEffectCodeEvaluates_exactReturn evaluation
+      spec.bodyAdapted spec.localsAligned invariant frameRelated
+      directRuntimeRefines caseRuntimeRefines effectRuntimeRefines
   have bodyWP :
       CodeWP context sourceModule sourceFunction [] target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
@@ -17284,6 +17652,64 @@ theorem
   spec.correctReuseCapacityEffectCode evaluation invariant
     (fun invariant => invariant.1.1)
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
+    parameterCount
+
+/--
+Finite whole-export partial correctness for arbitrary nesting of default-only
+cases around every facts-indexed direct/reuse operation and the complete
+current ownership, tag, object, `USize`, and packed-integer field mutation
+families.
+
+The source evaluation selects each sole default branch. The production
+compiler erases that wrapper to the selected branch, while the authoritative
+reuse fact map and allocation budget remain unchanged.
+-/
+theorem
+    ConcreteSupportedExport.correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCaseEffectCodeEvaluates context
+        (ReuseBudgetedDirectSupported context) DefaultOnlyCaseSupported
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCaseEffectCode evaluation invariant
+    (fun invariant => invariant.1.1)
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    caseRuntimeRefines_defaultOnly
     (fun _ => spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation)
     parameterCount
 

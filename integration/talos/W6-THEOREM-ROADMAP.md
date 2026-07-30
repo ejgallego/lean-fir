@@ -702,6 +702,14 @@ acceptance tests pass.
    the current constructor-field family for packed
    `UInt8`/`UInt16`/`UInt32`/`UInt64` writes. Float setters remain outside the
    concrete runtime fragment.
+   `ReuseCapacityCaseEffectCodeEvaluates` and
+   `codeWP_of_reuseCapacityCaseEffectCodeEvaluates_exactReturn` now extend
+   this facts-indexed induction through selected case nodes without carrying
+   target evidence. The first whole-export instance,
+   `correctReuseBudgetedDirectOwnershipTagAllFieldMutationDefaultCases`,
+   permits arbitrary nesting of compiler-erased default-only cases around the
+   strongest current direct/effect fragment. Object-constructor and scalar
+   discriminating cases are the next instances of the same case law.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the

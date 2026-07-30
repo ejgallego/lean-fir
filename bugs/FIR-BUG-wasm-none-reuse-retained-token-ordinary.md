@@ -103,7 +103,10 @@ same theorem and a shared facts-indexed target-effect transport. Typed `USize`
 and packed `UInt8`/`UInt16`/`UInt32`/`UInt64` slot writes use corresponding
 specializations and now compose as well. This bug still blocks validator-wide
 admission of effects that can create persistent aliases or otherwise fail
-that transport.
+that transport. Selected default-only cases compose without an additional
+ordinary-persistence obligation because branch entry changes neither the
+runtime nor the authoritative facts; discriminating cases can use the same
+frame once their existing case-runtime laws are instantiated.
 
 ## Classification and triage
 

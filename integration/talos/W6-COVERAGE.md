@@ -84,8 +84,13 @@ Cross-cutting W6.5 state:
   zero-token allocation. The theorem threads the exact budget remainder,
   local frame, fact relation, and ordinary-token relation; successful reuse
   preserves ordinaryness even for aliases and fresh collisions. Structural
-  whole-export composition now waits on ordinary-token invalidation across
-  unrelated effects
+  whole-export composition now covers every current direct operation and
+  every ownership/tag/object/`USize`/packed-integer mutation whose
+  ordinary-persistence transport has been proved. The facts-indexed
+  `ReuseCapacityCaseEffectCodeEvaluates` relation additionally retains the
+  exact facts and budget through selected case nodes; the first endpoint
+  permits arbitrary nesting of default-only cases. Validator-wide admission
+  still waits on ordinary-token invalidation across unrelated effects
   (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the coordinated
   provenance-sensitive result-kind fix
   (`FIR-BUG-wasm-none-reuse-retained-result-kind`).
