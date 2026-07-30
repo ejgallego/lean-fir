@@ -9502,6 +9502,41 @@ class CoverageIndexTests(unittest.TestCase):
             regression = coverage_index.compare_verified_coverage_indexes(
                 after_path, before_path
             )
+            for before_cli, after_cli, expected_status in (
+                (before_path, after_path, 0),
+                (after_path, before_path, 1),
+            ):
+                with (
+                    mock.patch.object(
+                        sys,
+                        "argv",
+                        [
+                            "validation_coverage_index.py",
+                            "--compare-index",
+                            str(before_cli),
+                            str(after_cli),
+                            "--require-no-regression",
+                        ],
+                    ),
+                    contextlib.redirect_stdout(io.StringIO()),
+                ):
+                    self.assertEqual(
+                        coverage_index.main(), expected_status
+                    )
+            with (
+                mock.patch.object(
+                    sys,
+                    "argv",
+                    [
+                        "validation_coverage_index.py",
+                        "--compare-index",
+                        str(after_path),
+                        str(before_path),
+                    ],
+                ),
+                contextlib.redirect_stdout(io.StringIO()),
+            ):
+                self.assertEqual(coverage_index.main(), 0)
 
         self.assertTrue(gain["classification"]["coverageGained"])
         self.assertFalse(gain["classification"]["coverageRegressed"])
@@ -9528,6 +9563,21 @@ class CoverageIndexTests(unittest.TestCase):
         self.assertGreater(
             regression["summary"]["policySlackDecreaseCount"], 0
         )
+
+    def test_no_regression_gate_requires_index_comparison(self) -> None:
+        with mock.patch.object(
+            sys,
+            "argv",
+            [
+                "validation_coverage_index.py",
+                "--require-no-regression",
+            ],
+        ):
+            with self.assertRaisesRegex(
+                core.ValidationError,
+                "--require-no-regression requires --compare-index",
+            ):
+                coverage_index.main()
 
     def test_snapshot_verification_recomputes_derived_claims(self) -> None:
         matrix = self.matrix(

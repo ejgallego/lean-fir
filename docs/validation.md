@@ -505,6 +505,10 @@ python3 scripts/validation_coverage_index.py \
 
 python3 scripts/validation_coverage_index.py \
   --compare-index <before-index.json> <after-index.json> --json
+
+python3 scripts/validation_coverage_index.py \
+  --compare-index <before-index.json> <after-index.json> \
+  --require-no-regression
 ```
 
 Both inputs pass the relocatable snapshot check before comparison. The stable
@@ -517,8 +521,11 @@ every tier, aggregate, and machine-coverage floor. A regression classification
 distinguishes actual coverage or attribution loss, increased policy failures,
 and shrinking headroom even while a floor remains satisfied. The command
 returns success after two valid snapshots are compared; differences are data
-for the caller, matching the immutable-evidence comparator. Use
-`--verify-index` when the current source artifacts must also be reverified.
+for the caller, matching the immutable-evidence comparator. The optional
+`--require-no-regression` gate instead returns failure when that verified
+comparison detects any regression signal; coverage gains remain successful.
+Use `--verify-index` when the current source artifacts must also be
+reverified.
 
 The driver discovers the corpus from the plan-selected manifest backend
 (`native` by default), then composes named backend adapters and optional

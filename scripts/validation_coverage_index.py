@@ -2306,7 +2306,19 @@ def main() -> int:
         action="store_true",
         help="emit --compare-index as stable JSON",
     )
+    parser.add_argument(
+        "--require-no-regression",
+        action="store_true",
+        help=(
+            "with --compare-index, fail when the verified comparison "
+            "detects a coverage regression"
+        ),
+    )
     args = parser.parse_args()
+    if args.require_no_regression and args.compare_index is None:
+        raise ValidationError(
+            "--require-no-regression requires --compare-index"
+        )
     inspection_modes = sum(
         int(option is not None)
         for option in (args.verify_index, args.compare_index)
@@ -2332,6 +2344,11 @@ def main() -> int:
             else:
                 for line in render_coverage_index_comparison(comparison):
                     print(line)
+            if (
+                args.require_no_regression
+                and comparison["classification"]["regressionDetected"]
+            ):
+                return 1
             return 0
         report = verify_coverage_index(args.verify_index)
         print(f"verified validation coverage index {args.verify_index}")
