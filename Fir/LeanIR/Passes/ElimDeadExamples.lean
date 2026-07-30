@@ -3583,7 +3583,7 @@ theorem deletedWriteDestinationUnreachable :
 
 /-- Runtime after one retained paired allocation. -/
 def nonemptyLedgerPairedRuntime : RuntimeState :=
-  (alloc ({} : RuntimeState) (.natural 7)).1
+  (alloc ({} : RuntimeState) (.natural 9223372036854775808)).1
 
 /-- Source runtime after a second, deleted constructor allocation. -/
 def nonemptyLedgerSourceRuntime : RuntimeState :=
@@ -3638,7 +3638,7 @@ theorem nonemptyTargetAllocationLedger_objectSetReady :
             [.object (.heap 0)])
           dead 0 .erased := by
   let paired := LedgerShadowRuntimeRel.empty.allocBoth
-      (HeapObjectRel.natural 7)
+      (HeapObjectRel.natural 9223372036854775808)
       (by simp [RootSubset, HeapObject.ownedValues])
       (by simp [RootSubset, HeapObject.ownedValues])
       false
@@ -3690,7 +3690,7 @@ def nonemptyLedgerResetRuntime : RuntimeState :=
   { nonemptyLedgerSourceRuntime with
     heap :=
       [(1, nonemptyLedgerClearedCell),
-        (0, { object := .natural 7 })] }
+        (0, { object := .natural 9223372036854775808 })] }
 
 def nonemptyLedgerReuseEnv : Env :=
   bind
@@ -3772,7 +3772,7 @@ theorem nonemptyTargetAllocationLedger_resetReuseReady :
             [.object (.heap 0)])
           reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] := by
   let paired := LedgerShadowRuntimeRel.empty.allocBoth
-      (HeapObjectRel.natural 7)
+      (HeapObjectRel.natural 9223372036854775808)
       (by simp [RootSubset, HeapObject.ownedValues])
       (by simp [RootSubset, HeapObject.ownedValues])
       false
@@ -12274,5 +12274,1181 @@ theorem closedPapBoxProgramLoweringCorrect
       closedPapBoxBeforeProgram closedPapBoxAfterProgram #[`main] :=
   (closedPapBoxSemanticallyAdmissibleRun
     externals).loweringCorrect compatible
+
+/-! ## Checked retained-prefix reset/reuse correctness -/
+
+/-- A constructor layout with one owned field plus non-object storage makes
+the source-only allocation definitionally equal to the local nonempty-ledger
+regression above. -/
+def retainedPrefixReuseObjectDecl : LCNF.LetDecl .impure :=
+  letDecl resetObjectVar objType (.ctor closedWritesInfo #[.erased])
+
+/-- The retained heap-backed natural allocates first on both sides.  The
+constructor/reset/reuse suffix then allocates and mutates only source
+location `1`. -/
+def retainedPrefixReuseBefore : LCNF.Code .impure :=
+  .let retainedLargeNatDecl <|
+  .let retainedPrefixReuseObjectDecl <|
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def retainedPrefixReuseAfter : LCNF.Code .impure :=
+  .let retainedLargeNatDecl <| .return live
+
+def retainedPrefixReuseBeforeProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main retainedPrefixReuseBefore] }
+
+def retainedPrefixReuseAfterProgram : ImpureProgram :=
+  { decls := #[fixtureDecl `main retainedPrefixReuseAfter] }
+
+theorem retainedPrefixReuseShadowRun :
+    shadowCode? 6 {} retainedPrefixReuseBefore =
+      some (retainedPrefixReuseAfter, neutralUsed) := by
+  simp [retainedPrefixReuseBefore, retainedPrefixReuseAfter,
+    retainedLargeNatDecl, retainedPrefixReuseObjectDecl,
+    closedConcreteReuseTokenDecl, closedReuseArgDecl, deadReuseDecl,
+    letDecl, neutralUsed, shadowCode?, safeToElim, collectLetValue,
+    live, resetObjectVar, reuseTokenVar, reuseArgVar, dead]
+
+theorem retainedPrefixReuseCheckedRun :
+    nullarySafeShadowCode? 6 {} retainedPrefixReuseBefore =
+      some (retainedPrefixReuseAfter, neutralUsed) := by
+  have liveMember : live ∈ ({} : UsedLocals).insert live := by
+    native_decide
+  have objectAbsent :
+      resetObjectVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have tokenAbsent :
+      reuseTokenVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have argumentAbsent :
+      reuseArgVar ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  have deadAbsent : dead ∉ ({} : UsedLocals).insert live := by
+    native_decide
+  simp [nullarySafeShadowCode?, retainedPrefixReuseBefore,
+    retainedPrefixReuseAfter, retainedLargeNatDecl,
+    retainedPrefixReuseObjectDecl, closedConcreteReuseTokenDecl,
+    closedReuseArgDecl, deadReuseDecl, letDecl, neutralUsed,
+    safeToElim, isNullaryFap, collectLetValue, collectArgs,
+    collectArgList, collectArg, liveMember, objectAbsent,
+    tokenAbsent, argumentAbsent, deadAbsent]
+
+def retainedPrefixReuseAfterLiveCode : LCNF.Code .impure :=
+  .let retainedPrefixReuseObjectDecl <|
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def retainedPrefixReuseAfterObjectCode : LCNF.Code .impure :=
+  .let closedConcreteReuseTokenDecl <|
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def retainedPrefixReuseAfterResetCode : LCNF.Code .impure :=
+  .let closedReuseArgDecl <|
+  .let deadReuseDecl <|
+  .return live
+
+def retainedPrefixReuseAfterArgCode : LCNF.Code .impure :=
+  .let deadReuseDecl <| .return live
+
+def retainedPrefixReuseTokenEnv : Env :=
+  bind nonemptyLedgerResetEnv reuseTokenVar
+    (.reuseToken (some 1))
+
+def retainedPrefixReuseFinalRuntime : RuntimeState :=
+  { nonemptyLedgerResetRuntime with
+    heap :=
+      [(1, { object := .ctor closedReuseAllocatedObject }),
+        (0, { object := .natural 9223372036854775808 })] }
+
+def retainedPrefixReuseSourceOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code retainedPrefixReuseBefore
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceObjectState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code retainedPrefixReuseAfterLiveCode
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceResetState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code retainedPrefixReuseAfterObjectCode
+    env := nonemptyLedgerResetEnv
+    runtime := nonemptyLedgerSourceRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceArgState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code retainedPrefixReuseAfterResetCode
+    env := retainedPrefixReuseTokenEnv
+    runtime := nonemptyLedgerResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceReuseState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code retainedPrefixReuseAfterArgCode
+    env := nonemptyLedgerReuseEnv
+    runtime := nonemptyLedgerResetRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .code (.return live)
+    env := bind nonemptyLedgerReuseEnv dead (.object (.heap 1))
+    runtime := retainedPrefixReuseFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .yielded (.object (.heap 0))
+    env := bind nonemptyLedgerReuseEnv dead (.object (.heap 1))
+    runtime := retainedPrefixReuseFinalRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseSourceCachedState : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .yielded (.object (.heap 0))
+    env := bind nonemptyLedgerReuseEnv dead (.object (.heap 1))
+    runtime := retainedPrefixReuseFinalRuntime.setGlobal `main
+      (.object (.heap 0)) }
+
+def retainedPrefixReuseSourceInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseBeforeProgram
+    control := .invokeValue (.object (.heap 0)) arguments
+    env := bind nonemptyLedgerReuseEnv dead (.object (.heap 1))
+    runtime := retainedPrefixReuseFinalRuntime }
+
+theorem retainedPrefixReuseSourceEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState retainedPrefixReuseBeforeProgram `main arguments) =
+      .next (retainedPrefixReuseSourceOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, retainedPrefixReuseBeforeProgram,
+      Program.findDecl?, invokeDecl, retainedPrefixReuseSourceOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem retainedPrefixReuseSourceOuterStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceOuterState arguments) =
+      .next (retainedPrefixReuseSourceObjectState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseSourceObjectStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceObjectState arguments) =
+      .next (retainedPrefixReuseSourceResetState arguments) := by
+  have evaluated :
+      evalLetValue (retainedPrefixReuseSourceObjectState arguments)
+          retainedPrefixReuseObjectDecl =
+        .ok (nonemptyLedgerSourceRuntime,
+          .value (.object (.heap 1))) := by
+    simp [evalLetValue, retainedPrefixReuseSourceObjectState,
+      retainedPrefixReuseAfterLiveCode,
+      retainedPrefixReuseObjectDecl, letDecl, evalArgs, evalArg,
+      allocCtor, alloc, closedWritesInfo, deletedWriteObject,
+      nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+      nonemptyLedgerPairedRuntime,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      retainedPrefixReuseSourceObjectState arguments with
+      control := .code
+        (.let retainedPrefixReuseObjectDecl
+          retainedPrefixReuseAfterObjectCode) } =
+    .next (retainedPrefixReuseSourceResetState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem retainedPrefixReuseSourceResetStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceResetState arguments) =
+      .next (retainedPrefixReuseSourceArgState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseSourceArgStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceArgState arguments) =
+      .next (retainedPrefixReuseSourceReuseState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseSourceReuseStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceReuseState arguments) =
+      .next (retainedPrefixReuseSourceReturnState arguments) := by
+  have evaluated :
+      evalLetValue (retainedPrefixReuseSourceReuseState arguments)
+          deadReuseDecl =
+        .ok (retainedPrefixReuseFinalRuntime,
+          .value (.object (.heap 1))) := by
+    simp [evalLetValue, retainedPrefixReuseSourceReuseState,
+      retainedPrefixReuseAfterArgCode, deadReuseDecl, letDecl,
+      nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      nonemptyLedgerResetRuntime, nonemptyLedgerClearedCell,
+      nonemptyLedgerClearedObject, lookupValue, evalArgs, evalArg,
+      Impure.bind, lookup, reuseTokenVar, reuseArgVar, reuse,
+      getLiveCell, setCell, findCell?, replaceCell, alloc,
+      oneFieldInfo, retainedPrefixReuseFinalRuntime,
+      closedReuseAllocatedObject,
+      nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+      nonemptyLedgerPairedRuntime, deletedWriteObject,
+      Functor.map, Except.map, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+  change coreStep {
+      retainedPrefixReuseSourceReuseState arguments with
+      control := .code (.let deadReuseDecl (.return live)) } =
+    .next (retainedPrefixReuseSourceReturnState arguments)
+  simp only [coreStep]
+  rw [evalLetValue_control_eq, evaluated]
+  rfl
+
+theorem retainedPrefixReuseSourceReturnStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseSourceReturnState arguments) =
+      .next (retainedPrefixReuseSourceYieldedState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseSourceYieldedStepEmpty :
+    coreStep (retainedPrefixReuseSourceYieldedState #[]) =
+      .next retainedPrefixReuseSourceCachedState := by
+  rfl
+
+theorem retainedPrefixReuseSourceYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (retainedPrefixReuseSourceYieldedState arguments) =
+      .next (retainedPrefixReuseSourceInvokingState arguments) := by
+  simp [coreStep, retainedPrefixReuseSourceYieldedState,
+    neutralEntryFrames, notEmpty,
+    retainedPrefixReuseSourceInvokingState]
+
+inductive RetainedPrefixReuseSourceReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      RetainedPrefixReuseSourceReachable arguments
+        (initialState retainedPrefixReuseBeforeProgram `main arguments)
+  | outer :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceOuterState arguments)
+  | object :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceObjectState arguments)
+  | reset :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceResetState arguments)
+  | argument :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceArgState arguments)
+  | reuse :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceReuseState arguments)
+  | ret :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceReturnState arguments)
+  | yielded :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      RetainedPrefixReuseSourceReachable arguments
+        retainedPrefixReuseSourceCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      RetainedPrefixReuseSourceReachable arguments
+        (retainedPrefixReuseSourceInvokingState arguments)
+
+theorem retainedPrefixReuseSourceReachable_step
+    (reachable :
+      RetainedPrefixReuseSourceReachable arguments before)
+    (step : Step externals before after) :
+    RetainedPrefixReuseSourceReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceOuterStep arguments) .object step
+  | object =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceObjectStep arguments) .reset step
+  | reset =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceResetStep arguments) .argument step
+  | argument =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceArgStep arguments) .reuse step
+  | reuse =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceReuseStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseSourceReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          retainedPrefixReuseSourceYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (retainedPrefixReuseSourceYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [retainedPrefixReuseSourceCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [retainedPrefixReuseSourceCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [retainedPrefixReuseSourceInvokingState,
+            retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
+            nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+            nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
+            coreStep, invokeClosure, fail] at transition
+      | external transition response =>
+          simp [retainedPrefixReuseSourceInvokingState,
+            retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
+            nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+            nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
+            coreStep, invokeClosure, fail] at transition
+
+def retainedPrefixReuseTargetOuterState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseAfterProgram
+    control := .code retainedPrefixReuseAfter
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseTargetReturnState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseAfterProgram
+    control := .code (.return live)
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseTargetYieldedState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseAfterProgram
+    control := .yielded (.object (.heap 0))
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime
+    frames := neutralEntryFrames arguments }
+
+def retainedPrefixReuseTargetCachedState : MachineState :=
+  { program := retainedPrefixReuseAfterProgram
+    control := .yielded (.object (.heap 0))
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime.setGlobal `main
+      (.object (.heap 0)) }
+
+def retainedPrefixReuseTargetInvokingState
+    (arguments : Array Value) : MachineState :=
+  { program := retainedPrefixReuseAfterProgram
+    control := .invokeValue (.object (.heap 0)) arguments
+    env := nonemptyLedgerRetainedEnv
+    runtime := nonemptyLedgerTargetRuntime }
+
+theorem retainedPrefixReuseTargetEntryStep
+    (arguments : Array Value) :
+    coreStep
+        (initialState retainedPrefixReuseAfterProgram `main arguments) =
+      .next (retainedPrefixReuseTargetOuterState arguments) := by
+  by_cases empty : arguments = #[] <;>
+    simp_all [initialState, coreStep, retainedPrefixReuseAfterProgram,
+      Program.findDecl?, invokeDecl, retainedPrefixReuseTargetOuterState,
+      neutralEntryFrames, fixtureDecl, decl, bindParams, findGlobal?]
+
+theorem retainedPrefixReuseTargetOuterStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseTargetOuterState arguments) =
+      .next (retainedPrefixReuseTargetReturnState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseTargetReturnStep
+    (arguments : Array Value) :
+    coreStep (retainedPrefixReuseTargetReturnState arguments) =
+      .next (retainedPrefixReuseTargetYieldedState arguments) := by
+  rfl
+
+theorem retainedPrefixReuseTargetYieldedStepEmpty :
+    coreStep (retainedPrefixReuseTargetYieldedState #[]) =
+      .next retainedPrefixReuseTargetCachedState := by
+  rfl
+
+theorem retainedPrefixReuseTargetYieldedStepNonempty
+    (notEmpty : arguments ≠ #[]) :
+    coreStep (retainedPrefixReuseTargetYieldedState arguments) =
+      .next (retainedPrefixReuseTargetInvokingState arguments) := by
+  simp [coreStep, retainedPrefixReuseTargetYieldedState,
+    neutralEntryFrames, notEmpty,
+    retainedPrefixReuseTargetInvokingState]
+
+inductive RetainedPrefixReuseTargetReachable
+    (arguments : Array Value) : MachineState → Prop where
+  | entry :
+      RetainedPrefixReuseTargetReachable arguments
+        (initialState retainedPrefixReuseAfterProgram `main arguments)
+  | outer :
+      RetainedPrefixReuseTargetReachable arguments
+        (retainedPrefixReuseTargetOuterState arguments)
+  | ret :
+      RetainedPrefixReuseTargetReachable arguments
+        (retainedPrefixReuseTargetReturnState arguments)
+  | yielded :
+      RetainedPrefixReuseTargetReachable arguments
+        (retainedPrefixReuseTargetYieldedState arguments)
+  | cached (empty : arguments = #[]) :
+      RetainedPrefixReuseTargetReachable arguments
+        retainedPrefixReuseTargetCachedState
+  | invoking (notEmpty : arguments ≠ #[]) :
+      RetainedPrefixReuseTargetReachable arguments
+        (retainedPrefixReuseTargetInvokingState arguments)
+
+theorem retainedPrefixReuseTargetReachable_step
+    (reachable :
+      RetainedPrefixReuseTargetReachable arguments before)
+    (step : Step externals before after) :
+    RetainedPrefixReuseTargetReachable arguments after := by
+  cases reachable with
+  | entry =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseTargetEntryStep arguments) .outer step
+  | outer =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseTargetOuterStep arguments) .ret step
+  | ret =>
+      exact predicate_of_step_next
+        (retainedPrefixReuseTargetReturnStep arguments) .yielded step
+  | yielded =>
+      by_cases empty : arguments = #[]
+      · subst arguments
+        exact predicate_of_step_next
+          retainedPrefixReuseTargetYieldedStepEmpty
+          (.cached rfl) step
+      · exact predicate_of_step_next
+          (retainedPrefixReuseTargetYieldedStepNonempty empty)
+          (.invoking empty) step
+  | cached empty =>
+      cases step with
+      | internal transition =>
+          simp [retainedPrefixReuseTargetCachedState,
+            coreStep] at transition
+      | external transition response =>
+          simp [retainedPrefixReuseTargetCachedState,
+            coreStep] at transition
+  | invoking notEmpty =>
+      cases step with
+      | internal transition =>
+          simp [retainedPrefixReuseTargetInvokingState,
+            nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime,
+            alloc, getLiveCell, findCell?, coreStep, invokeClosure, fail]
+            at transition
+      | external transition response =>
+          simp [retainedPrefixReuseTargetInvokingState,
+            nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime,
+            alloc, getLiveCell, findCell?, coreStep, invokeClosure, fail]
+            at transition
+
+/-- The whole-program reset state has exactly the local heap/environment
+shape used by the focused nonempty-ledger regression. -/
+def retainedPrefixReuseResetLocalReady
+    (arguments : Array Value) :
+    DeletedResetLocalReadyAt
+      (retainedPrefixReuseSourceResetState arguments)
+      1 resetObjectVar := by
+  refine {
+    objectValue := .object (.heap 1)
+    token := .reuseToken (some 1)
+    nextRuntime := nonemptyLedgerResetRuntime
+    objectRead := ?_
+    effect := ?_
+  }
+  · simp [retainedPrefixReuseSourceResetState,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      lookupValue, Impure.bind, lookup, resetObjectVar, live]
+  · simpa [retainedPrefixReuseSourceResetState] using
+      nonemptyLedgerResetEffect
+
+def retainedPrefixReuseLocalReady
+    (arguments : Array Value) :
+    DeletedReuseSomeLocalReadyAt
+      (retainedPrefixReuseSourceReuseState arguments)
+      reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] 1 := by
+  refine {
+    cell := nonemptyLedgerClearedCell
+    oldObject := nonemptyLedgerClearedObject
+    values := #[.erased]
+    tokenRead := ?_
+    argumentsRead := ?_
+    found := rfl
+    live := rfl
+    objectEq := rfl
+    arity := rfl
+  }
+  · simp [retainedPrefixReuseSourceReuseState,
+      nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      lookupValue, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, live]
+  · simp [retainedPrefixReuseSourceReuseState,
+      nonemptyLedgerReuseEnv, retainedPrefixReuseTokenEnv,
+      nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+      evalArgs, evalArg, Impure.bind, lookup,
+      reuseTokenVar, reuseArgVar, resetObjectVar, live]
+    rfl
+
+/-- Exact owner zero follows from the retained live root and the ledger's
+reverse-map law. -/
+theorem retainedPrefixReuseOwnerZero
+    (mapping : rho.forward 0 = some 0)
+    (ledger :
+      TargetAllocationLedger rho
+        nonemptyLedgerTargetRuntime.nextLocation) :
+    ledger.owner 0 = 0 := by
+  have ledgerMapped :=
+    ledger.reverseMapped 0 (by
+      simp [nonemptyLedgerTargetRuntime,
+        nonemptyLedgerPairedRuntime, alloc])
+  have inverse := rho.leftInverse mapping
+  rw [inverse] at ledgerMapped
+  exact (Option.some.inj ledgerMapped).symm
+
+theorem retainedPrefixReuseSourceOnlyAtOne
+    (ledger :
+      TargetAllocationLedger rho nonemptyLedgerTargetRuntime.nextLocation)
+    (ownerZero : ledger.owner 0 = 0) :
+    SourceOnlyUnderTargetLedger ledger 1 := by
+  intro rightLocation bounded
+  have rightZero : rightLocation = 0 := by
+    change rightLocation < 1 at bounded
+    exact Nat.le_antisymm
+      (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
+  subst rightLocation
+  rw [ownerZero]
+  decide
+
+theorem retainedPrefixReuseResetOwnerFrame
+    (ledger :
+      TargetAllocationLedger rho nonemptyLedgerTargetRuntime.nextLocation)
+    (ownerZero : ledger.owner 0 = 0) :
+    ∀ rightLocation,
+      rightLocation < nonemptyLedgerTargetRuntime.nextLocation →
+      findCell? nonemptyLedgerResetRuntime.heap
+          (ledger.owner rightLocation) =
+        findCell? nonemptyLedgerSourceRuntime.heap
+          (ledger.owner rightLocation) := by
+  intro rightLocation bounded
+  have rightZero : rightLocation = 0 := by
+    change rightLocation < 1 at bounded
+    exact Nat.le_antisymm
+      (Nat.le_of_lt_succ bounded) (Nat.zero_le rightLocation)
+  subst rightLocation
+  rw [ownerZero]
+  rfl
+
+theorem retainedPrefixReuseResetFresh :
+    ∀ location,
+      nonemptyLedgerResetRuntime.nextLocation ≤ location →
+        findCell? nonemptyLedgerResetRuntime.heap location = none := by
+  intro location bounded
+  change 2 ≤ location at bounded
+  have oneLt : 1 < location :=
+    Nat.lt_of_lt_of_le (by decide) bounded
+  have zeroLt : 0 < location :=
+    Nat.lt_trans (by decide) oneLt
+  have notOne : (1 : Nat) ≠ location := Nat.ne_of_lt oneLt
+  have notZero : (0 : Nat) ≠ location := Nat.ne_of_lt zeroLt
+  simp [nonemptyLedgerResetRuntime, findCell?, notOne, notZero]
+
+/-- Ledger-aligned reset readiness for the checked retained-prefix program.
+The only code-related target state is the post-literal return state; its
+covered live root fixes the paired address at `0`. -/
+theorem retainedPrefixReuseResetPairReady_ledger
+    (targetReachable :
+      RetainedPrefixReuseTargetReachable targetArguments target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 6
+      (retainedPrefixReuseSourceResetState sourceArguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 6
+      (retainedPrefixReuseSourceResetState sourceArguments) target := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (retainedPrefixReuseSourceResetState sourceArguments).control =
+        .code retainedPrefixReuseAfterObjectCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      have covered : CodeCovered used targetCode :=
+        graph.toShadowCodeGraph.covered
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      cases targetReachable with
+      | entry =>
+          simp [initialState] at targetControl
+      | outer =>
+          have codeEq : targetCode = retainedPrefixReuseAfter :=
+            Control.code.inj targetControl.symm
+          subst targetCode
+          cases covered with
+          | letE valueCovered continuationCovered =>
+            cases continuationCovered with
+            | ret liveMember =>
+              have values := env live liveMember
+              simp [retainedPrefixReuseSourceResetState,
+                retainedPrefixReuseTargetOuterState,
+                nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+                Impure.bind, lookup, live, resetObjectVar] at values
+              cases values
+      | ret =>
+          have codeEq : targetCode = .return live :=
+            Control.code.inj targetControl.symm
+          subst targetCode
+          cases covered with
+          | ret liveMember =>
+            have values := env live liveMember
+            have mapping : rho.forward 0 = some 0 := by
+              simp [retainedPrefixReuseSourceResetState,
+                retainedPrefixReuseTargetReturnState,
+                nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+                Impure.bind, lookup, live, resetObjectVar] at values
+              cases values with
+              | some related =>
+                  cases related with
+                  | heap mapping => exact mapping
+            have ownerZero : ledger.owner 0 = 0 :=
+              retainedPrefixReuseOwnerZero mapping (by
+                simpa [retainedPrefixReuseTargetReturnState] using ledger)
+            have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
+              retainedPrefixReuseSourceOnlyAtOne (by
+                simpa [retainedPrefixReuseTargetReturnState] using ledger)
+                ownerZero
+            have ownerFrame :
+                ∀ rightLocation,
+                  rightLocation <
+                      (retainedPrefixReuseTargetReturnState
+                        targetArguments).runtime.nextLocation →
+                  findCell? nonemptyLedgerResetRuntime.heap
+                      (ledger.owner rightLocation) =
+                    findCell? nonemptyLedgerSourceRuntime.heap
+                      (ledger.owner rightLocation) := by
+              simpa [retainedPrefixReuseTargetReturnState] using
+                retainedPrefixReuseResetOwnerFrame
+                  (by
+                    simpa [retainedPrefixReuseTargetReturnState] using ledger)
+                  ownerZero
+            have frame :
+                RuntimeReachableFrame nonemptyLedgerSourceRuntime
+                  nonemptyLedgerResetRuntime
+                  (runtimeRoots nonemptyLedgerSourceRuntime
+                    (envRootsOn used
+                      (retainedPrefixReuseSourceResetState
+                        sourceArguments).env ++
+                      sourceFrameRoots)) :=
+              runtime.leftRuntimeReachableFrame_of_targetAllocationLedger
+                ledger rfl rfl rfl rfl ownerFrame
+                  retainedPrefixReuseResetFresh
+            have resetReady :
+                DeletedResetReadyAt
+                  (retainedPrefixReuseSourceResetState sourceArguments)
+                  (runtimeRoots
+                    (retainedPrefixReuseSourceResetState
+                      sourceArguments).runtime
+                    (envRootsOn used
+                      (retainedPrefixReuseSourceResetState
+                        sourceArguments).env ++
+                      sourceFrameRoots))
+                  1 resetObjectVar :=
+              by
+                apply (retainedPrefixReuseResetLocalReady sourceArguments)
+                  |>.deletedReadyAt
+                change RuntimeReachableFrame
+                  nonemptyLedgerSourceRuntime
+                  nonemptyLedgerResetRuntime
+                  (runtimeRoots nonemptyLedgerSourceRuntime
+                    (envRootsOn used nonemptyLedgerResetEnv ++
+                      sourceFrameRoots))
+                exact frame
+            have removed :
+                DeletedLetReadyAt
+                  (retainedPrefixReuseSourceResetState sourceArguments)
+                  (runtimeRoots
+                    (retainedPrefixReuseSourceResetState
+                      sourceArguments).runtime
+                    (envRootsOn used
+                      (retainedPrefixReuseSourceResetState
+                        sourceArguments).env ++
+                      sourceFrameRoots))
+                  closedConcreteReuseTokenDecl := by
+              unfold closedConcreteReuseTokenDecl letDecl
+              exact .reset reuseTokenVar reuseTokenVar.name objType
+                1 resetObjectVar resetReady
+            refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+              ledger, programs, ?_, frames, runtime⟩
+            simpa only [sourceControl, targetControl] using
+              (BinderReadyReachableControlReadyAt.code
+                ⟨remaining, final, bounded, exact, subset, static,
+                  ExactShadowCodeRuntimeReadyAt.let_of_ready
+                    removed (by trivial)⟩
+                joins env)
+      | yielded =>
+          simp [retainedPrefixReuseTargetYieldedState] at targetControl
+      | cached empty =>
+          simp [retainedPrefixReuseTargetCachedState] at targetControl
+      | invoking notEmpty =>
+          simp [retainedPrefixReuseTargetInvokingState] at targetControl
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+/-- The same carried owner table proves that concrete reuse overwrites only
+source location `1`. -/
+theorem retainedPrefixReusePairReady_ledger
+    (targetReachable :
+      RetainedPrefixReuseTargetReachable targetArguments target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated 6
+      (retainedPrefixReuseSourceReuseState sourceArguments) target) :
+    LedgerBinderReadyReachableMachineReadyAt 6
+      (retainedPrefixReuseSourceReuseState sourceArguments) target := by
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  have sourceControl :
+      (retainedPrefixReuseSourceReuseState sourceArguments).control =
+        .code retainedPrefixReuseAfterArgCode := rfl
+  rw [sourceControl] at control
+  cases targetControl : target.control with
+  | code targetCode =>
+    rw [targetControl] at control
+    cases control with
+    | code graph joins env =>
+      rename_i used
+      have covered : CodeCovered used targetCode :=
+        graph.toShadowCodeGraph.covered
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      cases targetReachable with
+      | entry =>
+          simp [initialState] at targetControl
+      | outer =>
+          have codeEq : targetCode = retainedPrefixReuseAfter :=
+            Control.code.inj targetControl.symm
+          subst targetCode
+          cases covered with
+          | letE valueCovered continuationCovered =>
+            cases continuationCovered with
+            | ret liveMember =>
+              have values := env live liveMember
+              simp [retainedPrefixReuseSourceReuseState,
+                retainedPrefixReuseTargetOuterState,
+                nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
+                nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+                live, resetObjectVar, reuseTokenVar, reuseArgVar] at values
+              cases values
+      | ret =>
+          have codeEq : targetCode = .return live :=
+            Control.code.inj targetControl.symm
+          subst targetCode
+          cases covered with
+          | ret liveMember =>
+            have values := env live liveMember
+            have mapping : rho.forward 0 = some 0 := by
+              simp [retainedPrefixReuseSourceReuseState,
+                retainedPrefixReuseTargetReturnState,
+                nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
+                nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+                live, resetObjectVar, reuseTokenVar, reuseArgVar] at values
+              cases values with
+              | some related =>
+                  cases related with
+                  | heap mapping => exact mapping
+            have ownerZero : ledger.owner 0 = 0 :=
+              retainedPrefixReuseOwnerZero mapping (by
+                simpa [retainedPrefixReuseTargetReturnState] using ledger)
+            have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
+              retainedPrefixReuseSourceOnlyAtOne (by
+                simpa [retainedPrefixReuseTargetReturnState] using ledger)
+                ownerZero
+            have reuseReady :
+                DeletedReuseReadyAt
+                  (retainedPrefixReuseSourceReuseState sourceArguments)
+                  (runtimeRoots
+                    (retainedPrefixReuseSourceReuseState
+                      sourceArguments).runtime
+                    (envRootsOn used
+                      (retainedPrefixReuseSourceReuseState
+                        sourceArguments).env ++
+                      sourceFrameRoots))
+                  reuseTokenVar oneFieldInfo #[.fvar reuseArgVar] :=
+              (retainedPrefixReuseLocalReady sourceArguments)
+                |>.deletedReadyAt_of_targetAllocationLedger
+                  runtime ledger sourceOnly
+            have decision :
+                exact.view.runtimeDecision = .deletedLet :=
+              exact.view
+                |>.runtimeDecision_eq_deletedLet_of_target_not_same_let
+                  (by simp)
+            have removed :
+                DeletedLetReadyAt
+                  (retainedPrefixReuseSourceReuseState sourceArguments)
+                  (runtimeRoots
+                    (retainedPrefixReuseSourceReuseState
+                      sourceArguments).runtime
+                    (envRootsOn used
+                      (retainedPrefixReuseSourceReuseState
+                        sourceArguments).env ++
+                      sourceFrameRoots))
+                  deadReuseDecl := by
+              unfold deadReuseDecl letDecl
+              exact .reuse dead dead.name objType reuseTokenVar
+                oneFieldInfo true #[.fvar reuseArgVar] reuseReady
+            refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+              ledger, programs, ?_, frames, runtime⟩
+            simpa only [sourceControl, targetControl] using
+              (BinderReadyReachableControlReadyAt.code
+                ⟨remaining, final, bounded, exact, subset, static,
+                  ExactShadowCodeRuntimeReadyAt.letDeleted
+                    decision removed⟩
+                joins env)
+      | yielded =>
+          simp [retainedPrefixReuseTargetYieldedState] at targetControl
+      | cached empty =>
+          simp [retainedPrefixReuseTargetCachedState] at targetControl
+      | invoking notEmpty =>
+          simp [retainedPrefixReuseTargetInvokingState] at targetControl
+  | yielded targetValue =>
+      rw [targetControl] at control
+      cases control
+  | invokeName targetName targetArguments =>
+      rw [targetControl] at control
+      cases control
+  | invokeValue targetFunction targetArguments =>
+      rw [targetControl] at control
+      cases control
+
+theorem retainedPrefixReuseBeforeSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      retainedPrefixReuseBefore := by
+  unfold retainedPrefixReuseBefore retainedLargeNatDecl letDecl
+  exact SourceRuntimeOwnershipReadyAt.let_of_literal
+
+theorem retainedPrefixReuseObjectSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (retainedPrefixReuseSourceObjectState arguments)
+      sourceFrameRoots retainedPrefixReuseAfterLiveCode := by
+  unfold retainedPrefixReuseAfterLiveCode
+    retainedPrefixReuseObjectDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_constructor
+  refine .mk #[.erased] ?_ rfl
+  simp [retainedPrefixReuseSourceObjectState,
+    nonemptyLedgerRetainedEnv, evalArgs, evalArg]
+  rfl
+
+theorem retainedPrefixReuseArgSourceRuntimeReadyAt
+    (arguments : Array Value) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6
+      (retainedPrefixReuseSourceArgState arguments)
+      sourceFrameRoots retainedPrefixReuseAfterResetCode := by
+  unfold retainedPrefixReuseAfterResetCode closedReuseArgDecl letDecl
+  apply SourceRuntimeOwnershipReadyAt.let_of_runtimeNeutral
+  · exact ⟨.erased, rfl⟩
+  · intro roots
+    trivial
+
+theorem retainedPrefixReuseReturnSourceRuntimeReadyAt
+    (state : MachineState) (sourceFrameRoots : List Value) :
+    SourceRuntimeOwnershipReadyAt 6 state sourceFrameRoots
+      (.return live) := by
+  intro used remaining final targetCode bounded exact subset static
+  simp [ExactShadowCodeRuntimeReadyAt]
+
+theorem retainedPrefixReuseOuterSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceOuterState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = retainedPrefixReuseBefore :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact retainedPrefixReuseBeforeSourceRuntimeReadyAt
+    (retainedPrefixReuseSourceOuterState arguments)
+    sourceFrameRoots bounded exact subset static
+
+theorem retainedPrefixReuseObjectSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceObjectState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = retainedPrefixReuseAfterLiveCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact retainedPrefixReuseObjectSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem retainedPrefixReuseArgSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceArgState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = retainedPrefixReuseAfterResetCode :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact retainedPrefixReuseArgSourceRuntimeReadyAt
+    arguments sourceFrameRoots bounded exact subset static
+
+theorem retainedPrefixReuseReturnSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceReturnState arguments) := by
+  intro sourceFrameRoots sourceCode frames control
+  have codeEq : sourceCode = .return live :=
+    Control.code.inj control.symm
+  subst sourceCode
+  intro used remaining final targetCode bounded exact subset static
+  exact retainedPrefixReuseReturnSourceRuntimeReadyAt
+    (retainedPrefixReuseSourceReturnState arguments)
+    sourceFrameRoots bounded exact subset static
+
+/-- Every source state in the finite entry graph is ledger-ready. Reset and
+reuse use the paired owner proof; the remaining states use hereditary
+source-only readiness. -/
+theorem retainedPrefixReuseSourceReachable_pairReady_ledger
+    (sourceReachable :
+      RetainedPrefixReuseSourceReachable sourceArguments source)
+    (targetReachable :
+      RetainedPrefixReuseTargetReachable targetArguments target)
+    (related :
+      SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
+    LedgerBinderReadyReachableMachineReadyAt 6 source target := by
+  cases sourceReachable with
+  | entry =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [initialState] at control
+  | outer =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (retainedPrefixReuseOuterSourceMachineReadyAt sourceArguments)
+  | object =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (retainedPrefixReuseObjectSourceMachineReadyAt sourceArguments)
+  | reset =>
+      exact retainedPrefixReuseResetPairReady_ledger
+        targetReachable related
+  | argument =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (retainedPrefixReuseArgSourceMachineReadyAt sourceArguments)
+  | reuse =>
+      exact retainedPrefixReusePairReady_ledger targetReachable related
+  | ret =>
+      exact
+        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+          (retainedPrefixReuseReturnSourceMachineReadyAt sourceArguments)
+  | yielded =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [retainedPrefixReuseSourceYieldedState] at control
+  | cached empty =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [retainedPrefixReuseSourceCachedState] at control
+  | invoking notEmpty =>
+      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+      intro sourceCode control
+      simp [retainedPrefixReuseSourceInvokingState] at control
+
+theorem retainedPrefixReuseSourceReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState retainedPrefixReuseBeforeProgram `main arguments)
+      state) :
+    RetainedPrefixReuseSourceReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        RetainedPrefixReuseSourceReachable arguments before →
+          RetainedPrefixReuseSourceReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih
+          (retainedPrefixReuseSourceReachable_step ready head)
+  exact preserves steps .entry
+
+theorem retainedPrefixReuseTargetReachable_of_reaches
+    (path : NonLockstep.Reaches externals
+      (initialState retainedPrefixReuseAfterProgram `main arguments)
+      state) :
+    RetainedPrefixReuseTargetReachable arguments state := by
+  rcases path with ⟨count, steps⟩
+  have preserves : ∀ {count before after},
+      Steps externals count before after →
+        RetainedPrefixReuseTargetReachable arguments before →
+          RetainedPrefixReuseTargetReachable arguments after := by
+    intro count before after execution
+    induction execution with
+    | refl state =>
+        exact fun ready => ready
+    | step head tail ih =>
+        intro ready
+        exact ih
+          (retainedPrefixReuseTargetReachable_step ready head)
+  exact preserves steps .entry
+
+/-- Checked whole-program client of the ledger-exact ownership endpoint with
+a genuinely nonempty target owner table at reset and reuse. -/
+def retainedPrefixReuseLedgerExactOwnershipContract
+    (externals : ExternalSpec) :
+    ElimDeadLedgerExactOwnershipContract externals 6
+      retainedPrefixReuseBeforeProgram
+      retainedPrefixReuseAfterProgram #[`main] where
+  invariant := fun _ sourceArguments targetArguments source target =>
+    RetainedPrefixReuseSourceReachable sourceArguments source ∧
+      RetainedPrefixReuseTargetReachable targetArguments target
+  initial := by
+    intro entry member sourceArguments targetArguments _argumentsRelated
+    have entryEq : entry = `main := by
+      simpa using member
+    subst entry
+    exact ⟨.entry, .entry⟩
+  sourcePreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceBefore sourceAfter targetState
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨retainedPrefixReuseSourceReachable_step
+      sourceReachable step, targetReachable⟩
+  targetPreserved := by
+    rintro entry sourceArguments targetArguments
+      sourceState targetBefore targetAfter
+      ⟨sourceReachable, targetReachable⟩ step
+    exact ⟨sourceReachable,
+      retainedPrefixReuseTargetReachable_step
+        targetReachable step⟩
+  ready := by
+    rintro entry sourceArguments targetArguments source target
+      ⟨sourceReachable, targetReachable⟩ related
+    exact retainedPrefixReuseSourceReachable_pairReady_ledger
+      sourceReachable targetReachable related
+
+theorem retainedPrefixReuseBeforeProgramElimDeadWellFormed :
+    ProgramElimDeadWellFormed retainedPrefixReuseBeforeProgram := by
+  refine ⟨?_, ?_⟩
+  · apply ProgramWellFormed.ofCompilerInvariants
+    · apply WellFormedAt.impure
+      · simp [Program.NamesUnique,
+          retainedPrefixReuseBeforeProgram, fixtureDecl, decl]
+      · unfold Program.ImpureHygienic
+        native_decide
+    · native_decide
+    · intro declaration member
+      simp [retainedPrefixReuseBeforeProgram] at member
+      subst declaration
+      exact .letE (.letE (.letE (.letE (.letE .ret))))
+    · intro declaration member
+      simp [retainedPrefixReuseBeforeProgram] at member
+      subst declaration
+      exact .letE ⟨.object, trivial⟩
+        (.letE ⟨.object, trivial⟩
+          (.letE ⟨.object, trivial⟩
+            (.letE ⟨.object, trivial⟩
+              (.letE ⟨.object, trivial⟩ .ret))))
+  · intro declaration member
+    simp [retainedPrefixReuseBeforeProgram] at member
+    subst declaration
+    simp [DeclCodeBinderNamesUnique, fixtureDecl, decl,
+      retainedPrefixReuseBefore, retainedLargeNatDecl,
+      retainedPrefixReuseObjectDecl,
+      closedConcreteReuseTokenDecl, closedReuseArgDecl,
+      deadReuseDecl, letDecl, codeBinderIds,
+      BinderNamesUnique, ImpureHygiene.paramIds,
+      live, resetObjectVar, reuseTokenVar, reuseArgVar, dead]
+
+theorem retainedPrefixReuseShadowProgramRun :
+    shadowProgram? 6 retainedPrefixReuseBeforeProgram =
+      some retainedPrefixReuseAfterProgram := by
+  simp [shadowProgram?, shadowDecls?, shadowDecl?,
+    retainedPrefixReuseBeforeProgram,
+    retainedPrefixReuseAfterProgram,
+    fixtureDecl, decl, retainedPrefixReuseShadowRun]
+
+theorem retainedPrefixReuseCheckedProgramRun :
+    nullarySafeShadowProgram? 6 retainedPrefixReuseBeforeProgram =
+      some retainedPrefixReuseAfterProgram := by
+  simp [nullarySafeShadowProgram?, nullarySafeShadowDecls?,
+    nullarySafeShadowDecl?, retainedPrefixReuseBeforeProgram,
+    retainedPrefixReuseAfterProgram, fixtureDecl, decl,
+    retainedPrefixReuseCheckedRun]
+
+/-- The actual Lean 4.32 pass is checked against the transparent retained
+prefix fixture during elaboration, independently of the proof endpoint. -/
+elab "#check_retained_prefix_reuse_actual" : command =>
+  liftCoreM <|
+    checkActualElimDead `elimDeadRetainedPrefixReuse
+      retainedPrefixReuseBefore retainedPrefixReuseAfter
+
+#check_retained_prefix_reuse_actual
+
+/-- Direct checked-pass correctness through the unified ledger dispatcher.
+At the two ownership-sensitive edges the target ledger is exactly the
+nonempty `0 ↦ 0` table created by the retained literal allocation. -/
+theorem retainedPrefixReuseProgramLoweringCorrect_ledgerExact
+    (externals : ExternalSpec)
+    (compatible :
+      LedgerBinderReadyReachableExternalSpecCompatible externals 6) :
+    LoweringCorrect
+      (Impure.semantics externals) (Impure.semantics externals)
+      (reachablePhaseSimulation externals)
+      retainedPrefixReuseBeforeProgram
+      retainedPrefixReuseAfterProgram #[`main] :=
+  nullarySafeShadowProgram_loweringCorrect_ledgerExactOwnership
+    retainedPrefixReuseBeforeProgramElimDeadWellFormed
+    retainedPrefixReuseCheckedProgramRun
+    (retainedPrefixReuseLedgerExactOwnershipContract externals)
+    compatible
 
 end Fir.LeanIR.Passes.ElimDeadExamples
