@@ -5101,6 +5101,26 @@ and evolved table into one result containing both the exact budgeted miss and
 the successor whole-cache invariant. Nested initializer execution may change
 any cache slot; no unchanged-cache premise is used.
 
+W6.6gzq lifts that composition to the canonical program frame.
+`miss_of_cachedDeclarationFrame` constructs the executable `cacheSet` result
+from the hereditary callee's concrete runtime/value refinement, recovers both
+generated physical lanes from its evolved whole-cache table, performs the
+checked caller-local write from frame alignment, and derives the immutable
+external/descriptor equations definitionally through the host and Wasm global
+writes. The declaration-environment induction therefore no longer supplies
+`afterCache`, `valueStore`, `nextLocals`, old lane values, the concrete host
+operation, or publication table equalities.
+
+The remaining runtime-shaped premise is exact and static: the host runtime
+must retain a declared slot of the generated signature kind for each
+initializer. The production initial host constructs precisely that table via
+`cacheDeclarations`; extend the canonical whole-cache invariant with this
+host-slot layout and prove that concrete global writes preserve it. That will
+remove `cacheFound`/`cacheKindEq` before defining the recursive
+declaration-environment induction theorem. The other genuine induction inputs
+are generated callee/import selection, the cache-aware hereditary declaration
+result, and facts-aware semantic publication transport.
+
 The remaining uniform implementation work is now declaration-environment
 induction rather than another caller-side cache lemma. Its miss branch must
 select the generated callee/import operations, obtain the cache-aware

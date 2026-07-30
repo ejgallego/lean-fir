@@ -3461,6 +3461,178 @@ theorem ConcreteReuseCapacityCacheFrame.ofLazyCacheResult
       nextDescriptorAgreement⟩, nextCache⟩⟩
 
 /--
+Frame-driven generated lazy miss.
+
+The canonical cache frame and hereditary callee result determine every
+dynamic publication artifact: the concrete `cacheSet` result, the pre-existing
+physical value/flag lanes, both generated global writes, the caller-local
+write, and the immutable host tables. Callers retain only the static
+compiler/adapter selections, the hereditary declaration theorem, the
+facts-aware semantic publication transport, and the concrete host slot's
+static name/kind lookup.
+-/
+theorem
+    BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {calleeCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {declaration : Name}
+    {sourceDeclaration : LCNF.Decl .impure}
+    {kind resultKind : AbiKind}
+    {declarationId cacheSetId : Nat}
+    {imp : Wasm.ImportDecl}
+    {cacheSlot : ConcreteGlobalSlot}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {initial afterCall : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {initialWitness callWitness : RefinementWitness}
+    {physical : Wasm.Value}
+    {cacheIndex resultIndex stepCost remainingBytes : Nat}
+    (sourceStep :
+      SourceLazyLetResult .miss context sourceExternals sourceRuntime sourceEnv
+        decl continuation nextRuntime sourceValue)
+    (declValue : decl.value = .fap declaration #[])
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (generated :
+      LazyCacheGeneratedEnvironment context sourceModule)
+    (kindEq :
+      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+    (cacheEq :
+      context.cachedDeclarations.findIdx? (· == declaration) =
+        some cacheIndex)
+    (declarationFound :
+      context.program.findDecl? declaration = some sourceDeclaration)
+    (declarationParams : sourceDeclaration.params = #[])
+    (declarationBody : sourceDeclaration.value = .code calleeCode)
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule calleeFunction module hostEnv sourceExternals
+        sourceRuntime callRuntime [] calleeCode targetFunction declarationId
+        initial afterCall initialWitness callWitness [] resultKind sourceValue
+        physical stepCost)
+    (importFound :
+      module.imports[cacheSetId]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : cacheSetId < module.imports.length)
+    (contractFound :
+      spec.contracts[cacheSetId]? =
+        some (cacheSetContract declaration kind))
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some kind)
+    (publicationOrdinary :
+      ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
+        (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
+    (resultKindEq : resultKind = kind)
+    (cacheFound :
+      afterCall.host.runtime.globals.find? declaration = some cacheSlot)
+    (cacheKindEq : cacheSlot.kind = kind) :
+    ∃ nextStore nextLocals,
+      BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
+            module hostEnv sourceExternals decl continuation
+            [.globalGet (2 * cacheIndex),
+              .iff 0 0 [] [
+                .call declarationId,
+                .call cacheSetId,
+                .globalSet (2 * cacheIndex + 1),
+                .const 1,
+                .globalSet (2 * cacheIndex)],
+              .globalGet (2 * cacheIndex + 1)]
+            sourceRuntime nextRuntime sourceEnv sourceValue initial nextStore
+            locals nextLocals resultIndex initialWitness callWitness physical
+            stepCost ∧
+        LazyCacheGlobalsRel callWitness sourceModule nextRuntime nextStore := by
+  rcases invariant with
+    ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩,
+      descriptorAgreement⟩, initialCache⟩
+  have valueRelated :
+      PhysicalValueRel callWitness kind physical sourceValue := by
+    simpa [resultKindEq] using
+      callee.declaration.capacityPreserving.successful.valueRelated
+  have cacheDescriptorsEq :
+      afterCall.host.closureDescriptors = callWitness.closureDescriptors :=
+    callee.declaration.hostDescriptorsPreserved.trans
+      (descriptorAgreement.trans
+        callee.declaration.witnessDescriptorsPreserved.symm)
+  obtain ⟨runtimeAfter, operation, _, _, _⟩ :=
+    cacheSetStep_of_refines
+      callee.declaration.capacityPreserving.successful.runtimeRelated
+      valueRelated cacheFound cacheKindEq cacheDescriptorsEq
+  let afterCache := replaceRuntime afterCall runtimeAfter
+  have operationEq :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache := by
+    simpa [afterCache] using operation
+  obtain ⟨initializerFound, signature⟩ :=
+    generated.select kindEq declarationFound
+      (by simp [declarationParams]) cacheEq
+  obtain ⟨oldFlag, oldValue, flagAfterCall, valueAfterCall⟩ :=
+    callee.cacheTable.slotLanesPresent initializerFound signature
+  have valueAfterCache :
+      afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue := by
+    rw [cacheSetStep_preserves_wasmGlobals operationEq]
+    exact valueAfterCall
+  have flagAfterCache :
+      afterCache.globals.globals[2 * cacheIndex]? = some oldFlag := by
+    rw [cacheSetStep_preserves_wasmGlobals operationEq]
+    exact flagAfterCall
+  let valueStore :=
+    writeWasmGlobal afterCache (2 * cacheIndex + 1) physical
+  have valueStoreEq :
+      valueStore =
+        writeWasmGlobal afterCache (2 * cacheIndex + 1) physical := rfl
+  have flagAfterValue :
+      valueStore.globals.globals[2 * cacheIndex]? = some oldFlag := by
+    rw [valueStoreEq, writeWasmGlobal_get_ne (by omega)]
+    exact flagAfterCache
+  let nextStore := writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)
+  obtain ⟨nextLocals, targetSet, _⟩ :=
+    frameAligned.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := nextStore)
+      (nextWitness := callWitness)
+      (physical := physical) resultFound
+  have publicationExternals :
+      nextStore.host.externals = afterCall.host.externals := by
+    simp [nextStore, valueStore, afterCache, writeWasmGlobal, replaceRuntime,
+      clearFailure]
+  have publicationDescriptors :
+      nextStore.host.closureDescriptors =
+        afterCall.host.closureDescriptors := by
+    simp [nextStore, valueStore, afterCache, writeWasmGlobal, replaceRuntime,
+      clearFailure]
+  obtain ⟨step, nextCache⟩ :=
+    BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
+      sourceStep declValue initialRelated.1 initialCache generated kindEq cacheEq
+      declarationFound declarationParams declarationBody callee importFound
+      hostSatisfies importInBounds contractFound parameterCount resultCount
+      operationEq valueAfterCache valueStoreEq flagAfterValue resultFound
+      resultKindAt targetSet publicationOrdinary resultKindEq cacheFound
+      cacheKindEq cacheDescriptorsEq publicationExternals
+      publicationDescriptors
+  exact ⟨nextStore, nextLocals, step, nextCache⟩
+
+/--
 Uniform implementation condition for compiler-generated lazy declarations.
 
 From the source path/admission and the actual compiler/adapter outputs, the

@@ -889,6 +889,16 @@ acceptance tests pass.
    rather than independent per-call lookup/signature premises, and
    `LazyCacheImplementation` retains the environment once for the whole
    generated program.
+   `miss_of_cachedDeclarationFrame` now lifts the hereditary miss to the
+   canonical program invariant. It derives the concrete host result, evolved
+   physical-lane bounds, both Wasm global writes, the destination-local write,
+   and immutable host tables instead of accepting those execution artifacts
+   from the declaration environment. The remaining concrete host-slot
+   lookup/kind premise identifies a missing static component of the
+   whole-cache invariant: production `cacheDeclarations` creates one such
+   typed slot per initializer, and concrete global writes must preserve that
+   layout. Add that component before stating the final declaration-environment
+   induction theorem.
    The corresponding executable contract guard confirms
    `FIR-BUG-wasm-none-lazy-cache-result-refinement`: strict
    `.object`-to-`.tobject` named-call refinement is admitted by the source
