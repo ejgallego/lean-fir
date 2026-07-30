@@ -1027,6 +1027,38 @@ theorem box_ordinaryPersistenceTransport
   | erased => simp at operation
   | reuseToken token => simp at operation
 
+/-- Every semantic literal transition preserves ordinary persistence.
+Immediate literals leave the heap unchanged; large naturals and strings append
+one fresh ordinary cell. -/
+theorem literal_ordinaryPersistenceTransport
+    (before : RuntimeState) (lit : LCNF.LitValue) :
+    OrdinaryPersistenceTransport before (literal before lit).1 := by
+  cases lit with
+  | nat value =>
+      by_cases tagged : value ≤ maxTaggedPayload
+      · simpa [literal, tagged] using
+          OrdinaryPersistenceTransport.refl before
+      · simpa [literal, tagged] using
+          (alloc_ordinaryPersistenceTransport
+            (before := before) (after := (alloc before (.natural value)).1)
+            (object := .natural value)
+            (reference := (alloc before (.natural value)).2)
+            (operation := rfl))
+  | str value =>
+      change
+        OrdinaryPersistenceTransport before
+          (alloc before (.string value)).1
+      exact alloc_ordinaryPersistenceTransport
+        (before := before) (after := (alloc before (.string value)).1)
+        (object := .string value)
+        (reference := (alloc before (.string value)).2)
+        (operation := rfl)
+  | uint8 value => exact OrdinaryPersistenceTransport.refl before
+  | uint16 value => exact OrdinaryPersistenceTransport.refl before
+  | uint32 value => exact OrdinaryPersistenceTransport.refl before
+  | uint64 value => exact OrdinaryPersistenceTransport.refl before
+  | usize value => exact OrdinaryPersistenceTransport.refl before
+
 private theorem allocCtor_preserves_persistent_false
     {before after : RuntimeState} {info : LCNF.CtorInfo}
     {args : Array Value} {result : Value} {location : Location}

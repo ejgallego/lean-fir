@@ -13933,6 +13933,256 @@ theorem
           simpa [directLetAllocationCost, valueEq] using nextBudget⟩
 
 /--
+Representation-polymorphic natural literals erase the destination reuse fact
+while transporting older facts through the immediate, promoted-tag, or fresh
+limb-object branch selected by the concrete allocator.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_naturalLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => NaturalLiteralSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨value, valueEq, valueKind, resultCompiled⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  have naturalFits :
+      naturalAllocationBytes value ≤ remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  obtain ⟨heap, word, allocated, remainingBudget⟩ :=
+    related.stateRelated.1.heap.frontier.allocateNatural_eq_ok_of_budget value
+      budget naturalFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.call (.runtime (.literal (.nat value) .tobject))] :=
+    compileLetValue_naturalLiteral valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.literal (.nat value) .tobject)) with
+  | none =>
+      simp [instructions, instruction, callFound] at valueAdapted
+      change
+        Except.error AdapterError.unknownCallTarget =
+          Except.ok targetValue at valueAdapted
+      cases valueAdapted
+  | some callIndex =>
+      have expectedAdapted :
+          instructions sourceModule sourceFunction labels
+              [.call (.runtime (.literal (.nat value) .tobject))] =
+            .ok [.call callIndex] := by
+        simp [instructions, instruction, callFound]
+        rfl
+      rw [expectedAdapted] at valueAdapted
+      injection valueAdapted with targetValueEq
+      subst targetValue
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨updated, targetSet⟩ :=
+        FirTalos.Correctness.locals_set?_exists
+          (frameAligned.validIndex resultFound)
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.naturalLiteralCall callFound
+      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+        letStepSimulates_naturalLiteral (context := context) valueEq
+          related.stateRelated resultFound resultKindAt allocated imported
+          spec.hostsSatisfy inBounds contracted params results targetSet
+      obtain ⟨runtimeEq, sourceValueEq⟩ :=
+        SourceLetResult.deterministic sourceStep step.1
+      subst nextRuntime
+      subst sourceValue
+      have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+      have nextFrame :
+          ConcreteLocalFrameAligned sourceFunction
+            (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+      have capacityTransport :
+          HeaderCapacityTransport targetStore.host.runtime.heap heap witness :=
+        HeaderCapacityTransport.allocateNatural targetStore.host.runtime.heap
+          heap witness value word related.stateRelated.1.heap.frontier allocated
+      have nextRelated :
+          ReuseCapacityStateRelated
+            (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+            (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        related.ofLetStepEraseOfSet step resultFound targetSet
+          (WitnessTransport.ofExtension extension) capacityTransport
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (literal sourceRuntime (.nat value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.nat value)).2) :=
+        ordinaryTokens.eraseBind
+          (literal_ordinaryPersistenceTransport sourceRuntime (.nat value))
+      have transfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [reuseCapacityLetFacts?, valueEq]
+      have nextBudget :
+          (replaceHeap targetStore heap).host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - naturalAllocationBytes value) := by
+        simpa [replaceHeap, clearFailure] using remainingBudget
+      exact ⟨replaceHeap targetStore heap, updated, nextWitness,
+        eraseReuseCapacityFact facts decl.fvarId, step,
+        by simp [replaceHeap, clearFailure],
+        by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        transfer, nextRelated, nextOrdinary, nextFrame, by
+          simpa [directLetAllocationCost, valueEq] using nextBudget⟩
+
+/--
+UTF-8 String literals erase the destination reuse fact and transport all older
+facts through the fresh ordinary source cell and concrete prefix extension.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_stringLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun _ decl => StringLiteralSupported context decl)
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction) := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported allocationFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  rcases supported with
+    ⟨value, valueEq, valueKind, resultCompiled⟩
+  obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
+  have stringFits :
+      align8 (headerBytes + (stringUtf8Bytes value).length) ≤
+        remainingBytes := by
+    simpa [directLetAllocationCost, valueEq] using allocationFits
+  obtain ⟨heap, word, allocated, remainingBudget⟩ :=
+    related.stateRelated.1.heap.frontier.allocateString_eq_ok_of_budget value
+      budget stringFits
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.call (.runtime (.literal (.str value) .object))] :=
+    compileLetValue_stringLiteral valueEq valueKind
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.literal (.str value) .object)) with
+  | none =>
+      simp [instructions, instruction, callFound] at valueAdapted
+      change
+        Except.error AdapterError.unknownCallTarget =
+          Except.ok targetValue at valueAdapted
+      cases valueAdapted
+  | some callIndex =>
+      have expectedAdapted :
+          instructions sourceModule sourceFunction labels
+              [.call (.runtime (.literal (.str value) .object))] =
+            .ok [.call callIndex] := by
+        simp [instructions, instruction, callFound]
+        rfl
+      rw [expectedAdapted] at valueAdapted
+      injection valueAdapted with targetValueEq
+      subst targetValue
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        spec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      obtain ⟨updated, targetSet⟩ :=
+        FirTalos.Correctness.locals_set?_exists
+          (frameAligned.validIndex resultFound)
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        spec.stringLiteralCall callFound
+      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+        letStepSimulates_stringLiteral (context := context) valueEq
+          related.stateRelated resultFound resultKindAt allocated imported
+          spec.hostsSatisfy inBounds contracted params results targetSet
+      obtain ⟨runtimeEq, sourceValueEq⟩ :=
+        SourceLetResult.deterministic sourceStep step.1
+      subst nextRuntime
+      subst sourceValue
+      have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+      have nextFrame :
+          ConcreteLocalFrameAligned sourceFunction
+            (literal sourceRuntime (.str value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.str value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        ⟨lengths.1.trans frameAligned.1, lengths.2.trans frameAligned.2⟩
+      have capacityTransport :
+          HeaderCapacityTransport targetStore.host.runtime.heap heap witness :=
+        HeaderCapacityTransport.allocateString targetStore.host.runtime.heap
+          heap witness value word related.stateRelated.1.heap.frontier allocated
+      have nextRelated :
+          ReuseCapacityStateRelated
+            (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+            (literal sourceRuntime (.str value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.str value)).2)
+            (replaceHeap targetStore heap) updated nextWitness :=
+        related.ofLetStepEraseOfSet step resultFound targetSet
+          (WitnessTransport.ofExtension extension) capacityTransport
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (literal sourceRuntime (.str value)).1
+            (bind sourceEnv decl.fvarId
+              (literal sourceRuntime (.str value)).2) :=
+        ordinaryTokens.eraseBind
+          (literal_ordinaryPersistenceTransport sourceRuntime (.str value))
+      have transfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [reuseCapacityLetFacts?, valueEq]
+      have nextBudget :
+          (replaceHeap targetStore heap).host.runtime.heap.AddressSpaceBudget
+            (remainingBytes -
+              align8
+                (headerBytes + (stringUtf8Bytes value).length)) := by
+        simpa [replaceHeap, clearFailure] using remainingBudget
+      exact ⟨replaceHeap targetStore heap, updated, nextWitness,
+        eraseReuseCapacityFact facts decl.fvarId, step,
+        by simp [replaceHeap, clearFailure],
+        by simp [replaceHeap, clearFailure], extension.closureDescriptors,
+        transfer, nextRelated, nextOrdinary, nextFrame, by
+          simpa [directLetAllocationCost, valueEq] using nextBudget⟩
+
+/--
 Successful typed unboxing preserves the facts-indexed reuse frame. The source
 heap and concrete heap are unchanged, so the destination fact is erased while
 all older capacity facts and ordinary-token obligations cross reflexively.
@@ -15183,6 +15433,119 @@ theorem ConcreteSupportedExport.correctReuseConstructorBoxCode
             callerTail) :=
   spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
     spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
+    parameterCount
+
+/--
+The complete current budgeted direct fragment, strengthened with
+facts-indexed successful reuse.
+-/
+def ReuseBudgetedDirectSupported (context : Fir.Wasm.Context)
+    (facts : ReuseCapacityFacts) (decl : LCNF.LetDecl .impure) : Prop :=
+  ReuseConstructorBoxSupported context facts decl ∨
+    (NaturalLiteralSupported context decl ∨
+      StringLiteralSupported context decl)
+
+/--
+All current direct compiler operations share the facts-indexed reuse frame.
+-/
+theorem
+    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {labels : List FVarId} :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (ReuseBudgetedDirectSupported context) directLetAllocationCost
+      (ConcreteReuseCapacityFrame sourceFunction) := by
+  change
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels target.wasmModule hosts.env
+      (fun facts decl =>
+        ReuseConstructorBoxSupported context facts decl ∨
+          (NaturalLiteralSupported context decl ∨
+            StringLiteralSupported context decl))
+      directLetAllocationCost (ConcreteReuseCapacityFrame sourceFunction)
+  have literals :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (fun _ decl =>
+          NaturalLiteralSupported context decl ∨
+            StringLiteralSupported context decl)
+        directLetAllocationCost
+        (ConcreteReuseCapacityFrame sourceFunction) :=
+    ReuseCapacityDirectLetRuntimeRefinesWithCost.or
+      (Left := fun _ decl => NaturalLiteralSupported context decl)
+      (Right := fun _ decl => StringLiteralSupported context decl)
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_naturalLiteral
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_stringLiteral
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  cases supported with
+  | inl prior =>
+      exact
+        spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
+          prior stepFits invariant sourceStep valueCompiled valueAdapted
+          resultFound
+  | inr literal =>
+      exact literals literal stepFits invariant sourceStep valueCompiled
+        valueAdapted resultFound
+
+/--
+Finite whole-export partial correctness for arbitrary interleavings of
+successful validated reuse and every operation in `BudgetedDirectSupported`.
+-/
+theorem ConcreteSupportedExport.correctReuseBudgetedDirectCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName)
+    {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context
+        (ReuseBudgetedDirectSupported context) directLetAllocationCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates externals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind
+            callerTail) :=
+  spec.correctReuseCapacityCode_of_runtimeRefines evaluation invariant
+    spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
     parameterCount
 
 /--

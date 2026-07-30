@@ -4549,6 +4549,19 @@ interleavings of boxing with reuse, every heap-preserving direct reader, and
 nonempty constructors. Natural and String literals are the remaining direct
 allocating families in this fragment.
 
+W6.6gh closes those remaining direct allocating families. One generic
+`literal_ordinaryPersistenceTransport` covers heap identity for immediate
+literals, the tagged/fresh split for Naturals, and fresh ordinary String
+allocation. The Natural and String facts-indexed production laws combine it
+with their existing witness extension, retained-header transport, exact
+source-derived allocation cost, and generated calls.
+`ReuseBudgetedDirectSupported` is now precisely the current
+`BudgetedDirectSupported` family plus validated reuse, and
+`correctReuseBudgetedDirectCode` proves finite whole-export partial
+correctness for arbitrary interleavings of that complete direct fragment.
+The next widening frontier is the ownership/effect family rather than another
+direct-result case.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -668,6 +668,10 @@ acceptance tests pass.
    `correctReuseConstructorBoxCode`; its immediate, promoted, and heap
    branches share one source ordinary-persistence theorem and one concrete
    retained-header transport.
+   Natural and String literals complete the direct family.
+   `correctReuseBudgetedDirectCode` covers the full
+   `BudgetedDirectSupported` fragment plus reuse; the next widening obligation
+   is ownership/effect composition.
    Before reuse joins the structural direct family, coordinate two shared
    validator fixes: stable ordinary-token provenance across unrelated effects
    (`FIR-BUG-wasm-none-reuse-retained-token-ordinary`) and the
