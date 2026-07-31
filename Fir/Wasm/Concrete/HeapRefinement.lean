@@ -71,9 +71,11 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
     state.heapCursor
   semanticObjectFields : semantic.objectFields.size = info.size
   semanticUSizeFields : semantic.usizeFields.size = info.usize
-  /-- W6.2 packages the compiler's verified `UInt32`/`UInt64` packed fields.
-  Every represented field carries the compiler-shaped scalar base, stays
-  within the declared packed region, and reads back from concrete memory. -/
+  /-- W6.2 packages the compiler's verified packed scalar fields. Floating
+  fields use the same physical widths as `UInt32`/`UInt64` and retain their
+  exact IEEE-754 bit patterns. Every represented field carries the
+  compiler-shaped scalar base, stays within the declared packed region, and
+  reads back from concrete memory. -/
   semanticScalarFields : ∀ field, field ∈ semantic.scalarFields →
     match field.value with
     | .uint8 value =>
@@ -92,6 +94,14 @@ structure ConstructorObjectRel (state : MemoryState) (witness : RefinementWitnes
         field.width = info.size + info.usize ∧
         field.offset + 8 ≤ info.ssize ∧
         readScalarUInt64Field state address field.width field.offset = .ok value
+    | .float32Bits bits =>
+        field.width = info.size + info.usize ∧
+        field.offset + 4 ≤ info.ssize ∧
+        readScalarUInt32Field state address field.width field.offset = .ok bits
+    | .float64Bits bits =>
+        field.width = info.size + info.usize ∧
+        field.offset + 8 ≤ info.ssize ∧
+        readScalarUInt64Field state address field.width field.offset = .ok bits
   fieldKindsSize : fieldKinds.size = info.size
   fieldKindsValid : fieldKinds.all AbiKind.isObjectField = true
   objectFields : ∀ index kind value,
@@ -173,6 +183,14 @@ theorem ConstructorObjectRel.prefixExtension
           field.width = info.size + info.usize ∧
           field.offset + 8 ≤ info.ssize ∧
           readScalarUInt64Field after address field.width field.offset = .ok value
+      | .float32Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 4 ≤ info.ssize ∧
+          readScalarUInt32Field after address field.width field.offset = .ok bits
+      | .float64Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field after address field.width field.offset = .ok bits
       := by
     intro field member
     have beforeField := related.semanticScalarFields field member
@@ -277,6 +295,72 @@ theorem ConstructorObjectRel.prefixExtension
         rw [operationEq]
         exact readBefore
     | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset + 8 ≤
+              before.heapCursor := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          have extent := related.extent
+          simp [ConstructorLayout.ofInfo, target] at extent layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt64Field after address field.width field.offset =
+              readScalarUInt64Field before address field.width field.offset := by
+          unfold readScalarUInt64Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          change liftMemory (after.memory.readUInt64 _) =
+            liftMemory (before.memory.readUInt64 _)
+          rw [extension.readUInt64 _ fieldOwned]
+        rw [operationEq]
+        exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset + 4 ≤
+              before.heapCursor := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          have extent := related.extent
+          simp [ConstructorLayout.ofInfo, target] at extent layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt32Field after address field.width field.offset =
+              readScalarUInt32Field before address field.width field.offset := by
+          unfold readScalarUInt32Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          change liftMemory (after.memory.readUInt32 _) =
+            liftMemory (before.memory.readUInt32 _)
+          rw [extension.readUInt32 _ fieldOwned]
+        rw [operationEq]
+        exact readBefore
+    | float64Bits bits =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
         refine ⟨widthEq, fieldFits, ?_⟩
