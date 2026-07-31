@@ -232,7 +232,15 @@ theorem ConstructorObjectRel.writeObjectField_targetFrame
       | .uint64 scalar =>
           field.width = info.size + info.usize ∧
           field.offset + 8 ≤ info.ssize ∧
-          readScalarUInt64Field result address field.width field.offset = .ok scalar := by
+          readScalarUInt64Field result address field.width field.offset = .ok scalar
+      | .float32Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 4 ≤ info.ssize ∧
+          readScalarUInt32Field result address field.width field.offset = .ok bits
+      | .float64Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field result address field.width field.offset = .ok bits := by
     intro field member
     have beforeField := related.semanticScalarFields field member
     cases valueEq : field.value with
@@ -316,6 +324,50 @@ theorem ConstructorObjectRel.writeObjectField_targetFrame
           rfl
         rw [scalarAddress] at readBefore ⊢
         change liftMemory (memory.readUInt64 _) = .ok scalar
+        rw [readUInt64Frame _ (by
+          left
+          rw [widthEq]
+          simp [offset, objectFieldAddress, target]
+          omega)]
+        exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        unfold readScalarUInt32Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind] at readBefore ⊢
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 4 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        rw [scalarAddress] at readBefore ⊢
+        change liftMemory (memory.readUInt32 _) = .ok bits
+        rw [readUInt32Frame _ (by
+          left
+          rw [widthEq]
+          simp [offset, objectFieldAddress, target]
+          omega)]
+        exact readBefore
+    | float64Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        unfold readScalarUInt64Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind] at readBefore ⊢
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 8 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        rw [scalarAddress] at readBefore ⊢
+        change liftMemory (memory.readUInt64 _) = .ok bits
         rw [readUInt64Frame _ (by
           left
           rw [widthEq]
