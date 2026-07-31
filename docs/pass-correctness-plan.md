@@ -1789,11 +1789,17 @@ the existing nullary-`.fap` semantic discrepancy.
    interface from its phase invariant and uses the generic theorem for both
    deleted reset and deleted reuse, eliminating its duplicate target shape and
    owner calculation.
-   The next structural gap is no longer the concrete one-cell target state.
-   Generalize the ledger exclusion argument from singleton prefixes to an
-   arbitrary retained target prefix, derive that interface from exact checked
-   compiler residuals, and replace the remaining finite source reset/reuse
-   classification with generic local operation-shape and ownership premises.
+   Commit `c904f3e8` generalizes the ledger calculation itself.
+   `TargetMappedOwnerPrefix` supplies a proof-visible source owner and forward
+   mapping for every address below an arbitrary target frontier; its exclusion
+   theorem turns pointwise owner inequality into
+   `SourceOnlyUnderTargetLedger`. The singleton live-return interface now
+   constructs this general owner map and delegates to the arbitrary-prefix
+   theorem rather than reasoning directly about the ledger.
+   The next structural gaps are to derive the mapped-owner interface from
+   arbitrary exact checked compiler residuals and to replace the remaining
+   finite source reset/reuse classification with generic local operation-shape
+   and ownership premises.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
