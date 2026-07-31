@@ -30,6 +30,8 @@ def scalarValueByteSize : ScalarValue → Nat
   | .uint16 _ => 2
   | .uint32 _ => 4
   | .uint64 _ => 8
+  | .float32Bits _ => 4
+  | .float64Bits _ => 8
 
 /-- If every earlier write names the replaced coordinate, the retained-field
 disjointness premise is vacuous. -/
@@ -431,6 +433,78 @@ theorem ConstructorObjectRel.writeScalarUInt64Field
                     simp only [Bind.bind, Except.bind]
                     rw [oldAddress]
               _ = .ok oldValue := oldRead
+        | float32Bits bits =>
+            have oldRelated' := oldRelated
+            simp only [valueEq] at oldRelated'
+            simp only [valueEq, scalarValueByteSize] at separated
+            obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+            have oldAddress : scalarFieldAddress address header field.width
+                field.offset 4 = .ok other := by
+              unfold scalarFieldAddress
+              simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+                other]
+              rfl
+            have physicalDisjoint :
+                offset + 7 < other ∨ other + 3 < offset := by
+              rcases separated with before | after
+              · right
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+              · left
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+            refine ⟨oldWidth, oldFits, ?_⟩
+            calc
+              readScalarUInt32Field result address field.width field.offset =
+                  liftMemory (memory.readUInt32 other) := by
+                    unfold readScalarUInt32Field
+                    rw [constructorHeaderAfter]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = liftMemory (state.memory.readUInt32 other) := by
+                    rw [readUInt32Frame other physicalDisjoint]
+              _ = readScalarUInt32Field state address field.width field.offset := by
+                    unfold readScalarUInt32Field
+                    rw [constructorHeaderBefore]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = .ok bits := oldRead
+        | float64Bits bits =>
+            have oldRelated' := oldRelated
+            simp only [valueEq] at oldRelated'
+            simp only [valueEq, scalarValueByteSize] at separated
+            obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+            have oldAddress : scalarFieldAddress address header field.width
+                field.offset 8 = .ok other := by
+              unfold scalarFieldAddress
+              simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+                other]
+              rfl
+            have physicalDisjoint :
+                offset + 7 < other ∨ other + 7 < offset := by
+              rcases separated with before | after
+              · right
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+              · left
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+            refine ⟨oldWidth, oldFits, ?_⟩
+            calc
+              readScalarUInt64Field result address field.width field.offset =
+                  liftMemory (memory.readUInt64 other) := by
+                    unfold readScalarUInt64Field
+                    rw [constructorHeaderAfter]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = liftMemory (state.memory.readUInt64 other) := by
+                    rw [readUInt64Frame other physicalDisjoint]
+              _ = readScalarUInt64Field state address field.width field.offset := by
+                    unfold readScalarUInt64Field
+                    rw [constructorHeaderBefore]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = .ok bits := oldRead
     · intro index kind semanticValue kindAt valueAt
       change semantic.objectFields[index]? = some semanticValue at valueAt
       obtain ⟨word, readBefore, valueRelated⟩ :=
@@ -812,6 +886,78 @@ theorem ConstructorObjectRel.writeScalarUInt32Field
                     simp only [Bind.bind, Except.bind]
                     rw [oldAddress]
               _ = .ok oldValue := oldRead
+        | float32Bits bits =>
+            have oldRelated' := oldRelated
+            simp only [valueEq] at oldRelated'
+            simp only [valueEq, scalarValueByteSize] at separated
+            obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+            have oldAddress : scalarFieldAddress address header field.width
+                field.offset 4 = .ok other := by
+              unfold scalarFieldAddress
+              simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+                other]
+              rfl
+            have physicalDisjoint :
+                offset + 3 < other ∨ other + 3 < offset := by
+              rcases separated with before | after
+              · right
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+              · left
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+            refine ⟨oldWidth, oldFits, ?_⟩
+            calc
+              readScalarUInt32Field result address field.width field.offset =
+                  liftMemory (memory.readUInt32 other) := by
+                    unfold readScalarUInt32Field
+                    rw [constructorHeaderAfter]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = liftMemory (state.memory.readUInt32 other) := by
+                    rw [readUInt32Frame other physicalDisjoint]
+              _ = readScalarUInt32Field state address field.width field.offset := by
+                    unfold readScalarUInt32Field
+                    rw [constructorHeaderBefore]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = .ok bits := oldRead
+        | float64Bits bits =>
+            have oldRelated' := oldRelated
+            simp only [valueEq] at oldRelated'
+            simp only [valueEq, scalarValueByteSize] at separated
+            obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+            have oldAddress : scalarFieldAddress address header field.width
+                field.offset 8 = .ok other := by
+              unfold scalarFieldAddress
+              simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+                other]
+              rfl
+            have physicalDisjoint :
+                offset + 3 < other ∨ other + 7 < offset := by
+              rcases separated with before | after
+              · right
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+              · left
+                simp [other, offset, oldWidth, slotIndexEq, target]
+                omega
+            refine ⟨oldWidth, oldFits, ?_⟩
+            calc
+              readScalarUInt64Field result address field.width field.offset =
+                  liftMemory (memory.readUInt64 other) := by
+                    unfold readScalarUInt64Field
+                    rw [constructorHeaderAfter]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = liftMemory (state.memory.readUInt64 other) := by
+                    rw [readUInt64Frame other physicalDisjoint]
+              _ = readScalarUInt64Field state address field.width field.offset := by
+                    unfold readScalarUInt64Field
+                    rw [constructorHeaderBefore]
+                    simp only [Bind.bind, Except.bind]
+                    rw [oldAddress]
+              _ = .ok bits := oldRead
     · intro index kind semanticValue kindAt valueAt
       change semantic.objectFields[index]? = some semanticValue at valueAt
       obtain ⟨word, readBefore, valueRelated⟩ :=
@@ -1181,6 +1327,78 @@ theorem ConstructorObjectRel.writeScalarUInt8Field
                   simp only [Bind.bind, Except.bind]
                   rw [oldAddress]
             _ = .ok oldValue := oldRead
+      | float32Bits bits =>
+          have oldRelated' := oldRelated
+          simp only [valueEq] at oldRelated'
+          simp only [valueEq, scalarValueByteSize] at separated
+          obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+          have oldAddress : scalarFieldAddress address header field.width
+              field.offset 4 = .ok other := by
+            unfold scalarFieldAddress
+            simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+              other]
+            rfl
+          have physicalDisjoint :
+              offset < other ∨ other + 3 < offset := by
+            rcases separated with before | after
+            · right
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+            · left
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+          refine ⟨oldWidth, oldFits, ?_⟩
+          calc
+            readScalarUInt32Field result address field.width field.offset =
+                liftMemory (memory.readUInt32 other) := by
+                  unfold readScalarUInt32Field
+                  rw [constructorHeaderAfter]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = liftMemory (state.memory.readUInt32 other) := by
+                  rw [readUInt32Frame other physicalDisjoint]
+            _ = readScalarUInt32Field state address field.width field.offset := by
+                  unfold readScalarUInt32Field
+                  rw [constructorHeaderBefore]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = .ok bits := oldRead
+      | float64Bits bits =>
+          have oldRelated' := oldRelated
+          simp only [valueEq] at oldRelated'
+          simp only [valueEq, scalarValueByteSize] at separated
+          obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+          have oldAddress : scalarFieldAddress address header field.width
+              field.offset 8 = .ok other := by
+            unfold scalarFieldAddress
+            simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+              other]
+            rfl
+          have physicalDisjoint :
+              offset < other ∨ other + 7 < offset := by
+            rcases separated with before | after
+            · right
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+            · left
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+          refine ⟨oldWidth, oldFits, ?_⟩
+          calc
+            readScalarUInt64Field result address field.width field.offset =
+                liftMemory (memory.readUInt64 other) := by
+                  unfold readScalarUInt64Field
+                  rw [constructorHeaderAfter]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = liftMemory (state.memory.readUInt64 other) := by
+                  rw [readUInt64Frame other physicalDisjoint]
+            _ = readScalarUInt64Field state address field.width field.offset := by
+                  unfold readScalarUInt64Field
+                  rw [constructorHeaderBefore]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = .ok bits := oldRead
   · intro index kind semanticValue kindAt valueAt
     change semantic.objectFields[index]? = some semanticValue at valueAt
     obtain ⟨word, readBefore, valueRelated⟩ :=
@@ -1544,6 +1762,78 @@ theorem ConstructorObjectRel.writeScalarUInt16Field
                   simp only [Bind.bind, Except.bind]
                   rw [oldAddress]
             _ = .ok oldValue := oldRead
+      | float32Bits bits =>
+          have oldRelated' := oldRelated
+          simp only [valueEq] at oldRelated'
+          simp only [valueEq, scalarValueByteSize] at separated
+          obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+          have oldAddress : scalarFieldAddress address header field.width
+              field.offset 4 = .ok other := by
+            unfold scalarFieldAddress
+            simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+              other]
+            rfl
+          have physicalDisjoint :
+              offset + 1 < other ∨ other + 3 < offset := by
+            rcases separated with before | after
+            · right
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+            · left
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+          refine ⟨oldWidth, oldFits, ?_⟩
+          calc
+            readScalarUInt32Field result address field.width field.offset =
+                liftMemory (memory.readUInt32 other) := by
+                  unfold readScalarUInt32Field
+                  rw [constructorHeaderAfter]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = liftMemory (state.memory.readUInt32 other) := by
+                  rw [readUInt32Frame other physicalDisjoint]
+            _ = readScalarUInt32Field state address field.width field.offset := by
+                  unfold readScalarUInt32Field
+                  rw [constructorHeaderBefore]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = .ok bits := oldRead
+      | float64Bits bits =>
+          have oldRelated' := oldRelated
+          simp only [valueEq] at oldRelated'
+          simp only [valueEq, scalarValueByteSize] at separated
+          obtain ⟨oldWidth, oldFits, oldRead⟩ := oldRelated'
+          have oldAddress : scalarFieldAddress address header field.width
+              field.offset 8 = .ok other := by
+            unfold scalarFieldAddress
+            simp [oldWidth, objectCount, usizeCount, oldFits, scalarCount,
+              other]
+            rfl
+          have physicalDisjoint :
+              offset + 1 < other ∨ other + 7 < offset := by
+            rcases separated with before | after
+            · right
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+            · left
+              simp [other, offset, oldWidth, slotIndexEq, target]
+              omega
+          refine ⟨oldWidth, oldFits, ?_⟩
+          calc
+            readScalarUInt64Field result address field.width field.offset =
+                liftMemory (memory.readUInt64 other) := by
+                  unfold readScalarUInt64Field
+                  rw [constructorHeaderAfter]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = liftMemory (state.memory.readUInt64 other) := by
+                  rw [readUInt64Frame other physicalDisjoint]
+            _ = readScalarUInt64Field state address field.width field.offset := by
+                  unfold readScalarUInt64Field
+                  rw [constructorHeaderBefore]
+                  simp only [Bind.bind, Except.bind]
+                  rw [oldAddress]
+            _ = .ok bits := oldRead
   · intro index kind semanticValue kindAt valueAt
     change semantic.objectFields[index]? = some semanticValue at valueAt
     obtain ⟨word, readBefore, valueRelated⟩ :=
