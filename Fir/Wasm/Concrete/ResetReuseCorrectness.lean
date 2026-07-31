@@ -896,6 +896,28 @@ theorem ConstructorObjectRel.resetPrefix
           (List.replicate count taggedZero) field.width field.offset headerRead
           headerKind writtenFits slotIndexEq post]
         exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt32Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
+    | float64Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have slotIndexEq : field.width =
+            header.aux1.toNat + header.aux2.toNat := by
+          rw [widthEq, objectCount, usizeCount]
+        rw [readScalarUInt64Field_of_writeObjectFields state memory address header
+          (List.replicate count taggedZero) field.width field.offset headerRead
+          headerKind writtenFits slotIndexEq post]
+        exact readBefore
   · intro index protocolKind value protocolKindAt valueAt
     have indexLtSemantic : index < semantic.objectFields.size := by
       obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
