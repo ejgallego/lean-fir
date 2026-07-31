@@ -102,6 +102,10 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .memorySize => return .memorySize
   | .memoryGrow => return .memoryGrow
   | .i32WrapI64 _ => return .wrapI64
+  | .i32ReinterpretF32 _ => return .i32ReinterpretF32
+  | .i64ReinterpretF64 _ => return .i64ReinterpretF64
+  | .f32ReinterpretI32 _ => return .f32ReinterpretI32
+  | .f64ReinterpretI64 _ => return .f64ReinterpretI64
   | .block label body => do
       return .block 0 0 (← instructions module function (label :: labels) body)
   | .loop label body => do
