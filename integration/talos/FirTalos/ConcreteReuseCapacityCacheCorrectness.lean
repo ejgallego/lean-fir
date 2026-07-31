@@ -9,6 +9,44 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/--
+Two declaration-entry compiler contexts belong to the same generated module.
+
+Top-level declarations share the source program and the module-wide lazy-cache
+table. Their `localKinds` and transient `joins` are deliberately absent:
+`lowerDecl` computes those fields independently for each declaration body.
+This is the coherence carried across recursive calls without identifying a
+callee's declaration-local compiler context with its caller's context.
+-/
+structure DeclarationContextsCoherent
+    (caller callee : Fir.Wasm.Context) : Prop where
+  program : caller.program = callee.program
+  cachedDeclarations :
+    caller.cachedDeclarations = callee.cachedDeclarations
+
+/--
+Exact source execution transports from a declaration-local callee context to
+any coherent caller context. Source machine states observe only the shared
+program; compiler-local kinds, joins, and cache-indexing metadata do not occur
+in `SourceCodeResult`.
+-/
+theorem DeclarationContextsCoherent.sourceCodeResult
+    {caller callee : Fir.Wasm.Context}
+    (contexts : DeclarationContextsCoherent caller callee)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    (result :
+      SourceCodeResult callee sourceExternals sourceRuntime sourceEnv
+        sourceCode resultRuntime sourceValue) :
+    SourceCodeResult caller sourceExternals sourceRuntime sourceEnv sourceCode
+      resultRuntime sourceValue := by
+  rcases result with ⟨count, terminalEnv, steps⟩
+  exact ⟨count, terminalEnv, by
+    simpa [sourceCodeState, sourceYieldState, contexts.program] using steps⟩
+
 /-- Successful folds of cursor-preserving memory transitions preserve the
 cursor from the first state to the final state. -/
 private theorem List.foldlM_cache_preserves_heapCursor
@@ -2887,6 +2925,7 @@ directly.
 theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {sourceCode : LCNF.Code .impure}
@@ -2925,7 +2964,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
           (·.results[0]?) = some kind)
     (flagIndexEq : flagIndex = 2 * cacheIndex)
     (body :
-      CachedDeclarationBodyWP context sourceModule calleeFunction module
+      CachedDeclarationBodyWP calleeContext sourceModule calleeFunction module
         hostEnv sourceRuntime sourceCode targetFunction initial afterCall
         initialWitness physical)
     (notImport :
@@ -3061,6 +3100,7 @@ theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {calleeCode : LCNF.Code .impure}
@@ -3106,11 +3146,13 @@ theorem
       context.program.findDecl? declaration = some sourceDeclaration)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
+    (contexts : DeclarationContextsCoherent context calleeContext)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
-        calleeFunction module hostEnv sourceExternals sourceRuntime callRuntime
-        [] calleeCode targetFunction declarationId initial afterCall
-        initialWitness callWitness [] resultKind sourceValue physical stepCost)
+      BudgetedCapacityPreservingSuccessfulDeclaration calleeContext
+        sourceModule calleeFunction module hostEnv sourceExternals
+        sourceRuntime callRuntime [] calleeCode targetFunction declarationId
+        initial afterCall initialWitness callWitness [] resultKind sourceValue
+        physical stepCost)
     (importFound :
       module.imports[cacheSetId]? = some imp)
     (hostSatisfies : hostEnv.Satisfies module spec)
@@ -3177,7 +3219,8 @@ theorem
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
       declarationParams declarationBody sourceStep
-      callee.capacityPreserving.successful.sourceResult).2
+      (contexts.sourceCodeResult
+        callee.capacityPreserving.successful.sourceResult)).2
   subst nextRuntime
   have nextRelated :
       StateRelated callerFunction
@@ -3359,6 +3402,7 @@ theorem
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {calleeCode : LCNF.Code .impure}
@@ -3403,8 +3447,9 @@ theorem
       context.program.findDecl? declaration = some sourceDeclaration)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
+    (contexts : DeclarationContextsCoherent context calleeContext)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache calleeContext
         sourceModule calleeFunction module hostEnv sourceExternals
         sourceRuntime callRuntime [] calleeCode targetFunction declarationId
         initial afterCall initialWitness callWitness [] resultKind sourceValue
@@ -3479,7 +3524,8 @@ theorem
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
       declarationParams declarationBody sourceStep
-      callee.declaration.capacityPreserving.successful.sourceResult).2
+      (contexts.sourceCodeResult
+        callee.declaration.capacityPreserving.successful.sourceResult)).2
   have step :
       BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
         module hostEnv sourceExternals decl continuation
@@ -3497,10 +3543,10 @@ theorem
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
       sourceStep declValue initialRelated cacheTable generated kindEq cacheEq
       rfl declarationFound declarationParams declarationBody
-      callee.declaration importFound hostSatisfies importInBounds contractFound
-      parameterCount resultCount operation valueGlobal valueStoreEq flagGlobal
-      (by omega) resultFound resultKindAt targetSet publicationOrdinary
-      resultKindEq cacheFound cacheKindEq cacheDescriptorsEq
+      contexts callee.declaration importFound hostSatisfies importInBounds
+      contractFound parameterCount resultCount operation valueGlobal
+      valueStoreEq flagGlobal (by omega) resultFound resultKindAt targetSet
+      publicationOrdinary resultKindEq cacheFound cacheKindEq cacheDescriptorsEq
       publicationExternals publicationDispatch publicationDescriptors
   exact step.withCacheSetPublishedTable callee.cacheTable operation
     initializerFound signature publicationRuntimeEq
@@ -4199,16 +4245,18 @@ def DirectDeclarationCallImplementationWithCache
         .ok targetValue →
       findFVar? (functionBindings callerFunction) decl.fvarId =
         some resultIndex →
-      ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
+      ∃ calleeContext : Fir.Wasm.Context,
+        ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
           argumentTarget afterCall updated resultWitness physicalArgs
           resultKind physical,
-        targetValue = argumentTarget ++ [.call functionIndex] ∧
+        DeclarationContextsCoherent context calleeContext ∧
+          targetValue = argumentTarget ++ [.call functionIndex] ∧
           (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
             some resultKind ∧
           ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
             initial locals ∧
-          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
-            sourceModule calleeFunction module hostEnv sourceExternals
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+            calleeContext sourceModule calleeFunction module hostEnv sourceExternals
             sourceRuntime nextRuntime calleeEnv calleeCode targetFunction
             functionIndex initial afterCall initialWitness resultWitness
             physicalArgs.reverse resultKind sourceValue physical stepCost ∧
@@ -4253,10 +4301,10 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
     initialWitness supported stepFits invariant sourceStep valueCompiled
     valueAdapted resultFound
   rcases invariant with ⟨cacheInvariant, entryTransports⟩
-  obtain ⟨calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
-      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
-      resultKind, physical, targetEq, resultKindAt, assembled, callee,
-      targetSet, transfer⟩ :=
+  obtain ⟨calleeContext, calleeFunction, calleeEnv, calleeCode, targetFunction,
+      functionIndex, argumentTarget, afterCall, updated, resultWitness,
+      physicalArgs, resultKind, physical, _contexts, targetEq, resultKindAt,
+      assembled, callee, targetSet, transfer⟩ :=
     implementation supported sourceStep cacheInvariant valueCompiled
       valueAdapted resultFound
   subst targetValue
@@ -4384,14 +4432,17 @@ def DirectInternalCallDeclarationInduction
             ConstructorArgumentsRelated initialWitness
                 site.argumentKinds.toList physicalArgs
                 site.semanticArgs.toList →
-              ∃ calleeFunction targetFunction afterCall resultWitness physical,
-                BudgetedCapacityPreservingSuccessfulDeclarationWithCache
-                  context sourceModule calleeFunction targetModule.wasmModule
-                  hosts.env sourceExternals sourceRuntime nextRuntime
-                  site.calleeEnv site.calleeCode targetFunction functionIndex
-                  initial afterCall initialWitness resultWitness
-                  physicalArgs.reverse site.resultKind sourceValue physical
-                  stepCost
+              ∃ calleeContext : Fir.Wasm.Context,
+                ∃ calleeFunction targetFunction afterCall resultWitness
+                    physical,
+                  DeclarationContextsCoherent context calleeContext ∧
+                    BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                      calleeContext sourceModule calleeFunction
+                      targetModule.wasmModule hosts.env sourceExternals
+                      sourceRuntime nextRuntime site.calleeEnv site.calleeCode
+                      targetFunction functionIndex initial afterCall
+                      initialWitness resultWitness physicalArgs.reverse
+                      site.resultKind sourceValue physical stepCost
 
 /--
 Production compiler construction of the cache-aware direct-call law.
@@ -4457,8 +4508,8 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
       rw [resultFound] at alignedResultFound
       injection alignedResultFound with resultIndexEq
       subst alignedResultIndex
-      obtain ⟨calleeFunction, targetFunction, afterCall, resultWitness,
-          physical, callee⟩ :=
+      obtain ⟨calleeContext, calleeFunction, targetFunction, afterCall,
+          resultWitness, physical, contexts, callee⟩ :=
         declarations site sourceStep invariant callFound argumentsRelated
       obtain ⟨updated, targetSet, _⟩ :=
         invariant.1.1.1.2.2.1.set?
@@ -4468,10 +4519,10 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
           (nextWitness := resultWitness)
           (physical := physical) resultFound
       refine
-        ⟨calleeFunction, site.calleeEnv, site.calleeCode, targetFunction,
-          functionIndex, targetArguments, afterCall, updated, resultWitness,
-          physicalArgs, site.resultKind, physical, rfl, resultKindAt,
-          assembled, callee, targetSet, ?_⟩
+        ⟨calleeContext, calleeFunction, site.calleeEnv, site.calleeCode,
+          targetFunction, functionIndex, targetArguments, afterCall, updated,
+          resultWitness, physicalArgs, site.resultKind, physical, contexts,
+          rfl, resultKindAt, assembled, callee, targetSet, ?_⟩
       simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 /--
@@ -4486,6 +4537,7 @@ compiler-generated control prefix differs.
 theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {labels : List FVarId}
@@ -4544,7 +4596,7 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
       selected.targetBody =
         argumentTarget ++ [.call functionIndex, .localSet resultIndex])
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache calleeContext
         sourceModule calleeFunction module hostEnv sourceExternals
         sourceRuntime nextRuntime calleeEnv calleeCode targetFunction
         functionIndex initial afterCall initialWitness resultWitness
@@ -4651,6 +4703,7 @@ def SaturatedClosureCallImplementationWithCache
           (suffix : List
             (ClosureCandidateCase sourceModule callerFunction labels module
               spec initial closureId closureIndex address))
+          (calleeContext : Fir.Wasm.Context)
           (calleeFunction : Fir.Wasm.Function) (calleeEnv : Env)
           (calleeCode : LCNF.Code .impure)
           (targetFunction : Wasm.Function) (functionIndex : Nat)
@@ -4658,7 +4711,8 @@ def SaturatedClosureCallImplementationWithCache
           (updated : Wasm.Locals) (resultWitness : RefinementWitness)
           (physicalArgs : List Wasm.Value) (resultKind : AbiKind)
           (physical : Wasm.Value),
-        targetValue =
+        DeclarationContextsCoherent context calleeContext ∧
+          targetValue =
             resolvedClosureCandidateChain (before ++ selected :: suffix) ++
               [.localGet resultIndex] ∧
           (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
@@ -4675,12 +4729,12 @@ def SaturatedClosureCallImplementationWithCache
                           argumentTarget ++
                             [.call functionIndex, .localSet resultIndex] ∧
                         BudgetedCapacityPreservingSuccessfulDeclarationWithCache
-                            context sourceModule calleeFunction module hostEnv
-                            sourceExternals sourceRuntime nextRuntime calleeEnv
-                            calleeCode targetFunction functionIndex initial
-                            afterCall initialWitness resultWitness
-                            physicalArgs.reverse resultKind sourceValue physical
-                            stepCost ∧
+                            calleeContext sourceModule calleeFunction module
+                            hostEnv sourceExternals sourceRuntime nextRuntime
+                            calleeEnv calleeCode targetFunction functionIndex
+                            initial afterCall initialWitness resultWitness
+                            physicalArgs.reverse resultKind sourceValue
+                            physical stepCost ∧
                           locals.set? resultIndex physical = some updated ∧
                             reuseCapacityLetFacts? facts decl =
                               some
@@ -4726,9 +4780,10 @@ theorem
     valueAdapted resultFound
   rcases invariant with ⟨cacheInvariant, entryTransports⟩
   obtain ⟨closureId, closureIndex, address, before, selected, suffix,
-      calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
-      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
-      resultKind, physical, targetEq, resultKindAt, hClosure, hSat,
+      calleeContext, calleeFunction, calleeEnv, calleeCode, targetFunction,
+      functionIndex, argumentTarget, afterCall, updated, resultWitness,
+      physicalArgs, resultKind, physical, _contexts, targetEq, resultKindAt,
+      hClosure, hSat,
       beforeNonmatching, selectedMatches, assembled, selectedBodyEq, callee,
       targetSet, transfer⟩ :=
     implementation supported sourceStep cacheInvariant valueCompiled
@@ -5237,6 +5292,7 @@ def SaturatedClosureDispatchSelectionInduction
                   (ClosureCandidateCase sourceModule callerFunction labels
                     targetModule.wasmModule hosts.spec initial site.closureId
                     closureIndex address))
+                (calleeContext : Fir.Wasm.Context)
                 (calleeFunction : Fir.Wasm.Function) (calleeEnv : Env)
                 (calleeCode : LCNF.Code .impure)
                 (targetFunction : Wasm.Function) (functionIndex : Nat)
@@ -5244,7 +5300,8 @@ def SaturatedClosureDispatchSelectionInduction
                 (afterCall : Wasm.Store Host) (updated : Wasm.Locals)
                 (resultWitness : RefinementWitness)
                 (physicalArgs : List Wasm.Value) (physical : Wasm.Value),
-              context.program.decls.toList.flatMap (fun target =>
+              DeclarationContextsCoherent context calleeContext ∧
+                context.program.decls.toList.flatMap (fun target =>
                   compileClosureCandidatesForTarget decl.fvarId site.closureId
                     site.resultKind site.argumentCode site.argumentKinds
                     target) =
@@ -5260,7 +5317,7 @@ def SaturatedClosureDispatchSelectionInduction
                             argumentTarget ++
                               [.call functionIndex, .localSet resultIndex] ∧
                           BudgetedCapacityPreservingSuccessfulDeclarationWithCache
-                              context sourceModule calleeFunction
+                              calleeContext sourceModule calleeFunction
                               targetModule.wasmModule hosts.env sourceExternals
                               sourceRuntime nextRuntime calleeEnv calleeCode
                               targetFunction functionIndex initial afterCall
@@ -5332,20 +5389,22 @@ def SaturatedClosureCandidateResolutionInduction
                   (resolution.function == candidate.function &&
                     resolution.arity == candidate.arity &&
                     resolution.captures.size == candidate.fixed) = true →
-                    ∃ (calleeFunction : Fir.Wasm.Function)
+                    ∃ (calleeContext : Fir.Wasm.Context)
+                        (calleeFunction : Fir.Wasm.Function)
                         (targetFunction : Wasm.Function) (functionIndex : Nat)
                         (argumentTarget : Wasm.Program)
                         (afterCall : Wasm.Store Host) (updated : Wasm.Locals)
                         (resultWitness : RefinementWitness)
                         (physicalArgs : List Wasm.Value)
                         (physical : Wasm.Value),
-                      ClosureArgumentAssembly targetModule.wasmModule hosts.env
+                      DeclarationContextsCoherent context calleeContext ∧
+                        ClosureArgumentAssembly targetModule.wasmModule hosts.env
                           argumentTarget physicalArgs initial locals ∧
                         candidate.targetBody =
                             argumentTarget ++
                               [.call functionIndex, .localSet resultIndex] ∧
                           BudgetedCapacityPreservingSuccessfulDeclarationWithCache
-                              context sourceModule calleeFunction
+                              calleeContext sourceModule calleeFunction
                               targetModule.wasmModule hosts.env sourceExternals
                               sourceRuntime nextRuntime resolution.calleeEnv
                               resolution.calleeCode targetFunction
@@ -5396,18 +5455,19 @@ theorem SaturatedClosureCandidateResolutionInduction.toSelection
   have selectedMem : selected ∈ candidates := by
     rw [candidatesSplit]
     simp
-  obtain ⟨calleeFunction, targetFunction, functionIndex, argumentTarget,
-      afterCall, updated, resultWitness, physicalArgs, physical, assembled,
-      selectedBodyEq, callee, targetSet⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, functionIndex,
+      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
+      physical, contexts, assembled, selectedBodyEq, callee, targetSet⟩ :=
     selectedImplementation selected selectedMem selectedIdentity
   have generatedEq := candidatesEq
   rw [candidatesSplit] at generatedEq
   exact
-    ⟨address, before, selected, suffix, calleeFunction,
+    ⟨address, before, selected, suffix, calleeContext, calleeFunction,
       resolution.calleeEnv, resolution.calleeCode, targetFunction,
       functionIndex, argumentTarget, afterCall, updated, resultWitness,
-      physicalArgs, physical, generatedEq, hClosure, beforeNonmatching,
-      selectedMatches, assembled, selectedBodyEq, callee, targetSet⟩
+      physicalArgs, physical, contexts, generatedEq, hClosure,
+      beforeNonmatching, selectedMatches, assembled, selectedBodyEq, callee,
+      targetSet⟩
 
 /--
 Production compiler construction of the saturated closure-dispatch call law.
@@ -5465,11 +5525,11 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
       rw [resultFound] at alignedResultFound
       injection alignedResultFound with resultIndexEq
       subst alignedResultIndex
-      obtain ⟨address, before, selected, suffix, calleeFunction, calleeEnv,
-          calleeCode, targetFunction, functionIndex, argumentTarget, afterCall,
-          updated, resultWitness, physicalArgs, physical, candidatesEq,
-          hClosure, beforeNonmatching, selectedMatches, assembled,
-          selectedBodyEq, callee, targetSet⟩ :=
+      obtain ⟨address, before, selected, suffix, calleeContext, calleeFunction,
+          calleeEnv, calleeCode, targetFunction, functionIndex, argumentTarget,
+          afterCall, updated, resultWitness, physicalArgs, physical, contexts,
+          candidatesEq, hClosure, beforeNonmatching, selectedMatches,
+          assembled, selectedBodyEq, callee, targetSet⟩ :=
         selection site resolution sourceStep invariant closureFound resultFound
       have dispatchAdapted :
           instructions sourceModule callerFunction labels
@@ -5489,11 +5549,11 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
         exact (Except.ok.inj valueAdapted).symm
       refine
         ⟨site.closureId, closureIndex, address, before, selected, suffix,
-          calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
-          argumentTarget, afterCall, updated, resultWitness, physicalArgs,
-          site.resultKind, physical, targetEq, resultKindAt, hClosure,
-          spec.hostsSatisfy, beforeNonmatching, selectedMatches, assembled,
-          selectedBodyEq, callee, targetSet, ?_⟩
+          calleeContext, calleeFunction, calleeEnv, calleeCode, targetFunction,
+          functionIndex, argumentTarget, afterCall, updated, resultWitness,
+          physicalArgs, site.resultKind, physical, contexts, targetEq,
+          resultKindAt, hClosure, spec.hostsSatisfy, beforeNonmatching,
+          selectedMatches, assembled, selectedBodyEq, callee, targetSet, ?_⟩
       simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 /--
@@ -5686,6 +5746,7 @@ theorem
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {calleeCode : LCNF.Code .impure}
@@ -5728,8 +5789,9 @@ theorem
       context.program.findDecl? declaration = some sourceDeclaration)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
+    (contexts : DeclarationContextsCoherent context calleeContext)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache calleeContext
         sourceModule calleeFunction module hostEnv sourceExternals
         sourceRuntime callRuntime [] calleeCode targetFunction declarationId
         initial afterCall initialWitness callWitness [] resultKind sourceValue
@@ -5838,11 +5900,11 @@ theorem
   obtain ⟨step, nextCache⟩ :=
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
       sourceStep declValue initialRelated.1 initialCache generated kindEq cacheEq
-      declarationFound declarationParams declarationBody callee importFound
-      hostSatisfies importInBounds contractFound parameterCount resultCount
-      operationEq valueAfterCache valueStoreEq flagAfterValue resultFound
-      resultKindAt targetSet publicationOrdinary resultKindEq cacheFound
-      cacheKindEq cacheDescriptorsEq publicationExternals
+      declarationFound declarationParams declarationBody contexts callee
+      importFound hostSatisfies importInBounds contractFound parameterCount
+      resultCount operationEq valueAfterCache valueStoreEq flagAfterValue
+      resultFound resultKindAt targetSet publicationOrdinary resultKindEq
+      cacheFound cacheKindEq cacheDescriptorsEq publicationExternals
       publicationDispatch publicationDescriptors
   exact ⟨nextStore, nextLocals, step, nextCache⟩
 
@@ -5923,16 +5985,18 @@ def LazyCacheInternalMissInduction
     (stepCost : Nat) : Prop :=
   ∀ {declarationId : Nat},
     callIndex? sourceModule (.declaration declaration) = some declarationId →
-      ∃ calleeFunction targetFunction callRuntime afterCall callWitness
-          physical,
-        BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
-            sourceModule calleeFunction module hostEnv sourceExternals
-            sourceRuntime callRuntime [] calleeCode targetFunction
-            declarationId initial afterCall initialWitness callWitness []
-            resultKind sourceValue physical stepCost ∧
-          ReuseTokenOrdinaryBindTransport facts resultId callRuntime
-            (callRuntime.setGlobal declaration sourceValue) sourceEnv
-            sourceValue
+      ∃ calleeContext : Fir.Wasm.Context,
+        ∃ calleeFunction targetFunction callRuntime afterCall callWitness
+            physical,
+          DeclarationContextsCoherent context calleeContext ∧
+            BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                calleeContext sourceModule calleeFunction module hostEnv
+                sourceExternals sourceRuntime callRuntime [] calleeCode
+                targetFunction declarationId initial afterCall initialWitness
+                callWitness [] resultKind sourceValue physical stepCost ∧
+              ReuseTokenOrdinaryBindTransport facts resultId callRuntime
+                (callRuntime.setGlobal declaration sourceValue) sourceEnv
+                sourceValue
 
 /--
 Hereditary declaration selection parameterized by one source-runtime
@@ -5960,14 +6024,16 @@ def LazyCacheInternalCalleeInduction
     (Post : RuntimeState → Prop) : Prop :=
   ∀ {declarationId : Nat},
     callIndex? sourceModule (.declaration declaration) = some declarationId →
-      ∃ calleeFunction targetFunction callRuntime afterCall callWitness
-          physical,
-        BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
-            sourceModule calleeFunction module hostEnv sourceExternals
-            sourceRuntime callRuntime [] calleeCode targetFunction
-            declarationId initial afterCall initialWitness callWitness []
-            resultKind sourceValue physical stepCost ∧
-          Post callRuntime
+      ∃ calleeContext : Fir.Wasm.Context,
+        ∃ calleeFunction targetFunction callRuntime afterCall callWitness
+            physical,
+          DeclarationContextsCoherent context calleeContext ∧
+            BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+                calleeContext sourceModule calleeFunction module hostEnv
+                sourceExternals sourceRuntime callRuntime [] calleeCode
+                targetFunction declarationId initial afterCall initialWitness
+                callWitness [] resultKind sourceValue physical stepCost ∧
+              Post callRuntime
 
 /-- Preferred recursive cache-miss boundary: the hereditary callee result is
 paired with reachability disjointness at its exact semantic post-state. -/
@@ -6039,11 +6105,11 @@ theorem LazyCacheInternalPublicationInduction.toMissInduction
       sourceExternals facts sourceRuntime sourceEnv resultId declaration
       calleeCode resultKind initial initialWitness sourceValue stepCost := by
   intro declarationId declarationCall
-  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-      physical, callee, disjoint⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
+      afterCall, callWitness, physical, contexts, callee, disjoint⟩ :=
     induction declarationCall
-  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-    physical, callee,
+  exact ⟨calleeContext, calleeFunction, targetFunction, callRuntime, afterCall,
+    callWitness, physical, contexts, callee,
     ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration
       disjoint⟩
 
@@ -6075,11 +6141,11 @@ theorem
       sourceExternals facts sourceRuntime sourceEnv declaration calleeCode
       resultKind initial initialWitness sourceValue stepCost := by
   intro declarationId declarationCall
-  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-      physical, callee, _⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
+      afterCall, callWitness, physical, contexts, callee, _⟩ :=
     induction declarationCall
-  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-    physical, callee,
+  exact ⟨calleeContext, calleeFunction, targetFunction, callRuntime, afterCall,
+    callWitness, physical, contexts, callee,
     ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap⟩
 
 /--
@@ -6118,14 +6184,14 @@ theorem
       sourceExternals facts sourceRuntime sourceEnv declaration calleeCode
       resultKind initial initialWitness sourceValue stepCost := by
   intro declarationId declarationCall
-  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-      physical, callee, _⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
+      afterCall, callWitness, physical, contexts, callee, _⟩ :=
     induction declarationCall
   have nonHeap : IsNonHeapReference sourceValue :=
     callee.declaration.capacityPreserving.successful.valueRelated
       |>.isNonHeapReference_of_kind notObject notTObject
-  exact ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-    physical, callee,
+  exact ⟨calleeContext, calleeFunction, targetFunction, callRuntime, afterCall,
+    callWitness, physical, contexts, callee,
     ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap⟩
 
 /--
@@ -6209,8 +6275,9 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
     compileCachedLetValue_adapted_inv context sourceModule callerFunction
       labels decl declaration sourceDeclaration resultKind valueCode
       targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
-  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-      physical, callee, publicationOrdinary⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
+      afterCall, callWitness, physical, contexts, callee,
+      publicationOrdinary⟩ :=
     induction declarationCall
   obtain ⟨imp, importFound, importInBounds, contractFound, parameterCount,
       resultCount⟩ :=
@@ -6225,7 +6292,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
   obtain ⟨nextStore, nextLocals, step, nextCache⟩ :=
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
       sourceStep valueEq invariant generated kindEq cacheEq targetEq
-      declarationParams bodyEq callee importFound spec.hostsSatisfy
+      declarationParams bodyEq contexts callee importFound spec.hostsSatisfy
       importInBounds contractFound parameterCount resultCount resultFound
       resultKindAt publicationOrdinary rfl
   refine
@@ -6291,8 +6358,8 @@ theorem
     compileCachedLetValue_adapted_inv context sourceModule callerFunction
       labels decl declaration sourceDeclaration resultKind valueCode
       targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
-  obtain ⟨calleeFunction, targetFunction, callRuntime, afterCall, callWitness,
-      physical, callee, hereditaryPost⟩ :=
+  obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
+      afterCall, callWitness, physical, contexts, callee, hereditaryPost⟩ :=
     induction declarationCall
   have declarationParams : sourceDeclaration.params = #[] :=
     Array.isEmpty_iff.mp paramsEq
@@ -6300,7 +6367,8 @@ theorem
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee valueEq targetEq
       declarationParams bodyEq sourceStep
-      callee.declaration.capacityPreserving.successful.sourceResult).2
+      (contexts.sourceCodeResult
+        callee.declaration.capacityPreserving.successful.sourceResult)).2
   have nonHeap : IsNonHeapReference sourceValue :=
     callee.declaration.capacityPreserving.successful.valueRelated
       |>.isNonHeapReference_of_kind notObject notTObject

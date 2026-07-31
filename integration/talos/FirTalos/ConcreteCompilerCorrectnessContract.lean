@@ -3795,6 +3795,28 @@ example
     externals
 
 /--
+Recursive declarations may have different local layouts while still belonging
+to one generated module. The public coherence boundary transports exact source
+execution through their shared program without equating `localKinds` or
+`joins`.
+-/
+example
+    {callerContext calleeContext : Fir.Wasm.Context}
+    (contexts :
+      DeclarationContextsCoherent callerContext calleeContext)
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    (result :
+      SourceCodeResult calleeContext sourceExternals sourceRuntime sourceEnv
+        sourceCode resultRuntime sourceValue) :
+    SourceCodeResult callerContext sourceExternals sourceRuntime sourceEnv
+      sourceCode resultRuntime sourceValue :=
+  contexts.sourceCodeResult result
+
+/--
 A cache-aware direct-declaration implementation supplies the interprocedural
 call premise over the same fixed-entry cache frame. Its recursive callee
 returns the evolved cache table; no unchanged-global adapter is involved.

@@ -5523,6 +5523,24 @@ changing execution or cache state. This fixes
 the recursive hereditary declaration family from generated declarations and
 uses these packages in named and saturated calls.
 
+W6.6hh removes an accidental shared-context premise from that recursive
+boundary. `lowerDecl` computes `localKinds` and transient `joins` separately
+for every declaration, so a callee package cannot in general be indexed by
+the caller's compiler context. `DeclarationContextsCoherent` now records only
+the genuinely module-wide fields—the source program and lazy-cache declaration
+table—and direct named calls, saturated closure dispatch, and internal lazy
+misses existentially return their callee's coherent declaration context.
+
+Exact source execution transports between coherent contexts because canonical
+source machine states observe only `context.program`; the callee's target
+`CodeWP`, local alignment, and compiler adaptation remain at its own context.
+This fixes
+`FIR-BUG-wasm-none-recursive-callee-context-aliasing`. The next recursive slice
+must build each `ConcreteSupportedDeclaration` and its context from the actual
+`lowerDecl`/adapter function row, prove the coherence fields, and feed the
+result into the hereditary declaration package. It must not recover the old
+interface by equating declaration-local kinds or joins.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

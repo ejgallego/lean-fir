@@ -393,6 +393,7 @@ the checked caller-local write plus the two frame transports required by
 theorem ReuseCapacityCallLetStepSimulates.ofDirectDeclaration
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -426,7 +427,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofDirectDeclaration
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
     (callee :
-      CapacityPreservingSuccessfulDeclaration context sourceModule
+      CapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness resultWitness physicalArgs.reverse resultKind sourceValue
@@ -466,6 +467,7 @@ theorem
     ConcreteReuseCapacityPureExternalOwnershipFrame.ofBudgetedCallStepExact
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -495,7 +497,7 @@ theorem
         nextRuntime sourceEnv sourceValue initial afterCall locals updated
         resultIndex initialWitness resultWitness)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+      BudgetedCapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness resultWitness parameters resultKind sourceValue physical
@@ -566,6 +568,7 @@ theorem
     ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCallExact
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -601,7 +604,7 @@ theorem
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+      BudgetedCapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness resultWitness physicalArgs.reverse resultKind sourceValue
@@ -682,6 +685,7 @@ theorem
     ConcreteReuseCapacityPureExternalOwnershipFrame.ofDirectDeclarationCall
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {module : Wasm.Module}
@@ -717,7 +721,7 @@ theorem
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
     (callee :
-      BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
+      BudgetedCapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness resultWitness physicalArgs.reverse resultKind sourceValue
@@ -795,7 +799,8 @@ def DirectDeclarationCallImplementation
         .ok targetValue →
       findFVar? (functionBindings callerFunction) decl.fvarId =
         some resultIndex →
-      ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
+      ∃ calleeContext : Fir.Wasm.Context,
+        ∃ calleeFunction calleeEnv calleeCode targetFunction functionIndex
           argumentTarget afterCall updated resultWitness physicalArgs
           resultKind physical,
         targetValue = argumentTarget ++ [.call functionIndex] ∧
@@ -803,8 +808,8 @@ def DirectDeclarationCallImplementation
             some resultKind ∧
           ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
             initial locals ∧
-          BudgetedCapacityPreservingSuccessfulDeclaration context sourceModule
-            calleeFunction module hostEnv sourceExternals sourceRuntime
+          BudgetedCapacityPreservingSuccessfulDeclaration calleeContext
+            sourceModule calleeFunction module hostEnv sourceExternals sourceRuntime
             nextRuntime calleeEnv calleeCode targetFunction functionIndex
             initial afterCall initialWitness resultWitness physicalArgs.reverse
             resultKind sourceValue physical stepCost ∧
@@ -842,10 +847,10 @@ theorem DirectDeclarationCallImplementation.runtimeRefines
     valueCode targetValue initial locals resultIndex remainingBytes stepCost
     initialWitness supported stepFits invariant sourceStep valueCompiled
     valueAdapted resultFound
-  obtain ⟨calleeFunction, calleeEnv, calleeCode, targetFunction, functionIndex,
-      argumentTarget, afterCall, updated, resultWitness, physicalArgs,
-      resultKind, physical, targetEq, resultKindAt, assembled, callee,
-      targetSet, transfer⟩ :=
+  obtain ⟨calleeContext, calleeFunction, calleeEnv, calleeCode, targetFunction,
+      functionIndex, argumentTarget, afterCall, updated, resultWitness,
+      physicalArgs, resultKind, physical, targetEq, resultKindAt, assembled,
+      callee, targetSet, transfer⟩ :=
     implementation supported sourceStep invariant.1.1.1 valueCompiled
       valueAdapted resultFound
   subst targetValue
@@ -863,6 +868,7 @@ dispatch reload and enclosing `let` write is discharged by
 theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
     {facts : ReuseCapacityFacts}
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {labels : List FVarId}
@@ -919,7 +925,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
       selected.targetBody =
         argumentTarget ++ [.call functionIndex, .localSet resultIndex])
     (callee :
-      CapacityPreservingSuccessfulDeclaration context sourceModule
+      CapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness resultWitness physicalArgs.reverse resultKind sourceValue
@@ -1078,6 +1084,7 @@ transfer, while the callee frame theorem preserves every differently named
 caller fact. -/
 theorem ReuseCapacityCodeSimulation.callLetOfDirectDeclaration
     {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {callerFunction calleeFunction : Fir.Wasm.Function}
     {labels : List FVarId} {module : Wasm.Module}
@@ -1124,7 +1131,7 @@ theorem ReuseCapacityCodeSimulation.callLetOfDirectDeclaration
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
     (callee :
-      CapacityPreservingSuccessfulDeclaration context sourceModule
+      CapacityPreservingSuccessfulDeclaration calleeContext sourceModule
         calleeFunction module hostEnv sourceExternals sourceRuntime nextRuntime
         calleeEnv calleeCode targetFunction functionIndex initial afterCall
         initialWitness callWitness physicalArgs.reverse callResultKind
