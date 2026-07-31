@@ -1773,13 +1773,19 @@ the existing nullary-`.fap` semantic discrepancy.
    target-state case analyses and concrete target-runtime rewrites are gone.
    Source-only closure and reset-token provenance are generalized over an
    arbitrary target-ledger frontier.
-   The next structural gap is static initialization and preservation:
-   arbitrary checked compiler entries must derive these local
-   typing/ownership/readiness facts without finite execution-graph
-   enumeration. Replace the remaining target-reachability premise of the
-   relation-to-shape theorem with a step-preserved allocation-budget/control
-   invariant, then lift the same local-shape interface from this fixture to
-   arbitrary checked reset/reuse residuals.
+   Commit `f5814ec6` removes the retained-prefix target execution graph from
+   both exact contracts.  A three-phase allocation/control invariant covers
+   declaration entry, the sole retained allocation, and an abstract
+   post-allocation phase.  The latter retains only the live binding,
+   allocation frontier, and terminal control/frame facts needed to prove that
+   return, cache, and attempted application cannot allocate again.  Its step
+   law is proved directly from those fields, and reset/reuse shape extraction
+   no longer accepts a finite target-reachability premise.
+   The next structural gap is generalization beyond the fixture: parameterize
+   the post-allocation interface by the retained binding, owner location, and
+   frontier; derive it from exact checked compiler residuals; then replace the
+   remaining finite source reset/reuse classification with generic local
+   operation-shape and ownership premises.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
