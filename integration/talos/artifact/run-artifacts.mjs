@@ -4,6 +4,9 @@ import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  encodeManifestArgument,
+  manifestEntryName,
+  observeManifestResult,
   SemanticFault,
   SemanticHost,
   manifestValue,
@@ -20,19 +23,21 @@ export async function runArtifact(manifestPath) {
 
   const host = new SemanticHost(manifest.initialRuntime, artifactExternalRegistry);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-  const entry = instance.exports[manifest.entry];
-  assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
+  const entryName = manifestEntryName(manifest);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `missing exported entry ${entryName}`);
   assert.ok(Array.isArray(manifest.params), `${manifest.fixture} manifest params must be an array`);
   assert.ok(Array.isArray(manifest.arguments),
     `${manifest.fixture} manifest arguments must be an array`);
   assert.equal(manifest.params.length, manifest.arguments.length,
     `${manifest.fixture} manifest argument arity mismatch`);
-  const physicalArgs = manifest.params.map((kind, index) =>
-    host.encode(kind, manifestValue(manifest.arguments[index])));
+  const physicalArgs = manifest.params.map((_kind, index) =>
+    encodeManifestArgument(host, manifest, index,
+      manifestValue(manifest.arguments[index])));
   let actual;
   try {
     const physicalResult = entry(...physicalArgs);
-    actual = host.observation(manifest.result, physicalResult);
+    actual = observeManifestResult(host, manifest, physicalResult);
   } catch (error) {
     if (!(error instanceof SemanticFault)) {
       throw error;

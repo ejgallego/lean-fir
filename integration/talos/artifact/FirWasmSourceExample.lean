@@ -175,12 +175,18 @@ end Fir.Wasm.Emit.SourceFixture
   to "_build/source-uint64-id.wasm"
 
 #fir_wasm_emit Fir.Wasm.Emit.SourceFixture.idFloat32 with
-    [float32Bits(2143363909)]
+    [float32Bits(2141266757)]
   to "_build/source-float32-id.wasm"
 
+#fir_wasm_emit_module Fir.Wasm.Emit.SourceFixture.idFloat32
+  to "_build/source-float32-id-module.wasm"
+
 #fir_wasm_emit Fir.Wasm.Emit.SourceFixture.idFloat64 with
-    [float64Bits(9223372036854775808)]
+    [float64Bits(9219188693200907213)]
   to "_build/source-float64-id.wasm"
+
+#fir_wasm_emit_module Fir.Wasm.Emit.SourceFixture.idFloat64
+  to "_build/source-float64-id-module.wasm"
 
 #fir_wasm_emit Fir.Wasm.Emit.SourceFixture.acceptString with [string("hello α_world_β")]
   to "_build/source-string-input.wasm"

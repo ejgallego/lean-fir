@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-js-float-signaling-nan-transport
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-07-30
 reproduction: integration/talos/artifact/test-concrete-floats.mjs
-regression: none
+regression: integration/talos/artifact/test-concrete-floats.mjs
 ---
 
 # Summary
@@ -77,4 +77,15 @@ none
 
 ## Resolution and regression
 
-unresolved
+The source compiler now exports a canonical integer-lane facade for every
+entry with a Float32 or Float parameter/result and records it in the
+version-1 `bitExactFloatTransport` manifest capability. Shared consumers
+validate that capability, pass Float32/Float bits through `i32`/`i64`, and
+reinterpret only inside Wasm.
+
+`test-concrete-floats.mjs` executes positive and negative signaling NaNs,
+quiet NaNs, signed zeros, infinities, and maximal payloads through the generated
+facades. The canonical invocation probes use `0x7fa12345` and
+`0x7ff123456789abcd`; the Node module client and Chrome concrete-corpus Worker
+both preserve those exact payloads. Missing, malformed, unknown, and
+schema-mismatched capabilities fail closed.

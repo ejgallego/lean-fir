@@ -138,6 +138,10 @@ for resident_pretty in "${resident_pretties[@]}"; do
 done
 cmp _build/source-usize-id-module.wasm _build/source-usize-id.wasm
 cmp _build/source-usize-id-module.wasm.lcnf _build/source-usize-id.wasm.lcnf
+cmp _build/source-float32-id-module.wasm _build/source-float32-id.wasm
+cmp _build/source-float32-id-module.wasm.lcnf _build/source-float32-id.wasm.lcnf
+cmp _build/source-float64-id-module.wasm _build/source-float64-id.wasm
+cmp _build/source-float64-id-module.wasm.lcnf _build/source-float64-id.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm _build/source-pretty-format.wasm
 cmp _build/source-pretty-format-module.wasm.lcnf _build/source-pretty-format.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
@@ -381,7 +385,9 @@ node call-concrete-pretty-format.mjs \
 ./package-pretty-format.sh --no-build
 node test-module-client.mjs \
   _build/source-usize-id-module.wasm \
-  _build/source-usize-id.wasm
+  _build/source-usize-id.wasm \
+  _build/source-float32-id-module.wasm \
+  _build/source-float64-id-module.wasm
 node test-module-fetch.mjs _build/source-usize-id-module.wasm
 node test-semantic-host.mjs
 node test-concrete-closure-dispatch.mjs

@@ -332,8 +332,9 @@ module without attaching a sample invocation:
 Its JSON descriptor contains only `sourceEntry`, exported `entry`, `params`,
 `result`, and the exact semantic-host `imports`. It deliberately has no
 `fixture`, `arguments`, or `initialRuntime`; those remain invocation-manifest
-fields for reproducible corpus runs. Module-only and invocation-bearing
-emission produce identical `.wasm` and `.lcnf` files.
+fields for reproducible corpus runs. A floating signature additionally carries
+the versioned `bitExactFloatTransport` capability described below. Module-only
+and invocation-bearing emission produce identical `.wasm` and `.lcnf` files.
 
 The command writes `answer.wasm`, the Node-compatible ABI manifest
 `answer.wasm.json`, and the captured final-impure program
@@ -345,16 +346,20 @@ the module or captured LCNF. The command accepts `erased`, `tagged(n)`,
 `natList([…])`, with range and schema checks before compilation. The two float
 forms take unsigned decimal IEEE-754 bit patterns rather than JavaScript or
 Lean decimal floating-point literals; this preserves signed zero, infinities,
-subnormals, and quiet-NaN payloads in the invocation manifest. Join-point-
-bearing source programs remain an explicit fragment follow-up even when their
-individual runtime operations are supported.
+subnormals, and both quiet- and signaling-NaN payloads in the invocation
+manifest. Join-point-bearing source programs remain an explicit fragment
+follow-up even when their individual runtime operations are supported.
 
 The lane-local source fixture executes compiler-produced identity declarations
 for `UInt8`, `UInt16`, `UInt32`, `UInt64`, `USize`, `Float32`, and `Float` at
-selected exact-bit boundaries, including a noncanonical quiet-NaN payload and
-negative zero. The Node runner derives every physical argument from the
-manifest and normalizes each WebAssembly result back to the declared semantic
-width before comparison.
+selected exact-bit boundaries. The canonical Float32 and Float invocation
+artifacts use signaling-NaN payloads `0x7fa12345` and
+`0x7ff123456789abcd`; the wider Node suite also covers both signed zeros,
+infinities, subnormals, quiet NaNs, and maximal payloads. The generated module
+retains its source floating export and adds a canonical integer-lane facade.
+Its `bitExactFloatTransport` descriptor maps Float32 to `uint32` and Float to
+`uint64`; the facade reinterprets those bits inside Wasm, so JavaScript never
+coerces them through `number`.
 The source checks additionally execute Lean 4.32's compiler-produced small
 `Nat` literal, reconstruct a Unicode string and a list containing a natural
 above the tagged-immediate range, then execute the list classifier through the
@@ -755,17 +760,23 @@ node call-concrete-pretty-format-invocation.mjs \
 accepts Wasm bytes, the parsed invocation-free descriptor, and a caller-owned
 semantic ABI host; `fetchModuleArtifact` obtains the first two inputs through
 the web-standard Fetch API. `node-module-client.mjs` is the small filesystem
-wrapper that creates the repository's `SemanticHost`. Both return the raw
-exported function and deliberately avoid creating source-language values or a
-function-specific API. The caller continues to allocate runtime values in the
-host and use `host.encode`/`host.decode` with the descriptor's ABI kinds.
+wrapper that creates the repository's `SemanticHost`. Both return the selected
+low-level exported function and deliberately avoid creating source-language
+values or a function-specific API. For non-floating signatures this is
+`manifest.entry`. For floating signatures the loader validates and selects the
+integer-lane entry in `bitExactFloatTransport`, failing closed on missing,
+unknown, or mismatched capability fields. The caller continues to allocate
+runtime values in the host and uses the shared manifest codecs rather than
+performing JavaScript floating-point conversion.
 
 For a fetch-capable JavaScript environment with a compatible semantic host:
 
 ```js
-const { manifest, entry } = await fetchModuleArtifact("pretty.wasm", { host });
-const physicalResult = entry(...physicalArguments);
-const result = host.decode(manifest.result, physicalResult);
+const { manifest, entry } = await fetchModuleArtifact("module.wasm", { host });
+const physicalArgument =
+  encodeManifestArgument(host, manifest, 0, semanticArgument);
+const physicalResult = entry(physicalArgument);
+const result = decodeManifestResult(host, manifest, physicalResult);
 ```
 
 The shipped semantic host and Format external registry are also free of Node

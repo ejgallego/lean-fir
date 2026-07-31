@@ -185,6 +185,52 @@ run_cmd do
 
 run_cmd do
   let result ← liftCoreM <|
+    compileModule ``idFloat32Fixture
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "Float facade fail-closed fixture did not compile: {repr error}"
+  let facade := Fir.Wasm.Emit.BitExactFloat.facadeName
+    ``idFloat32Fixture
+  let missingExport := {
+    artifact with
+    module := { artifact.module with exports := #[``idFloat32Fixture] } }
+  match missingExport.moduleManifest with
+  | .error (.manifest message) =>
+      unless message.contains "is not exported" do
+        throwError "missing Float facade reported the wrong error: {message}"
+  | .error error =>
+      throwError "missing Float facade reported the wrong error kind: {repr error}"
+  | .ok descriptor =>
+      throwError "missing Float facade emitted a descriptor: {descriptor.compress}"
+  let malformedBody := {
+    artifact with
+    module := {
+      artifact.module with
+      functions := artifact.module.functions.map fun
+          (function : Fir.Wasm.Function) =>
+        if function.name == facade then
+          { function with body := [Fir.Wasm.Instruction.ret] }
+        else
+          function } }
+  match malformedBody.moduleManifest with
+  | .error (.manifest message) =>
+      unless message.contains "does not match its source signature" do
+        throwError "malformed Float facade reported the wrong error: {message}"
+  | .error error =>
+      throwError "malformed Float facade reported the wrong error kind: {repr error}"
+  | .ok descriptor =>
+      throwError "malformed Float facade emitted a descriptor: {descriptor.compress}"
+  match Fir.Wasm.Emit.BitExactFloat.install artifact.module
+      ``idFloat32Fixture with
+  | .error message =>
+      unless message.contains "already reserved" do
+        throwError "duplicate Float facade reported the wrong error: {message}"
+  | .ok _ =>
+      throwError "duplicate Float facade installation did not fail closed"
+
+run_cmd do
+  let result ← liftCoreM <|
     compileModule ``Fir.Validation.Corpus.Source.boxedUInt32
       #[``Fir.Validation.Corpus.Source.polyId]
   let artifact ← match result with

@@ -1780,8 +1780,7 @@ export class ConcreteHost {
     return seen;
   }
 
-  observation(resultKind, physicalResult) {
-    const value = this.decode(resultKind, physicalResult);
+  observationValue(value) {
     const reachable = this.reachableAddresses(value);
     return {
       outcome: { kind: "returned", value: this.valueJson(value) },
@@ -1800,6 +1799,10 @@ export class ConcreteHost {
       world: this.world,
       trace: this.trace,
     };
+  }
+
+  observation(resultKind, physicalResult) {
+    return this.observationValue(this.decode(resultKind, physicalResult));
   }
 
   faultObservation(fault) {

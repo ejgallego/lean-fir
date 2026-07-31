@@ -1,5 +1,12 @@
 import assert from "node:assert/strict";
+import { readFile } from "node:fs/promises";
 
+import {
+  decodeManifestResult,
+  encodeManifestArgument,
+  manifestEntryName,
+  validateBitExactFloatTransport,
+} from "../../../scripts/wasm_semantic_host.mjs";
 import {
   ConcreteFault,
   ConcreteHost,
@@ -39,6 +46,67 @@ for (const [kind, bits] of exactCases) {
   const host = new ConcreteHost([]);
   const physical = host.encode(kind, scalar(kind, bits));
   assert.deepStrictEqual(host.decode(kind, physical), scalar(kind, bits));
+}
+
+const facadeCases = Object.freeze({
+  float32: Object.freeze([
+    0x00000000n,
+    0x80000000n,
+    0x7f800000n,
+    0xff800000n,
+    0x7fc01234n,
+    0x7f800001n,
+    0x7fa12345n,
+    0xff800001n,
+    0xffffffffn,
+  ]),
+  float: Object.freeze([
+    0x0000000000000000n,
+    0x8000000000000000n,
+    0x7ff0000000000000n,
+    0xfff0000000000000n,
+    0x7ff8000000000042n,
+    0x7ff0000000000001n,
+    0x7ff123456789abcdn,
+    0xfff0000000000001n,
+    0xffffffffffffffffn,
+  ]),
+});
+
+for (const [kind, path] of [
+  ["float32", "_build/source-float32-id.wasm"],
+  ["float", "_build/source-float64-id.wasm"],
+]) {
+  const [bytes, manifestBytes] = await Promise.all([
+    readFile(path),
+    readFile(`${path}.json`),
+  ]);
+  const manifest = JSON.parse(manifestBytes.toString("utf8"));
+  const transport = validateBitExactFloatTransport(manifest);
+  assert.ok(transport, `${kind} source artifact has no exact-bit transport`);
+  assert.equal(transport.entry, manifestEntryName(manifest));
+  assert.deepStrictEqual(transport.params,
+    [kind === "float32" ? "uint32" : "uint64"]);
+  assert.equal(transport.result,
+    kind === "float32" ? "uint32" : "uint64");
+
+  const host = new ConcreteHost(manifest.imports, manifest.initialRuntime,
+    concreteValidationExternalRegistry, manifest.closureDispatch,
+    manifest.closureDescriptors);
+  const { instance } = await WebAssembly.instantiate(
+    bytes, host.imports(manifest.imports));
+  const entry = instance.exports[transport.entry];
+  assert.equal(typeof entry, "function",
+    `${kind} exact-bit facade is not exported`);
+  for (const bits of facadeCases[kind]) {
+    const physical = encodeManifestArgument(
+      host, manifest, 0, scalar(kind, bits));
+    assert.deepStrictEqual(
+      decodeManifestResult(host, manifest, entry(physical)),
+      scalar(kind, bits),
+      `${kind} facade changed payload 0x${bits.toString(16)}`,
+    );
+  }
 }
 
 for (const malformed of [
@@ -165,4 +233,5 @@ function invoke(host, declaration, params, result, args) {
   ]);
 }
 
-console.log("PASS concrete bit-exact Float32/Float manifest and runtime paths");
+console.log(
+  "PASS concrete bit-exact Float32/Float manifest, facade, and runtime paths");

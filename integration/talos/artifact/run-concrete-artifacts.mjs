@@ -4,6 +4,11 @@ import { basename, dirname, join } from "node:path";
 import { pathToFileURL } from "node:url";
 
 import {
+  encodeManifestArgument,
+  manifestEntryName,
+  observeManifestResult,
+} from "../../../scripts/wasm_semantic_host.mjs";
+import {
   ConcreteFault,
   ConcreteHost,
   concreteManifestValue,
@@ -28,15 +33,17 @@ export async function runConcreteArtifact(manifestPath) {
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-  const entry = instance.exports[manifest.entry];
-  assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
+  const entryName = manifestEntryName(manifest);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `missing exported entry ${entryName}`);
   assert.equal(manifest.params.length, manifest.arguments.length,
     `${manifest.fixture} manifest argument arity mismatch`);
-  const physicalArgs = manifest.params.map((kind, index) =>
-    host.encode(kind, concreteManifestValue(manifest.arguments[index])));
+  const physicalArgs = manifest.params.map((_kind, index) =>
+    encodeManifestArgument(host, manifest, index,
+      concreteManifestValue(manifest.arguments[index])));
   let actual;
   try {
-    actual = host.observation(manifest.result, entry(...physicalArgs));
+    actual = observeManifestResult(host, manifest, entry(...physicalArgs));
   } catch (error) {
     if (!(error instanceof ConcreteFault)) throw error;
     actual = host.faultObservation(error.fault);
@@ -69,7 +76,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {
-      instance.exports[manifest.entry]();
+      instance.exports[manifestEntryName(manifest)]();
       actual = undefined;
     } catch (error) {
       if (!(error instanceof ConcreteFault)) throw error;
@@ -89,7 +96,7 @@ export async function runConcreteArtifactDirectory(artifactDirectory) {
     const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
     let actual;
     try {
-      instance.exports[manifest.entry]();
+      instance.exports[manifestEntryName(manifest)]();
       actual = undefined;
     } catch (error) {
       if (!(error instanceof ConcreteFault)) throw error;

@@ -1,6 +1,11 @@
 import assert from "../../../scripts/wasm_assert.mjs";
 
 import {
+  encodeManifestArgument,
+  manifestEntryName,
+  observeManifestResult,
+} from "../../../scripts/wasm_semantic_host.mjs";
+import {
   ConcreteFault,
   ConcreteHost,
   concreteManifestValue,
@@ -46,15 +51,17 @@ async function runConcreteArtifact(fixture) {
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
-  const entry = instance.exports[manifest.entry];
-  assert.equal(typeof entry, "function", `missing exported entry ${manifest.entry}`);
+  const entryName = manifestEntryName(manifest);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `missing exported entry ${entryName}`);
   assert.equal(manifest.params.length, manifest.arguments.length,
     `${fixture} manifest argument arity mismatch`);
-  const physicalArgs = manifest.params.map((kind, index) =>
-    host.encode(kind, concreteManifestValue(manifest.arguments[index])));
+  const physicalArgs = manifest.params.map((_kind, index) =>
+    encodeManifestArgument(host, manifest, index,
+      concreteManifestValue(manifest.arguments[index])));
   let actual;
   try {
-    actual = host.observation(manifest.result, entry(...physicalArgs));
+    actual = observeManifestResult(host, manifest, entry(...physicalArgs));
   } catch (error) {
     if (!(error instanceof ConcreteFault)) throw error;
     actual = host.faultObservation(error.fault);
@@ -85,7 +92,7 @@ async function checkExpectedFault(fixture, expectedFault) {
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   let actual;
   try {
-    instance.exports[manifest.entry]();
+    instance.exports[manifestEntryName(manifest)]();
     actual = undefined;
   } catch (error) {
     if (!(error instanceof ConcreteFault)) throw error;
@@ -103,7 +110,7 @@ async function checkDefaultExternalFault(fixture, expectedFault) {
   const { instance } = await WebAssembly.instantiate(bytes, host.imports(manifest.imports));
   let actual;
   try {
-    instance.exports[manifest.entry]();
+    instance.exports[manifestEntryName(manifest)]();
     actual = undefined;
   } catch (error) {
     if (!(error instanceof ConcreteFault)) throw error;

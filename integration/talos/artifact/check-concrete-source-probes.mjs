@@ -1,5 +1,11 @@
 import assert from "../../../scripts/wasm_assert.mjs";
 
+import {
+  decodeManifestResult,
+  encodeManifestArgument,
+  manifestEntryName,
+  validateBitExactFloatTransport,
+} from "../../../scripts/wasm_semantic_host.mjs";
 import { concreteArtifactExternalRegistry } from "./concrete-artifact-external-registry.mjs";
 import {
   CONCRETE_SOURCE_PROBES,
@@ -31,7 +37,7 @@ export const CONCRETE_SOURCE_EXPECTATIONS = Object.freeze({
     sourceEntry: "Fir.Wasm.Emit.SourceFixture.idFloat32",
     params: Object.freeze(["float32"]),
     result: "float32",
-    expected: scalar("float32", 0x7fc12345n),
+    expected: scalar("float32", 0x7fa12345n),
   }),
   "source-float64-id": Object.freeze({
     mode: "invocation",
@@ -39,7 +45,7 @@ export const CONCRETE_SOURCE_EXPECTATIONS = Object.freeze({
     sourceEntry: "Fir.Wasm.Emit.SourceFixture.idFloat64",
     params: Object.freeze(["float"]),
     result: "float",
-    expected: scalar("float", 0x8000000000000000n),
+    expected: scalar("float", 0x7ff123456789abcdn),
   }),
   "source-nat": Object.freeze({
     mode: "invocation",
@@ -160,6 +166,7 @@ function checkDescriptor(id, manifest, expectation) {
     `${id} parameter ABI mismatch`);
   assert.equal(manifest.result, expectation.result,
     `${id} result ABI mismatch`);
+  validateBitExactFloatTransport(manifest);
 }
 
 function checkInitialRuntime(id, host, initialRuntime) {
@@ -210,18 +217,28 @@ async function runInvocation(id, bytes, manifest, expectation) {
     concreteArtifactExternalRegistry, manifest.closureDispatch,
     manifest.closureDescriptors);
   checkInitialRuntime(id, host, manifest.initialRuntime);
-  const physicalArgs = manifest.params.map((kind, index) => {
+  const physicalArgs = manifest.params.map((_kind, index) => {
     const semantic = concreteManifestValue(manifest.arguments[index]);
-    const physical = host.encode(kind, semantic);
-    assert.deepStrictEqual(host.decode(kind, physical), semantic,
+    const physical = encodeManifestArgument(host, manifest, index, semantic);
+    assert.deepStrictEqual(decodeManifestResult(host, {
+      ...manifest,
+      result: manifest.params[index],
+      bitExactFloatTransport: manifest.bitExactFloatTransport === undefined
+        ? undefined
+        : {
+          ...manifest.bitExactFloatTransport,
+          result: manifest.bitExactFloatTransport.params[index],
+        },
+    }, physical), semantic,
       `${id} argument ${index} did not round-trip through the concrete ABI`);
     return physical;
   });
   const { instance } = await WebAssembly.instantiate(
     bytes, host.imports(manifest.imports));
-  const entry = instance.exports[manifest.entry];
-  assert.equal(typeof entry, "function", `${id} is missing export ${manifest.entry}`);
-  const result = host.decode(manifest.result, entry(...physicalArgs));
+  const entryName = manifestEntryName(manifest);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `${id} is missing export ${entryName}`);
+  const result = decodeManifestResult(host, manifest, entry(...physicalArgs));
   checkResult(id, host, result, expectation.expected);
   assert.ok(!host.trace.some((event) => event.name === "panicCore" ||
     event.name === "instInhabitedOfMonad._redArg"),
@@ -237,8 +254,10 @@ async function runModule(id, bytes, manifest, expectation) {
     checkConcretePrettyFormatModule(artifact);
     return;
   }
-  const physical = host.encode(manifest.params[0], expectation.argument);
-  const result = host.decode(manifest.result, artifact.entry(physical));
+  const physical = encodeManifestArgument(
+    host, manifest, 0, expectation.argument);
+  const result = decodeManifestResult(
+    host, manifest, artifact.entry(physical));
   checkResult(id, host, result, expectation.expected);
 }
 
@@ -251,7 +270,8 @@ export async function checkConcreteSourceProbe({ id, bytes, manifest }) {
   } else {
     await runModule(id, bytes, manifest, expectation);
   }
-  return Object.freeze({ id, mode: expectation.mode, entry: manifest.entry });
+  return Object.freeze({ id, mode: expectation.mode,
+    entry: manifestEntryName(manifest) });
 }
 
 /**

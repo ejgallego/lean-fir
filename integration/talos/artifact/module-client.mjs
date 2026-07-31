@@ -1,3 +1,8 @@
+import {
+  manifestEntryName,
+  validateBitExactFloatTransport,
+} from "../../../scripts/wasm_semantic_host.mjs";
+
 const INVOCATION_FIELDS = ["fixture", "arguments", "initialRuntime"];
 
 function requireCondition(condition, message) {
@@ -41,6 +46,7 @@ export function validateModuleDescriptor(manifest) {
   }
   requireCondition(Array.isArray(manifest.imports),
     "module descriptor imports must be an array");
+  validateBitExactFloatTransport(manifest);
   for (const field of INVOCATION_FIELDS) {
     requireCondition(!Object.hasOwn(manifest, field),
       `module-only descriptor must not contain ${field}`);
@@ -86,9 +92,10 @@ export async function instantiateModuleArtifact({ bytes, manifest, host }) {
       host.attachResidentFrontier(frontier, setFrontier);
     }
   }
-  const entry = instance.exports[manifest.entry];
+  const entryName = manifestEntryName(manifest);
+  const entry = instance.exports[entryName];
   requireCondition(typeof entry === "function",
-    `module export ${manifest.entry} must be a function`);
+    `module export ${entryName} must be a function`);
   return { manifest, host, instance, entry };
 }
 

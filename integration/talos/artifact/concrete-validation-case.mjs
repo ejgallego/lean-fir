@@ -1,5 +1,11 @@
 import assert from "../../../scripts/wasm_assert.mjs";
 import {
+  decodeManifestResult,
+  encodeManifestArgument,
+  manifestEntryName,
+  validateBitExactFloatTransport,
+} from "../../../scripts/wasm_semantic_host.mjs";
+import {
   semanticDatum,
 } from "../../../scripts/wasm_validation_case.mjs";
 import * as validationExternals from "../../../scripts/wasm_validation_externals.mjs";
@@ -130,8 +136,12 @@ function manifestShape(caseId, manifest) {
     ["arguments", "closureDescriptors", "closureDispatch", "entry", "fixture",
       "imports", "params", "result", "sourceEntry"];
   if (Object.hasOwn(manifest, "initialRuntime")) keys.push("initialRuntime");
+  if (Object.hasOwn(manifest, "bitExactFloatTransport")) {
+    keys.push("bitExactFloatTransport");
+  }
   assert.deepStrictEqual(Object.keys(manifest).sort(), keys.sort(),
     `${caseId} compiler manifest shape mismatch`);
+  validateBitExactFloatTransport(manifest);
 }
 
 export function concreteValidationBlockers(manifest) {
@@ -187,7 +197,7 @@ export async function executeConcreteValidationCase({
     `${caseId} manifest/corpus argument arity mismatch`);
   assert.equal(compilerManifest.arguments.length, descriptor.args.length,
     `${caseId} manifest invocation arity mismatch`);
-  const physicalArguments = compilerManifest.params.map((kind, index) => {
+  const physicalArguments = compilerManifest.params.map((_kind, index) => {
     const semanticArgument = concreteManifestValue(
       compilerManifest.arguments[index]);
     assert.deepStrictEqual(
@@ -201,7 +211,8 @@ export async function executeConcreteValidationCase({
       descriptor.args[index],
       `${caseId} concrete manifest disagrees with the corpus invocation`,
     );
-    return host.encode(kind, semanticArgument);
+    return encodeManifestArgument(
+      host, compilerManifest, index, semanticArgument);
   });
 
   assert.ok(WebAssembly.validate(bytes),
@@ -222,18 +233,25 @@ export async function executeConcreteValidationCase({
     [{ name: descriptor.entry, kind: "function" }],
     `${caseId} concrete binary must export its selected entry exactly once`,
   );
+  const entryName = manifestEntryName(compilerManifest);
+  if (entryName !== descriptor.entry) {
+    assert.deepStrictEqual(
+      WebAssembly.Module.exports(wasmModule)
+        .filter((item) => item.name === entryName),
+      [{ name: entryName, kind: "function" }],
+      `${caseId} concrete binary must export its float facade exactly once`,
+    );
+  }
   const instance = await WebAssembly.instantiate(
     wasmModule,
     host.imports(compilerManifest.imports),
   );
-  const entry = instance.exports[descriptor.entry];
-  assert.equal(typeof entry, "function", `missing concrete Wasm export ${descriptor.entry}`);
+  const entry = instance.exports[entryName];
+  assert.equal(typeof entry, "function", `missing concrete Wasm export ${entryName}`);
   assert.equal(entry.length, compilerManifest.params.length,
     `${caseId} concrete binary/manifest argument arity mismatch`);
-  const result = host.decode(
-    compilerManifest.result,
-    entry(...physicalArguments),
-  );
+  const result = decodeManifestResult(
+    host, compilerManifest, entry(...physicalArguments));
   const datum = semanticDatum(
     descriptor.resultSchema,
     result,
