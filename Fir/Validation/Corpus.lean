@@ -1121,6 +1121,46 @@ def maxUInt64 : UInt64 := 18446744073709551615
 
 def maxUSize : USize := 18446744073709551615
 
+def resultInt8Minimum : Int8 := ⟨0x80⟩
+
+def resultInt8NegativeOne : Int8 := ⟨0xff⟩
+
+def resultInt8Zero : Int8 := ⟨0⟩
+
+def resultInt8Maximum : Int8 := ⟨0x7f⟩
+
+def resultInt16Minimum : Int16 := ⟨0x8000⟩
+
+def resultInt16NegativeOne : Int16 := ⟨0xffff⟩
+
+def resultInt16Zero : Int16 := ⟨0⟩
+
+def resultInt16Maximum : Int16 := ⟨0x7fff⟩
+
+def resultInt32Minimum : Int32 := ⟨0x80000000⟩
+
+def resultInt32NegativeOne : Int32 := ⟨0xffffffff⟩
+
+def resultInt32Zero : Int32 := ⟨0⟩
+
+def resultInt32Maximum : Int32 := ⟨0x7fffffff⟩
+
+def resultInt64Minimum : Int64 := ⟨0x8000000000000000⟩
+
+def resultInt64NegativeOne : Int64 := ⟨0xffffffffffffffff⟩
+
+def resultInt64Zero : Int64 := ⟨0⟩
+
+def resultInt64Maximum : Int64 := ⟨0x7fffffffffffffff⟩
+
+def resultISizeMinimum : ISize := ⟨0x8000000000000000⟩
+
+def resultISizeNegativeOne : ISize := ⟨0xffffffffffffffff⟩
+
+def resultISizeZero : ISize := ⟨0⟩
+
+def resultISizeMaximum : ISize := ⟨0x7fffffffffffffff⟩
+
 @[noinline]
 def polyId (α : Type) (value : α) : α :=
   value
@@ -2302,6 +2342,24 @@ private def exactCapturedFixedWidthEntryCase (codec : FixedWidthCaseCodec α)
   requiredAdministrativeStepKinds := capturedGenericScalarPartialAdministrativeKinds
   provenance := firProvenance note }
 
+private def exactFixedWidthResultCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (value : α) (tags : Array String)
+    (note : String) : Case := {
+  id
+  entry
+  resultSchema := codec.schema
+  native := fun _ => codec.datum value
+  tags := #["quick", "scalar", "result-abi", "literal", "boundary"] ++ tags
+  requiredLcnfForms := #["lit", "return"]
+  requiredExecutedLcnfForms := #["lit", "return"]
+  requiredExecutedLcnfFormCounts :=
+    #[{ form := "lit", minimum := 1, maximum := some 1 },
+      { form := "return", minimum := 1, maximum := some 1 }]
+  requiredExecutedLcnfFormTrace := some #["lit", "return"]
+  requiredAdministrativeStepKinds :=
+    #["admin:invoke-name", "admin:yield-cache", "admin:yield-done"]
+  provenance := firProvenance note }
+
 private def signedFixedWidthEntryCases (codec : FixedWidthCaseCodec α)
     (typeId wasmLane : String) (entry : Lean.Name) (operation : α → α → α)
     (ofInt : Int → α) (minimum maximum : Int) (platformTags : Array String) :
@@ -2330,6 +2388,31 @@ private def signedFixedWidthEntryCases (codec : FixedWidthCaseCodec α)
       (value maximum) (value minimum)
       (tags #["maximum"])
       s!"Capture runner-supplied {typeId} maximum through generic application and return it"
+  ]
+
+private def signedFixedWidthResultCases (codec : FixedWidthCaseCodec α)
+    (typeId wasmLane : String)
+    (minimumEntry negativeOneEntry zeroEntry maximumEntry : Lean.Name)
+    (ofInt : Int → α) (minimum maximum : Int) (platformTags : Array String) :
+    Array Case :=
+  let value := ofInt
+  let tags (boundaryTags : Array String) :=
+    #[typeId, "signed", wasmLane] ++ platformTags ++ boundaryTags
+  #[
+    exactFixedWidthResultCase codec s!"{typeId}-result-min" minimumEntry
+      (value minimum)
+      (tags #["minimum", "negative", "sign-bit", "twos-complement"])
+      s!"Return the argument-free {typeId} minimum through the signed scalar result ABI",
+    exactFixedWidthResultCase codec s!"{typeId}-result-negative-one" negativeOneEntry
+      (value (-1))
+      (tags #["negative-one", "negative", "sign-bit", "twos-complement"])
+      s!"Return argument-free {typeId} negative one through the signed scalar result ABI",
+    exactFixedWidthResultCase codec s!"{typeId}-result-zero" zeroEntry
+      (value 0) (tags #["zero"])
+      s!"Return argument-free {typeId} zero through the signed scalar result ABI",
+    exactFixedWidthResultCase codec s!"{typeId}-result-max" maximumEntry
+      (value maximum) (tags #["maximum"])
+      s!"Return the argument-free {typeId} maximum through the signed scalar result ABI"
   ]
 
 private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
@@ -7874,8 +7957,31 @@ private def signedEntryCases : Array Case :=
       ``Source.capturedISizePartial Source.capturedISizePartial ISize.ofInt
       (-9223372036854775808) 9223372036854775807 #["semantic-lean64"]
 
+private def signedResultCases : Array Case :=
+  signedFixedWidthResultCases int8CaseCodec "int8" "i32"
+      ``Source.resultInt8Minimum ``Source.resultInt8NegativeOne
+      ``Source.resultInt8Zero ``Source.resultInt8Maximum
+      Int8.ofInt (-128) 127 #[] ++
+    signedFixedWidthResultCases int16CaseCodec "int16" "i32"
+      ``Source.resultInt16Minimum ``Source.resultInt16NegativeOne
+      ``Source.resultInt16Zero ``Source.resultInt16Maximum
+      Int16.ofInt (-32768) 32767 #[] ++
+    signedFixedWidthResultCases int32CaseCodec "int32" "i32"
+      ``Source.resultInt32Minimum ``Source.resultInt32NegativeOne
+      ``Source.resultInt32Zero ``Source.resultInt32Maximum
+      Int32.ofInt (-2147483648) 2147483647 #[] ++
+    signedFixedWidthResultCases int64CaseCodec "int64" "i64"
+      ``Source.resultInt64Minimum ``Source.resultInt64NegativeOne
+      ``Source.resultInt64Zero ``Source.resultInt64Maximum
+      Int64.ofInt (-9223372036854775808) 9223372036854775807 #[] ++
+    signedFixedWidthResultCases isizeCaseCodec "isize" "i64"
+      ``Source.resultISizeMinimum ``Source.resultISizeNegativeOne
+      ``Source.resultISizeZero ``Source.resultISizeMaximum
+      ISize.ofInt (-9223372036854775808) 9223372036854775807 #["semantic-lean64"]
+
 def cases : Array Case :=
-  preConversionCases ++ signedEntryCases ++ conversionCases ++ postConversionCases ++
+  preConversionCases ++ signedEntryCases ++ signedResultCases ++
+    conversionCases ++ postConversionCases ++
     int8Cases ++ int16Cases ++ int32Cases ++ int64Cases ++ isizeCases ++
       signedCrossConversionCases
 
@@ -7917,19 +8023,19 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "fixed-width-signed-conversion").size == 65
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 49
+  validationCase.tags.contains "int8").size == 53
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int16").size == 49
+  validationCase.tags.contains "int16").size == 53
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int32").size == 49
+  validationCase.tags.contains "int32").size == 53
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int64").size == 49
+  validationCase.tags.contains "int64").size == 53
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "isize").size == 49
+  validationCase.tags.contains "isize").size == 53
 
 #guard System.Platform.numBits == 64
 

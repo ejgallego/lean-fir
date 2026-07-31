@@ -3241,6 +3241,43 @@ private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSch
       return .ctor name tag fields
   | _, _ => throw s!"cannot decode {repr value} as {repr schema}"
 
+private def decodedSignedScalarResultsUseAbiGuard : Bool :=
+  let encoded : Array (ValidationSchema × Value) := #[
+    (.bits 8, .scalar (.uint8 0x80)),
+    (.bits 8, .scalar (.uint8 0xff)),
+    (.bits 8, .scalar (.uint8 0)),
+    (.bits 8, .scalar (.uint8 0x7f)),
+    (.bits 16, .scalar (.uint16 0x8000)),
+    (.bits 16, .scalar (.uint16 0xffff)),
+    (.bits 16, .scalar (.uint16 0)),
+    (.bits 16, .scalar (.uint16 0x7fff)),
+    (.bits 32, .scalar (.uint32 0x80000000)),
+    (.bits 32, .scalar (.uint32 0xffffffff)),
+    (.bits 32, .scalar (.uint32 0)),
+    (.bits 32, .scalar (.uint32 0x7fffffff)),
+    (.bits 64, .scalar (.uint64 0x8000000000000000)),
+    (.bits 64, .scalar (.uint64 0xffffffffffffffff)),
+    (.bits 64, .scalar (.uint64 0)),
+    (.bits 64, .scalar (.uint64 0x7fffffffffffffff)),
+    (.usize, .usize 0x8000000000000000),
+    (.usize, .usize 0xffffffffffffffff),
+    (.usize, .usize 0),
+    (.usize, .usize 0x7fffffffffffffff)]
+  let expected : Array ValidationDatum := #[
+    .bits 8 0x80, .bits 8 0xff, .bits 8 0, .bits 8 0x7f,
+    .bits 16 0x8000, .bits 16 0xffff, .bits 16 0, .bits 16 0x7fff,
+    .bits 32 0x80000000, .bits 32 0xffffffff,
+    .bits 32 0, .bits 32 0x7fffffff,
+    .bits 64 0x8000000000000000, .bits 64 0xffffffffffffffff,
+    .bits 64 0, .bits 64 0x7fffffffffffffff,
+    .usize 0x8000000000000000, .usize 0xffffffffffffffff,
+    .usize 0, .usize 0x7fffffffffffffff]
+  match encoded.mapM fun (schema, value) => decodeValue {} schema value with
+  | .ok actual => actual == expected
+  | .error _ => false
+
+#guard decodedSignedScalarResultsUseAbiGuard
+
 private def decodeEffect (projection : Corpus.EffectProjection)
     (snapshot : ExternalSnapshot) : Except String EffectEvent := do
   let event := snapshot.event

@@ -1756,6 +1756,19 @@ A representative public-compiler probe for `capturedInt8Partial` returns the
 same typed `unsupportedCode` result, so all twenty cases remain behind the
 existing `wasm-generation-pending` admission fence rather than overlapping W7
 lowering work.
+The complementary signed result-ABI matrix removes argument decoding from the
+experiment. Twenty argument-free `Int8`, `Int16`, `Int32`, `Int64`, and
+semantic Lean64 `ISize` entries return minimum, negative one, zero, or maximum
+from the raw unsigned field of Lean's signed scalar structures. Each source
+entry therefore compiles to an exact two-form `lit`/`return` trace and executes
+five total transitions including invocation, cache, and completion
+administration. The result decoder independently checks the same twenty raw
+two's-complement payloads. Unlike captured scalar closures, these literal
+entries are already accepted by W7's public `compileValidationInvocation`
+surface. All twenty execute in V8 and compare on all three native/LCNF/V8
+edges; no W7 source change or compiler-side workaround is involved. Matching
+source and V8 coverage domains require the full matrix, both Wasm lanes, every
+width and boundary, and all ten sign-bit results.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and

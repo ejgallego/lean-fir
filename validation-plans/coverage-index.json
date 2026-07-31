@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 613,
-        "minimumComparisons": 613,
+        "minimumCases": 633,
+        "minimumComparisons": 633,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 581,
-        "minimumComparisons": 1162,
+        "minimumCases": 601,
+        "minimumComparisons": 1202,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 622,
-      "minimumTierCases": 1203,
-      "minimumComparisons": 1784
+      "minimumUniqueCases": 642,
+      "minimumTierCases": 1243,
+      "minimumComparisons": 1844
     },
     "machine": {
-      "minimumCases": 622,
-      "minimumInterpreterSteps": 5650,
+      "minimumCases": 642,
+      "minimumInterpreterSteps": 5750,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -452,7 +452,7 @@
       {
         "tier": "source-lcnf",
         "tag": "boundary",
-        "minimumCases": 451
+        "minimumCases": 471
       },
       {
         "tier": "source-lcnf",
@@ -496,13 +496,18 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "literal",
+        "minimumCases": 26
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "maximum",
-        "minimumCases": 25
+        "minimumCases": 30
       },
       {
         "tier": "source-lcnf",
         "tag": "minimum",
-        "minimumCases": 32
+        "minimumCases": 37
       },
       {
         "tier": "source-lcnf",
@@ -512,7 +517,7 @@
       {
         "tier": "source-lcnf",
         "tag": "negative-one",
-        "minimumCases": 5
+        "minimumCases": 10
       },
       {
         "tier": "source-lcnf",
@@ -531,18 +536,23 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "result-abi",
+        "minimumCases": 20
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "scalar",
-        "minimumCases": 389
+        "minimumCases": 409
       },
       {
         "tier": "source-lcnf",
         "tag": "sign-bit",
-        "minimumCases": 10
+        "minimumCases": 20
       },
       {
         "tier": "source-lcnf",
         "tag": "signed",
-        "minimumCases": 282
+        "minimumCases": 302
       },
       {
         "tier": "source-lcnf",
@@ -557,7 +567,7 @@
       {
         "tier": "source-lcnf",
         "tag": "zero",
-        "minimumCases": 17
+        "minimumCases": 22
       },
       {
         "tier": "wasm-v8",
@@ -567,7 +577,7 @@
       {
         "tier": "wasm-v8",
         "tag": "boundary",
-        "minimumCases": 419
+        "minimumCases": 439
       },
       {
         "tier": "wasm-v8",
@@ -601,8 +611,28 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "literal",
+        "minimumCases": 26
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "maximum",
+        "minimumCases": 20
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "minimum",
+        "minimumCases": 32
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "mutation",
         "minimumCases": 26
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "negative-one",
+        "minimumCases": 5
       },
       {
         "tier": "wasm-v8",
@@ -616,8 +646,28 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "result-abi",
+        "minimumCases": 20
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "scalar",
-        "minimumCases": 357
+        "minimumCases": 377
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "sign-bit",
+        "minimumCases": 10
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "signed",
+        "minimumCases": 282
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "zero",
+        "minimumCases": 12
       }
     ],
     "semanticDomains": [
@@ -967,6 +1017,84 @@
       },
       {
         "tier": "source-lcnf",
+        "name": "signed-scalar-result-i32",
+        "allTags": ["i32", "result-abi", "signed"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-i64",
+        "allTags": ["i64", "result-abi", "signed"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-int16",
+        "allTags": ["int16", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-int32",
+        "allTags": ["int32", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-int64",
+        "allTags": ["int64", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-int8",
+        "allTags": ["int8", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-isize",
+        "allTags": ["isize", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-literal",
+        "allTags": ["literal", "result-abi", "scalar", "signed"],
+        "minimumCases": 20
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-maximum",
+        "allTags": ["maximum", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-minimum",
+        "allTags": ["minimum", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-negative-one",
+        "allTags": ["negative-one", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-sign-bit",
+        "allTags": ["result-abi", "sign-bit", "signed"],
+        "minimumCases": 10
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "signed-scalar-result-zero",
+        "allTags": ["result-abi", "signed", "zero"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
         "name": "string-comparison",
         "allTags": ["comparison", "string"],
         "minimumCases": 10
@@ -1296,6 +1424,84 @@
         "name": "remainder-zero-divisor",
         "allTags": ["remainder", "zero-divisor"],
         "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-i32",
+        "allTags": ["i32", "result-abi", "signed"],
+        "minimumCases": 12
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-i64",
+        "allTags": ["i64", "result-abi", "signed"],
+        "minimumCases": 8
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-int16",
+        "allTags": ["int16", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-int32",
+        "allTags": ["int32", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-int64",
+        "allTags": ["int64", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-int8",
+        "allTags": ["int8", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-isize",
+        "allTags": ["isize", "result-abi", "signed"],
+        "minimumCases": 4
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-literal",
+        "allTags": ["literal", "result-abi", "scalar", "signed"],
+        "minimumCases": 20
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-maximum",
+        "allTags": ["maximum", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-minimum",
+        "allTags": ["minimum", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-negative-one",
+        "allTags": ["negative-one", "result-abi", "signed"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-sign-bit",
+        "allTags": ["result-abi", "sign-bit", "signed"],
+        "minimumCases": 10
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "signed-scalar-result-zero",
+        "allTags": ["result-abi", "signed", "zero"],
+        "minimumCases": 5
       },
       {
         "tier": "wasm-v8",
