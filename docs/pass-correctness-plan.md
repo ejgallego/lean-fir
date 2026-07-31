@@ -1781,11 +1781,19 @@ the existing nullary-`.fap` semantic discrepancy.
    return, cache, and attempted application cannot allocate again.  Its step
    law is proved directly from those fields, and reset/reuse shape extraction
    no longer accepts a finite target-reachability premise.
-   The next structural gap is generalization beyond the fixture: parameterize
-   the post-allocation interface by the retained binding, owner location, and
-   frontier; derive it from exact checked compiler residuals; then replace the
-   remaining finite source reset/reuse classification with generic local
-   operation-shape and ownership premises.
+   Commit `3c071252` extracts the first program-independent post-allocation
+   interface. `TargetSingletonLiveReturnAt` is parameterized by the retained
+   binder, its target location, and the allocation frontier; its generic
+   ledger theorem proves that every distinct source owner is absent from the
+   singleton target prefix. The retained-prefix fixture now derives this
+   interface from its phase invariant and uses the generic theorem for both
+   deleted reset and deleted reuse, eliminating its duplicate target shape and
+   owner calculation.
+   The next structural gap is no longer the concrete one-cell target state.
+   Generalize the ledger exclusion argument from singleton prefixes to an
+   arbitrary retained target prefix, derive that interface from exact checked
+   compiler residuals, and replace the remaining finite source reset/reuse
+   classification with generic local operation-shape and ownership premises.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
