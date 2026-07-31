@@ -85,10 +85,15 @@ integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 The check covers Unicode, line flattening, fill groups, alignment, signed
 nesting, arbitrary-precision tags and widths, nonzero starting columns, and
 repeated calls. See the
-[C/Emscripten package guide](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md)
+[LLVM-backed C/Emscripten client guide](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md)
 and the
 [FIR-native package guide](../integration/talos/artifact/prettyM-package/README.md)
 for client examples.
+
+The LLVM-backed guide is copied into every generated C/Emscripten package. It
+identifies the minimal deployment set, gives a standalone Node client, lists
+the browser isolation headers required by the threaded build, and defines the
+versioned request, result, lifetime, integrity, and resource-limit contracts.
 
 ## What the common checkpoint does and does not guarantee
 
