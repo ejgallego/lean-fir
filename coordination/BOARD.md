@@ -78,16 +78,16 @@ identities.
   harness tests, 593 native/LCNF cases, 9 direct cases, the 581-case
   native/LCNF/V8 triangle, all 103 semantic domains, bug cards, trusted
   assumptions, and placeholder policy. Its latest retained V8 receipt is
-  `621ffa3a18de2bfc376a7284b2a2597de1a0c1022b00253d05b0a8930d82f891`;
-  run `2115e22fb8097de8fc3f1275076cedc6ad9d894e82060744d529f7e0d14f96ff`
+  `7745f51feec5dc76a85a7120ce169f28aeae9d227fe78c5db6516db5a26fc90c`;
+  run `1cfcf94879bc5ffc01425965b89a82ec8ad9c13b05a495e691a879ca55c33913`
   names source evidence
-  `cb3edc3ff2e453280125117586295a0b2710c586f4b8053957b091ad9b8dedfe`
+  `d0e40b223316777475dcbd41fed5e4cbaf4a4a6bde0330e852aa2af09b9ae218`
   and matrix
-  `3fcdb1d2f758fe405b90dc535cd449070bc3b4b0f897fa81d82eac56a8dbe781`.
+  `4a24c5ff4d0def34591480cb8c017489bf276823a73d7461c439fbbf4ce9bf15`.
   The three-edge comparison envelope has stable contract
-  `761aa4613628749250b71f91309593b38054abf09c9373d41044c54f7153077f`,
+  `e2d5bed981aea99d01d1f370c1411e44e972da4d28a60e1f3e3077b1af6930bf`,
   evidence
-  `ae259cfc92df2abb24bc6c8bd1ac51acb47b4fb0a5ce6504860a8e381e64e31b`,
+  `dcfbdc189797f569808b9d1afeee6471904603f4bd6d3b90270d192cb2e2868e`,
   and 1,162 witnessed native-oracle comparisons under policy
   `e11ddcfc5fd9bff44f46a4eb593a47bb5905796c6ea48ab1661ab96e6d219e31`.
 - Current-main landing `3853a923` fixes
