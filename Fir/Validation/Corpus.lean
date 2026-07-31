@@ -109,6 +109,21 @@ def capturedUInt64Partial (captured value : UInt64) : UInt64 :=
 def capturedUSizePartial (captured value : USize) : USize :=
   applyGeneric (firstGeneric captured) value
 
+def capturedInt8Partial (captured value : Int8) : Int8 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedInt16Partial (captured value : Int16) : Int16 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedInt32Partial (captured value : Int32) : Int32 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedInt64Partial (captured value : Int64) : Int64 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedISizePartial (captured value : ISize) : ISize :=
+  applyGeneric (firstGeneric captured) value
+
 @[noinline]
 def lastOr (fallback : Nat) : List Nat → Nat
   | [] => fallback
@@ -2287,6 +2302,36 @@ private def exactCapturedFixedWidthEntryCase (codec : FixedWidthCaseCodec α)
   requiredAdministrativeStepKinds := capturedGenericScalarPartialAdministrativeKinds
   provenance := firProvenance note }
 
+private def signedFixedWidthEntryCases (codec : FixedWidthCaseCodec α)
+    (typeId wasmLane : String) (entry : Lean.Name) (operation : α → α → α)
+    (ofInt : Int → α) (minimum maximum : Int) (platformTags : Array String) :
+    Array Case :=
+  let value := ofInt
+  let tags (boundaryTags : Array String) :=
+    #[typeId, "signed", wasmLane] ++ platformTags ++ boundaryTags
+  #[
+    exactCapturedFixedWidthEntryCase codec
+      s!"captured-{typeId}-partial-min" entry operation
+      (value minimum) (value maximum)
+      (tags #["minimum", "negative", "sign-bit", "twos-complement"])
+      s!"Capture runner-supplied {typeId} minimum through generic application and return it",
+    exactCapturedFixedWidthEntryCase codec
+      s!"captured-{typeId}-partial-negative-one" entry operation
+      (value (-1)) (value 0)
+      (tags #["negative-one", "negative", "sign-bit", "twos-complement"])
+      s!"Capture runner-supplied {typeId} negative one through generic application and return it",
+    exactCapturedFixedWidthEntryCase codec
+      s!"captured-{typeId}-partial-zero" entry operation
+      (value 0) (value (-1))
+      (tags #["zero"])
+      s!"Capture runner-supplied {typeId} zero through generic application and return it",
+    exactCapturedFixedWidthEntryCase codec
+      s!"captured-{typeId}-partial-max" entry operation
+      (value maximum) (value minimum)
+      (tags #["maximum"])
+      s!"Capture runner-supplied {typeId} maximum through generic application and return it"
+  ]
+
 private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
     (id : String) (entry : Lean.Name) (operation : α → α → α)
     (external : Lean.Name) (left right : α) (tags : Array String)
@@ -2721,52 +2766,52 @@ private def preConversionCases : Array Case := #[
   exactCapturedFixedWidthEntryCase uint8CaseCodec
     "captured-uint8-partial-zero" ``Source.capturedUInt8Partial
     Source.capturedUInt8Partial 0 255
-    #["uint8", "zero", "i32"]
+    #["uint8", "unsigned", "zero", "i32"]
     "Capture runner-supplied UInt8 zero through generic application and return it",
   exactCapturedFixedWidthEntryCase uint8CaseCodec
     "captured-uint8-partial-max" ``Source.capturedUInt8Partial
     Source.capturedUInt8Partial 255 0
-    #["uint8", "maximum", "i32"]
+    #["uint8", "unsigned", "maximum", "i32"]
     "Capture runner-supplied UInt8 maximum through generic application and return it",
   exactCapturedFixedWidthEntryCase uint16CaseCodec
     "captured-uint16-partial-zero" ``Source.capturedUInt16Partial
     Source.capturedUInt16Partial 0 65535
-    #["uint16", "zero", "i32"]
+    #["uint16", "unsigned", "zero", "i32"]
     "Capture runner-supplied UInt16 zero through generic application and return it",
   exactCapturedFixedWidthEntryCase uint16CaseCodec
     "captured-uint16-partial-max" ``Source.capturedUInt16Partial
     Source.capturedUInt16Partial 65535 0
-    #["uint16", "maximum", "i32"]
+    #["uint16", "unsigned", "maximum", "i32"]
     "Capture runner-supplied UInt16 maximum through generic application and return it",
   exactCapturedFixedWidthEntryCase uint32CaseCodec
     "captured-uint32-partial-zero" ``Source.capturedUInt32Partial
     Source.capturedUInt32Partial 0 0xffffffff
-    #["uint32", "zero", "i32"]
+    #["uint32", "unsigned", "zero", "i32"]
     "Capture runner-supplied UInt32 zero through generic application and return it",
   exactCapturedFixedWidthEntryCase uint32CaseCodec
     "captured-uint32-partial-max" ``Source.capturedUInt32Partial
     Source.capturedUInt32Partial 0xffffffff 0
-    #["uint32", "maximum", "i32"]
+    #["uint32", "unsigned", "maximum", "i32"]
     "Capture runner-supplied UInt32 maximum through generic application and return it",
   exactCapturedFixedWidthEntryCase uint64CaseCodec
     "captured-uint64-partial-zero" ``Source.capturedUInt64Partial
     Source.capturedUInt64Partial 0 0xffffffffffffffff
-    #["uint64", "zero", "i64"]
+    #["uint64", "unsigned", "zero", "i64"]
     "Capture runner-supplied UInt64 zero through generic application and return it",
   exactCapturedFixedWidthEntryCase uint64CaseCodec
     "captured-uint64-partial-max" ``Source.capturedUInt64Partial
     Source.capturedUInt64Partial 0xffffffffffffffff 0
-    #["uint64", "maximum", "i64"]
+    #["uint64", "unsigned", "maximum", "i64"]
     "Capture runner-supplied UInt64 maximum through generic application and return it",
   exactCapturedFixedWidthEntryCase usizeCaseCodec
     "captured-usize-partial-zero" ``Source.capturedUSizePartial
     Source.capturedUSizePartial 0 Source.maxUSize
-    #["usize", "zero", "i64", "semantic-lean64"]
+    #["usize", "unsigned", "zero", "i64", "semantic-lean64"]
     "Capture runner-supplied USize zero through generic application and return it",
   exactCapturedFixedWidthEntryCase usizeCaseCodec
     "captured-usize-partial-max" ``Source.capturedUSizePartial
     Source.capturedUSizePartial Source.maxUSize 0
-    #["usize", "maximum", "i64", "semantic-lean64"]
+    #["usize", "unsigned", "maximum", "i64", "semantic-lean64"]
     "Capture runner-supplied USize maximum through generic application and return it",
   { id := "recursive-traversal"
     entry := ``Source.recursiveTraversal
@@ -7814,8 +7859,23 @@ private def int64Cases : Array Case :=
 private def isizeCases : Array Case :=
   signedFixedWidthCases isizeCaseFamily
 
+private def signedEntryCases : Array Case :=
+  signedFixedWidthEntryCases int8CaseCodec "int8" "i32"
+      ``Source.capturedInt8Partial Source.capturedInt8Partial Int8.ofInt (-128) 127 #[] ++
+    signedFixedWidthEntryCases int16CaseCodec "int16" "i32"
+      ``Source.capturedInt16Partial Source.capturedInt16Partial Int16.ofInt (-32768) 32767 #[] ++
+    signedFixedWidthEntryCases int32CaseCodec "int32" "i32"
+      ``Source.capturedInt32Partial Source.capturedInt32Partial Int32.ofInt
+      (-2147483648) 2147483647 #[] ++
+    signedFixedWidthEntryCases int64CaseCodec "int64" "i64"
+      ``Source.capturedInt64Partial Source.capturedInt64Partial Int64.ofInt
+      (-9223372036854775808) 9223372036854775807 #[] ++
+    signedFixedWidthEntryCases isizeCaseCodec "isize" "i64"
+      ``Source.capturedISizePartial Source.capturedISizePartial ISize.ofInt
+      (-9223372036854775808) 9223372036854775807 #["semantic-lean64"]
+
 def cases : Array Case :=
-  preConversionCases ++ conversionCases ++ postConversionCases ++
+  preConversionCases ++ signedEntryCases ++ conversionCases ++ postConversionCases ++
     int8Cases ++ int16Cases ++ int32Cases ++ int64Cases ++ isizeCases ++
       signedCrossConversionCases
 
@@ -7857,19 +7917,19 @@ def requiredSourceAdministrativeStepKinds : Array String :=
   validationCase.tags.contains "fixed-width-signed-conversion").size == 65
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int8").size == 45
+  validationCase.tags.contains "int8").size == 49
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int16").size == 45
+  validationCase.tags.contains "int16").size == 49
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int32").size == 45
+  validationCase.tags.contains "int32").size == 49
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "int64").size == 45
+  validationCase.tags.contains "int64").size == 49
 
 #guard (cases.filter fun validationCase =>
-  validationCase.tags.contains "isize").size == 45
+  validationCase.tags.contains "isize").size == 49
 
 #guard System.Platform.numBits == 64
 

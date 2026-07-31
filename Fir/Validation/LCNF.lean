@@ -3152,6 +3152,38 @@ private def encodedUnsignedScalarArgumentsUseEntryAbiGuard : Bool :=
 
 #guard encodedUnsignedScalarArgumentsUseEntryAbiGuard
 
+private def encodedSignedScalarArgumentsUseEntryAbiGuard : Bool :=
+  match encodeArgs
+      #[.bits 8, .bits 8, .bits 8, .bits 8,
+        .bits 16, .bits 16, .bits 16, .bits 16,
+        .bits 32, .bits 32, .bits 32, .bits 32,
+        .bits 64, .bits 64, .bits 64, .bits 64,
+        .usize, .usize, .usize, .usize]
+      #[.bits 8 0x80, .bits 8 0xff, .bits 8 0, .bits 8 0x7f,
+        .bits 16 0x8000, .bits 16 0xffff, .bits 16 0, .bits 16 0x7fff,
+        .bits 32 0x80000000, .bits 32 0xffffffff, .bits 32 0, .bits 32 0x7fffffff,
+        .bits 64 0x8000000000000000, .bits 64 0xffffffffffffffff,
+        .bits 64 0, .bits 64 0x7fffffffffffffff,
+        .usize 0x8000000000000000, .usize 0xffffffffffffffff,
+        .usize 0, .usize 0x7fffffffffffffff] with
+  | .ok (runtime, values) =>
+      runtime.heap.isEmpty &&
+        values == #[
+          .scalar (.uint8 0x80), .scalar (.uint8 0xff),
+          .scalar (.uint8 0), .scalar (.uint8 0x7f),
+          .scalar (.uint16 0x8000), .scalar (.uint16 0xffff),
+          .scalar (.uint16 0), .scalar (.uint16 0x7fff),
+          .scalar (.uint32 0x80000000), .scalar (.uint32 0xffffffff),
+          .scalar (.uint32 0), .scalar (.uint32 0x7fffffff),
+          .scalar (.uint64 0x8000000000000000),
+          .scalar (.uint64 0xffffffffffffffff),
+          .scalar (.uint64 0), .scalar (.uint64 0x7fffffffffffffff),
+          .usize 0x8000000000000000, .usize 0xffffffffffffffff,
+          .usize 0, .usize 0x7fffffffffffffff]
+  | .error _ => false
+
+#guard encodedSignedScalarArgumentsUseEntryAbiGuard
+
 private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSchema)
     (value : Value) : Except String ValidationDatum := do
   match schema, value with

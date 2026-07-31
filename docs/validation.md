@@ -1735,11 +1735,27 @@ all ten cases pin the same exact 17-form execution trace: two boxes, one
 partial application, three applications, one fixed-variable lookup, one
 ownership increment, three decrements, one unbox, and five returns in 27
 interpreter steps. The `entry-abi` and `generic-application` coverage domains
-independently require both boundaries and both cases for every width.
+independently require both boundaries and both cases for every width. The ten
+fixtures carry an explicit `unsigned` tag, and every unsigned entry domain
+requires it, so later signed fixtures cannot satisfy those floors accidentally.
 A representative compiler probe for `capturedUInt8Partial` currently returns
 the same typed `unsupportedCode` admission result as the Boolean closure.
 Consequently these cases also carry `wasm-generation-pending`; they expand the
 native/LCNF oracle without claiming a V8 execution or changing W7 lowering.
+The signed companion matrix covers `Int8`, `Int16`, `Int32`, `Int64`, and
+semantic Lean64 `ISize` at minimum, negative one, zero, and maximum. Every
+captured value is paired with a distinct applied value, including opposite
+signed extrema, so argument swapping cannot preserve the expected result. The
+wire and interpreter boundary retains negative inputs as their exact two's-
+complement `bits` payloads, or the same raw 64-bit payload in the `usize` lane;
+an empty-heap guard checks all twenty encodings before execution. These cases
+share the unsigned matrix's exact 17-form/27-step closure trace. Separate
+coverage domains require all four values for every signed width, both Wasm
+lanes, the five sign-bit pairs, and the complete twenty-case closure family.
+A representative public-compiler probe for `capturedInt8Partial` returns the
+same typed `unsupportedCode` result, so all twenty cases remain behind the
+existing `wasm-generation-pending` admission fence rather than overlapping W7
+lowering work.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and
