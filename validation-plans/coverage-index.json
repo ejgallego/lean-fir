@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 583,
-        "minimumComparisons": 583,
+        "minimumCases": 593,
+        "minimumComparisons": 593,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -56,8 +56,8 @@
       },
       {
         "id": "direct-lcnf-machine",
-        "minimumCases": 5,
-        "minimumComparisons": 5,
+        "minimumCases": 9,
+        "minimumComparisons": 9,
         "requiredBackends": [
           "direct-lcnf",
           "direct-native"
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 592,
-      "minimumTierCases": 1173,
-      "minimumComparisons": 1754
+      "minimumUniqueCases": 602,
+      "minimumTierCases": 1183,
+      "minimumComparisons": 1764
     },
     "machine": {
-      "minimumCases": 592,
-      "minimumInterpreterSteps": 4840,
+      "minimumCases": 602,
+      "minimumInterpreterSteps": 5110,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -452,12 +452,12 @@
       {
         "tier": "source-lcnf",
         "tag": "boundary",
-        "minimumCases": 421
+        "minimumCases": 431
       },
       {
         "tier": "source-lcnf",
         "tag": "closure",
-        "minimumCases": 4
+        "minimumCases": 14
       },
       {
         "tier": "source-lcnf",
@@ -476,8 +476,18 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "entry-abi",
+        "minimumCases": 10
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "external",
         "minimumCases": 298
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "generic-application",
+        "minimumCases": 10
       },
       {
         "tier": "source-lcnf",
@@ -501,13 +511,18 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "partial-application",
+        "minimumCases": 13
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "scalar",
-        "minimumCases": 359
+        "minimumCases": 369
       },
       {
         "tier": "source-lcnf",
         "tag": "wasm-generation-pending",
-        "minimumCases": 2
+        "minimumCases": 12
       },
       {
         "tier": "wasm-v8",
@@ -641,7 +656,7 @@
         "tier": "source-lcnf",
         "name": "closure-partial-application",
         "allTags": ["closure", "partial-application"],
-        "minimumCases": 3
+        "minimumCases": 13
       },
       {
         "tier": "source-lcnf",
@@ -870,6 +885,61 @@
         "name": "string-unicode",
         "allTags": ["string", "unicode"],
         "minimumCases": 41
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-closure",
+        "allTags": [
+          "closure",
+          "entry-abi",
+          "generic-application",
+          "partial-application",
+          "scalar",
+          "wasm-generation-pending"
+        ],
+        "minimumCases": 10
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-maximum",
+        "allTags": ["entry-abi", "maximum"],
+        "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-uint16",
+        "allTags": ["entry-abi", "uint16"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-uint32",
+        "allTags": ["entry-abi", "uint32"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-uint64",
+        "allTags": ["entry-abi", "uint64"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-uint8",
+        "allTags": ["entry-abi", "uint8"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-usize",
+        "allTags": ["entry-abi", "usize"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "unsigned-scalar-entry-zero",
+        "allTags": ["entry-abi", "zero"],
+        "minimumCases": 5
       },
       {
         "tier": "wasm-v8",

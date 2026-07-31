@@ -1726,6 +1726,20 @@ well. The Boolean-capture regression currently carries
 `unsupportedCode` validation error before product emission, so the V8 plans
 exclude only that explicit tag while native/LCNF keeps both cases. Removing the
 tag is a later compiler-admission handoff, not a lane-4 lowering workaround.
+The source-oracle tier extends that boundary into an unsigned entry-ABI matrix
+for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize`. Each width runs both
+zero and maximum as the captured value, with the opposite boundary supplied as
+the applied argument so an argument-order error cannot pass accidentally. The
+source program crosses the polymorphic `firstGeneric`/`applyGeneric` boundary;
+all ten cases pin the same exact 17-form execution trace: two boxes, one
+partial application, three applications, one fixed-variable lookup, one
+ownership increment, three decrements, one unbox, and five returns in 27
+interpreter steps. The `entry-abi` and `generic-application` coverage domains
+independently require both boundaries and both cases for every width.
+A representative compiler probe for `capturedUInt8Partial` currently returns
+the same typed `unsupportedCode` admission result as the Boolean closure.
+Consequently these cases also carry `wasm-generation-pending`; they expand the
+native/LCNF oracle without claiming a V8 execution or changing W7 lowering.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and

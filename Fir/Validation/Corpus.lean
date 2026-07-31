@@ -87,6 +87,29 @@ def capturedBoolPartial (captured : Bool) (x : Nat) : Nat :=
   applyNat (selectCapturedBool captured) x
 
 @[noinline]
+def firstGeneric {α : Type} (captured _value : α) : α :=
+  captured
+
+@[noinline]
+def applyGeneric {α : Type} (f : α → α) (value : α) : α :=
+  f value
+
+def capturedUInt8Partial (captured value : UInt8) : UInt8 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedUInt16Partial (captured value : UInt16) : UInt16 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedUInt32Partial (captured value : UInt32) : UInt32 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedUInt64Partial (captured value : UInt64) : UInt64 :=
+  applyGeneric (firstGeneric captured) value
+
+def capturedUSizePartial (captured value : USize) : USize :=
+  applyGeneric (firstGeneric captured) value
+
+@[noinline]
 def lastOr (fallback : Nat) : List Nat → Nat
   | [] => fallback
   | x :: xs => lastOr x xs
@@ -2095,6 +2118,25 @@ private def capturedBoolPartialAdministrativeKinds : Array String :=
   #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
     "admin:yield-done"]
 
+private def capturedGenericScalarPartialFormTrace : Array String :=
+  #["box", "pap", "box", "fap", "fvar", "fap", "fap", "inc", "return",
+    "return", "dec", "dec", "return", "return", "unbox", "dec", "return"]
+
+private def capturedGenericScalarPartialFormCounts :
+    Array ExecutedFormCountRequirement :=
+  #[{ form := "box", minimum := 2, maximum := some 2 },
+    { form := "dec", minimum := 3, maximum := some 3 },
+    { form := "fap", minimum := 3, maximum := some 3 },
+    { form := "fvar", minimum := 1, maximum := some 1 },
+    { form := "inc", minimum := 1, maximum := some 1 },
+    { form := "pap", minimum := 1, maximum := some 1 },
+    { form := "return", minimum := 5, maximum := some 5 },
+    { form := "unbox", minimum := 1, maximum := some 1 }]
+
+private def capturedGenericScalarPartialAdministrativeKinds : Array String :=
+  #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+    "admin:yield-done"]
+
 private def recursiveListFormTrace : Array String :=
   #["lit", "fap", "cases", "oproj", "oproj",
     "fap", "cases", "oproj", "oproj",
@@ -2223,6 +2265,27 @@ private def usizeCaseCodec : FixedWidthCaseCodec USize where
   datum value := .usize value.toUInt64
   externalTag := "fixed-width-unsigned-external"
   conversionTag := "fixed-width-unsigned-conversion"
+
+private def exactCapturedFixedWidthEntryCase (codec : FixedWidthCaseCodec α)
+    (id : String) (entry : Lean.Name) (operation : α → α → α)
+    (captured applied : α) (tags : Array String) (note : String) : Case := {
+  id
+  entry
+  dependencies := #[``Source.firstGeneric, ``Source.applyGeneric]
+  args := #[codec.datum captured, codec.datum applied]
+  argSchemas := #[codec.schema, codec.schema]
+  resultSchema := codec.schema
+  native := fun _ => codec.datum (operation captured applied)
+  tags := #[
+    "quick", "scalar", "closure", "partial-application", "entry-abi",
+    "generic-application", "boundary", "wasm-generation-pending"] ++ tags
+  requiredLcnfForms := #["box", "dec", "fap", "fvar", "inc", "pap", "return", "unbox"]
+  requiredExecutedLcnfForms :=
+    #["box", "dec", "fap", "fvar", "inc", "pap", "return", "unbox"]
+  requiredExecutedLcnfFormCounts := capturedGenericScalarPartialFormCounts
+  requiredExecutedLcnfFormTrace := some capturedGenericScalarPartialFormTrace
+  requiredAdministrativeStepKinds := capturedGenericScalarPartialAdministrativeKinds
+  provenance := firProvenance note }
 
 private def exactFixedWidthBinaryExternalCase (codec : FixedWidthCaseCodec α)
     (id : String) (entry : Lean.Name) (operation : α → α → α)
@@ -2655,6 +2718,56 @@ private def preConversionCases : Array Case := #[
     requiredAdministrativeStepKinds := capturedBoolPartialAdministrativeKinds
     provenance := firProvenance
       "Capture runner-supplied Bool false through the scalar entry ABI" },
+  exactCapturedFixedWidthEntryCase uint8CaseCodec
+    "captured-uint8-partial-zero" ``Source.capturedUInt8Partial
+    Source.capturedUInt8Partial 0 255
+    #["uint8", "zero", "i32"]
+    "Capture runner-supplied UInt8 zero through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint8CaseCodec
+    "captured-uint8-partial-max" ``Source.capturedUInt8Partial
+    Source.capturedUInt8Partial 255 0
+    #["uint8", "maximum", "i32"]
+    "Capture runner-supplied UInt8 maximum through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint16CaseCodec
+    "captured-uint16-partial-zero" ``Source.capturedUInt16Partial
+    Source.capturedUInt16Partial 0 65535
+    #["uint16", "zero", "i32"]
+    "Capture runner-supplied UInt16 zero through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint16CaseCodec
+    "captured-uint16-partial-max" ``Source.capturedUInt16Partial
+    Source.capturedUInt16Partial 65535 0
+    #["uint16", "maximum", "i32"]
+    "Capture runner-supplied UInt16 maximum through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint32CaseCodec
+    "captured-uint32-partial-zero" ``Source.capturedUInt32Partial
+    Source.capturedUInt32Partial 0 0xffffffff
+    #["uint32", "zero", "i32"]
+    "Capture runner-supplied UInt32 zero through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint32CaseCodec
+    "captured-uint32-partial-max" ``Source.capturedUInt32Partial
+    Source.capturedUInt32Partial 0xffffffff 0
+    #["uint32", "maximum", "i32"]
+    "Capture runner-supplied UInt32 maximum through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint64CaseCodec
+    "captured-uint64-partial-zero" ``Source.capturedUInt64Partial
+    Source.capturedUInt64Partial 0 0xffffffffffffffff
+    #["uint64", "zero", "i64"]
+    "Capture runner-supplied UInt64 zero through generic application and return it",
+  exactCapturedFixedWidthEntryCase uint64CaseCodec
+    "captured-uint64-partial-max" ``Source.capturedUInt64Partial
+    Source.capturedUInt64Partial 0xffffffffffffffff 0
+    #["uint64", "maximum", "i64"]
+    "Capture runner-supplied UInt64 maximum through generic application and return it",
+  exactCapturedFixedWidthEntryCase usizeCaseCodec
+    "captured-usize-partial-zero" ``Source.capturedUSizePartial
+    Source.capturedUSizePartial 0 Source.maxUSize
+    #["usize", "zero", "i64", "semantic-lean64"]
+    "Capture runner-supplied USize zero through generic application and return it",
+  exactCapturedFixedWidthEntryCase usizeCaseCodec
+    "captured-usize-partial-max" ``Source.capturedUSizePartial
+    Source.capturedUSizePartial Source.maxUSize 0
+    #["usize", "maximum", "i64", "semantic-lean64"]
+    "Capture runner-supplied USize maximum through generic application and return it",
   { id := "recursive-traversal"
     entry := ``Source.recursiveTraversal
     dependencies := #[``Source.lastOr]

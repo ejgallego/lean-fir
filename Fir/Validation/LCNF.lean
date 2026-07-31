@@ -3133,6 +3133,25 @@ private def encodedBoolArgumentsUseScalarAbiGuard : Bool :=
 
 #guard encodedBoolArgumentsUseScalarAbiGuard
 
+private def encodedUnsignedScalarArgumentsUseEntryAbiGuard : Bool :=
+  match encodeArgs
+      #[.bits 8, .bits 8, .bits 16, .bits 16, .bits 32, .bits 32,
+        .bits 64, .bits 64, .usize, .usize]
+      #[.bits 8 0, .bits 8 255, .bits 16 0, .bits 16 65535,
+        .bits 32 0, .bits 32 0xffffffff, .bits 64 0,
+        .bits 64 0xffffffffffffffff, .usize 0, .usize 0xffffffffffffffff] with
+  | .ok (runtime, values) =>
+      runtime.heap.isEmpty &&
+        values == #[
+          .scalar (.uint8 0), .scalar (.uint8 255),
+          .scalar (.uint16 0), .scalar (.uint16 65535),
+          .scalar (.uint32 0), .scalar (.uint32 0xffffffff),
+          .scalar (.uint64 0), .scalar (.uint64 0xffffffffffffffff),
+          .usize 0, .usize 0xffffffffffffffff]
+  | .error _ => false
+
+#guard encodedUnsignedScalarArgumentsUseEntryAbiGuard
+
 private partial def decodeValue (runtime : RuntimeState) (schema : ValidationSchema)
     (value : Value) : Except String ValidationDatum := do
   match schema, value with
