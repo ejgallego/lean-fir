@@ -7521,6 +7521,45 @@ def SourceOnlyUnderTargetLedger
   ∀ rightLocation, rightLocation < rightFrontier →
     ledger.owner rightLocation ≠ location
 
+/-- Program-independent target interface for a live returned heap binding
+when the allocated target prefix contains exactly one location.  The binder,
+location, and numeric frontier are explicit parameters so reset/reuse clients
+need not name a concrete target state or heap. -/
+structure TargetSingletonLiveReturnAt
+    (target : MachineState) (binder : FVarId)
+    (rightLocation rightFrontier : Location) : Prop where
+  control : target.control = .code (.return binder)
+  liveRead :
+    lookup target.env binder = some (.object (.heap rightLocation))
+  frontier : target.runtime.nextLocation = rightFrontier
+  rightBounded : rightLocation < rightFrontier
+  singleton : ∀ location, location < rightFrontier →
+    location = rightLocation
+
+/-- A mapped source owner for the singleton target prefix excludes every
+distinct source location from the exact target allocation ledger.  This is
+the generic allocation-provenance calculation previously repeated by the
+retained-prefix reset/reuse fixture. -/
+theorem TargetSingletonLiveReturnAt.sourceOnly_of_mapping_ne
+    (shape : TargetSingletonLiveReturnAt target binder
+      rightLocation rightFrontier)
+    (mapping : rho.forward sourceOwner = some rightLocation)
+    (different : sourceOwner ≠ sourceOnly)
+    (ledger :
+      TargetAllocationLedger rho target.runtime.nextLocation) :
+    SourceOnlyUnderTargetLedger ledger sourceOnly := by
+  intro candidate bounded sameOwner
+  have candidateBounded : candidate < rightFrontier := by
+    simpa [shape.frontier] using bounded
+  have candidateEq : candidate = rightLocation :=
+    shape.singleton candidate candidateBounded
+  subst candidate
+  have rightBounded : rightLocation < target.runtime.nextLocation := by
+    simpa [shape.frontier] using shape.rightBounded
+  have ownerEq : ledger.owner rightLocation = sourceOwner :=
+    ledger.owner_eq_of_forward mapping rightBounded
+  exact different (ownerEq.symm.trans sameOwner)
+
 /-- An environment local names a source heap allocation that is outside the
 target owner ledger. The address is retained as proof-relevant data so later
 reset/write/reuse edges can select it without rediscovering allocation order. -/

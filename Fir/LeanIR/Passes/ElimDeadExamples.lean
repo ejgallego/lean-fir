@@ -16364,21 +16364,12 @@ theorem retainedPrefixReuseTargetAllocationControlInvariant_step
                   simp [coreStep, control, invokeClosure, getLiveCell,
                     found, liveEq, object, fail] at transition
 
-/-- Local target facts needed by the deleted reset/reuse suffix. They are
-strictly weaker than the concrete target-state enumeration: only the active
-residual, retained live binding, and allocation frontier are exposed. -/
-structure RetainedPrefixReuseTargetLivePrefixAt
-    (target : MachineState) : Prop where
-  control : target.control = .code (.return live)
-  liveRead :
-    lookup target.env live = some (.object (.heap 0))
-  frontier : target.runtime.nextLocation = 1
-
 /-- A structurally related active source state can meet the target's static
 allocation/control invariant only after the retained literal allocation.
-This bridges the step-preserved target phase interface to the three local
-facts consumed by both ownership-sensitive suffix edges. -/
-theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
+This bridges the step-preserved target phase interface to the generic
+singleton live-return contract consumed by both ownership-sensitive suffix
+edges. -/
+theorem retainedPrefixReuseTargetSingletonLiveReturnAt_of_relatedCode
     (sourceControl : source.control = .code sourceCode)
     (sourceLiveRead :
       lookup source.env live = some (.object (.heap 0)))
@@ -16386,7 +16377,7 @@ theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
       RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related :
       SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
-    RetainedPrefixReuseTargetLivePrefixAt target := by
+    TargetSingletonLiveReturnAt target live 0 1 := by
   rcases related with
     ⟨rho, ledger, sourceControlRoots, targetControlRoots,
       sourceFrameRoots, targetFrameRoots,
@@ -16424,6 +16415,11 @@ theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
                 control := activeControl
                 liveRead := shape.liveRead
                 frontier := shape.frontier
+                rightBounded := by decide
+                singleton := by
+                  intro location bounded
+                  exact Nat.eq_zero_of_le_zero
+                    (Nat.le_of_lt_succ bounded)
               }
           | yielded arguments activeControl activeFrames objectRead =>
               rw [targetControl] at activeControl
@@ -16443,27 +16439,6 @@ theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
   | invokeValue targetFunction targetArguments =>
       rw [targetControl] at control
       cases control
-
-/-- The retained live address identifies the sole target-ledger owner.
-Consequently source location one is outside the target allocation history,
-without exposing the concrete target heap. -/
-theorem RetainedPrefixReuseTargetLivePrefixAt.sourceOnlyAtOne
-    (shape : RetainedPrefixReuseTargetLivePrefixAt target)
-    (mapping : rho.forward 0 = some 0)
-    (ledger :
-      TargetAllocationLedger rho target.runtime.nextLocation) :
-    SourceOnlyUnderTargetLedger ledger 1 := by
-  have zeroBounded : 0 < target.runtime.nextLocation := by
-    simpa [shape.frontier]
-  have ownerZero : ledger.owner 0 = 0 :=
-    ledger.owner_eq_of_forward mapping zeroBounded
-  apply ledger.sourceOnly_of_owner_lt
-  intro rightLocation bounded
-  have rightZero : rightLocation = 0 := by
-    rw [shape.frontier] at bounded
-    exact Nat.eq_zero_of_le_zero (Nat.le_of_lt_succ bounded)
-  subst rightLocation
-  simpa [ownerZero]
 
 /-- The whole-program reset state has exactly the local heap/environment
 shape used by the focused nonempty-ledger regression. -/
@@ -16567,8 +16542,8 @@ theorem retainedPrefixReuseResetPairReady_ledger
       (retainedPrefixReuseSourceResetState sourceArguments).control =
         .code retainedPrefixReuseAfterObjectCode := rfl
   have targetShape :
-      RetainedPrefixReuseTargetLivePrefixAt target :=
-    retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
+      TargetSingletonLiveReturnAt target live 0 1 :=
+    retainedPrefixReuseTargetSingletonLiveReturnAt_of_relatedCode
       sourceControl
       (by
         simp [retainedPrefixReuseSourceResetState,
@@ -16598,7 +16573,8 @@ theorem retainedPrefixReuseResetPairReady_ledger
         · exact targetShape.liveRead
       have sourceOnly :
           SourceOnlyUnderTargetLedger ledger 1 :=
-        targetShape.sourceOnlyAtOne mapping ledger
+        targetShape.sourceOnly_of_mapping_ne
+          mapping (by decide) ledger
       have closure :
           SourceOnlyHeapClosureBinding ledger
             (retainedPrefixReuseSourceResetState sourceArguments).env
@@ -16679,8 +16655,8 @@ theorem retainedPrefixReusePairReady_ledger
       (retainedPrefixReuseSourceReuseState sourceArguments).control =
         .code retainedPrefixReuseAfterArgCode := rfl
   have targetShape :
-      RetainedPrefixReuseTargetLivePrefixAt target :=
-    retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
+      TargetSingletonLiveReturnAt target live 0 1 :=
+    retainedPrefixReuseTargetSingletonLiveReturnAt_of_relatedCode
       sourceControl
       (by
         simp [retainedPrefixReuseSourceReuseState,
@@ -16711,7 +16687,8 @@ theorem retainedPrefixReusePairReady_ledger
             live, resetObjectVar, reuseTokenVar, reuseArgVar]
         · exact targetShape.liveRead
       have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
-        targetShape.sourceOnlyAtOne mapping ledger
+        targetShape.sourceOnly_of_mapping_ne
+          mapping (by decide) ledger
       have reuseReady :
           DeletedReuseReadyAt
             (retainedPrefixReuseSourceReuseState sourceArguments)
