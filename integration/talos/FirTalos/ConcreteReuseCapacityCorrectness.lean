@@ -1030,7 +1030,8 @@ theorem box_ordinaryPersistenceTransport
   cases value with
   | scalar scalar =>
       simp only at operation
-      by_cases tagged : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · rw [if_pos tagged] at operation
         simp only [pure, Except.pure] at operation
         have pairEq := Except.ok.inj operation
@@ -1052,7 +1053,7 @@ theorem box_ordinaryPersistenceTransport
           (operation := rfl)
   | usize value =>
       simp only at operation
-      by_cases tagged : value.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type value = true
       · rw [if_pos tagged] at operation
         simp only [pure, Except.pure] at operation
         have pairEq := Except.ok.inj operation
@@ -1086,7 +1087,8 @@ theorem box_preserves_globals
   cases value with
   | scalar scalar =>
       simp only at operation
-      by_cases tagged : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · rw [if_pos tagged] at operation
         simp only [pure, Except.pure] at operation
         have pairEq := Except.ok.inj operation
@@ -1108,7 +1110,7 @@ theorem box_preserves_globals
           (operation := rfl)
   | usize value =>
       simp only at operation
-      by_cases tagged : value.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type value = true
       · rw [if_pos tagged] at operation
         simp only [pure, Except.pure] at operation
         have pairEq := Except.ok.inj operation

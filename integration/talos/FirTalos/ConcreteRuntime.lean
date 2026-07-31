@@ -12787,7 +12787,8 @@ theorem caseChainWP_scalarUInt8_constructor
               (UInt64.ofNat value.toNat).toNat = value.toNat :=
             UInt64.toNat_ofNat_of_lt' fits64
           have tagEq : actualTag = value.toNat := by
-            simpa [getTag, ScalarValue.toUInt64, valueToNat] using tagged.symm
+            simpa [getTag, ScalarValue.toUInt64, ScalarValue.rawBits,
+              valueToNat] using tagged.symm
           subst actualTag
           apply wp_scalarUInt8_case_test (host := Host) (rest := [])
             value.toNat info.cidx
