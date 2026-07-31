@@ -16074,97 +16074,17 @@ theorem retainedPrefixReuseSourceYieldedStepNonempty
     neutralEntryFrames, notEmpty,
     retainedPrefixReuseSourceInvokingState]
 
-inductive RetainedPrefixReuseSourceReachable
-    (arguments : Array Value) : MachineState → Prop where
-  | entry :
-      RetainedPrefixReuseSourceReachable arguments
-        (initialState retainedPrefixReuseBeforeProgram `main arguments)
-  | outer :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceOuterState arguments)
-  | object :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceObjectState arguments)
-  | reset :
-      RetainedPrefixReuseSourceReachable arguments
+/-- The only source controls whose dynamic readiness depends on the target
+allocation ledger. Every administrative, retained-allocation, argument, and
+terminal state is represented by ordinary source-machine readiness instead
+of a constructor in a whole-program execution graph. -/
+inductive RetainedPrefixReuseSourceSpecialAt : MachineState → Prop where
+  | reset (arguments : Array Value) :
+      RetainedPrefixReuseSourceSpecialAt
         (retainedPrefixReuseSourceResetState arguments)
-  | argument :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceArgState arguments)
-  | reuse :
-      RetainedPrefixReuseSourceReachable arguments
+  | reuse (arguments : Array Value) :
+      RetainedPrefixReuseSourceSpecialAt
         (retainedPrefixReuseSourceReuseState arguments)
-  | ret :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceReturnState arguments)
-  | yielded :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceYieldedState arguments)
-  | cached (empty : arguments = #[]) :
-      RetainedPrefixReuseSourceReachable arguments
-        retainedPrefixReuseSourceCachedState
-  | invoking (notEmpty : arguments ≠ #[]) :
-      RetainedPrefixReuseSourceReachable arguments
-        (retainedPrefixReuseSourceInvokingState arguments)
-
-theorem retainedPrefixReuseSourceReachable_step
-    (reachable :
-      RetainedPrefixReuseSourceReachable arguments before)
-    (step : Step externals before after) :
-    RetainedPrefixReuseSourceReachable arguments after := by
-  cases reachable with
-  | entry =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceEntryStep arguments) .outer step
-  | outer =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceOuterStep arguments) .object step
-  | object =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceObjectStep arguments) .reset step
-  | reset =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceResetStep arguments) .argument step
-  | argument =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceArgStep arguments) .reuse step
-  | reuse =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceReuseStep arguments) .ret step
-  | ret =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseSourceReturnStep arguments) .yielded step
-  | yielded =>
-      by_cases empty : arguments = #[]
-      · subst arguments
-        exact predicate_of_step_next
-          retainedPrefixReuseSourceYieldedStepEmpty
-          (.cached rfl) step
-      · exact predicate_of_step_next
-          (retainedPrefixReuseSourceYieldedStepNonempty empty)
-          (.invoking empty) step
-  | cached empty =>
-      cases step with
-      | internal transition =>
-          simp [retainedPrefixReuseSourceCachedState,
-            coreStep] at transition
-      | external transition response =>
-          simp [retainedPrefixReuseSourceCachedState,
-            coreStep] at transition
-  | invoking notEmpty =>
-      cases step with
-      | internal transition =>
-          simp [retainedPrefixReuseSourceInvokingState,
-            retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
-            nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
-            nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
-            coreStep, invokeClosure, fail] at transition
-      | external transition response =>
-          simp [retainedPrefixReuseSourceInvokingState,
-            retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
-            nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
-            nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
-            coreStep, invokeClosure, fail] at transition
 
 def retainedPrefixReuseTargetOuterState
     (arguments : Array Value) : MachineState :=
@@ -16828,112 +16748,273 @@ theorem retainedPrefixReuseReturnSourceMachineReadyAt
     (retainedPrefixReuseSourceReturnState arguments)
     sourceFrameRoots bounded exact subset static
 
-/-- Every source state in the finite entry graph is ledger-ready. Reset and
-reuse use the paired owner proof; the remaining states use hereditary
-source-only readiness. -/
-theorem retainedPrefixReuseSourceReachable_pairReady_ledger
-    (sourceReachable :
-      RetainedPrefixReuseSourceReachable sourceArguments source)
+/-- Entry control is administrative rather than active code. -/
+theorem retainedPrefixReuseEntrySourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (initialState retainedPrefixReuseBeforeProgram `main arguments) := by
+  apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+  intro sourceCode control
+  simp [initialState] at control
+
+/-- Yielded control carries no active source-code obligation. -/
+theorem retainedPrefixReuseYieldedSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceYieldedState arguments) := by
+  apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+  intro sourceCode control
+  simp [retainedPrefixReuseSourceYieldedState] at control
+
+/-- The cached terminal state carries no active source-code obligation. -/
+theorem retainedPrefixReuseCachedSourceMachineReadyAt :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      retainedPrefixReuseSourceCachedState := by
+  apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+  intro sourceCode control
+  simp [retainedPrefixReuseSourceCachedState] at control
+
+/-- Attempted application of the returned natural carries no active
+source-code obligation. -/
+theorem retainedPrefixReuseInvokingSourceMachineReadyAt
+    (arguments : Array Value) :
+    SourceRuntimeOwnershipMachineReadyAt 6
+      (retainedPrefixReuseSourceInvokingState arguments) := by
+  apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
+  intro sourceCode control
+  simp [retainedPrefixReuseSourceInvokingState] at control
+
+/-- Terminal cached branch of the hereditary local-readiness plan. -/
+theorem retainedPrefixReuseSourceCachedPlan
+    (externals : ExternalSpec) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      retainedPrefixReuseSourceCachedState := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    retainedPrefixReuseCachedSourceMachineReadyAt ?_
+  intro after step
+  cases step with
+  | internal transition =>
+      simp [retainedPrefixReuseSourceCachedState,
+        coreStep] at transition
+  | external transition response =>
+      simp [retainedPrefixReuseSourceCachedState,
+        coreStep] at transition
+
+/-- Terminal failed-application branch of the hereditary local-readiness
+plan. -/
+theorem retainedPrefixReuseSourceInvokingPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceInvokingState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseInvokingSourceMachineReadyAt arguments) ?_
+  intro after step
+  cases step with
+  | internal transition =>
+      simp [retainedPrefixReuseSourceInvokingState,
+        retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
+        nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+        nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
+        coreStep, invokeClosure, fail] at transition
+  | external transition response =>
+      simp [retainedPrefixReuseSourceInvokingState,
+        retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
+        nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
+        nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
+        coreStep, invokeClosure, fail] at transition
+
+/-- Yield dispatch keeps only generic non-code readiness and selects one of
+the two terminal local plans. -/
+theorem retainedPrefixReuseSourceYieldedPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceYieldedState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseYieldedSourceMachineReadyAt arguments) ?_
+  intro after step
+  by_cases empty : arguments = #[]
+  · subst arguments
+    exact predicate_of_step_next
+      retainedPrefixReuseSourceYieldedStepEmpty
+      (retainedPrefixReuseSourceCachedPlan externals) step
+  · exact predicate_of_step_next
+      (retainedPrefixReuseSourceYieldedStepNonempty empty)
+      (retainedPrefixReuseSourceInvokingPlan externals arguments) step
+
+/-- Retained return is an ordinary source-ready node. -/
+theorem retainedPrefixReuseSourceReturnPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceReturnState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseReturnSourceMachineReadyAt arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceReturnStep arguments)
+    (retainedPrefixReuseSourceYieldedPlan externals arguments) step
+
+/-- Deleted concrete reuse is one of the two ledger-sensitive local nodes. -/
+theorem retainedPrefixReuseSourceReusePlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceReuseState arguments) := by
+  refine SourceLocalReadinessPlan.special
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (.reuse arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceReuseStep arguments)
+    (retainedPrefixReuseSourceReturnPlan externals arguments) step
+
+/-- The retained argument binding is ordinary source readiness. -/
+theorem retainedPrefixReuseSourceArgPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceArgState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseArgSourceMachineReadyAt arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceArgStep arguments)
+    (retainedPrefixReuseSourceReusePlan externals arguments) step
+
+/-- Deleted reset is the other ledger-sensitive local node. -/
+theorem retainedPrefixReuseSourceResetPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceResetState arguments) := by
+  refine SourceLocalReadinessPlan.special
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (.reset arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceResetStep arguments)
+    (retainedPrefixReuseSourceArgPlan externals arguments) step
+
+/-- The retained constructor allocation is ordinary source readiness. -/
+theorem retainedPrefixReuseSourceObjectPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceObjectState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseObjectSourceMachineReadyAt arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceObjectStep arguments)
+    (retainedPrefixReuseSourceResetPlan externals arguments) step
+
+/-- The retained literal allocation is ordinary source readiness. -/
+theorem retainedPrefixReuseSourceOuterPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (retainedPrefixReuseSourceOuterState arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseOuterSourceMachineReadyAt arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceOuterStep arguments)
+    (retainedPrefixReuseSourceObjectPlan externals arguments) step
+
+/-- Complete hereditary source certificate. Unlike the former ten-state
+reachability graph, its public interface distinguishes only ordinary source
+readiness from the two operations that consume target-ledger provenance. -/
+theorem retainedPrefixReuseSourceLocalReadinessPlan
+    (externals : ExternalSpec) (arguments : Array Value) :
+    SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt
+      (initialState retainedPrefixReuseBeforeProgram `main arguments) := by
+  refine SourceLocalReadinessPlan.ordinary
+    (ordinaryReady := SourceRuntimeOwnershipMachineReadyAt 6)
+    (specialReady := RetainedPrefixReuseSourceSpecialAt)
+    (retainedPrefixReuseEntrySourceMachineReadyAt arguments) ?_
+  intro after step
+  exact predicate_of_step_next
+    (retainedPrefixReuseSourceEntryStep arguments)
+    (retainedPrefixReuseSourceOuterPlan externals arguments) step
+
+/-- Every node in the local source plan is ledger-ready. Ordinary nodes use
+their target-independent machine certificate; the two special nodes invoke
+the existing reset/reuse ledger bridges. -/
+theorem retainedPrefixReuseSourcePlan_pairReady_ledger
+    (sourcePlan : SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt source)
     (targetInvariant :
       RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related :
-      SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
+    SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
     LedgerBinderReadyReachableMachineReadyAt 6 source target := by
-  cases sourceReachable with
-  | entry =>
-      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
-      intro sourceCode control
-      simp [initialState] at control
-  | outer =>
-      exact
-        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-          (retainedPrefixReuseOuterSourceMachineReadyAt sourceArguments)
-  | object =>
-      exact
-        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-          (retainedPrefixReuseObjectSourceMachineReadyAt sourceArguments)
-  | reset =>
+  cases sourcePlan with
+  | ordinary sourceReady _next =>
+      exact related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+        sourceReady
+  | special specialReady _next =>
+    cases specialReady with
+    | reset arguments =>
       exact retainedPrefixReuseResetPairReady_ledger
         retainedPrefixReuseResetFresh targetInvariant related
-  | argument =>
-      exact
-        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-          (retainedPrefixReuseArgSourceMachineReadyAt sourceArguments)
-  | reuse =>
+    | reuse arguments =>
       exact retainedPrefixReusePairReady_ledger targetInvariant related
-  | ret =>
-      exact
-        related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-          (retainedPrefixReuseReturnSourceMachineReadyAt sourceArguments)
-  | yielded =>
-      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
-      intro sourceCode control
-      simp [retainedPrefixReuseSourceYieldedState] at control
-  | cached empty =>
-      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
-      intro sourceCode control
-      simp [retainedPrefixReuseSourceCachedState] at control
-  | invoking notEmpty =>
-      apply related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
-      apply SourceRuntimeOwnershipMachineReadyAt.of_not_code
-      intro sourceCode control
-      simp [retainedPrefixReuseSourceInvokingState] at control
 
-/-- Combined readiness for every retained-prefix source state. The reset edge
-uses source ownership and the nonempty target ledger together; all other
-edges reuse the established ledger-exact readiness proofs. -/
-theorem retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
-    (sourceReachable :
-      RetainedPrefixReuseSourceReachable sourceArguments source)
+/-- Source-owned form of local-plan readiness. Only reset consumes the
+separately maintained source ownership carrier. -/
+theorem retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
+    (sourcePlan : SourceLocalReadinessPlan externals
+      (SourceRuntimeOwnershipMachineReadyAt 6)
+      RetainedPrefixReuseSourceSpecialAt source)
     (targetInvariant :
       RetainedPrefixReuseTargetAllocationControlInvariant target)
     (sourceOwnership :
       SourceMachineOwnershipBelowFrontier source)
     (related :
-      SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
+    SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
     LedgerBinderReadyReachableMachineReadyAt 6 source target := by
-  cases sourceReachable with
-  | entry =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .entry targetInvariant related
-  | outer =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .outer targetInvariant related
-  | object =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .object targetInvariant related
-  | reset =>
+  cases sourcePlan with
+  | ordinary sourceReady _next =>
+      exact related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
+        sourceReady
+  | special specialReady _next =>
+    cases specialReady with
+    | reset arguments =>
       exact retainedPrefixReuseResetPairReady_sourceOwnedLedger
         sourceOwnership targetInvariant related
-  | argument =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .argument targetInvariant related
-  | reuse =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .reuse targetInvariant related
-  | ret =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .ret targetInvariant related
-  | yielded =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .yielded targetInvariant related
-  | cached empty =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        (.cached empty) targetInvariant related
-  | invoking notEmpty =>
-      exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        (.invoking notEmpty) targetInvariant related
-
-theorem retainedPrefixReuseSourceReachable_of_reaches
-    (path : NonLockstep.Reaches externals
-      (initialState retainedPrefixReuseBeforeProgram `main arguments)
-      state) :
-    RetainedPrefixReuseSourceReachable arguments state := by
-  exact path.invariant .entry
-    retainedPrefixReuseSourceReachable_step
+    | reuse arguments =>
+      exact retainedPrefixReusePairReady_ledger targetInvariant related
 
 theorem retainedPrefixReuseTargetAllocationControlInvariant_of_reaches
     (path : NonLockstep.Reaches externals
@@ -16952,32 +17033,34 @@ def retainedPrefixReuseLedgerExactOwnershipContract
       retainedPrefixReuseBeforeProgram
       retainedPrefixReuseAfterProgram #[`main] where
   invariant := fun _ sourceArguments targetArguments source target =>
-    RetainedPrefixReuseSourceReachable sourceArguments source ∧
+    SourceLocalReadinessPlan externals
+        (SourceRuntimeOwnershipMachineReadyAt 6)
+        RetainedPrefixReuseSourceSpecialAt source ∧
       RetainedPrefixReuseTargetAllocationControlInvariant target
   initial := by
     intro entry member sourceArguments targetArguments _argumentsRelated
     have entryEq : entry = `main := by
       simpa using member
     subst entry
-    exact ⟨.entry, .entry targetArguments⟩
+    exact ⟨retainedPrefixReuseSourceLocalReadinessPlan
+      externals sourceArguments, .entry targetArguments⟩
   sourcePreserved := by
     rintro entry sourceArguments targetArguments
       sourceBefore sourceAfter targetState
-      ⟨sourceReachable, targetInvariant⟩ step
-    exact ⟨retainedPrefixReuseSourceReachable_step
-      sourceReachable step, targetInvariant⟩
+      ⟨sourcePlan, targetInvariant⟩ step
+    exact ⟨sourcePlan.step step, targetInvariant⟩
   targetPreserved := by
     rintro entry sourceArguments targetArguments
       sourceState targetBefore targetAfter
-      ⟨sourceReachable, targetInvariant⟩ step
-    exact ⟨sourceReachable,
+      ⟨sourcePlan, targetInvariant⟩ step
+    exact ⟨sourcePlan,
       retainedPrefixReuseTargetAllocationControlInvariant_step
         targetInvariant step⟩
   ready := by
     rintro entry sourceArguments targetArguments source target
-      ⟨sourceReachable, targetInvariant⟩ related
-    exact retainedPrefixReuseSourceReachable_pairReady_ledger
-      sourceReachable targetInvariant related
+      ⟨sourcePlan, targetInvariant⟩ related
+    exact retainedPrefixReuseSourcePlan_pairReady_ledger
+      sourcePlan targetInvariant related
 
 /-- Combined source-owned/ledger-exact contract for the same nonempty-prefix
 program.  The source still carries its operational reachability proof, while
@@ -16998,9 +17081,9 @@ def retainedPrefixReuseSourceOwnedLedgerExactContract
     ready := ?_
   }
   rintro entry sourceArguments targetArguments source target
-    ⟨sourceReachable, targetInvariant⟩ sourceOwnership related
-  exact retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
-    sourceReachable targetInvariant sourceOwnership related
+    ⟨sourcePlan, targetInvariant⟩ sourceOwnership related
+  exact retainedPrefixReuseSourcePlan_pairReady_sourceOwnedLedger
+    sourcePlan targetInvariant sourceOwnership related
 
 theorem retainedPrefixReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed retainedPrefixReuseBeforeProgram := by

@@ -19811,6 +19811,42 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.ledgerBinderReadyReachableM
   exact sourceReady
     ⟨rho, target.frames, targetFrameRoots, frames⟩ sourceControl
 
+/-- Hereditary source-execution certificate parameterized by two local
+readiness interfaces. Ordinary states carry a target-independent source
+machine certificate; special states expose only the operation-specific shape
+that a ledger-aware client must discharge. Each node supplies its semantic
+successor certificate, so clients do not need a global finite-state
+enumeration merely to obtain a rectangular step invariant. -/
+inductive SourceLocalReadinessPlan
+    (externals : ExternalSpec)
+    (ordinaryReady specialReady : MachineState → Prop) :
+    MachineState → Prop where
+  | ordinary {state : MachineState}
+      (ready : ordinaryReady state)
+      (next : ∀ {after}, Step externals state after →
+        SourceLocalReadinessPlan externals
+          ordinaryReady specialReady after) :
+      SourceLocalReadinessPlan externals ordinaryReady specialReady state
+  | special {state : MachineState}
+      (ready : specialReady state)
+      (next : ∀ {after}, Step externals state after →
+        SourceLocalReadinessPlan externals
+          ordinaryReady specialReady after) :
+      SourceLocalReadinessPlan externals ordinaryReady specialReady state
+
+/-- A local-readiness plan is an ordinary rectangular source invariant: one
+semantic source step selects the successor certificate stored at its current
+node. -/
+theorem SourceLocalReadinessPlan.step
+    (plan : SourceLocalReadinessPlan externals
+      ordinaryReady specialReady before)
+    (step : Step externals before after) :
+    SourceLocalReadinessPlan externals
+      ordinaryReady specialReady after := by
+  cases plan with
+  | ordinary _ next => exact next step
+  | special _ next => exact next step
+
 /-- Hereditary source-only runtime/ownership contract.  Unlike the pair
 invariant, it quantifies over one execution and contains no target path,
 target state, observation relation, or address renaming. -/
