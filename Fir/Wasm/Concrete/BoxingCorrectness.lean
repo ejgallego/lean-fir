@@ -327,40 +327,50 @@ def semanticBoxResult (runtime : RuntimeState) (scalar : BoxedScalar) : RuntimeS
   heap := (runtime.nextLocation, semanticBoxCell scalar) :: runtime.heap
   nextLocation := runtime.nextLocation + 1 }
 
+/-- Every scalar kind implemented by the concrete boxing runtime is an
+integer kind, so the shared semantic predicate reduces to the historical
+payload-size split. Floating boxes use a separate heap-only path. -/
+@[simp] theorem boxUsesTaggedRepresentation_boxedScalar (scalar : BoxedScalar) :
+    boxUsesTaggedRepresentation scalar.kind.semanticType scalar.payload =
+      decide (scalar.payload.toNat ≤ maxTaggedPayload) := by
+  cases scalar <;> simp [boxUsesTaggedRepresentation, BoxedScalar.kind,
+    BoxedScalarKind.semanticType, BoxedScalar.payload,
+    Lean.Compiler.LCNF.ImpureType.uint8, Lean.Compiler.LCNF.ImpureType.uint16,
+    Lean.Compiler.LCNF.ImpureType.uint32, Lean.Compiler.LCNF.ImpureType.uint64,
+    Lean.Compiler.LCNF.ImpureType.usize, Lean.Compiler.LCNF.ImpureType.float32,
+    Lean.Compiler.LCNF.ImpureType.float] <;>
+    intro <;> constructor <;> native_decide
+
+/-- Concrete integer boxing sees the shared semantic box operation through
+the same payload-size split as before the float-only heap rule was added. -/
+theorem semanticBox_split (runtime : RuntimeState) (scalar : BoxedScalar) :
+    Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
+      if scalar.payload.toNat ≤ maxTaggedPayload then
+        .ok (runtime, .object (.tagged scalar.payload))
+      else
+        .ok (semanticBoxResult runtime scalar,
+          .object (.heap runtime.nextLocation)) := by
+  have nonfloating :
+      (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float32) = false ∧
+      (scalar.kind.semanticType == Lean.Compiler.LCNF.ImpureType.float) = false := by
+    cases scalar <;> simp only [BoxedScalar.kind, BoxedScalarKind.semanticType] <;>
+      constructor <;> native_decide
+  rcases nonfloating with ⟨notF32, notF64⟩
+  cases scalar <;>
+    simp only [BoxedScalar.kind, BoxedScalarKind.semanticType] at notF32 notF64 <;>
+    simp [Fir.LeanIR.Impure.box, BoxedScalar.kind,
+      BoxedScalarKind.semanticType, BoxedScalar.semanticValue,
+      BoxedScalar.payload, ScalarValue.rawBits, ScalarValue.toUInt64,
+      boxUsesTaggedRepresentation, notF32, notF64, alloc,
+      semanticBoxResult, semanticBoxCell, Bind.bind, Except.bind,
+      Pure.pure, Except.pure]
+
 theorem semanticBox_heap_eq (runtime : RuntimeState) (scalar : BoxedScalar)
     (heap : maxTaggedPayload < scalar.payload.toNat) :
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
       .ok (semanticBoxResult runtime scalar,
         .object (.heap runtime.nextLocation)) := by
-  cases scalar with
-  | uint8 value =>
-      have bound := value.toNat_lt
-      simp [BoxedScalar.payload, maxTaggedPayload] at heap
-      omega
-  | uint16 value =>
-      have bound := value.toNat_lt
-      simp [BoxedScalar.payload, maxTaggedPayload] at heap
-      omega
-  | uint32 value =>
-      have bound := value.toNat_lt
-      simp [BoxedScalar.payload, maxTaggedPayload] at heap
-      omega
-  | uint64 value =>
-      change maxTaggedPayload < value.toNat at heap
-      unfold Fir.LeanIR.Impure.box
-      simp only [BoxedScalar.kind, BoxedScalarKind.semanticType,
-        BoxedScalar.semanticValue, ScalarValue.toUInt64, Bind.bind, Except.bind]
-      rw [if_neg (Nat.not_le.mpr heap)]
-      simp [alloc, semanticBoxResult, semanticBoxCell]
-      rfl
-  | usize value =>
-      change maxTaggedPayload < value.toNat at heap
-      unfold Fir.LeanIR.Impure.box
-      simp only [BoxedScalar.kind, BoxedScalarKind.semanticType,
-        BoxedScalar.semanticValue, Bind.bind, Except.bind]
-      rw [if_neg (Nat.not_le.mpr heap)]
-      simp [alloc, semanticBoxResult, semanticBoxCell]
-      rfl
+  rw [semanticBox_split, if_neg (Nat.not_le.mpr heap)]
 
 /-- Heap-backed boxing extends the complete concrete/semantic live-heap
 relation and relates the returned wasm32 address to the fresh semantic box. -/
@@ -644,10 +654,7 @@ theorem semanticBox_tagged_eq (runtime : RuntimeState) (scalar : BoxedScalar)
     (tagged : scalar.payload.toNat ≤ maxTaggedPayload) :
     Fir.LeanIR.Impure.box runtime scalar.kind.semanticType scalar.semanticValue =
       .ok (runtime, .object (.tagged scalar.payload)) := by
-  cases scalar <;>
-    simp_all [Fir.LeanIR.Impure.box, BoxedScalar.semanticValue,
-      BoxedScalar.payload, ScalarValue.toUInt64, Bind.bind, Except.bind] <;>
-    rfl
+  rw [semanticBox_split, if_pos tagged]
 
 /-- The public concrete boxing operation and semantic boxing agree throughout
 the tagged range, whether wasm32 can use a direct immediate or must allocate a
