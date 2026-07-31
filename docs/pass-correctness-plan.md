@@ -1765,12 +1765,21 @@ the existing nullary-`.fap` semantic discrepancy.
    `LoweringCorrect`. The retained-prefix reset/reuse client checks this path
    with a genuinely nonempty target ledger and obtains reset freshness from
    source ownership.
+   Commit `6060a918` begins the static/local-shape replacement. The shared
+   `RetainedPrefixReuseTargetLivePrefixAt` invariant exposes only the target
+   residual control, retained live binding, and allocation frontier needed by
+   deleted reset/reuse. One relation-to-shape theorem now discharges the
+   target execution classification for both edges; their duplicated finite
+   target-state case analyses and concrete target-runtime rewrites are gone.
+   Source-only closure and reset-token provenance are generalized over an
+   arbitrary target-ledger frontier.
    The next structural gap is static initialization and preservation:
    arbitrary checked compiler entries must derive these local
    typing/ownership/readiness facts without finite execution-graph
-   enumeration. Start by factoring static reset/reuse laws that imply local
-   operation success, source-only closure, and token provenance, then lift
-   those laws through reachable compiler states.
+   enumeration. Replace the remaining target-reachability premise of the
+   relation-to-shape theorem with a step-preserved allocation-budget/control
+   invariant, then lift the same local-shape interface from this fixture to
+   arbitrary checked reset/reuse residuals.
 2. Extend the actual-pass matrix when new ownership laws or semantic
    boundaries produce a distinct compiler-relevant shape.
 3. Adapt `scalarFromType_ok_eq_immediate` to the queued tagged-float runtime
