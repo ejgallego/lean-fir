@@ -906,7 +906,15 @@ theorem ConstructorObjectRel.allocationFrame
       | .uint64 value =>
           field.width = info.size + info.usize ∧
           field.offset + 8 ≤ info.ssize ∧
-          readScalarUInt64Field after address field.width field.offset = .ok value := by
+          readScalarUInt64Field after address field.width field.offset = .ok value
+      | .float32Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 4 ≤ info.ssize ∧
+          readScalarUInt32Field after address field.width field.offset = .ok bits
+      | .float64Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field after address field.width field.offset = .ok bits := by
     intro field member
     have beforeField := related.semanticScalarFields field member
     cases valueEq : field.value with
@@ -1031,6 +1039,86 @@ theorem ConstructorObjectRel.allocationFrame
         rw [operationEq]
         exact readBefore
     | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            headerBytes + target.semanticSlotBytes * field.width + field.offset + 8 ≤
+              (ConstructorLayout.ofInfo info).allocationBytes := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          simp [ConstructorLayout.ofInfo, target] at layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt64Field after address field.width field.offset =
+              readScalarUInt64Field before address field.width field.offset := by
+          unfold readScalarUInt64Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          have memoryEq : after.memory.readUInt64
+                (address.value + headerBytes +
+                  target.semanticSlotBytes * field.width + field.offset) =
+              before.memory.readUInt64
+                (address.value + headerBytes +
+                  target.semanticSlotBytes * field.width + field.offset) := by
+            rw [show address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset =
+              address.value + (headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) by omega]
+            exact frame.readUInt64 fieldOwned
+          simp [memoryEq]
+        rw [operationEq]
+        exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have fieldOwned :
+            headerBytes + target.semanticSlotBytes * field.width + field.offset + 4 ≤
+              (ConstructorLayout.ofInfo info).allocationBytes := by
+          have layoutBound := align8_ge
+            (headerBytes + target.semanticSlotBytes * (info.size + info.usize) +
+              info.ssize)
+          simp [ConstructorLayout.ofInfo, target] at layoutBound ⊢
+          rw [widthEq]
+          omega
+        have operationEq :
+            readScalarUInt32Field after address field.width field.offset =
+              readScalarUInt32Field before address field.width field.offset := by
+          unfold readScalarUInt32Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddress : scalarFieldAddress address header field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          rw [scalarAddress]
+          have memoryEq : after.memory.readUInt32
+                (address.value + headerBytes +
+                  target.semanticSlotBytes * field.width + field.offset) =
+              before.memory.readUInt32
+                (address.value + headerBytes +
+                  target.semanticSlotBytes * field.width + field.offset) := by
+            rw [show address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset =
+              address.value + (headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) by omega]
+            exact frame.readUInt32 fieldOwned
+          simp [memoryEq]
+        rw [operationEq]
+        exact readBefore
+    | float64Bits bits =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
         refine ⟨widthEq, fieldFits, ?_⟩
