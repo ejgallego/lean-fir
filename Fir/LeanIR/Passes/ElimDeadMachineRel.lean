@@ -7521,6 +7521,31 @@ def SourceOnlyUnderTargetLedger
   ∀ rightLocation, rightLocation < rightFrontier →
     ledger.owner rightLocation ≠ location
 
+/-- Proof-visible source owners for every address in an allocated target
+prefix. Unlike `TargetAllocationLedger`, this interface carries forward
+mapping witnesses, so compiler-residual clients can construct it directly
+from retained bindings without inspecting the ledger's owner table. -/
+structure TargetMappedOwnerPrefix
+    (rho : AddressRenaming) (rightFrontier : Location) where
+  sourceOwner : Location → Location
+  forwardMapped : ∀ rightLocation, rightLocation < rightFrontier →
+    rho.forward (sourceOwner rightLocation) = some rightLocation
+
+/-- Any source location distinct from every witnessed owner of an arbitrary
+mapped target prefix is outside the corresponding allocation ledger. -/
+theorem TargetMappedOwnerPrefix.sourceOnly_of_owners_ne
+    (ownerMap : TargetMappedOwnerPrefix rho rightFrontier)
+    (different : ∀ rightLocation, rightLocation < rightFrontier →
+      ownerMap.sourceOwner rightLocation ≠ sourceOnly)
+    (ledger : TargetAllocationLedger rho rightFrontier) :
+    SourceOnlyUnderTargetLedger ledger sourceOnly := by
+  intro rightLocation bounded sameOwner
+  have ownerEq :
+      ledger.owner rightLocation = ownerMap.sourceOwner rightLocation :=
+    ledger.owner_eq_of_forward
+      (ownerMap.forwardMapped rightLocation bounded) bounded
+  exact different rightLocation bounded (ownerEq.symm.trans sameOwner)
+
 /-- Program-independent target interface for a live returned heap binding
 when the allocated target prefix contains exactly one location.  The binder,
 location, and numeric frontier are explicit parameters so reset/reuse clients
@@ -7536,6 +7561,24 @@ structure TargetSingletonLiveReturnAt
   singleton : ∀ location, location < rightFrontier →
     location = rightLocation
 
+/-- A mapped owner of the unique live target address supplies owner witnesses
+for the whole singleton prefix. This is the adapter from the focused fixture
+to the arbitrary-prefix allocation interface. -/
+def TargetSingletonLiveReturnAt.mappedOwnerPrefix
+    (shape : TargetSingletonLiveReturnAt target binder
+      rightLocation rightFrontier)
+    (mapping : rho.forward sourceOwner = some rightLocation) :
+    TargetMappedOwnerPrefix rho target.runtime.nextLocation where
+  sourceOwner := fun _ => sourceOwner
+  forwardMapped := by
+    intro location bounded
+    have prefixBounded : location < rightFrontier := by
+      simpa [shape.frontier] using bounded
+    have locationEq : location = rightLocation :=
+      shape.singleton location prefixBounded
+    subst location
+    exact mapping
+
 /-- A mapped source owner for the singleton target prefix excludes every
 distinct source location from the exact target allocation ledger.  This is
 the generic allocation-provenance calculation previously repeated by the
@@ -7548,17 +7591,11 @@ theorem TargetSingletonLiveReturnAt.sourceOnly_of_mapping_ne
     (ledger :
       TargetAllocationLedger rho target.runtime.nextLocation) :
     SourceOnlyUnderTargetLedger ledger sourceOnly := by
-  intro candidate bounded sameOwner
-  have candidateBounded : candidate < rightFrontier := by
-    simpa [shape.frontier] using bounded
-  have candidateEq : candidate = rightLocation :=
-    shape.singleton candidate candidateBounded
-  subst candidate
-  have rightBounded : rightLocation < target.runtime.nextLocation := by
-    simpa [shape.frontier] using shape.rightBounded
-  have ownerEq : ledger.owner rightLocation = sourceOwner :=
-    ledger.owner_eq_of_forward mapping rightBounded
-  exact different (ownerEq.symm.trans sameOwner)
+  exact (shape.mappedOwnerPrefix mapping).sourceOnly_of_owners_ne
+    (by
+      intro _location _bounded
+      exact different)
+    ledger
 
 /-- An environment local names a source heap allocation that is outside the
 target owner ledger. The address is retained as proof-relevant data so later
