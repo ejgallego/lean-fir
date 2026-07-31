@@ -1249,7 +1249,17 @@ theorem ConstructorObjectRel.writeOwnershipMetadata
           field.width = info.size + info.usize ∧
           field.offset + 8 ≤ info.ssize ∧
           readScalarUInt64Field ({ state with memory } : MemoryState) address
-            field.width field.offset = .ok value := by
+            field.width field.offset = .ok value
+      | .float32Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 4 ≤ info.ssize ∧
+          readScalarUInt32Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok bits
+      | .float64Bits bits =>
+          field.width = info.size + info.usize ∧
+          field.offset + 8 ≤ info.ssize ∧
+          readScalarUInt64Field ({ state with memory } : MemoryState) address
+            field.width field.offset = .ok bits := by
     intro field member
     have beforeField := related.semanticScalarFields field member
     cases valueEq : field.value with
@@ -1359,6 +1369,76 @@ theorem ConstructorObjectRel.writeOwnershipMetadata
         rw [operationEq]
         exact readBefore
     | uint64 value =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt64Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt64Field state address field.width field.offset := by
+          unfold readScalarUInt64Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 8 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readUInt64 (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readUInt64 (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readUInt64_of_write_eq_ok_payload state.memory memory address
+            { header with refCount := nextCount, persistent := nextPersistent }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (by omega)]
+        rw [operationEq]
+        exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have operationEq :
+            readScalarUInt32Field ({ state with memory } : MemoryState) address
+                field.width field.offset =
+              readScalarUInt32Field state address field.width field.offset := by
+          unfold readScalarUInt32Field
+          rw [constructorHeaderAfter, constructorHeaderBefore]
+          simp only [Bind.bind, Except.bind]
+          have scalarAddressBefore : scalarFieldAddress address header field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+            rfl
+          have scalarAddressAfter : scalarFieldAddress address updatedHeader field.width
+              field.offset 4 = .ok (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset) := by
+            unfold scalarFieldAddress
+            simp [updatedHeader, widthEq, objectCount, usizeCount, fieldFits,
+              scalarCount]
+            rfl
+          rw [scalarAddressAfter, scalarAddressBefore]
+          change liftMemory (memory.readUInt32 (address.value + headerBytes +
+            target.semanticSlotBytes * field.width + field.offset)) =
+              liftMemory (state.memory.readUInt32 (address.value + headerBytes +
+                target.semanticSlotBytes * field.width + field.offset))
+          rw [Header.readUInt32_of_write_eq_ok_other state.memory memory address
+            { header with refCount := nextCount, persistent := nextPersistent }
+            (address.value + headerBytes + target.semanticSlotBytes * field.width +
+              field.offset) headerInBounds headerWrite (.inr (by omega))]
+        rw [operationEq]
+        exact readBefore
+    | float64Bits bits =>
         simp only [valueEq] at beforeField ⊢
         obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
         refine ⟨widthEq, fieldFits, ?_⟩
