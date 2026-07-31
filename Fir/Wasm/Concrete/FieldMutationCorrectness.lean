@@ -289,6 +289,54 @@ theorem ConstructorObjectRel.writeUSizeField
           simp [target]
           omega)]
         exact readBefore
+    | float32Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 4 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt32Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        rw [scalarAddress]
+        change liftMemory (memory.readUInt32 _) = .ok bits
+        rw [readUInt32Frame _ (by
+          left
+          rw [offsetEq, widthEq]
+          simp [target]
+          omega)]
+        exact readBefore
+    | float64Bits bits =>
+        simp only [valueEq] at beforeField ⊢
+        obtain ⟨widthEq, fieldFits, readBefore⟩ := beforeField
+        refine ⟨widthEq, fieldFits, ?_⟩
+        have scalarAddress : scalarFieldAddress address header field.width
+            field.offset 8 = .ok (address.value + headerBytes +
+              target.semanticSlotBytes * field.width + field.offset) := by
+          unfold scalarFieldAddress
+          simp [widthEq, objectCount, usizeCount, fieldFits, scalarCount]
+          rfl
+        unfold readScalarUInt64Field at readBefore ⊢
+        rw [constructorHeaderBefore] at readBefore
+        simp only [Bind.bind, Except.bind] at readBefore
+        rw [scalarAddress] at readBefore
+        rw [constructorHeaderAfter]
+        simp only [Bind.bind, Except.bind]
+        rw [scalarAddress]
+        change liftMemory (memory.readUInt64 _) = .ok bits
+        rw [readUInt64Frame _ (by
+          left
+          rw [offsetEq, widthEq]
+          simp [target]
+          omega)]
+        exact readBefore
   · intro fieldIndex kind semanticValue kindAt valueAt
     change semantic.objectFields[fieldIndex]? = some semanticValue at valueAt
     have fieldValid : fieldIndex < info.size := by
