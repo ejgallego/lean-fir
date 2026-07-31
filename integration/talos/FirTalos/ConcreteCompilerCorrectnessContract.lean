@@ -3817,6 +3817,43 @@ example
   contexts.sourceCodeResult result
 
 /--
+The production declaration selector is driven by `lowerSupported` and
+`adapt`, not by caller-supplied symbolic/target rows.  Its sole remaining
+static premise is the uniform hygiene-to-local-layout theorem for
+`lowerDecl`; the result carries the exact callee context and pointwise adapted
+function row.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    (layoutSound : LoweredDeclarationLocalLayoutSound)
+    (declarationHygienic :
+      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    ∃ calleeContext sourceFunction,
+      DeclarationContextsCoherent caller calleeContext ∧
+        Nonempty (ConcreteGeneratedDeclaration calleeContext sourceCode
+          sourceModule sourceFunction target) :=
+  ConcreteGeneratedDeclaration.exists_ofSupportedPipeline layoutSound
+    declarationHygienic callerProgram callerCaches lowered adapted
+    declarationFound bodyEq resultClassified
+
+/--
 A cache-aware direct-declaration implementation supplies the interprocedural
 call premise over the same fixed-entry cache frame. Its recursive callee
 returns the evolved cache table; no unchanged-global adapter is involved.

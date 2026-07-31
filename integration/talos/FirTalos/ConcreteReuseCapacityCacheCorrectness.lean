@@ -7129,6 +7129,652 @@ structure ConcreteSupportedDeclaration
   localsAligned : LocalLayoutAligned context sourceFunction
   singleResult : targetFunction.results.length = 1
 
+/--
+Exact declaration-local data computed by one successful production
+`lowerDecl` call.
+
+This is deliberately a view of the executable compiler, not a second lowering
+relation: `exists_of_lowerDecl` below obtains every field by unfolding the
+actual `lowerDecl` result.  Keeping the declaration-local context explicit is
+what prevents recursive proofs from reusing the caller's local and join rows.
+-/
+structure LoweredInternalDeclaration
+    (program : Fir.LeanIR.ImpureProgram)
+    (cachedDeclarations : Array Name)
+    (declaration : LCNF.Decl .impure)
+    (sourceCode : LCNF.Code .impure)
+    (sourceFunction : Fir.Wasm.Function) where
+  paramLocals : Fir.Wasm.LocalKinds
+  localKinds : Fir.Wasm.LocalKinds
+  symbolicBody : List Fir.Wasm.Instruction
+  abiResults : Array AbiKind
+  bodyEq : declaration.value = .code sourceCode
+  paramsAdded :
+    Fir.Wasm.addParams [] declaration.params = .ok paramLocals
+  localsCollected :
+    Fir.Wasm.collectLocals paramLocals sourceCode = .ok localKinds
+  bodyCompiled :
+    Fir.Wasm.compileCode {
+        program
+        localKinds
+        cachedDeclarations } sourceCode = .ok symbolicBody
+  resultsCompiled :
+    Fir.Wasm.resultKinds declaration.type = .ok abiResults
+  sourceFunctionEq :
+    sourceFunction = {
+      name := declaration.name
+      params := paramLocals.reverse.toArray
+      results := abiResults
+      locals := (localKinds.reverse.filter fun entry =>
+        !declaration.params.any fun param =>
+          param.fvarId.name == entry.fst.name).toArray
+      body := symbolicBody }
+
+/-- The exact declaration-local context used by production lowering. -/
+def LoweredInternalDeclaration.context
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) : Fir.Wasm.Context := {
+  program
+  localKinds := row.localKinds
+  cachedDeclarations }
+
+/-- The selected source function body is the output compiled in its own
+declaration context. -/
+theorem LoweredInternalDeclaration.compileCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+    Fir.Wasm.compileCode row.context sourceCode =
+      .ok sourceFunction.body := by
+  change
+    Fir.Wasm.compileCode {
+        program
+        localKinds := row.localKinds
+        cachedDeclarations } sourceCode = .ok sourceFunction.body
+  have bodyEq : sourceFunction.body = row.symbolicBody := by
+    simpa using congrArg Fir.Wasm.Function.body row.sourceFunctionEq
+  rw [bodyEq]
+  exact row.bodyCompiled
+
+/-- A canonical lowered declaration shares only module-wide context fields
+with its caller; declaration-local kinds and joins remain independent. -/
+theorem LoweredInternalDeclaration.contextsCoherent
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction)
+    {caller : Fir.Wasm.Context}
+    (callerProgram : caller.program = program)
+    (callerCaches : caller.cachedDeclarations = cachedDeclarations) :
+    DeclarationContextsCoherent caller row.context := {
+  program := callerProgram
+  cachedDeclarations := callerCaches }
+
+/--
+Uniform compiler theorem still required for production declaration selection:
+every hygienic `lowerDecl` row gives the adapter the same local number and ABI
+kind that the lowering context assigns to a source variable.
+
+This is deliberately quantified over the executable `lowerDecl` view.  It is
+not a per-program or per-call translation certificate; proving this proposition
+once closes local layout selection for every generated declaration.
+-/
+def LoweredDeclarationLocalLayoutSound : Prop :=
+  ∀ {program : Fir.LeanIR.ImpureProgram}
+      {cachedDeclarations : Array Name}
+      {declaration : LCNF.Decl .impure}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      (hygienic :
+        Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
+      (row :
+        LoweredInternalDeclaration program cachedDeclarations declaration
+          sourceCode sourceFunction),
+    LocalLayoutAligned row.context sourceFunction
+
+/-- Successful production `lowerDecl` exposes its exact declaration-local
+context, symbolic body, ABI result row, and emitted source function. -/
+theorem LoweredInternalDeclaration.exists_of_lowerDecl
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (bodyEq : declaration.value = .code sourceCode)
+    (lowered :
+      Fir.Wasm.lowerDecl program cachedDeclarations declaration =
+        .ok (some sourceFunction)) :
+    Nonempty (LoweredInternalDeclaration program cachedDeclarations declaration
+      sourceCode sourceFunction) := by
+  unfold Fir.Wasm.lowerDecl at lowered
+  rw [bodyEq] at lowered
+  cases paramsResult : Fir.Wasm.addParams [] declaration.params with
+  | error error =>
+      simp only [paramsResult, Bind.bind, Except.bind] at lowered
+      contradiction
+  | ok paramLocals =>
+      simp only [paramsResult, Bind.bind, Except.bind] at lowered
+      cases localsResult :
+          Fir.Wasm.collectLocals paramLocals sourceCode with
+      | error error =>
+          simp only [localsResult] at lowered
+          contradiction
+      | ok localKinds =>
+          simp only [localsResult] at lowered
+          cases bodyResult :
+              Fir.Wasm.compileCode {
+                program
+                localKinds
+                cachedDeclarations } sourceCode with
+          | error error =>
+              simp only [bodyResult] at lowered
+              contradiction
+          | ok symbolicBody =>
+              simp only [bodyResult] at lowered
+              cases resultsResult :
+                  Fir.Wasm.resultKinds declaration.type with
+              | error error =>
+                  simp only [resultsResult] at lowered
+                  contradiction
+              | ok abiResults =>
+                  simp only [resultsResult, pure, Except.pure,
+                    Except.ok.injEq, Option.some.injEq] at lowered
+                  exact ⟨{
+                    paramLocals
+                    localKinds
+                    symbolicBody
+                    abiResults
+                    bodyEq
+                    paramsAdded := paramsResult
+                    localsCollected := localsResult
+                    bodyCompiled := bodyResult
+                    resultsCompiled := resultsResult
+                    sourceFunctionEq := lowered.symm }⟩
+
+/-- An internal source declaration cannot produce the `none` branch reserved
+for external imports when `lowerDecl` succeeds. -/
+theorem lowerDecl_some_of_code
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {result : Option Fir.Wasm.Function}
+    (bodyEq : declaration.value = .code sourceCode)
+    (lowered :
+      Fir.Wasm.lowerDecl program cachedDeclarations declaration = .ok result) :
+    ∃ sourceFunction, result = some sourceFunction := by
+  cases result with
+  | some sourceFunction => exact ⟨sourceFunction, rfl⟩
+  | none =>
+      unfold Fir.Wasm.lowerDecl at lowered
+      rw [bodyEq] at lowered
+      cases paramsResult : Fir.Wasm.addParams [] declaration.params with
+      | error error =>
+          simp only [paramsResult, Bind.bind, Except.bind] at lowered
+          contradiction
+      | ok paramLocals =>
+          simp only [paramsResult, Bind.bind, Except.bind] at lowered
+          cases localsResult :
+              Fir.Wasm.collectLocals paramLocals sourceCode with
+          | error error => simp [localsResult] at lowered
+          | ok localKinds =>
+              simp only [localsResult] at lowered
+              cases bodyResult :
+                  Fir.Wasm.compileCode {
+                    program
+                    localKinds
+                    cachedDeclarations } sourceCode with
+              | error error => simp [bodyResult] at lowered
+              | ok symbolicBody =>
+                  simp only [bodyResult] at lowered
+                  cases resultsResult :
+                      Fir.Wasm.resultKinds declaration.type with
+                  | error error => simp [resultsResult] at lowered
+                  | ok abiResults =>
+                      simp [resultsResult, pure, Except.pure] at lowered
+
+/-- Successful whole-module lowering exposes the exact production
+`filterMapM lowerDecl` result used as the symbolic function table. -/
+theorem LoweredInternalDeclaration.functions_of_lower
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    (lowered : Fir.Wasm.lower program = .ok source) :
+    program.decls.filterMapM
+        (Fir.Wasm.lowerDecl program
+          (Fir.Wasm.cachedDeclarationNames program)) =
+      .ok source.functions := by
+  unfold Fir.Wasm.lower at lowered
+  dsimp only at lowered
+  generalize functionsEq :
+      program.decls.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        functionsResult at lowered
+  cases functionsResult with
+  | error error => contradiction
+  | ok functions =>
+      simp only [Bind.bind, Except.bind] at lowered
+      by_cases operations :
+          (Fir.Wasm.collectRuntimeOps functions).all
+              Fir.Wasm.RuntimeOp.abiWellFormed = true
+      · simp only [operations, ↓reduceIte] at lowered
+        generalize externalsEq :
+            (program.decls.filterMapM (fun decl =>
+              match decl.value with
+              | .extern _ => do
+                  match Fir.Wasm.externalImport decl with
+                  | .ok import_ => return some import_
+                  | .error error =>
+                      throw (Fir.Wasm.CompileError.abi error)
+              | .code _ => pure none) :
+                Except Fir.Wasm.CompileError (Array Fir.Wasm.Import)) =
+              externalsResult at lowered
+        cases externalsResult with
+        | error error => contradiction
+        | ok externals =>
+            simp only [pure, Except.pure, Except.ok.injEq] at lowered
+            subst source
+            simpa using functionsEq
+      · simp [operations] at lowered
+
+/--
+The production-strengthened declaration package.
+
+`ConcreteSupportedDeclaration` contains exactly the static facts consumed by
+the dynamic body theorem.  This companion additionally records that the
+symbolic and concrete functions occupy the same row of the actual
+`lower`/`adapt` pipeline.  In particular, its unified target index is computed
+from the symbolic import prefix and source-function row; it cannot be paired
+with an unrelated adapted function.
+-/
+structure ConcreteGeneratedDeclaration
+    (context : Fir.Wasm.Context)
+    (sourceCode : LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (target : AdaptedModule)
+    extends ConcreteSupportedDeclaration context sourceCode sourceModule
+      sourceFunction target where
+  sourceFunctionIndex : Nat
+  sourceFunctionFound :
+    sourceModule.functions[sourceFunctionIndex]? = some sourceFunction
+  targetFunctionIndex_eq :
+    targetFunctionIndex = sourceModule.imports.size + sourceFunctionIndex
+  functionAdapted :
+    FirTalos.function sourceModule sourceFunction = .ok targetFunction
+
+/-- Pointwise inversion of successful `Except`-valued list traversal. -/
+private theorem exceptListMapM_getElem?_eq_some
+    {α β ε : Type} {f : α → Except ε β} {xs : List α} {ys : List β}
+    {index : Nat} {x : α}
+    (mapped : xs.mapM f = .ok ys)
+    (found : xs[index]? = some x) :
+    ∃ y, f x = .ok y ∧ ys[index]? = some y := by
+  induction xs generalizing ys index with
+  | nil => simp at found
+  | cons head tail ih =>
+      cases index with
+      | zero =>
+          simp only [List.getElem?_cons_zero] at found
+          have xEq : x = head := (Option.some.inj found).symm
+          subst x
+          cases headResult : f head with
+          | error error =>
+              simp only [List.mapM_cons, headResult, Bind.bind, Except.bind]
+                at mapped
+              contradiction
+          | ok y =>
+              cases tailResult : tail.mapM f with
+              | error error =>
+                  simp only [List.mapM_cons, headResult, Bind.bind, Except.bind,
+                    tailResult] at mapped
+                  contradiction
+              | ok mappedTail =>
+                  simp only [List.mapM_cons, headResult, Bind.bind, Except.bind,
+                    tailResult, pure, Except.pure, Except.ok.injEq] at mapped
+                  subst ys
+                  exact ⟨y, by simpa using headResult, rfl⟩
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at found
+          cases headResult : f head with
+          | error error =>
+              simp only [List.mapM_cons, headResult, Bind.bind, Except.bind]
+                at mapped
+              contradiction
+          | ok y =>
+              cases tailResult : tail.mapM f with
+              | error error =>
+                  simp only [List.mapM_cons, headResult, Bind.bind, Except.bind,
+                    tailResult] at mapped
+                  contradiction
+              | ok mappedTail =>
+                  simp only [List.mapM_cons, headResult, Bind.bind, Except.bind,
+                    tailResult, pure, Except.pure, Except.ok.injEq] at mapped
+                  subst ys
+                  obtain ⟨result, resultFound, resultAt⟩ :=
+                    ih tailResult found
+                  exact ⟨result, resultFound, by simpa using resultAt⟩
+
+/-- Every input visited by a successful `filterMapM` also returned
+successfully, whether or not it contributed an output row. -/
+private theorem exceptListFilterMapM_ok_of_mem
+    {α β ε : Type} {f : α → Except ε (Option β)}
+    {xs : List α} {ys : List β} {x : α}
+    (mapped : xs.filterMapM f = .ok ys)
+    (member : x ∈ xs) :
+    ∃ result, f x = .ok result := by
+  induction xs generalizing ys x with
+  | nil => simp at member
+  | cons head tail ih =>
+      simp only [List.mem_cons] at member
+      cases headResult : f head with
+      | error error =>
+          simp only [List.filterMapM_cons, headResult, Bind.bind, Except.bind]
+            at mapped
+          contradiction
+      | ok headOption =>
+          cases tailResult : tail.filterMapM f with
+          | error error =>
+              cases headOption <;>
+                simp only [List.filterMapM_cons, headResult, Bind.bind,
+                  Except.bind, tailResult] at mapped <;>
+                contradiction
+          | ok mappedTail =>
+              rcases member with headEq | tailMember
+              · subst x
+                exact ⟨headOption, headResult⟩
+              · exact ih tailResult tailMember
+
+/-- A selected successful `filterMapM` row occurs in the successful output. -/
+private theorem exceptListFilterMapM_mem_of_mem
+    {α β ε : Type} {f : α → Except ε (Option β)}
+    {xs : List α} {ys : List β} {x : α} {y : β}
+    (mapped : xs.filterMapM f = .ok ys)
+    (member : x ∈ xs)
+    (selected : f x = .ok (some y)) :
+    y ∈ ys := by
+  induction xs generalizing ys x y with
+  | nil => simp at member
+  | cons head tail ih =>
+      simp only [List.mem_cons] at member
+      cases headResult : f head with
+      | error error =>
+          simp only [List.filterMapM_cons, headResult, Bind.bind, Except.bind]
+            at mapped
+          contradiction
+      | ok headOption =>
+          cases tailResult : tail.filterMapM f with
+          | error error =>
+              cases headOption <;>
+                simp only [List.filterMapM_cons, headResult, Bind.bind,
+                  Except.bind, tailResult] at mapped <;>
+                contradiction
+          | ok mappedTail =>
+              cases headOption with
+              | none =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, Except.ok.injEq] at mapped
+                  subst ys
+                  rcases member with headEq | tailMember
+                  · subst x
+                    rw [headResult] at selected
+                    simp at selected
+                  · exact ih tailResult tailMember selected
+              | some headValue =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, pure, Except.pure,
+                    Except.ok.injEq] at mapped
+                  subst ys
+                  rcases member with headEq | tailMember
+                  · subst x
+                    rw [headResult] at selected
+                    simp only [Except.ok.injEq, Option.some.injEq] at selected
+                    subst y
+                    simp
+                  · exact List.mem_cons_of_mem headValue
+                      (ih tailResult tailMember selected)
+
+/-- Select the exact symbolic function row and declaration-local lowering view
+for any internal declaration found in a successfully lowered program. -/
+theorem LoweredInternalDeclaration.exists_of_lower
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode) :
+    ∃ (sourceFunctionIndex : Nat) (sourceFunction : Fir.Wasm.Function),
+      source.functions[sourceFunctionIndex]? = some sourceFunction ∧
+        Nonempty (LoweredInternalDeclaration program
+          (Fir.Wasm.cachedDeclarationNames program) declaration sourceCode
+          sourceFunction) := by
+  have functionsEq := LoweredInternalDeclaration.functions_of_lower lowered
+  have mappedList :
+      program.decls.toList.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        .ok source.functions.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [functionsEq]
+    rfl
+  have declarationMember : declaration ∈ program.decls.toList := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    have member : declaration ∈ program.decls := by
+      rw [← selected]
+      exact Array.getElem_mem inBounds
+    simpa using member
+  obtain ⟨result, selected⟩ :=
+    exceptListFilterMapM_ok_of_mem mappedList declarationMember
+  obtain ⟨sourceFunction, resultEq⟩ :=
+    lowerDecl_some_of_code bodyEq selected
+  subst result
+  have sourceMember : sourceFunction ∈ source.functions.toList :=
+    exceptListFilterMapM_mem_of_mem mappedList declarationMember selected
+  obtain ⟨sourceFunctionIndex, sourceFunctionFoundList⟩ :=
+    List.getElem?_of_mem sourceMember
+  have sourceFunctionFound :
+      source.functions[sourceFunctionIndex]? = some sourceFunction := by
+    simpa using sourceFunctionFoundList
+  exact ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
+    LoweredInternalDeclaration.exists_of_lowerDecl bodyEq selected⟩
+
+/-- A value-classified source result produces the singleton function result
+row required by the concrete declaration body theorem. -/
+theorem LoweredInternalDeclaration.singleResult_of_abiKind
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction)
+    {resultKind : AbiKind}
+    (classified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    sourceFunction.results.size = 1 := by
+  have resultsCompiled := row.resultsCompiled
+  have abiResultsEq : row.abiResults = #[resultKind] := by
+    unfold Fir.Wasm.resultKinds at resultsCompiled
+    rw [classified] at resultsCompiled
+    simp only [Bind.bind, Except.bind, pure, Except.pure,
+      Except.ok.injEq] at resultsCompiled
+    exact resultsCompiled.symm
+  have functionResults : sourceFunction.results = row.abiResults := by
+    simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
+  rw [functionResults, abiResultsEq]
+  rfl
+
+/-- A successful function adaptation turns the source body equation into the
+two-stage `CodeAdapted` boundary used by the structural correctness proof. -/
+private theorem codeAdapted_of_function
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceCode : LCNF.Code .impure}
+    {targetFunction : Wasm.Function}
+    (compiled :
+      Fir.Wasm.compileCode context sourceCode = .ok sourceFunction.body)
+    (adapted :
+      FirTalos.function sourceModule sourceFunction = .ok targetFunction) :
+    CodeAdapted context sourceModule sourceFunction [] sourceCode
+      targetFunction.body := by
+  unfold FirTalos.function at adapted
+  cases bodyEq :
+      FirTalos.instructions sourceModule sourceFunction [] sourceFunction.body with
+  | error error =>
+      simp only [bodyEq, Bind.bind, Except.bind] at adapted
+      contradiction
+  | ok targetBody =>
+      simp only [bodyEq, Bind.bind, Except.bind, pure, Except.pure,
+        Except.ok.injEq] at adapted
+      subst targetFunction
+      exact ⟨sourceFunction.body, compiled, bodyEq⟩
+
+/--
+Select the matching concrete function from one actual adapted symbolic row.
+
+The returned package uses the unified index
+`sourceModule.imports.size + sourceFunctionIndex`; both its non-import fact and
+its concrete function lookup are consequences of the production adapter
+layout.  `Nonempty` keeps the construction proof-irrelevant while still
+allowing recursive correctness proofs (whose conclusions are propositions) to
+open the selected package.
+-/
+theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (sourceFunctionIndex : Nat)
+    (sourceFunctionFound :
+      sourceModule.functions[sourceFunctionIndex]? = some sourceFunction)
+    (compiled :
+      Fir.Wasm.compileCode context sourceCode = .ok sourceFunction.body)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (sourceSingleResult : sourceFunction.results.size = 1)
+    (adapted : FirTalos.adapt sourceModule = .ok target) :
+    Nonempty (ConcreteGeneratedDeclaration context sourceCode sourceModule
+      sourceFunction target) := by
+  obtain ⟨targetFunctions, functionsAdapted, targetLayout⟩ :=
+    FirTalos.Correctness.adapt_preserves_module_layout adapted
+  have sourceFoundList :
+      sourceModule.functions.toList[sourceFunctionIndex]? =
+        some sourceFunction := by
+    simpa using sourceFunctionFound
+  obtain ⟨targetFunction, functionAdapted, targetFoundList⟩ :=
+    exceptListMapM_getElem?_eq_some functionsAdapted sourceFoundList
+  have targetFoundAt :
+      target.wasmModule.funcs[sourceFunctionIndex]? = some targetFunction := by
+    rw [targetLayout]
+    exact targetFoundList
+  have importCount :
+      target.wasmModule.imports.length = sourceModule.imports.size :=
+    FirTalos.Correctness.adapt_preserves_import_count adapted
+  have notImport :
+      target.wasmModule.imports[
+        sourceModule.imports.size + sourceFunctionIndex]? = none := by
+    apply List.getElem?_eq_none
+    rw [importCount]
+    omega
+  have targetFunctionFound :
+      target.wasmModule.funcs[
+          sourceModule.imports.size + sourceFunctionIndex -
+            target.wasmModule.imports.length]? =
+        some targetFunction := by
+    rw [importCount]
+    simpa using targetFoundAt
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature functionAdapted
+  have singleResult : targetFunction.results.length = 1 := by
+    rw [signature.2.2]
+    simpa using sourceSingleResult
+  exact ⟨{
+    sourceFunctionIndex
+    sourceFunctionFound
+    targetFunctionIndex := sourceModule.imports.size + sourceFunctionIndex
+    targetFunction
+    targetFunctionIndex_eq := rfl
+    functionAdapted
+    notImport
+    targetFunctionFound
+    bodyAdapted := codeAdapted_of_function compiled functionAdapted
+    localsAligned
+    singleResult }⟩
+
+/--
+Whole-pipeline internal-declaration selector.
+
+Supported lowering chooses the real symbolic function row, `adapt` chooses the
+corresponding concrete row, and the declaration-local context is constructed
+from the exact `lowerDecl` intermediates.  The only outstanding compiler lemma
+is the uniform hygiene-to-local-layout theorem named by
+`LoweredDeclarationLocalLayoutSound`.
+-/
+theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    (layoutSound : LoweredDeclarationLocalLayoutSound)
+    (declarationHygienic :
+      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    ∃ calleeContext sourceFunction,
+      DeclarationContextsCoherent caller calleeContext ∧
+        Nonempty (ConcreteGeneratedDeclaration calleeContext sourceCode
+          sourceModule sourceFunction target) := by
+  have ordinaryLowering : Fir.Wasm.lower program = .ok sourceModule :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  obtain ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
+      ⟨row⟩⟩ :=
+    LoweredInternalDeclaration.exists_of_lower ordinaryLowering
+      declarationFound bodyEq
+  have contexts : DeclarationContextsCoherent caller row.context :=
+    row.contextsCoherent callerProgram callerCaches
+  have localsAligned : LocalLayoutAligned row.context sourceFunction :=
+    layoutSound declarationHygienic row
+  have sourceSingleResult : sourceFunction.results.size = 1 :=
+    row.singleResult_of_abiKind resultClassified
+  have generated :=
+    ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
+      sourceFunctionIndex sourceFunctionFound row.compileCode localsAligned
+      sourceSingleResult adapted
+  exact ⟨row.context, sourceFunction, contexts, generated⟩
+
 /-- Every supported export exposes its export-independent declaration body. -/
 def ConcreteSupportedExport.toSupportedDeclaration
     {program : Fir.LeanIR.ImpureProgram}
