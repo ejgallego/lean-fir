@@ -16180,28 +16180,6 @@ def retainedPrefixReuseTargetReturnState
     runtime := nonemptyLedgerTargetRuntime
     frames := neutralEntryFrames arguments }
 
-def retainedPrefixReuseTargetYieldedState
-    (arguments : Array Value) : MachineState :=
-  { program := retainedPrefixReuseAfterProgram
-    control := .yielded (.object (.heap 0))
-    env := nonemptyLedgerRetainedEnv
-    runtime := nonemptyLedgerTargetRuntime
-    frames := neutralEntryFrames arguments }
-
-def retainedPrefixReuseTargetCachedState : MachineState :=
-  { program := retainedPrefixReuseAfterProgram
-    control := .yielded (.object (.heap 0))
-    env := nonemptyLedgerRetainedEnv
-    runtime := nonemptyLedgerTargetRuntime.setGlobal `main
-      (.object (.heap 0)) }
-
-def retainedPrefixReuseTargetInvokingState
-    (arguments : Array Value) : MachineState :=
-  { program := retainedPrefixReuseAfterProgram
-    control := .invokeValue (.object (.heap 0)) arguments
-    env := nonemptyLedgerRetainedEnv
-    runtime := nonemptyLedgerTargetRuntime }
-
 theorem retainedPrefixReuseTargetEntryStep
     (arguments : Array Value) :
     coreStep
@@ -16218,90 +16196,173 @@ theorem retainedPrefixReuseTargetOuterStep
       .next (retainedPrefixReuseTargetReturnState arguments) := by
   rfl
 
-theorem retainedPrefixReuseTargetReturnStep
-    (arguments : Array Value) :
-    coreStep (retainedPrefixReuseTargetReturnState arguments) =
-      .next (retainedPrefixReuseTargetYieldedState arguments) := by
-  rfl
+/-- Control/frame phases possible after the target's sole retained
+allocation.  The heap-object witness is carried only while it is needed to
+show that applying the returned natural cannot re-enter executable code;
+the cache-terminal phase deliberately drops it. -/
+inductive RetainedPrefixReuseTargetAllocatedControl
+    (target : MachineState) : Prop where
+  | ret (arguments : Array Value)
+      (control : target.control = .code (.return live))
+      (frames : target.frames = neutralEntryFrames arguments)
+      (objectRead :
+        (findCell? target.runtime.heap 0).map HeapCell.object =
+          some (.natural 9223372036854775808))
+  | yielded (arguments : Array Value)
+      (control : target.control = .yielded (.object (.heap 0)))
+      (frames : target.frames = neutralEntryFrames arguments)
+      (objectRead :
+        (findCell? target.runtime.heap 0).map HeapCell.object =
+          some (.natural 9223372036854775808))
+  | cached
+      (control : target.control = .yielded (.object (.heap 0)))
+      (frames : target.frames = [])
+  | invoking (arguments : Array Value)
+      (control : target.control =
+        .invokeValue (.object (.heap 0)) arguments)
+      (frames : target.frames = [])
+      (objectRead :
+        (findCell? target.runtime.heap 0).map HeapCell.object =
+          some (.natural 9223372036854775808))
 
-theorem retainedPrefixReuseTargetYieldedStepEmpty :
-    coreStep (retainedPrefixReuseTargetYieldedState #[]) =
-      .next retainedPrefixReuseTargetCachedState := by
-  rfl
+/-- Static post-allocation facts used by the deleted reset/reuse suffix.
+Unlike the former exact-state graph, this records only the retained live
+binding, allocation frontier, and the control/frame phase needed to prove
+that no later target step allocates. -/
+structure RetainedPrefixReuseTargetAllocatedAt
+    (target : MachineState) : Prop where
+  liveRead :
+    lookup target.env live = some (.object (.heap 0))
+  frontier : target.runtime.nextLocation = 1
+  control : RetainedPrefixReuseTargetAllocatedControl target
 
-theorem retainedPrefixReuseTargetYieldedStepNonempty
-    (notEmpty : arguments ≠ #[]) :
-    coreStep (retainedPrefixReuseTargetYieldedState arguments) =
-      .next (retainedPrefixReuseTargetInvokingState arguments) := by
-  simp [coreStep, retainedPrefixReuseTargetYieldedState,
-    neutralEntryFrames, notEmpty,
-    retainedPrefixReuseTargetInvokingState]
-
-inductive RetainedPrefixReuseTargetReachable
-    (arguments : Array Value) : MachineState → Prop where
-  | entry :
-      RetainedPrefixReuseTargetReachable arguments
+/-- Allocation/control phase invariant for the transformed fixture.  Only
+entry and the pre-allocation state are concrete; every post-allocation state
+is represented by the abstract interface above. -/
+inductive RetainedPrefixReuseTargetAllocationControlInvariant :
+    MachineState → Prop where
+  | entry (arguments : Array Value) :
+      RetainedPrefixReuseTargetAllocationControlInvariant
         (initialState retainedPrefixReuseAfterProgram `main arguments)
-  | outer :
-      RetainedPrefixReuseTargetReachable arguments
+  | beforeAllocation (arguments : Array Value) :
+      RetainedPrefixReuseTargetAllocationControlInvariant
         (retainedPrefixReuseTargetOuterState arguments)
-  | ret :
-      RetainedPrefixReuseTargetReachable arguments
-        (retainedPrefixReuseTargetReturnState arguments)
-  | yielded :
-      RetainedPrefixReuseTargetReachable arguments
-        (retainedPrefixReuseTargetYieldedState arguments)
-  | cached (empty : arguments = #[]) :
-      RetainedPrefixReuseTargetReachable arguments
-        retainedPrefixReuseTargetCachedState
-  | invoking (notEmpty : arguments ≠ #[]) :
-      RetainedPrefixReuseTargetReachable arguments
-        (retainedPrefixReuseTargetInvokingState arguments)
+  | allocated (shape : RetainedPrefixReuseTargetAllocatedAt target) :
+      RetainedPrefixReuseTargetAllocationControlInvariant target
 
-theorem retainedPrefixReuseTargetReachable_step
-    (reachable :
-      RetainedPrefixReuseTargetReachable arguments before)
+theorem retainedPrefixReuseTargetReturnAllocatedAt
+    (arguments : Array Value) :
+    RetainedPrefixReuseTargetAllocatedAt
+      (retainedPrefixReuseTargetReturnState arguments) := by
+  refine {
+    liveRead := ?_
+    frontier := ?_
+    control := .ret arguments rfl rfl ?_
+  }
+  · simp [retainedPrefixReuseTargetReturnState,
+      nonemptyLedgerRetainedEnv, lookup, live]
+  · simp [retainedPrefixReuseTargetReturnState,
+      nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime, alloc]
+  · simp [retainedPrefixReuseTargetReturnState,
+      nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime,
+      alloc, findCell?]
+
+/-- The allocation/control invariant is preserved by every semantic target
+step.  Post-allocation preservation uses only the abstract fields: return
+publishes the retained value, the entry frame either caches or applies it,
+and applying the retained natural terminates with a fault rather than
+entering new code. -/
+theorem retainedPrefixReuseTargetAllocationControlInvariant_step
+    (invariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant before)
     (step : Step externals before after) :
-    RetainedPrefixReuseTargetReachable arguments after := by
-  cases reachable with
-  | entry =>
+    RetainedPrefixReuseTargetAllocationControlInvariant after := by
+  cases invariant with
+  | entry arguments =>
       exact predicate_of_step_next
-        (retainedPrefixReuseTargetEntryStep arguments) .outer step
-  | outer =>
+        (retainedPrefixReuseTargetEntryStep arguments)
+        (.beforeAllocation arguments) step
+  | beforeAllocation arguments =>
       exact predicate_of_step_next
-        (retainedPrefixReuseTargetOuterStep arguments) .ret step
-  | ret =>
-      exact predicate_of_step_next
-        (retainedPrefixReuseTargetReturnStep arguments) .yielded step
-  | yielded =>
-      by_cases empty : arguments = #[]
-      · subst arguments
-        exact predicate_of_step_next
-          retainedPrefixReuseTargetYieldedStepEmpty
-          (.cached rfl) step
-      · exact predicate_of_step_next
-          (retainedPrefixReuseTargetYieldedStepNonempty empty)
-          (.invoking empty) step
-  | cached empty =>
-      cases step with
-      | internal transition =>
-          simp [retainedPrefixReuseTargetCachedState,
-            coreStep] at transition
-      | external transition response =>
-          simp [retainedPrefixReuseTargetCachedState,
-            coreStep] at transition
-  | invoking notEmpty =>
-      cases step with
-      | internal transition =>
-          simp [retainedPrefixReuseTargetInvokingState,
-            nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime,
-            alloc, getLiveCell, findCell?, coreStep, invokeClosure, fail]
-            at transition
-      | external transition response =>
-          simp [retainedPrefixReuseTargetInvokingState,
-            nonemptyLedgerTargetRuntime, nonemptyLedgerPairedRuntime,
-            alloc, getLiveCell, findCell?, coreStep, invokeClosure, fail]
-            at transition
+        (retainedPrefixReuseTargetOuterStep arguments)
+        (.allocated
+          (retainedPrefixReuseTargetReturnAllocatedAt arguments)) step
+  | allocated shape =>
+      cases shape.control with
+      | ret arguments control frames objectRead =>
+          let expected : MachineState := {
+            before with control := .yielded (.object (.heap 0)) }
+          have transition : coreStep before = .next expected := by
+            simp [coreStep, control, lookupValue,
+              shape.liveRead, expected]
+          apply predicate_of_step_next transition _ step
+          apply
+            RetainedPrefixReuseTargetAllocationControlInvariant.allocated
+          exact {
+            liveRead := by simpa [expected] using shape.liveRead
+            frontier := by simpa [expected] using shape.frontier
+            control := .yielded arguments rfl
+              (by simpa [expected] using frames)
+              (by simpa [expected] using objectRead)
+          }
+      | yielded arguments control frames objectRead =>
+          by_cases empty : arguments = #[]
+          · subst arguments
+            let expected : MachineState := {
+              before with
+                runtime := before.runtime.setGlobal `main
+                  (.object (.heap 0))
+                frames := []
+                control := .yielded (.object (.heap 0)) }
+            have transition : coreStep before = .next expected := by
+              simp [coreStep, control, frames,
+                neutralEntryFrames, expected]
+            apply predicate_of_step_next transition _ step
+            apply
+              RetainedPrefixReuseTargetAllocationControlInvariant.allocated
+            exact {
+              liveRead := by simpa [expected] using shape.liveRead
+              frontier := by
+                simpa [expected, RuntimeState.setGlobal] using
+                  shape.frontier
+              control := .cached rfl rfl
+            }
+          · let expected : MachineState := {
+              before with
+                control := .invokeValue (.object (.heap 0)) arguments
+                frames := [] }
+            have transition : coreStep before = .next expected := by
+              simp [coreStep, control, frames,
+                neutralEntryFrames, empty, expected]
+            apply predicate_of_step_next transition _ step
+            apply
+              RetainedPrefixReuseTargetAllocationControlInvariant.allocated
+            exact {
+              liveRead := by simpa [expected] using shape.liveRead
+              frontier := by simpa [expected] using shape.frontier
+              control := .invoking arguments rfl rfl
+                (by simpa [expected] using objectRead)
+            }
+      | cached control frames =>
+          cases step with
+          | internal transition =>
+              simp [coreStep, control, frames] at transition
+          | external transition response =>
+              simp [coreStep, control, frames] at transition
+      | invoking arguments control frames objectRead =>
+          cases found : findCell? before.runtime.heap 0 with
+          | none => simp [found] at objectRead
+          | some cell =>
+              have object :
+                  cell.object = .natural 9223372036854775808 := by
+                simpa [found] using objectRead
+              cases liveEq : cell.live <;> cases step with
+              | internal transition =>
+                  simp [coreStep, control, invokeClosure, getLiveCell,
+                    found, liveEq, object, fail] at transition
+              | external transition response =>
+                  simp [coreStep, control, invokeClosure, getLiveCell,
+                    found, liveEq, object, fail] at transition
 
 /-- Local target facts needed by the deleted reset/reuse suffix. They are
 strictly weaker than the concrete target-state enumeration: only the active
@@ -16313,16 +16374,16 @@ structure RetainedPrefixReuseTargetLivePrefixAt
     lookup target.env live = some (.object (.heap 0))
   frontier : target.runtime.nextLocation = 1
 
-/-- A structurally related active source state can meet the retained-prefix
-target graph only after the retained literal allocation. This is the bridge
-from the finite fixture graph to the local target invariant consumed by both
-ownership-sensitive suffix edges. -/
+/-- A structurally related active source state can meet the target's static
+allocation/control invariant only after the retained literal allocation.
+This bridges the step-preserved target phase interface to the three local
+facts consumed by both ownership-sensitive suffix edges. -/
 theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
     (sourceControl : source.control = .code sourceCode)
     (sourceLiveRead :
       lookup source.env live = some (.object (.heap 0)))
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related :
       SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
     RetainedPrefixReuseTargetLivePrefixAt target := by
@@ -16339,10 +16400,10 @@ theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
       rename_i used
       have covered : CodeCovered used targetCode :=
         graph.toShadowCodeGraph.covered
-      cases targetReachable with
+      cases targetInvariant with
       | entry =>
           simp [initialState] at targetControl
-      | outer =>
+      | beforeAllocation =>
           have codeEq : targetCode = retainedPrefixReuseAfter :=
             Control.code.inj targetControl.symm
           subst targetCode
@@ -16356,27 +16417,23 @@ theorem retainedPrefixReuseTargetLivePrefixAt_of_relatedCode
                   liveMember sourceLiveRead
               simp [retainedPrefixReuseTargetOuterState,
                 lookup] at targetFound
-      | ret =>
-          have codeEq : targetCode = .return live :=
-            Control.code.inj targetControl.symm
-          subst targetCode
-          exact {
-            control := targetControl
-            liveRead := by
-              simp [retainedPrefixReuseTargetReturnState,
-                nonemptyLedgerRetainedEnv,
-                Impure.bind, lookup, live]
-            frontier := by
-              simp [retainedPrefixReuseTargetReturnState,
-                nonemptyLedgerTargetRuntime,
-                nonemptyLedgerPairedRuntime, alloc]
-          }
-      | yielded =>
-          simp [retainedPrefixReuseTargetYieldedState] at targetControl
-      | cached empty =>
-          simp [retainedPrefixReuseTargetCachedState] at targetControl
-      | invoking notEmpty =>
-          simp [retainedPrefixReuseTargetInvokingState] at targetControl
+      | allocated shape =>
+          cases shape.control with
+          | ret arguments activeControl activeFrames objectRead =>
+              exact {
+                control := activeControl
+                liveRead := shape.liveRead
+                frontier := shape.frontier
+              }
+          | yielded arguments activeControl activeFrames objectRead =>
+              rw [targetControl] at activeControl
+              cases activeControl
+          | cached activeControl activeFrames =>
+              rw [targetControl] at activeControl
+              cases activeControl
+          | invoking arguments activeControl activeFrames objectRead =>
+              rw [targetControl] at activeControl
+              cases activeControl
   | yielded targetValue =>
       rw [targetControl] at control
       cases control
@@ -16500,8 +16557,8 @@ theorem retainedPrefixReuseResetPairReady_ledger
       ∀ location,
         nonemptyLedgerResetRuntime.nextLocation ≤ location →
           findCell? nonemptyLedgerResetRuntime.heap location = none)
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related : SomeLedgerBinderReadyReachableMachineRelated 6
       (retainedPrefixReuseSourceResetState sourceArguments) target) :
     LedgerBinderReadyReachableMachineReadyAt 6
@@ -16517,7 +16574,7 @@ theorem retainedPrefixReuseResetPairReady_ledger
         simp [retainedPrefixReuseSourceResetState,
           nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
           Impure.bind, lookup, live, resetObjectVar])
-      targetReachable related
+      targetInvariant related
   rcases related with
     ⟨rho, ledger, sourceControlRoots, targetControlRoots,
       sourceFrameRoots, targetFrameRoots,
@@ -16596,8 +16653,8 @@ theorem retainedPrefixReuseResetPairReady_sourceOwnedLedger
     (sourceOwnership :
       SourceMachineOwnershipBelowFrontier
         (retainedPrefixReuseSourceResetState sourceArguments))
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related : SomeLedgerBinderReadyReachableMachineRelated 6
       (retainedPrefixReuseSourceResetState sourceArguments) target) :
     LedgerBinderReadyReachableMachineReadyAt 6
@@ -16606,14 +16663,14 @@ theorem retainedPrefixReuseResetPairReady_sourceOwnedLedger
   · exact
       (retainedPrefixReuseResetLocalReady sourceArguments)
         |>.afterFresh_of_sourceOwnership sourceOwnership
-  · exact targetReachable
+  · exact targetInvariant
   · exact related
 
 /-- The same carried owner table proves that concrete reuse overwrites only
 source location `1`. -/
 theorem retainedPrefixReusePairReady_ledger
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related : SomeLedgerBinderReadyReachableMachineRelated 6
       (retainedPrefixReuseSourceReuseState sourceArguments) target) :
     LedgerBinderReadyReachableMachineReadyAt 6
@@ -16630,7 +16687,7 @@ theorem retainedPrefixReusePairReady_ledger
           nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
           nonemptyLedgerRetainedEnv, Impure.bind, lookup,
           live, resetObjectVar, reuseTokenVar, reuseArgVar])
-      targetReachable related
+      targetInvariant related
   rcases related with
     ⟨rho, ledger, sourceControlRoots, targetControlRoots,
       sourceFrameRoots, targetFrameRoots,
@@ -16800,8 +16857,8 @@ source-only readiness. -/
 theorem retainedPrefixReuseSourceReachable_pairReady_ledger
     (sourceReachable :
       RetainedPrefixReuseSourceReachable sourceArguments source)
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (related :
       SomeLedgerBinderReadyReachableMachineRelated 6 source target) :
     LedgerBinderReadyReachableMachineReadyAt 6 source target := by
@@ -16821,13 +16878,13 @@ theorem retainedPrefixReuseSourceReachable_pairReady_ledger
           (retainedPrefixReuseObjectSourceMachineReadyAt sourceArguments)
   | reset =>
       exact retainedPrefixReuseResetPairReady_ledger
-        retainedPrefixReuseResetFresh targetReachable related
+        retainedPrefixReuseResetFresh targetInvariant related
   | argument =>
       exact
         related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
           (retainedPrefixReuseArgSourceMachineReadyAt sourceArguments)
   | reuse =>
-      exact retainedPrefixReusePairReady_ledger targetReachable related
+      exact retainedPrefixReusePairReady_ledger targetInvariant related
   | ret =>
       exact
         related.ledgerBinderReadyReachableMachineReadyAt_of_sourceMachine
@@ -16854,8 +16911,8 @@ edges reuse the established ledger-exact readiness proofs. -/
 theorem retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
     (sourceReachable :
       RetainedPrefixReuseSourceReachable sourceArguments source)
-    (targetReachable :
-      RetainedPrefixReuseTargetReachable targetArguments target)
+    (targetInvariant :
+      RetainedPrefixReuseTargetAllocationControlInvariant target)
     (sourceOwnership :
       SourceMachineOwnershipBelowFrontier source)
     (related :
@@ -16864,34 +16921,34 @@ theorem retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
   cases sourceReachable with
   | entry =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .entry targetReachable related
+        .entry targetInvariant related
   | outer =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .outer targetReachable related
+        .outer targetInvariant related
   | object =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .object targetReachable related
+        .object targetInvariant related
   | reset =>
       exact retainedPrefixReuseResetPairReady_sourceOwnedLedger
-        sourceOwnership targetReachable related
+        sourceOwnership targetInvariant related
   | argument =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .argument targetReachable related
+        .argument targetInvariant related
   | reuse =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .reuse targetReachable related
+        .reuse targetInvariant related
   | ret =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .ret targetReachable related
+        .ret targetInvariant related
   | yielded =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        .yielded targetReachable related
+        .yielded targetInvariant related
   | cached empty =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        (.cached empty) targetReachable related
+        (.cached empty) targetInvariant related
   | invoking notEmpty =>
       exact retainedPrefixReuseSourceReachable_pairReady_ledger
-        (.invoking notEmpty) targetReachable related
+        (.invoking notEmpty) targetInvariant related
 
 theorem retainedPrefixReuseSourceReachable_of_reaches
     (path : NonLockstep.Reaches externals
@@ -16901,13 +16958,14 @@ theorem retainedPrefixReuseSourceReachable_of_reaches
   exact path.invariant .entry
     retainedPrefixReuseSourceReachable_step
 
-theorem retainedPrefixReuseTargetReachable_of_reaches
+theorem retainedPrefixReuseTargetAllocationControlInvariant_of_reaches
     (path : NonLockstep.Reaches externals
       (initialState retainedPrefixReuseAfterProgram `main arguments)
       state) :
-    RetainedPrefixReuseTargetReachable arguments state := by
-  exact path.invariant .entry
-    retainedPrefixReuseTargetReachable_step
+    RetainedPrefixReuseTargetAllocationControlInvariant state := by
+  exact path.invariant
+    (.entry arguments)
+    retainedPrefixReuseTargetAllocationControlInvariant_step
 
 /-- Checked whole-program client of the ledger-exact ownership endpoint with
 a genuinely nonempty target owner table at reset and reuse. -/
@@ -16918,35 +16976,37 @@ def retainedPrefixReuseLedgerExactOwnershipContract
       retainedPrefixReuseAfterProgram #[`main] where
   invariant := fun _ sourceArguments targetArguments source target =>
     RetainedPrefixReuseSourceReachable sourceArguments source ∧
-      RetainedPrefixReuseTargetReachable targetArguments target
+      RetainedPrefixReuseTargetAllocationControlInvariant target
   initial := by
     intro entry member sourceArguments targetArguments _argumentsRelated
     have entryEq : entry = `main := by
       simpa using member
     subst entry
-    exact ⟨.entry, .entry⟩
+    exact ⟨.entry, .entry targetArguments⟩
   sourcePreserved := by
     rintro entry sourceArguments targetArguments
       sourceBefore sourceAfter targetState
-      ⟨sourceReachable, targetReachable⟩ step
+      ⟨sourceReachable, targetInvariant⟩ step
     exact ⟨retainedPrefixReuseSourceReachable_step
-      sourceReachable step, targetReachable⟩
+      sourceReachable step, targetInvariant⟩
   targetPreserved := by
     rintro entry sourceArguments targetArguments
       sourceState targetBefore targetAfter
-      ⟨sourceReachable, targetReachable⟩ step
+      ⟨sourceReachable, targetInvariant⟩ step
     exact ⟨sourceReachable,
-      retainedPrefixReuseTargetReachable_step
-        targetReachable step⟩
+      retainedPrefixReuseTargetAllocationControlInvariant_step
+        targetInvariant step⟩
   ready := by
     rintro entry sourceArguments targetArguments source target
-      ⟨sourceReachable, targetReachable⟩ related
+      ⟨sourceReachable, targetInvariant⟩ related
     exact retainedPrefixReuseSourceReachable_pairReady_ledger
-      sourceReachable targetReachable related
+      sourceReachable targetInvariant related
 
 /-- Combined source-owned/ledger-exact contract for the same nonempty-prefix
-program. Its rectangular execution graph remains unchanged, but reset
-readiness now consumes the separately maintained source carrier. -/
+program.  The source still carries its operational reachability proof, while
+the target is tracked only by the step-preserved allocation/control
+invariant; reset readiness also consumes the separately maintained source
+carrier. -/
 def retainedPrefixReuseSourceOwnedLedgerExactContract
     (externals : ExternalSpec) :
     ElimDeadSourceOwnedLedgerExactContract externals 6
@@ -16961,9 +17021,9 @@ def retainedPrefixReuseSourceOwnedLedgerExactContract
     ready := ?_
   }
   rintro entry sourceArguments targetArguments source target
-    ⟨sourceReachable, targetReachable⟩ sourceOwnership related
+    ⟨sourceReachable, targetInvariant⟩ sourceOwnership related
   exact retainedPrefixReuseSourceReachable_pairReady_sourceOwnedLedger
-    sourceReachable targetReachable sourceOwnership related
+    sourceReachable targetInvariant sourceOwnership related
 
 theorem retainedPrefixReuseBeforeProgramElimDeadWellFormed :
     ProgramElimDeadWellFormed retainedPrefixReuseBeforeProgram := by
