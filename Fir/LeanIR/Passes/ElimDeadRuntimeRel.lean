@@ -8893,8 +8893,9 @@ theorem ShadowRuntimeRel.evalLetValuePapLeftGarbage
     rfl
   · exact related.allocLeftGarbage object false
 
-/-- Boxing a scalar is immediate when the payload fits the tagged range and
-otherwise contributes one unreachable boxed allocation. -/
+/-- Boxing a scalar is immediate exactly when its type and payload permit the
+tagged representation; otherwise it contributes one unreachable boxed
+allocation. Floating scalar types therefore always take the allocation arm. -/
 theorem ShadowRuntimeRel.boxScalarLeftGarbage
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
     (type : Expr) (scalar : ScalarValue) :
@@ -8902,39 +8903,40 @@ theorem ShadowRuntimeRel.boxScalarLeftGarbage
       box left type (.scalar scalar) = .ok (nextRuntime, value) ∧
       ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
   let payload := scalar.toUInt64
-  by_cases small : payload.toNat ≤ maxTaggedPayload
+  by_cases tagged : boxUsesTaggedRepresentation type payload = true
   · refine ⟨left, .object (.tagged payload), ?_, related⟩
     unfold box
     simp only [Bind.bind, Except.bind]
-    rw [if_pos (by simpa [payload] using small)]
+    rw [if_pos (by simpa [payload] using tagged)]
     rfl
   · let object : HeapObject := .boxed type (.scalar scalar)
     refine ⟨(alloc left object).1, .object (alloc left object).2, ?_,
       related.allocLeftGarbage object false⟩
     unfold box
     simp only [Bind.bind, Except.bind]
-    rw [if_neg (by simpa [payload] using small)]
+    rw [if_neg (by simpa [payload] using tagged)]
     rfl
 
-/-- The unboxed-word case has the same immediate/allocation split. -/
+/-- The unboxed-word case follows the same type-sensitive representation
+predicate. -/
 theorem ShadowRuntimeRel.boxUSizeLeftGarbage
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
     (type : Expr) (word : UInt64) :
     ∃ nextRuntime value,
       box left type (.usize word) = .ok (nextRuntime, value) ∧
       ShadowRuntimeRel rho nextRuntime right leftExtra rightExtra := by
-  by_cases small : word.toNat ≤ maxTaggedPayload
+  by_cases tagged : boxUsesTaggedRepresentation type word = true
   · refine ⟨left, .object (.tagged word), ?_, related⟩
     unfold box
     simp only [Bind.bind, Except.bind]
-    rw [if_pos small]
+    rw [if_pos tagged]
     rfl
   · let object : HeapObject := .boxed type (.usize word)
     refine ⟨(alloc left object).1, .object (alloc left object).2, ?_,
       related.allocLeftGarbage object false⟩
     unfold box
     simp only [Bind.bind, Except.bind]
-    rw [if_neg small]
+    rw [if_neg tagged]
     rfl
 
 /-- Related retained allocations may choose different fresh locations.  The
@@ -9065,8 +9067,9 @@ theorem ShadowRuntimeRel.literalBoth
           (by intro location; simp) (by intro location; simp)
 
 /-- Boxing related published scalar inputs produces related retained values.
-Small payloads remain identical tagged objects; large payloads allocate a
-fresh related pair and extend the address renaming. -/
+Inputs selected by the type-sensitive tagged predicate remain identical tagged
+objects; every other input allocates a fresh related pair and extends the
+address renaming. -/
 theorem ShadowRuntimeRel.boxBoth_of_related
     (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
     (leftMember : leftValue ∈ leftExtra)
@@ -9090,16 +9093,17 @@ theorem ShadowRuntimeRel.boxBoth_of_related
           ⟨target, targetMember, targetRelated⟩
         cases targetRelated
         exact targetMember
-      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
         subst leftRuntime
         refine ⟨rho, right, .object (.tagged scalar.toUInt64),
           .refl rho, ?_, .tagged _, ?_⟩
-        · simp [box, small, Bind.bind, Except.bind,
+        · simp [box, tagged, Bind.bind, Except.bind,
             Pure.pure, Except.pure]
         · exact related.prependNonHeap (.tagged _)
             (by intro location; simp) (by intro location; simp)
@@ -9124,14 +9128,14 @@ theorem ShadowRuntimeRel.boxBoth_of_related
         rcases related.allocBoth objects leftOwned rightOwned false with
           ⟨larger, extension, resultValues, nextRuntime⟩
         have normalized := sourceBox
-        simp [box, small, leftObject, Bind.bind, Except.bind,
+        simp [box, tagged, leftObject, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
         subst leftRuntime
         exact ⟨larger, (alloc right rightObject).1,
           .object (alloc right rightObject).2, extension,
-          by simp [box, small, rightObject, Bind.bind, Except.bind,
+          by simp [box, tagged, rightObject, Bind.bind, Except.bind,
             Pure.pure, Except.pure],
           resultValues, nextRuntime⟩
   | usize word =>
@@ -9140,16 +9144,16 @@ theorem ShadowRuntimeRel.boxBoth_of_related
           ⟨target, targetMember, targetRelated⟩
         cases targetRelated
         exact targetMember
-      by_cases small : word.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type word = true
       · have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
         subst leftRuntime
         refine ⟨rho, right, .object (.tagged word),
           .refl rho, ?_, .tagged _, ?_⟩
-        · simp [box, small, Bind.bind, Except.bind,
+        · simp [box, tagged, Bind.bind, Except.bind,
             Pure.pure, Except.pure]
         · exact related.prependNonHeap (.tagged _)
             (by intro location; simp) (by intro location; simp)
@@ -9174,14 +9178,14 @@ theorem ShadowRuntimeRel.boxBoth_of_related
         rcases related.allocBoth objects leftOwned rightOwned false with
           ⟨larger, extension, resultValues, nextRuntime⟩
         have normalized := sourceBox
-        simp [box, small, leftObject, Bind.bind, Except.bind,
+        simp [box, tagged, leftObject, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
         subst leftRuntime
         exact ⟨larger, (alloc right rightObject).1,
           .object (alloc right rightObject).2, extension,
-          by simp [box, small, rightObject, Bind.bind, Except.bind,
+          by simp [box, tagged, rightObject, Bind.bind, Except.bind,
             Pure.pure, Except.pure],
           resultValues, nextRuntime⟩
 
@@ -9206,16 +9210,17 @@ theorem ShadowRuntimeRel.boxBoth_related
   | error sourceFault =>
       cases values with
       | scalar scalar =>
-          by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
-          · simp [box, small, Bind.bind, Except.bind,
+          by_cases tagged :
+              boxUsesTaggedRepresentation type scalar.toUInt64 = true
+          · simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure] at sourceBoxEq
-          · simp [box, small, Bind.bind, Except.bind,
+          · simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure] at sourceBoxEq
       | usize word =>
-          by_cases small : word.toNat ≤ maxTaggedPayload
-          · simp [box, small, Bind.bind, Except.bind,
+          by_cases tagged : boxUsesTaggedRepresentation type word = true
+          · simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure] at sourceBoxEq
-          · simp [box, small, Bind.bind, Except.bind,
+          · simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure] at sourceBoxEq
       | tagged payload =>
           simp [box, Bind.bind, Except.bind] at sourceBoxEq
