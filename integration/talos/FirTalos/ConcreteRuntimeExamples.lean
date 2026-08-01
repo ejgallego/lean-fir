@@ -1409,24 +1409,28 @@ private def closureStore : Wasm.Store Host := {
       | _ => false
   | _ => false
 
--- The generated trampoline's concrete metadata test and typed projection
--- recover the just-allocated closure without consulting semantic handles.
+-- The generated trampoline's concrete metadata test takes closure ownership
+-- and records the typed capture snapshot. Projection consumes the successful
+-- matcher's returned store, even after exclusive application releases the
+-- closure header, without consulting semantic handles.
 #guard match partialApplyStep closureTarget 2 1 #[.uint64] .object closureStore
     [.i64 18446744073709551615] with
   | .Return [.i32 object] store =>
-      match closureMatchesStep closureTarget 2 1 store [.i32 object],
-          closureMatchesStep `FirTalos.Concrete.otherTarget 2 1 store
-            [.i32 object],
-          closureProjStep closureTarget 2 1 0 .uint64 store [.i32 object] with
-      | .Return [.i32 matched] matchedStore,
-          .Return [.i32 mismatch] mismatchedStore,
-          .Return [.i64 captured] projectedStore =>
-          matched == 1 && mismatch == 0 &&
-            captured == 18446744073709551615 &&
-            matchedStore.host.failure?.isNone &&
-            mismatchedStore.host.failure?.isNone &&
-            projectedStore.host.failure?.isNone
-      | _, _, _ => false
+      match closureMatchesStep closureTarget 2 1 store [.i32 object] with
+      | .Return [.i32 matched] matchedStore =>
+          match closureMatchesStep `FirTalos.Concrete.otherTarget 2 1 store
+                [.i32 object],
+              closureProjStep closureTarget 2 1 0 .uint64 matchedStore
+                [.i32 object] with
+          | .Return [.i32 mismatch] mismatchedStore,
+              .Return [.i64 captured] projectedStore =>
+              matched == 1 && mismatch == 0 &&
+                captured == 18446744073709551615 &&
+                matchedStore.host.failure?.isNone &&
+                mismatchedStore.host.failure?.isNone &&
+                projectedStore.host.failure?.isNone
+          | _, _ => false
+      | _ => false
   | _ => false
 
 end FirTalos.Concrete

@@ -144,4 +144,86 @@ def projectClosureCapture (state : MemoryState) (dispatch : ClosureDispatchTable
   liftMemory <| state.memory.readClosureCapture
     (closureCaptureAddress object.value index) kind
 
+/-- Snapshot every statically typed closure capture before application may
+release the closure header. Unlike the ownership decoder, this retains scalar
+lanes because the generated projection prefix must still transfer them to the
+callee. -/
+def readClosureCaptures (state : MemoryState) (object : Word32)
+    (index : Nat) : List AbiKind → Except ConcreteError (List LaneValue)
+  | [] => .ok []
+  | kind :: rest => do
+      let lane ← liftMemory <| state.memory.readClosureCapture
+        (closureCaptureAddress object.value index) kind
+      let lanes ← readClosureCaptures state object (index + 1) rest
+      return lane :: lanes
+
+/-- Captures transferred by one successful concrete closure application.
+The snapshot outlives an exclusive closure's released header and is the sole
+source used by the immediately following generated projection prefix. -/
+structure ClosureApplication where
+  object : Word32
+  function : Lean.Name
+  arity : Nat
+  captureKinds : Array AbiKind
+  captures : Array LaneValue
+
+/-- Retain one already-typed owned capture during closure application.
+Physical zero is the erased value and therefore transfers no heap ownership;
+ordinary `incrementReference` remains strict for standalone increment calls. -/
+def retainClosureCapture (state : MemoryState) (object : Word32) :
+    Except ConcreteError MemoryState :=
+  if object == Word32.zero then .ok state
+  else incrementReference state object 1 true
+
+@[simp] theorem retainClosureCapture_zero (state : MemoryState) :
+    retainClosureCapture state Word32.zero = .ok state := by
+  unfold retainClosureCapture
+  rw [if_pos (by decide)]
+
+/-- Consume one concrete closure reference and snapshot its transferred fixed
+arguments. An exclusive closure installs the canonical released header without
+recursively releasing captures. A shared closure decrements the parent and
+retains every statically owning capture. Persistent closures are unchanged. -/
+def takeClosureApplication (state : MemoryState)
+    (dispatch : ClosureDispatchTable) (descriptors : ClosureDescriptorTable)
+    (object : Word32) :
+    Except ConcreteError (MemoryState × ClosureApplication) := do
+  let metadata ← readClosureMetadata state dispatch descriptors object
+  let captures ← readClosureCaptures state object 0 metadata.captureKinds.toList
+  let application : ClosureApplication := {
+    object
+    function := metadata.function
+    arity := metadata.arity
+    captureKinds := metadata.captureKinds
+    captures := captures.toArray }
+  if metadata.header.persistent then
+    return (state, application)
+  if metadata.header.refCount == 0 then
+    throw (.sourceAddress (.referenceCountUnderflow object))
+  if metadata.header.refCount == 1 then
+    let state ← deleteObject state object
+    return (state, application)
+  let owned ← readClosureOwnedReferences state object 0
+    metadata.captureKinds.toList
+  let state ← decrementReferenceOnce state object true descriptors
+  let state ← owned.foldlM (init := state) fun state child =>
+    retainClosureCapture state child
+  return (state, application)
+
+/-- Project one typed capture from a previously taken application snapshot.
+This is independent of the closure's current live-header state. -/
+def ClosureApplication.project (application : ClosureApplication)
+    (object : Word32) (function : Lean.Name) (arity fixed index : Nat)
+    (kind : AbiKind) : Except ConcreteError LaneValue := do
+  unless application.object == object && application.function == function &&
+      application.arity == arity && application.captures.size == fixed do
+    throw (.target .closureMetadataMismatch)
+  unless index < fixed do
+    throw (.target (.closureCaptureIndexOutOfBounds index fixed))
+  unless application.captureKinds[index]? == some kind do
+    throw (.target .closureMetadataMismatch)
+  let some lane := application.captures[index]? |
+    throw (.target .closureMetadataMismatch)
+  return lane
+
 end Fir.Wasm.Concrete

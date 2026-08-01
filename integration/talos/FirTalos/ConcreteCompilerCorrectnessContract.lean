@@ -4047,12 +4047,12 @@ example
     ∃ address : Word32,
       locals.get closureIndex =
           some (.i32 (UInt32.ofNat address.value)) ∧
-        closureMatchesStep expectedFunction expectedArity expectedFixed initial
-            [.i32 (UInt32.ofNat address.value)] =
-          .Return [
-            .i32 (if function == expectedFunction && arity == expectedArity &&
-              captures.size == expectedFixed then 1 else 0)]
-            (FirTalos.Concrete.clearFailure initial) ∧
+        (∀ results next,
+          closureMatchesStep expectedFunction expectedArity expectedFixed initial
+              [.i32 (UInt32.ofNat address.value)] = .Return results next →
+            results = [
+              .i32 (if function == expectedFunction && arity == expectedArity &&
+                captures.size == expectedFixed then 1 else 0)]) ∧
         closureData sourceRuntime (.object (.heap location)) =
           .ok (function, arity, captures) :=
   related.resolveClosureMatcher dispatchEq descriptorsEq sourceLookup
@@ -4098,12 +4098,12 @@ example
     ∃ address : Word32,
       locals.get closureIndex =
           some (.i32 (UInt32.ofNat address.value)) ∧
-        closureMatchesStep expectedFunction expectedArity expectedFixed initial
-            [.i32 (UInt32.ofNat address.value)] =
-          .Return [
-            .i32 (if function == expectedFunction && arity == expectedArity &&
-              captures.size == expectedFixed then 1 else 0)]
-            (FirTalos.Concrete.clearFailure initial) ∧
+        (∀ results next,
+          closureMatchesStep expectedFunction expectedArity expectedFixed initial
+              [.i32 (UInt32.ofNat address.value)] = .Return results next →
+            results = [
+              .i32 (if function == expectedFunction && arity == expectedArity &&
+                captures.size == expectedFixed then 1 else 0)]) ∧
         closureData sourceRuntime (.object (.heap location)) =
           .ok (function, arity, captures) :=
   invariant.resolveClosureMatcher sourceLookup closureFound closureKindAt

@@ -918,6 +918,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
       ∀ candidate, candidate ∈ before →
         candidate.matched = (0 : UInt32))
     (selectedMatches : (selected.matched != 0) = true)
+    (selectedStore : selected.nextStore = initial)
     (assembled :
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
@@ -963,7 +964,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
       wp_compileClosureDispatch_of_selected before selected suffix
         (.localSet resultIndex :: rest) Q hClosure hSat
         initialRelated.stateRelated.clearFailure beforeNonmatching
-        selectedMatches selectedBody
+        selectedMatches (by simpa [selectedStore] using selectedBody)
 
 /--
 The underapplication sibling of `ofSaturatedClosureDeclaration`.
@@ -1025,6 +1026,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofUnderappliedClosure
       ∀ candidate, candidate ∈ before →
         candidate.matched = (0 : UInt32))
     (selectedMatches : (selected.matched != 0) = true)
+    (selectedStore : selected.nextStore = initial)
     (assembled :
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
@@ -1076,7 +1078,7 @@ theorem ReuseCapacityCallLetStepSimulates.ofUnderappliedClosure
       wp_compileClosureDispatch_of_selected before selected suffix
         (.localSet resultIndex :: rest) Q hClosure hSat
         initialRelated.stateRelated.clearFailure beforeNonmatching
-        selectedMatches selectedBody
+        selectedMatches (by simpa [selectedStore] using selectedBody)
 
 /-- Recursive certificate node for the same direct declaration-call boundary.
 The continuation starts under the validator's ordinary-result erasure

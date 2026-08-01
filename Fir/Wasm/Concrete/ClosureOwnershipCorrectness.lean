@@ -137,6 +137,87 @@ theorem ClosureObjectRel.foldlM_closureOwnedValues
       (by simpa using kindAt) (by simpa using valueAt)
     exact ⟨lane, laneRelated⟩
 
+/-- A capture omitted by the concrete ownership filter is also a no-op for
+the closure-application retain fold. -/
+theorem ValueRel.retainNoOp_of_notObjectField
+    {witness : RefinementWitness} {kind : AbiKind} {lane : LaneValue}
+    {value : Value} (related : ValueRel witness kind lane value)
+    (rejected : kind.isObjectField = false) (runtime : RuntimeState) :
+    retainOwnedValue runtime value = .ok runtime := by
+  cases related with
+  | object | tagged | tobject | erased =>
+      simp [AbiKind.isObjectField] at rejected
+  | reuseNone | reuseSome | uint8 | uint16 | uint32 | uint64 | usize => rfl
+
+/-- Filtering statically non-owning closure captures preserves the semantic
+application-retain fold because every omitted value is a typed no-op. -/
+private theorem closureOwnedValues_retain_foldlM_eq_of_each
+    (witness : RefinementWitness) (kinds : List AbiKind) (values : List Value)
+    (sizeEq : kinds.length = values.length)
+    (each : ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+      kinds[offset]? = some kind →
+      values[offset]? = some value →
+      ∃ lane, ValueRel witness kind lane value)
+    (runtime : RuntimeState) :
+    values.foldlM (init := runtime) retainOwnedValue =
+      (closureOwnedValues kinds values).foldlM
+        (init := runtime) retainOwnedValue := by
+  induction kinds generalizing values runtime with
+  | nil =>
+      cases values with
+      | nil => rfl
+      | cons value values => simp at sizeEq
+  | cons kind kinds ih =>
+      cases values with
+      | nil => simp at sizeEq
+      | cons value values =>
+          have tailSize : kinds.length = values.length := by
+            simpa using sizeEq
+          obtain ⟨lane, headRelated⟩ := each 0 kind value (by simp) (by simp)
+          have tailEach : ∀ (offset : Nat) (tailKind : AbiKind)
+              (tailValue : Value),
+              kinds[offset]? = some tailKind →
+              values[offset]? = some tailValue →
+              ∃ lane, ValueRel witness tailKind lane tailValue := by
+            intro offset tailKind tailValue kindAt valueAt
+            exact each (offset + 1) tailKind tailValue (by simpa using kindAt)
+              (by simpa using valueAt)
+          by_cases admissible : kind.isObjectField = true
+          · simp only [closureOwnedValues, admissible, if_true,
+              List.foldlM_cons, Bind.bind, Except.bind]
+            cases headOperation : retainOwnedValue runtime value with
+            | error fault => rfl
+            | ok next => exact ih values tailSize tailEach next
+          · have rejected : kind.isObjectField = false := by
+              cases found : kind.isObjectField <;> simp_all
+            have headNoOp :=
+              headRelated.retainNoOp_of_notObjectField rejected runtime
+            simp only [closureOwnedValues, rejected, if_false,
+              List.foldlM_cons, Bind.bind, Except.bind]
+            rw [headNoOp]
+            exact ih values tailSize tailEach runtime
+
+/-- The semantic application-retain fold over all fixed arguments agrees with
+the exact filtered value order returned by the concrete ownership decoder. -/
+theorem ClosureObjectRel.foldlM_retainOwnedValue
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {captures : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds captures)
+    (runtime : RuntimeState) :
+    captures.toList.foldlM (init := runtime) retainOwnedValue =
+      (closureOwnedValues captureKinds.toList captures.toList).foldlM
+        (init := runtime) retainOwnedValue := by
+  apply closureOwnedValues_retain_foldlM_eq_of_each witness captureKinds.toList
+    captures.toList
+  · simpa using related.captureKindsSize
+  · intro offset kind value kindAt valueAt
+    obtain ⟨lane, _, laneRelated⟩ := related.captures offset kind value
+      (by simpa using kindAt) (by simpa using valueAt)
+    exact ⟨lane, laneRelated⟩
+
 /-- Pointwise typed capture reads determine the exact filtered word list
 returned by the executable closure ownership decoder. -/
 private theorem readClosureOwnedReferences_of_each

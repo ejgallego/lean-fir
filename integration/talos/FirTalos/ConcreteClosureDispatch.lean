@@ -89,12 +89,12 @@ theorem StateRelated.resolveClosureMatcher
     ∃ address : Word32,
       locals.get closureIndex =
           some (.i32 (UInt32.ofNat address.value)) ∧
-        closureMatchesStep expectedFunction expectedArity expectedFixed initial
-            [.i32 (UInt32.ofNat address.value)] =
-          .Return [
-            .i32 (if function == expectedFunction && arity == expectedArity &&
-              captures.size == expectedFixed then 1 else 0)]
-            (FirTalos.Concrete.clearFailure initial) ∧
+        (∀ results next,
+          closureMatchesStep expectedFunction expectedArity expectedFixed initial
+              [.i32 (UInt32.ofNat address.value)] = .Return results next →
+            results = [
+              .i32 (if function == expectedFunction && arity == expectedArity &&
+                captures.size == expectedFixed then 1 else 0)]) ∧
         closureData sourceRuntime (.object (.heap location)) =
           .ok (function, arity, captures) := by
   obtain ⟨physical, localFound, physicalRelated⟩ :=
@@ -102,10 +102,14 @@ theorem StateRelated.resolveClosureMatcher
   obtain ⟨address, physicalEq, mapped⟩ :=
     physicalRelated.heapAddress
   subst physical
-  obtain ⟨matcher, closureDataEq⟩ :=
-    closureMatchesStep_of_refines related.1 dispatchEq descriptorsEq mapped
-      cellFound cellLive cellObjectEq
-  exact ⟨address, localFound, matcher, closureDataEq⟩
+  refine ⟨address, localFound, ?_, ?_⟩
+  · intro results next operation
+    exact (closureMatchesStep_result_of_refines related.1 dispatchEq
+      descriptorsEq mapped cellFound cellLive cellObjectEq operation).1
+  · unfold closureData
+    simp only [getLiveCell, cellFound, cellLive, if_true, Bind.bind, Except.bind]
+    rw [cellObjectEq]
+    rfl
 
 /-- One compiler-produced closure candidate after numeric Talos adaptation,
 paired with the exact concrete matcher invocation used to select it. The body
@@ -128,6 +132,7 @@ structure ClosureCandidateCase
   fixed : Nat
   matcherIndex : Nat
   matched : UInt32
+  nextStore : Wasm.Store Host
   imp : Wasm.ImportDecl
   sourceMatcher :
     source.1 = [
@@ -148,7 +153,7 @@ structure ClosureCandidateCase
   operation :
     closureMatchesStep function arity fixed initial
         [.i32 (UInt32.ofNat address.value)] =
-      .Return [.i32 matched] (clearFailure initial)
+      .Return [.i32 matched] nextStore
 
 /--
 The candidate's recorded matcher bit is determined by the related semantic
@@ -190,12 +195,11 @@ theorem ClosureCandidateCase.matched_eq_of_refines
       else
         0 := by
   have matcher :=
-    (closureMatchesStep_of_refines runtimeRelated dispatchEq descriptorsEq
-      mapped cellFound cellLive cellObjectEq
+    (closureMatchesStep_result_of_refines runtimeRelated dispatchEq descriptorsEq
+      mapped cellFound cellLive cellObjectEq candidate.operation
       (expectedFunction := candidate.function)
       (expectedArity := candidate.arity)
       (expectedFixed := candidate.fixed)).1
-  have returnsEq := candidate.operation.symm.trans matcher
   have valuesEq :
       [Wasm.Value.i32 candidate.matched] =
         [Wasm.Value.i32 (if function == candidate.function &&
@@ -203,7 +207,7 @@ theorem ClosureCandidateCase.matched_eq_of_refines
             1
           else
             0)] := by
-    injection returnsEq
+    exact matcher
   have valueEq :
       Wasm.Value.i32 candidate.matched =
         Wasm.Value.i32 (if function == candidate.function &&
@@ -686,7 +690,7 @@ theorem wp_resolvedClosureCandidateChain_of_selected
     (selectedBody :
       Wasm.wp module selected.targetBody
         (closureDispatchSelectedPost module hostEnv tail before.length rest Q)
-        initial { locals with values := tail } hostEnv) :
+        selected.nextStore { locals with values := tail } hostEnv) :
     Wasm.wp module
       (resolvedClosureCandidateChain (before ++ selected :: suffix) ++ rest)
       Q initial { locals with values := tail } hostEnv := by
@@ -700,10 +704,10 @@ theorem wp_resolvedClosureCandidateChain_of_selected
       apply wp_closureCandidate hClosure selected.importFound hSat
         selected.importInBounds selected.contractFound selected.parameterCount
         selected.resultCount selected.operation
-      rw [failureClear, if_pos selectedMatches]
+      rw [if_pos selectedMatches]
       change Wasm.wp module selected.targetBody
         (closureDispatchResumePost module hostEnv rest Q tail)
-        initial { locals with values := tail } hostEnv
+        selected.nextStore { locals with values := tail } hostEnv
       simpa [closureDispatchSelectedPost] using selectedBody
   | cons candidate before ih =>
       have candidateNonmatching : candidate.matched = 0 :=
@@ -721,7 +725,7 @@ theorem wp_resolvedClosureCandidateChain_of_selected
             Wasm.wp module selected.targetBody
               (closureDispatchSelectedPost module hostEnv tail before.length []
                 (closureDispatchResumePost module hostEnv rest Q tail))
-              initial { locals with values := tail } hostEnv := by
+              selected.nextStore { locals with values := tail } hostEnv := by
           simpa [closureDispatchSelectedPost] using selectedBody
         have recursiveWithNil :=
           ih [] (closureDispatchResumePost module hostEnv rest Q tail)
@@ -736,7 +740,14 @@ theorem wp_resolvedClosureCandidateChain_of_selected
       apply wp_closureCandidate hClosure candidate.importFound hSat
         candidate.importInBounds candidate.contractFound
         candidate.parameterCount candidate.resultCount candidate.operation
-      rw [failureClear, candidateNonmatching]
+      have candidateOperationZero :
+          closureMatchesStep candidate.function candidate.arity candidate.fixed
+              initial [.i32 (UInt32.ofNat address.value)] =
+            .Return [.i32 0] candidate.nextStore := by
+        simpa [candidateNonmatching] using candidate.operation
+      have candidateStore : candidate.nextStore = initial :=
+        (closureMatchesStep_zero_store candidateOperationZero).trans failureClear
+      rw [candidateNonmatching, candidateStore]
       change Wasm.wp module
         (resolvedClosureCandidateChain (before ++ selected :: suffix))
         (closureDispatchResumePost module hostEnv rest Q tail)
@@ -783,7 +794,7 @@ theorem wp_compileClosureDispatch_of_selected
       Wasm.wp module selected.targetBody
         (closureDispatchSelectedPost module hostEnv tail before.length
           (.localGet resultIndex :: rest) Q)
-        initial { locals with values := tail } hostEnv) :
+        selected.nextStore { locals with values := tail } hostEnv) :
     Wasm.wp module
       (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
         .localGet resultIndex :: rest)
@@ -848,7 +859,7 @@ theorem compileClosureDispatch_correct_of_selected
       Wasm.wp module selected.targetBody
         (closureDispatchSelectedPost module hostEnv tail before.length
           (.localGet resultIndex :: rest) Q)
-        initial { locals with values := tail } hostEnv) :
+        selected.nextStore { locals with values := tail } hostEnv) :
     instructions sourceModule sourceFunction labels
         (compileClosureDispatch context declId closureId resultKind
           argumentCode argumentKinds) =

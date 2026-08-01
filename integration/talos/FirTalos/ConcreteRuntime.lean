@@ -946,6 +946,7 @@ structure Host where
   runtime : ConcreteRuntimeState := {}
   closureDispatch : ClosureDispatchTable := #[]
   closureDescriptors : ClosureDescriptorTable := #[]
+  closureApplication? : Option ClosureApplication := none
   externals : ConcreteExternalImpl := rejectExternalImpl
   failure? : Option HostFailure := none
   deriving Inhabited
@@ -2211,8 +2212,9 @@ theorem unboxStep_expectedScalar_of_refines
   simp [unboxStep, clearFailure, Word32.ofUInt32_ofNat_value, concrete,
     ConcreteError.toTrap]
 
-/-- Concrete trampoline metadata test. It reads only the closure header and
-returns the direct i32 Boolean consumed by generated `if` control flow. -/
+/-- Concrete trampoline metadata test and application boundary. A mismatch is
+a pure read. A match consumes one closure reference, transfers its captures,
+and records the snapshot used by the selected candidate's projection prefix. -/
 def closureMatchesStep (function : Lean.Name) (arity fixed : Nat)
     (store : Wasm.Store Host) (args : List Wasm.Value) : Wasm.HostResult Host :=
   let store := clearFailure store
@@ -2221,7 +2223,18 @@ def closureMatchesStep (function : Lean.Name) (arity fixed : Nat)
       match closureMatches store.host.runtime.heap store.host.closureDispatch
           store.host.closureDescriptors (Word32.ofUInt32 bits) function arity
           fixed with
-      | .ok matched => .Return [.i32 matched] store
+      | .ok matched =>
+          if matched == 0 then
+            .Return [.i32 matched] store
+          else
+            match takeClosureApplication store.host.runtime.heap
+                store.host.closureDispatch store.host.closureDescriptors
+                (Word32.ofUInt32 bits) with
+            | .ok (heap, application) =>
+                let store := replaceHeap store heap
+                .Return [.i32 matched] { store with host := {
+                  store.host with closureApplication? := some application } }
+            | .error failure => trap store (.runtime failure.toTrap)
       | .error failure => trap store (.runtime failure.toTrap)
   | [_] => trap store (.laneMismatch 0 .i32)
   | args => trap store (.arityMismatch 1 args.length)
@@ -2243,18 +2256,26 @@ theorem closureMatchesFn_satisfies_contract
       ((closureMatchesFn function arity fixed).invoke initial args) := by
   rfl
 
-/-- Concrete typed capture projection used by the generated trampoline. -/
+/-- Concrete typed capture projection used by the generated trampoline. The
+lane comes from the successful match snapshot, so exclusive application may
+project after the closure header has already been released. -/
 def closureProjStep (function : Lean.Name) (arity fixed index : Nat)
     (resultKind : AbiKind) (store : Wasm.Store Host)
     (args : List Wasm.Value) : Wasm.HostResult Host :=
   let store := clearFailure store
   match args with
   | [.i32 bits] =>
-      match projectClosureCapture store.host.runtime.heap
-          store.host.closureDispatch store.host.closureDescriptors
-          (Word32.ofUInt32 bits) function arity fixed index resultKind with
-      | .ok lane => .Return [physicalOfLane lane] store
-      | .error failure => trap store (.runtime failure.toTrap)
+      match store.host.closureApplication? with
+      | none =>
+          trap store
+            (.runtime
+              ((Fir.Wasm.Concrete.ConcreteError.target
+                .closureMetadataMismatch).toTrap))
+      | some application =>
+          match application.project (Word32.ofUInt32 bits) function arity fixed
+              index resultKind with
+          | .ok lane => .Return [physicalOfLane lane] store
+          | .error failure => trap store (.runtime failure.toTrap)
   | [_] => trap store (.laneMismatch 0 .i32)
   | args => trap store (.arityMismatch 1 args.length)
 
@@ -3581,9 +3602,66 @@ theorem partialApplyStep_of_refines
         simpa [replaceHeap, clearFailure, semanticClosureResult] using
           runtimeRelated.trace.witnessExtension extension }
 
-/-- Executable trampoline metadata matching agrees with the exact semantic
-closure identity predicate and leaves the concrete runtime unchanged. -/
-theorem closureMatchesStep_of_refines
+/-- Any successful executable matcher return carries the exact semantic
+identity bit. A nonmatching candidate is read-only; a matching candidate may
+have taken ownership before returning, so the theorem intentionally exposes
+the result independently of the post-store. -/
+theorem closureMatchesStep_result_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime : RuntimeState} {location : Location} {address : Word32}
+    {cell : HeapCell} {function : Lean.Name} {arity : Nat}
+    {captures : Array Value} {expectedFunction : Lean.Name}
+    {expectedArity expectedFixed : Nat} {results : List Wasm.Value}
+    {next : Wasm.Store Host}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures)
+    (operation :
+      closureMatchesStep expectedFunction expectedArity expectedFixed initial
+          [.i32 (UInt32.ofNat address.value)] = .Return results next) :
+    results = [
+      .i32 (if function == expectedFunction && arity == expectedArity &&
+        captures.size == expectedFixed then 1 else 0)] ∧
+      closureData runtime (.object (.heap location)) =
+        .ok (function, arity, captures) := by
+  have concreteMatch := runtimeRelated.heap.closureMatches_refines mapped found live
+    objectEq expectedFunction expectedArity expectedFixed
+  constructor
+  · unfold closureMatchesStep at operation
+    simp only [clearFailure] at operation
+    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
+      concreteMatch] at operation
+    by_cases identity :
+        (function == expectedFunction && arity == expectedArity &&
+          captures.size == expectedFixed) = true
+    · simp only [identity, if_true] at operation ⊢
+      cases taken : takeClosureApplication initial.host.runtime.heap
+          witness.closureDispatch witness.closureDescriptors address with
+      | error failure =>
+          simp [taken, trap] at operation
+      | ok result =>
+          obtain ⟨heap, application⟩ := result
+          simp [taken] at operation
+          exact operation.1.symm
+    · have identityFalse :
+          (function == expectedFunction && arity == expectedArity &&
+            captures.size == expectedFixed) = false :=
+        Bool.eq_false_of_not_eq_true identity
+      simp [identityFalse] at operation ⊢
+      exact operation.1.symm
+  · unfold closureData
+    simp only [getLiveCell, found, live, if_true, Bind.bind, Except.bind]
+    rw [objectEq]
+    rfl
+
+/-- A nonmatching candidate performs the exact read-only matcher return. -/
+theorem closureMatchesStep_miss_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
     {runtime : RuntimeState} {location : Location} {address : Word32}
     {cell : HeapCell} {function : Lean.Name} {arity : Nat}
@@ -3597,46 +3675,64 @@ theorem closureMatchesStep_of_refines
     (mapped : witness.locations.lookup? location = some address)
     (found : findCell? runtime.heap location = some cell)
     (live : cell.live = true)
-    (objectEq : cell.object = .closure function arity captures) :
+    (objectEq : cell.object = .closure function arity captures)
+    (identityFalse :
+      (function == expectedFunction && arity == expectedArity &&
+        captures.size == expectedFixed) = false) :
     closureMatchesStep expectedFunction expectedArity expectedFixed initial
         [.i32 (UInt32.ofNat address.value)] =
-      .Return [
-        .i32 (if function == expectedFunction && arity == expectedArity &&
-          captures.size == expectedFixed then 1 else 0)]
-        (clearFailure initial) ∧
-      closureData runtime (.object (.heap location)) =
-        .ok (function, arity, captures) := by
+      .Return [.i32 0] (clearFailure initial) := by
   have concreteMatch := runtimeRelated.heap.closureMatches_refines mapped found live
     objectEq expectedFunction expectedArity expectedFixed
-  constructor
-  · unfold closureMatchesStep
-    simp only [clearFailure]
-    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
-      concreteMatch]
-  · unfold closureData
-    simp only [getLiveCell, found, live, if_true, Bind.bind, Except.bind]
-    rw [objectEq]
-    rfl
+  unfold closureMatchesStep
+  simp only [clearFailure]
+  rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
+    concreteMatch]
+  simp [identityFalse]
+
+/-- A matcher returning the zero bit cannot have crossed the ownership
+boundary, so its post-store is exactly the failure-cleared input store. -/
+theorem closureMatchesStep_zero_store
+    {function : Lean.Name} {arity fixed : Nat}
+    {initial next : Wasm.Store Host} {address : Word32}
+    (operation :
+      closureMatchesStep function arity fixed initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [.i32 0] next) :
+    next = clearFailure initial := by
+  unfold closureMatchesStep at operation
+  simp only [clearFailure] at operation ⊢
+  rw [Word32.ofUInt32_ofNat_value] at operation
+  cases matched : closureMatches initial.host.runtime.heap
+      initial.host.closureDispatch initial.host.closureDescriptors address
+      function arity fixed with
+  | error failure =>
+      simp [matched, trap] at operation
+  | ok result =>
+      rw [matched] at operation
+      by_cases resultZero : (result == 0) = true
+      · simp [resultZero] at operation
+        exact operation.2.symm
+      · cases taken : takeClosureApplication initial.host.runtime.heap
+            initial.host.closureDispatch initial.host.closureDescriptors address with
+        | error failure =>
+            simp [resultZero, taken, trap] at operation
+        | ok application =>
+            simp [resultZero, taken] at operation
+            exact (resultZero (by simp [operation.1])).elim
 
 /-- Executable typed capture projection returns the exact Talos lane related
-to the selected semantic capture and preserves the runtime state. -/
+to the selected semantic application snapshot and preserves the runtime
+state. -/
 theorem closureProjStep_of_refines
     {initial : Wasm.Store Host} {witness : RefinementWitness}
-    {runtime : RuntimeState} {location : Location} {address : Word32}
-    {cell : HeapCell} {function : Lean.Name} {arity fixed index : Nat}
+    {application : ClosureApplication} {address : Word32}
+    {function : Lean.Name} {arity fixed index : Nat}
     {captures : Array Value} {captureKinds : Array AbiKind}
     {kind : AbiKind} {value : Value}
-    (runtimeRelated :
-      ConcreteRuntimeRel initial.host.runtime witness runtime)
-    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
-    (descriptorsEq :
-      witness.closureDescriptors = initial.host.closureDescriptors)
-    (mapped : witness.locations.lookup? location = some address)
-    (found : findCell? runtime.heap location = some cell)
-    (live : cell.live = true)
-    (objectEq : cell.object = .closure function arity captures)
-    (descriptorFound : witness.descriptors.lookup? address =
-      some (.closure function arity captureKinds))
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
     (fixedSize : captures.size = fixed)
     (kindAt : captureKinds[index]? = some kind)
     (valueAt : captures[index]? = some value) :
@@ -3644,22 +3740,16 @@ theorem closureProjStep_of_refines
       closureProjStep function arity fixed index kind initial
           [.i32 (UInt32.ofNat address.value)] =
         .Return [physicalOfLane lane] (clearFailure initial) ∧
-      PhysicalValueRel witness kind (physicalOfLane lane) value ∧
-      closureData runtime (.object (.heap location)) =
-        .ok (function, arity, captures) := by
+      PhysicalValueRel witness kind (physicalOfLane lane) value := by
   obtain ⟨lane, projected, valueRelated⟩ :=
-    runtimeRelated.heap.projectClosureCapture_refines mapped found live objectEq
-      descriptorFound kindAt valueAt
+    applicationRelated.project index kind value kindAt valueAt
   rw [fixedSize] at projected
-  refine ⟨lane, ?_, physicalOfLane_related valueRelated, ?_⟩
+  refine ⟨lane, ?_, physicalOfLane_related valueRelated⟩
   · unfold closureProjStep
     simp only [clearFailure]
-    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
-      projected]
-  · unfold closureData
-    simp only [getLiveCell, found, live, if_true, Bind.bind, Except.bind]
-    rw [objectEq]
-    rfl
+    rw [applicationFound]
+    simp only
+    rw [Word32.ofUInt32_ofNat_value, projected]
 
 /-- A successful semantic heap-cell replacement changes only the heap field. -/
 theorem setCell_heapOnly
@@ -3771,6 +3861,135 @@ theorem Array.foldlM_runtimeAux
       items.toList.foldlM (init := before) step = .ok after := by
     simpa only [Array.foldlM_toList] using operation
   exact List.foldlM_runtimeAux stepAux listOperation
+
+theorem incLocation_runtimeAux
+    {before after : RuntimeState} {location amount : Nat}
+    (operation : incLocation before location amount = .ok after) :
+    RuntimeAuxEq before after := by
+  unfold incLocation at operation
+  cases read : getLiveCell before location with
+  | error failure =>
+      simp only [read, Bind.bind, Except.bind] at operation
+      contradiction
+  | ok cell =>
+      simp only [read, Bind.bind, Except.bind] at operation
+      cases persistent : cell.persistent with
+      | true =>
+          simp only [persistent, if_true] at operation
+          have runtimeEq := Except.ok.inj operation
+          subst after
+          exact RuntimeAuxEq.refl _
+      | false =>
+          simp only [persistent, Bool.false_eq_true, if_false] at operation
+          exact setCell_runtimeAux operation
+
+theorem retainOwnedValue_runtimeAux
+    {before after : RuntimeState} {value : Value}
+    (operation : retainOwnedValue before value = .ok after) :
+    RuntimeAuxEq before after := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location => exact incLocation_runtimeAux operation
+      | tagged payload =>
+          have runtimeEq := Except.ok.inj operation
+          subst after
+          exact RuntimeAuxEq.refl _
+  | usize value | scalar value | erased | reuseToken value =>
+      have runtimeEq := Except.ok.inj operation
+      subst after
+      exact RuntimeAuxEq.refl _
+
+/-- Taking a closure application changes only source heap ownership. Its
+metadata result and capture snapshot do not affect globals, the external
+world token, or the observable trace. -/
+theorem takeClosureApplication_runtimeAux
+    {before after : RuntimeState} {location : Location}
+    {function : Lean.Name} {arity : Nat} {captures : Array Value}
+    (operation : Fir.LeanIR.Impure.takeClosureApplication before location =
+      .ok (after, function, arity, captures)) :
+    RuntimeAuxEq before after := by
+  unfold Fir.LeanIR.Impure.takeClosureApplication at operation
+  cases read : getLiveCell before location with
+  | error failure =>
+      simp only [read, Bind.bind, Except.bind] at operation
+      contradiction
+  | ok cell =>
+      simp only [read, Bind.bind, Except.bind] at operation
+      cases objectEq : cell.object with
+      | closure storedFunction storedArity storedCaptures =>
+          simp only [objectEq] at operation
+          cases persistent : cell.persistent with
+          | true =>
+              simp only [persistent, if_true] at operation
+              have runtimeEq : before = after :=
+                congrArg (fun result => result.1) (Except.ok.inj operation)
+              subst after
+              exact RuntimeAuxEq.refl _
+          | false =>
+              simp only [persistent, Bool.false_eq_true, if_false] at operation
+              by_cases zero : cell.rc = 0
+              · simp [zero] at operation
+              · rw [if_neg zero] at operation
+                by_cases one : cell.rc = 1
+                · rw [if_pos one] at operation
+                  cases changed : setCell before location
+                      { object := .closure storedFunction storedArity
+                          storedCaptures
+                        rc := 0
+                        live := false } with
+                  | error failure =>
+                      rw [changed] at operation
+                      contradiction
+                  | ok next =>
+                      rw [changed] at operation
+                      have runtimeEq : next = after :=
+                        congrArg (fun result => result.1)
+                          (Except.ok.inj operation)
+                      subst after
+                      exact setCell_runtimeAux changed
+                · rw [if_neg one] at operation
+                  cases changed : setCell before location
+                      { object := .closure storedFunction storedArity
+                          storedCaptures
+                        rc := cell.rc - 1
+                        live := cell.live } with
+                  | error failure =>
+                      rw [changed] at operation
+                      contradiction
+                  | ok parent =>
+                      rw [changed] at operation
+                      simp only [Bind.bind, Except.bind] at operation
+                      cases retained : storedCaptures.foldlM retainOwnedValue
+                          parent with
+                      | error failure =>
+                          rw [retained] at operation
+                          contradiction
+                      | ok final =>
+                          rw [retained] at operation
+                          have runtimeEq : final = after :=
+                            congrArg (fun result => result.1)
+                              (Except.ok.inj operation)
+                          subst after
+                          exact (setCell_runtimeAux changed).trans
+                            (Array.foldlM_runtimeAux
+                              (fun stepOperation =>
+                                retainOwnedValue_runtimeAux stepOperation)
+                              retained)
+      | ctor info =>
+          simp [objectEq] at operation
+      | boxed type value =>
+          simp [objectEq] at operation
+      | natural value =>
+          simp [objectEq] at operation
+      | integer value =>
+          simp [objectEq] at operation
+      | string value =>
+          simp [objectEq] at operation
+      | byteArray bytes =>
+          simp [objectEq] at operation
+      | «opaque» name =>
+          simp [objectEq] at operation
 
 /-- Every successful recursive semantic release preserves globals, world, and
 external trace, including all recursively released children. -/
@@ -4030,6 +4249,73 @@ theorem ConcreteRuntimeRel.replaceHeap_of_runtimeAux
     trace := by
       rw [aux.trace]
       simpa [replaceHeap, clearFailure] using related.trace }
+
+/-- A successful concrete closure match crosses the same ownership boundary
+as source application, records the exact typed capture snapshot used by the
+projection prefix, and relates the resulting concrete store to the semantic
+post-application runtime. -/
+theorem closureMatchesStep_hit_of_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {runtime nextRuntime : RuntimeState} {location : Location}
+    {address : Word32} {cell : HeapCell} {function : Lean.Name} {arity : Nat}
+    {captures : Array Value} {expectedFunction : Lean.Name}
+    {expectedArity expectedFixed : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness runtime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures)
+    (identityTrue :
+      (function == expectedFunction && arity == expectedArity &&
+        captures.size == expectedFixed) = true)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell runtime location { cell with rc := cell.rc - 1 } =
+          .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime captures.toList)
+    (semanticOperation :
+      Fir.LeanIR.Impure.takeClosureApplication runtime location =
+        .ok (nextRuntime, function, arity, captures)) :
+    ∃ (next : Wasm.Store Host) (application : ClosureApplication)
+        (captureKinds : Array AbiKind),
+      closureMatchesStep expectedFunction expectedArity expectedFixed initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [.i32 1] next ∧
+      next.host.closureApplication? = some application ∧
+      ClosureApplicationRel witness application address function arity
+        captureKinds captures ∧
+      ConcreteRuntimeRel next.host.runtime witness nextRuntime := by
+  obtain ⟨heap, application, captureKinds, concreteOperation,
+      applicationRelated, heapRelated⟩ :=
+    runtimeRelated.heap.takeClosureApplication_refines mapped found live
+      objectEq sharedCapacity semanticOperation
+  have concreteMatch := runtimeRelated.heap.closureMatches_refines mapped found
+    live objectEq expectedFunction expectedArity expectedFixed
+  have concreteOperationInitial :
+      Fir.Wasm.Concrete.takeClosureApplication initial.host.runtime.heap
+          initial.host.closureDispatch initial.host.closureDescriptors address =
+        .ok (heap, application) := by
+    simpa [dispatchEq, descriptorsEq] using concreteOperation
+  let next : Wasm.Store Host :=
+    let store := replaceHeap (clearFailure initial) heap
+    { store with host := {
+        store.host with closureApplication? := some application } }
+  refine ⟨next, application, captureKinds, ?_, ?_, applicationRelated, ?_⟩
+  · unfold closureMatchesStep
+    simp only [clearFailure]
+    rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
+      concreteMatch]
+    simp [identityTrue, concreteOperationInitial, next, replaceHeap,
+      clearFailure, dispatchEq, descriptorsEq]
+  · simp [next]
+  · have runtimeAux := takeClosureApplication_runtimeAux semanticOperation
+    have nextRuntimeRelated :=
+      FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
+        runtimeRelated heapRelated runtimeAux
+    simpa [next, replaceHeap, clearFailure] using nextRuntimeRelated
 
 /-- Lift a recursively changed heap while transporting the auxiliary value
 relations through a descriptor rebind. -/
@@ -6941,7 +7227,8 @@ theorem StateRelated.clearFailure
     ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
       gcHeap, host⟩
   rcases host with
-    ⟨runtime, closureDispatch, closureDescriptors, externals, failure⟩
+    ⟨runtime, closureDispatch, closureDescriptors, closureApplication,
+      externals, failure⟩
   have failureEq : failure = none := related.2.1
   subst failure
   rfl
@@ -10313,7 +10600,7 @@ theorem wp_closureMatches
     {module : Wasm.Module} {env : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
     {rest : Wasm.Program} {Q : Wasm.Assertion Host}
-    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {initial nextStore : Wasm.Store Host} {locals : Wasm.Locals}
     {closureIndex : Nat} {address : Word32} {matched : UInt32}
     {function : Lean.Name} {arity fixed : Nat} {tail : List Wasm.Value}
     (hClosure : locals.get closureIndex =
@@ -10327,8 +10614,8 @@ theorem wp_closureMatches
     (hResults : imp.results.length = 1)
     (operation : closureMatchesStep function arity fixed initial
         [.i32 (UInt32.ofNat address.value)] =
-      .Return [.i32 matched] (clearFailure initial))
-    (continued : Wasm.wp module rest Q (clearFailure initial)
+      .Return [.i32 matched] nextStore)
+    (continued : Wasm.wp module rest Q nextStore
       { locals with values := .i32 matched :: tail } env) :
     Wasm.wp module (.localGet closureIndex :: .call id :: rest) Q initial
       { locals with values := tail } env := by
@@ -10352,7 +10639,7 @@ theorem wp_closureCandidate
     {module : Wasm.Module} {env : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
     {thenBody elseBody rest : Wasm.Program} {Q : Wasm.Assertion Host}
-    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {initial nextStore : Wasm.Store Host} {locals : Wasm.Locals}
     {closureIndex : Nat} {address : Word32} {matched : UInt32}
     {function : Lean.Name} {arity fixed : Nat} {tail : List Wasm.Value}
     (hClosure : locals.get closureIndex =
@@ -10366,7 +10653,7 @@ theorem wp_closureCandidate
     (hResults : imp.results.length = 1)
     (operation : closureMatchesStep function arity fixed initial
         [.i32 (UInt32.ofNat address.value)] =
-      .Return [.i32 matched] (clearFailure initial))
+      .Return [.i32 matched] nextStore)
     (selected :
       Wasm.wp module (if matched != 0 then thenBody else elseBody)
         (fun continuation => match continuation with
@@ -10379,7 +10666,7 @@ theorem wp_closureCandidate
           | .Break (level + 1) nextStore nextLocals =>
               Q (.Break level nextStore nextLocals)
           | other => Q other)
-        (clearFailure initial) { locals with values := tail } env) :
+        nextStore { locals with values := tail } env) :
     Wasm.wp module
       (.localGet closureIndex :: .call id ::
         .iff 0 0 thenBody elseBody :: rest)

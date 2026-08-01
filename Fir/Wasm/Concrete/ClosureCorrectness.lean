@@ -21,7 +21,7 @@ structure ClosureObjectRel (state : MemoryState) (witness : RefinementWitness)
       metadata.function = function ∧ metadata.arity = arity ∧
       metadata.fixed = semantic.size ∧ metadata.captureKinds = captureKinds
   captureKindsSize : captureKinds.size = semantic.size
-  captures : ∀ index kind value,
+  captures : ∀ (index : Nat) (kind : AbiKind) (value : Value),
     captureKinds[index]? = some kind →
     semantic[index]? = some value →
     ∃ lane,
@@ -48,6 +48,40 @@ theorem ClosureObjectRel.matches
   simp only [Bind.bind, Except.bind]
   simp [metadataFunction, metadataArity, metadataFixed]
   rfl
+
+/-- Successful closure metadata decoding returns the exact live header read
+at the same address. This lets ownership proofs reuse the packaged refcount
+and persistence equations without reopening descriptor lookup details. -/
+theorem readClosureMetadata_header_eq
+    {state : MemoryState} {dispatch : ClosureDispatchTable}
+    {descriptors : ClosureDescriptorTable} {address : Word32}
+    {metadata : ClosureMetadata} {header : Header}
+    (metadataRead :
+      readClosureMetadata state dispatch descriptors address = .ok metadata)
+    (headerRead : state.readLiveHeader address = .ok header) :
+    metadata.header = header := by
+  have closureHeaderRead : readClosureHeader state address = .ok metadata.header := by
+    unfold readClosureMetadata at metadataRead
+    cases operation : readClosureHeader state address with
+    | error failure =>
+        rw [operation] at metadataRead
+        contradiction
+    | ok decodedHeader =>
+        rw [operation] at metadataRead
+        simp only [Bind.bind, Except.bind] at metadataRead
+        split at metadataRead <;> try contradiction
+        split at metadataRead <;> try contradiction
+        split at metadataRead <;> try contradiction
+        have metadataEq := Except.ok.inj metadataRead
+        subst metadata
+        rfl
+  unfold readClosureHeader at closureHeaderRead
+  split at closureHeaderRead <;> try contradiction
+  rw [headerRead] at closureHeaderRead
+  simp only [liftMemory, Bind.bind, Except.bind] at closureHeaderRead
+  split at closureHeaderRead <;> try contradiction
+  split at closureHeaderRead <;> try contradiction
+  exact (Except.ok.inj closureHeaderRead).symm
 
 /-- The checked concrete match operation agrees exactly with the semantic
 function/arity/fixed-count predicate, including the nonmatching result. -/
@@ -113,6 +147,178 @@ theorem ClosureObjectRel.project
     cases kind <;> decide]
   simp only [if_true]
   exact congrArg liftMemory read
+
+/-- A concrete application snapshot carries every fixed argument in its
+original typed lane. This relation deliberately does not require the source
+closure cell to remain live: exclusive application releases that cell before
+the generated projection prefix runs. -/
+structure ClosureApplicationRel (witness : RefinementWitness)
+    (application : ClosureApplication) (address : Word32)
+    (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
+    (semantic : Array Value) : Prop where
+  objectEq : application.object = address
+  functionEq : application.function = function
+  arityEq : application.arity = arity
+  captureKindsEq : application.captureKinds = captureKinds
+  capturesSize : application.captures.size = semantic.size
+  captures : ∀ (index : Nat) (kind : AbiKind) (value : Value),
+    captureKinds[index]? = some kind →
+    semantic[index]? = some value →
+    ∃ lane : LaneValue,
+      application.captures[index]? = some lane ∧
+        ValueRel witness kind lane value
+
+/-- Projection from an application snapshot returns the exact physical lane
+related to the corresponding semantic fixed argument. -/
+theorem ClosureApplicationRel.project
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {semantic : Array Value}
+    (related : ClosureApplicationRel witness application address function arity
+      captureKinds semantic)
+    (index : Nat) (kind : AbiKind) (value : Value)
+    (kindAt : captureKinds[index]? = some kind)
+    (valueAt : semantic[index]? = some value) :
+    ∃ lane,
+      application.project address function arity semantic.size index kind =
+        .ok lane ∧
+      ValueRel witness kind lane value := by
+  obtain ⟨lane, laneAt, laneRelated⟩ :=
+    related.captures index kind value kindAt valueAt
+  obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+  have applicationKindAt : application.captureKinds[index]? = some kind := by
+    rw [related.captureKindsEq]
+    exact kindAt
+  refine ⟨lane, ?_, laneRelated⟩
+  unfold ClosureApplication.project
+  simp only [related.objectEq, related.functionEq, related.arityEq,
+    related.capturesSize, beq_self_eq_true, true_and, ↓reduceIte,
+    Bind.bind, Except.bind]
+  rw [if_pos (by
+    change ((address.value == address.value) && true && true && true) = true
+    simp)]
+  rw [if_pos indexLt]
+  rw [show (application.captureKinds[index]? == some kind) = true by
+    rw [applicationKindAt]
+    cases kind <;> decide]
+  simp only [↓reduceIte]
+  rw [laneAt]
+  rfl
+
+/-- Pointwise related closure slots can be read into one exact ordered
+snapshot. The explicit list theorem is the induction boundary used by
+`takeClosureApplication`; clients consume the array-shaped relation below. -/
+private theorem readClosureCaptures_of_each
+    (state : MemoryState) (witness : RefinementWitness) (address : Word32)
+    (index : Nat) (kinds : List AbiKind) (values : List Value)
+    (sizeEq : kinds.length = values.length)
+    (each : ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+      kinds[offset]? = some kind →
+      values[offset]? = some value →
+      ∃ lane : LaneValue,
+        state.memory.readClosureCapture
+            (closureCaptureAddress address.value (index + offset)) kind =
+              .ok lane ∧
+          ValueRel witness kind lane value) :
+    ∃ lanes : List LaneValue,
+      readClosureCaptures state address index kinds = .ok lanes ∧
+      lanes.length = values.length ∧
+      ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+        kinds[offset]? = some kind →
+        values[offset]? = some value →
+        ∃ lane : LaneValue, lanes[offset]? = some lane ∧
+          ValueRel witness kind lane value := by
+  induction kinds generalizing index values with
+  | nil =>
+      cases values with
+      | nil => exact ⟨[], rfl, rfl, by simp⟩
+      | cons value values => simp at sizeEq
+  | cons kind kinds ih =>
+      cases values with
+      | nil => simp at sizeEq
+      | cons value values =>
+          have tailSize : kinds.length = values.length := by
+            simpa using sizeEq
+          obtain ⟨lane, laneRead, laneRelated⟩ :=
+            each 0 kind value (by simp) (by simp)
+          have tailEach : ∀ (offset : Nat) (tailKind : AbiKind)
+              (tailValue : Value),
+              kinds[offset]? = some tailKind →
+              values[offset]? = some tailValue →
+              ∃ tailLane : LaneValue,
+                state.memory.readClosureCapture
+                    (closureCaptureAddress address.value
+                      (index + 1 + offset)) tailKind = .ok tailLane ∧
+                  ValueRel witness tailKind tailLane tailValue := by
+            intro offset tailKind tailValue kindAt valueAt
+            obtain ⟨tailLane, tailRead, tailRelated⟩ :=
+              each (offset + 1) tailKind tailValue (by simpa using kindAt)
+                (by simpa using valueAt)
+            exact ⟨tailLane, by simpa [Nat.add_assoc, Nat.add_comm,
+              Nat.add_left_comm] using tailRead, tailRelated⟩
+          obtain ⟨lanes, lanesRead, lanesSize, lanesRelated⟩ :=
+            ih (index + 1) values tailSize tailEach
+          refine ⟨lane :: lanes, ?_, by simp [lanesSize], ?_⟩
+          · unfold readClosureCaptures
+            have laneRead' :
+                state.memory.readClosureCapture
+                    (closureCaptureAddress address.value index) kind =
+                  .ok lane := by
+              simpa using laneRead
+            rw [congrArg liftMemory laneRead']
+            simp only [Bind.bind, Except.bind]
+            rw [lanesRead]
+            rfl
+          · intro offset actualKind actualValue kindAt valueAt
+            cases offset with
+            | zero =>
+                simp at kindAt valueAt
+                subst actualKind
+                subst actualValue
+                exact ⟨lane, by simp, laneRelated⟩
+            | succ offset =>
+                obtain ⟨tailLane, tailLaneAt, tailRelated⟩ :=
+                  lanesRelated offset actualKind actualValue
+                    (by simpa using kindAt) (by simpa using valueAt)
+                exact ⟨tailLane, by simpa using tailLaneAt, tailRelated⟩
+
+/-- Reading every capture of a locally related closure produces the
+array-shaped transfer relation used after ownership has been taken. -/
+theorem ClosureObjectRel.readCaptures
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {semantic : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds semantic) :
+    ∃ lanes,
+      readClosureCaptures state address 0 captureKinds.toList = .ok lanes ∧
+      ClosureApplicationRel witness {
+        object := address
+        function
+        arity
+        captureKinds
+        captures := lanes.toArray }
+        address function arity captureKinds semantic := by
+  obtain ⟨lanes, lanesRead, lanesSize, lanesRelated⟩ :=
+    readClosureCaptures_of_each state witness address 0 captureKinds.toList
+      semantic.toList (by simpa using related.captureKindsSize) (by
+        intro offset kind value kindAt valueAt
+        obtain ⟨lane, laneRead, laneRelated⟩ :=
+          related.captures offset kind value (by simpa using kindAt)
+            (by simpa using valueAt)
+        exact ⟨lane, by simpa using laneRead, laneRelated⟩)
+  refine ⟨lanes, lanesRead, {
+    objectEq := rfl
+    functionEq := rfl
+    arityEq := rfl
+    captureKindsEq := rfl
+    capturesSize := by simpa using lanesSize
+    captures := ?_ }⟩
+  intro index kind value kindAt valueAt
+  obtain ⟨lane, laneAt, laneRelated⟩ := lanesRelated index kind value
+    (by simpa using kindAt) (by simpa using valueAt)
+  exact ⟨lane, by simpa using laneAt, laneRelated⟩
 
 /-- An eight-byte capture decoder depends only on the bytes in its slot. -/
 theorem LinearMemory.readClosureCapture_of_byteFrame

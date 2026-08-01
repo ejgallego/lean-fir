@@ -3800,12 +3800,12 @@ theorem ConcreteReuseCapacityCacheFrame.resolveClosureMatcher
     ∃ address : Word32,
       locals.get closureIndex =
           some (.i32 (UInt32.ofNat address.value)) ∧
-        closureMatchesStep expectedFunction expectedArity expectedFixed initial
-            [.i32 (UInt32.ofNat address.value)] =
-          .Return [
-            .i32 (if function == expectedFunction && arity == expectedArity &&
-              captures.size == expectedFixed then 1 else 0)]
-            (clearFailure initial) ∧
+        (∀ results next,
+          closureMatchesStep expectedFunction expectedArity expectedFixed initial
+              [.i32 (UInt32.ofNat address.value)] = .Return results next →
+            results = [
+              .i32 (if function == expectedFunction && arity == expectedArity &&
+                captures.size == expectedFixed then 1 else 0)]) ∧
         closureData sourceRuntime (.object (.heap location)) =
           .ok (function, arity, captures) :=
   invariant.1.1.1.1.stateRelated.resolveClosureMatcher
@@ -4529,10 +4529,12 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
 A selected saturated closure candidate reconstructs the cache-augmented
 canonical caller frame at the hereditary callee's exact endpoint.
 
-The dispatch matcher chain itself is read-only. The selected declaration
-therefore contributes the same witness, capacity, ordinaryness, immutable
-table, and evolved-cache transports as a direct named call; only the
-compiler-generated control prefix differs.
+The nonmatching dispatch prefix is read-only. This compatibility theorem also
+assumes explicitly that the selected matcher has the unchanged-store case;
+under that specialization the selected declaration contributes the same
+witness, capacity, ordinaryness, immutable-table, and evolved-cache transports
+as a direct named call. The general ownership-threaded selected call is a
+separate composition boundary.
 -/
 theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
     {facts : ReuseCapacityFacts}
@@ -4589,6 +4591,7 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
       ∀ candidate, candidate ∈ before →
         candidate.matched = (0 : UInt32))
     (selectedMatches : (selected.matched != 0) = true)
+    (selectedStore : selected.nextStore = initial)
     (assembled :
       ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
         initial locals)
@@ -4634,8 +4637,8 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
         updated resultIndex initialWitness resultWitness :=
     ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration before
       selected suffix sourceStep invariant.1.1.1.1 resultFound resultKindAt
-      hClosure hSat beforeNonmatching selectedMatches assembled selectedBodyEq
-      callee.declaration.capacityPreserving targetSet
+      hClosure hSat beforeNonmatching selectedMatches selectedStore assembled
+      selectedBodyEq callee.declaration.capacityPreserving targetSet
   obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
       witnessDescriptorsPreserved, nextTransfer, nextBaseInvariant⟩ :=
     invariant.1.ofBudgetedCallStepExact stepFits capacityStep
@@ -4723,8 +4726,9 @@ def SaturatedClosureCallImplementationWithCache
                 (∀ candidate, candidate ∈ before →
                   candidate.matched = (0 : UInt32)) ∧
                   (selected.matched != 0) = true ∧
-                    ClosureArgumentAssembly module hostEnv argumentTarget
-                        physicalArgs initial locals ∧
+                    selected.nextStore = initial ∧
+                      ClosureArgumentAssembly module hostEnv argumentTarget
+                          physicalArgs initial locals ∧
                       selected.targetBody =
                           argumentTarget ++
                             [.call functionIndex, .localSet resultIndex] ∧
@@ -4784,8 +4788,8 @@ theorem
       functionIndex, argumentTarget, afterCall, updated, resultWitness,
       physicalArgs, resultKind, physical, _contexts, targetEq, resultKindAt,
       hClosure, hSat,
-      beforeNonmatching, selectedMatches, assembled, selectedBodyEq, callee,
-      targetSet, transfer⟩ :=
+      beforeNonmatching, selectedMatches, selectedStore, assembled,
+      selectedBodyEq, callee, targetSet, transfer⟩ :=
     implementation supported sourceStep cacheInvariant valueCompiled
       valueAdapted resultFound
   subst targetValue
@@ -4793,8 +4797,8 @@ theorem
       witnessDescriptorsPreserved, nextTransfer, nextCacheInvariant⟩ :=
     cacheInvariant.ofSaturatedClosureDeclarationExact stepFits before selected
       suffix sourceStep resultFound resultKindAt hClosure hSat
-      beforeNonmatching selectedMatches assembled selectedBodyEq callee
-      targetSet transfer
+      beforeNonmatching selectedMatches selectedStore assembled selectedBodyEq
+      callee targetSet transfer
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         afterCall entryWitness resultWitness :=
@@ -5311,8 +5315,9 @@ def SaturatedClosureDispatchSelectionInduction
                   (∀ candidate, candidate ∈ before →
                     candidate.matched = (0 : UInt32)) ∧
                     (selected.matched != 0) = true ∧
-                      ClosureArgumentAssembly targetModule.wasmModule hosts.env
-                          argumentTarget physicalArgs initial locals ∧
+                      selected.nextStore = initial ∧
+                        ClosureArgumentAssembly targetModule.wasmModule hosts.env
+                            argumentTarget physicalArgs initial locals ∧
                         selected.targetBody =
                             argumentTarget ++
                               [.call functionIndex, .localSet resultIndex] ∧
@@ -5398,8 +5403,9 @@ def SaturatedClosureCandidateResolutionInduction
                         (physicalArgs : List Wasm.Value)
                         (physical : Wasm.Value),
                       DeclarationContextsCoherent context calleeContext ∧
-                        ClosureArgumentAssembly targetModule.wasmModule hosts.env
-                          argumentTarget physicalArgs initial locals ∧
+                        candidate.nextStore = initial ∧
+                          ClosureArgumentAssembly targetModule.wasmModule hosts.env
+                            argumentTarget physicalArgs initial locals ∧
                         candidate.targetBody =
                             argumentTarget ++
                               [.call functionIndex, .localSet resultIndex] ∧
@@ -5457,7 +5463,8 @@ theorem SaturatedClosureCandidateResolutionInduction.toSelection
     simp
   obtain ⟨calleeContext, calleeFunction, targetFunction, functionIndex,
       argumentTarget, afterCall, updated, resultWitness, physicalArgs,
-      physical, contexts, assembled, selectedBodyEq, callee, targetSet⟩ :=
+      physical, contexts, selectedStore, assembled, selectedBodyEq, callee,
+      targetSet⟩ :=
     selectedImplementation selected selectedMem selectedIdentity
   have generatedEq := candidatesEq
   rw [candidatesSplit] at generatedEq
@@ -5466,8 +5473,8 @@ theorem SaturatedClosureCandidateResolutionInduction.toSelection
       resolution.calleeEnv, resolution.calleeCode, targetFunction,
       functionIndex, argumentTarget, afterCall, updated, resultWitness,
       physicalArgs, physical, contexts, generatedEq, hClosure,
-      beforeNonmatching, selectedMatches, assembled, selectedBodyEq, callee,
-      targetSet⟩
+      beforeNonmatching, selectedMatches, selectedStore, assembled,
+      selectedBodyEq, callee, targetSet⟩
 
 /--
 Production compiler construction of the saturated closure-dispatch call law.
@@ -5529,7 +5536,7 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
           calleeEnv, calleeCode, targetFunction, functionIndex, argumentTarget,
           afterCall, updated, resultWitness, physicalArgs, physical, contexts,
           candidatesEq, hClosure, beforeNonmatching, selectedMatches,
-          assembled, selectedBodyEq, callee, targetSet⟩ :=
+          selectedStore, assembled, selectedBodyEq, callee, targetSet⟩ :=
         selection site resolution sourceStep invariant closureFound resultFound
       have dispatchAdapted :
           instructions sourceModule callerFunction labels
@@ -5553,7 +5560,8 @@ theorem SaturatedClosureCallImplementationWithCache.ofInternalCompiler
           functionIndex, argumentTarget, afterCall, updated, resultWitness,
           physicalArgs, site.resultKind, physical, contexts, targetEq,
           resultKindAt, hClosure, spec.hostsSatisfy, beforeNonmatching,
-          selectedMatches, assembled, selectedBodyEq, callee, targetSet, ?_⟩
+          selectedMatches, selectedStore, assembled, selectedBodyEq, callee,
+          targetSet, ?_⟩
       simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 /--

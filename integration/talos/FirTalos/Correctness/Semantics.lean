@@ -212,9 +212,7 @@ private theorem invokeClosure_next_withFrameSuffix
       | heap location =>
           simp_all [invokeClosure, withFrameSuffix, fail, observe]
           split <;> simp_all [fail, observe]
-          split <;> simp_all [fail, observe]
-          next name arity fixed cell found objectEq =>
-            exact invokeDecl_next_withFrameSuffix transition
+          exact invokeDecl_next_withFrameSuffix transition
   | usize value => simp [invokeClosure, fail] at transition
   | scalar value => simp [invokeClosure, fail] at transition
   | erased => simp [invokeClosure, fail] at transition
@@ -239,9 +237,7 @@ private theorem invokeClosure_external_withFrameSuffix
       | heap location =>
           simp_all [invokeClosure, withFrameSuffix, fail, observe]
           split <;> simp_all [fail, observe]
-          split <;> simp_all [fail, observe]
-          next name arity fixed cell found objectEq =>
-            exact invokeDecl_external_withFrameSuffix transition
+          exact invokeDecl_external_withFrameSuffix transition
   | usize value => simp [invokeClosure, fail] at transition
   | scalar value => simp [invokeClosure, fail] at transition
   | erased => simp [invokeClosure, fail] at transition

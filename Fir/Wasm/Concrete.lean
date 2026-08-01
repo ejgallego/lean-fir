@@ -27,6 +27,7 @@ import Fir.Wasm.Concrete.SharingCorrectness
 import Fir.Wasm.Concrete.ReferenceCountCorrectness
 import Fir.Wasm.Concrete.ClosureOwnershipCorrectness
 import Fir.Wasm.Concrete.OwnershipFrameCorrectness
+import Fir.Wasm.Concrete.ClosureApplicationCorrectness
 import Fir.Wasm.Concrete.MutationHeapCorrectness
 import Fir.Wasm.Concrete.ObjectMutationCorrectness
 import Fir.Wasm.Concrete.ReuseMemoryCorrectness

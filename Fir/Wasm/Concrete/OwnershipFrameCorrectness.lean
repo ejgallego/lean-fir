@@ -2116,6 +2116,299 @@ theorem LiveHeapRel.incrementReference_refines
       check
   exact ⟨result, nextRuntime, concrete, semantic, finalRelated⟩
 
+/-- One typed ownership word is either a mapped semantic heap value or an
+exact concrete/semantic no-op for closure-application retention. The latter
+includes tagged values and the operation-specific erased zero sentinel. -/
+theorem OwnershipValueRel.retainClosureCaptureStep
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {word : Word32} {value : Value}
+    (heap : LiveHeapRel state witness runtime)
+    (ownership : OwnershipValueRel witness word value) :
+    (∃ location,
+      value = .object (.heap location) ∧
+      witness.locations.lookup? location = some word) ∨
+    (retainClosureCapture state word = .ok state ∧
+      retainOwnedValue runtime value = .ok runtime) := by
+  cases ownership with
+  | intro kind admissible valueRelated =>
+      cases valueRelated with
+      | object heapRelated =>
+          cases heapRelated with
+          | mapped found => exact .inl ⟨_, rfl, found⟩
+      | tagged taggedRelated =>
+          refine .inr ⟨?_, rfl⟩
+          unfold retainClosureCapture
+          by_cases zero : (word == Word32.zero) = true
+          · rw [if_pos zero]
+          · rw [if_neg zero]
+            simpa using heap.incrementReference_tagged taggedRelated 1 true
+      | tobject objectRelated =>
+          cases objectRelated with
+          | heap heapRelated =>
+              cases heapRelated with
+              | mapped found => exact .inl ⟨_, rfl, found⟩
+          | tagged taggedRelated =>
+              refine .inr ⟨?_, rfl⟩
+              unfold retainClosureCapture
+              by_cases zero : (word == Word32.zero) = true
+              · rw [if_pos zero]
+              · rw [if_neg zero]
+                simpa using heap.incrementReference_tagged taggedRelated 1 true
+      | erased =>
+          exact .inr ⟨retainClosureCapture_zero state, rfl⟩
+      | reuseNone | reuseSome | uint8 | uint16 | uint32 =>
+          simp [AbiKind.isObjectField] at admissible
+
+/-- Resource precondition for an ordered semantic retain fold. It asks for
+one UInt32 reference-count unit exactly at every heap-valued step reached by a
+successful semantic prefix; repeated aliases are therefore counted at their
+actual intermediate state. -/
+def ClosureRetainCapacity (runtime : RuntimeState) (values : List Value) : Prop :=
+  ∀ (prior : List Value) (location : Location) (suffix : List Value)
+      (before : RuntimeState) (cell : HeapCell),
+    values = prior ++ (.object (.heap location) :: suffix) →
+    prior.foldlM (init := runtime) retainOwnedValue = .ok before →
+    findCell? before.heap location = some cell →
+    cell.live = true →
+    cell.rc + 1 < UInt32.size
+
+/-- Removing statically non-owning captures preserves the ordered retain
+capacity requirement. The typed relation is essential: it proves every
+removed capture takes the semantic no-op branch. -/
+private theorem closureOwnedValues_capacity_of_each
+    (witness : RefinementWitness) (kinds : List AbiKind) (values : List Value)
+    (sizeEq : kinds.length = values.length)
+    (each : ∀ (offset : Nat) (kind : AbiKind) (value : Value),
+      kinds[offset]? = some kind →
+      values[offset]? = some value →
+      ∃ lane, ValueRel witness kind lane value)
+    (runtime : RuntimeState)
+    (capacity : ClosureRetainCapacity runtime values) :
+    ClosureRetainCapacity runtime (closureOwnedValues kinds values) := by
+  induction kinds generalizing values runtime with
+  | nil =>
+      cases values with
+      | nil =>
+          intro prior location suffix before cell valuesEq
+          simp [closureOwnedValues] at valuesEq
+      | cons value values => simp at sizeEq
+  | cons kind kinds ih =>
+      cases values with
+      | nil => simp at sizeEq
+      | cons value values =>
+          have tailSize : kinds.length = values.length := by
+            simpa using sizeEq
+          obtain ⟨lane, headRelated⟩ := each 0 kind value (by simp) (by simp)
+          have tailEach : ∀ (offset : Nat) (tailKind : AbiKind)
+              (tailValue : Value),
+              kinds[offset]? = some tailKind →
+              values[offset]? = some tailValue →
+              ∃ lane, ValueRel witness tailKind lane tailValue := by
+            intro offset tailKind tailValue kindAt valueAt
+            exact each (offset + 1) tailKind tailValue (by simpa using kindAt)
+              (by simpa using valueAt)
+          by_cases admissible : kind.isObjectField = true
+          · simp only [closureOwnedValues, admissible, if_true]
+            intro prior location suffix before cell filteredEq priorOperation
+              found live
+            cases prior with
+            | nil =>
+                simp only [List.nil_append] at filteredEq
+                have valueEq : value = .object (.heap location) :=
+                  (List.cons.inj filteredEq).1
+                have beforeEq : runtime = before := by
+                  exact Except.ok.inj priorOperation
+                subst before
+                apply capacity [] location values runtime cell
+                · simp [valueEq]
+                · rfl
+                · exact found
+                · exact live
+            | cons first prior =>
+                simp only [List.cons_append] at filteredEq
+                have headEq : value = first := (List.cons.inj filteredEq).1
+                have tailEq :
+                    closureOwnedValues kinds values =
+                      prior ++ .object (.heap location) :: suffix :=
+                  (List.cons.inj filteredEq).2
+                subst first
+                cases headOperation : retainOwnedValue runtime value with
+                | error fault =>
+                    simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                      at priorOperation
+                    rw [headOperation] at priorOperation
+                    contradiction
+                | ok next =>
+                    simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                      at priorOperation
+                    rw [headOperation] at priorOperation
+                    have tailCapacity : ClosureRetainCapacity next values := by
+                      intro tailPrior tailLocation tailSuffix tailBefore tailCell
+                        tailValuesEq tailOperation tailFound tailLive
+                      apply capacity (value :: tailPrior) tailLocation tailSuffix
+                        tailBefore tailCell
+                      · simp only [List.cons_append]
+                        rw [tailValuesEq]
+                      · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                        rw [headOperation]
+                        exact tailOperation
+                      · exact tailFound
+                      · exact tailLive
+                    exact (ih values tailSize tailEach next tailCapacity) prior
+                      location suffix before cell tailEq priorOperation found live
+          · have rejected : kind.isObjectField = false := by
+              cases found : kind.isObjectField <;> simp_all
+            have headNoOp :=
+              headRelated.retainNoOp_of_notObjectField rejected runtime
+            have tailCapacity : ClosureRetainCapacity runtime values := by
+              intro prior location suffix before cell valuesEq priorOperation
+                found live
+              apply capacity (value :: prior) location suffix before cell
+              · simp only [List.cons_append]
+                rw [valuesEq]
+              · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                rw [headNoOp]
+                exact priorOperation
+              · exact found
+              · exact live
+            simpa [closureOwnedValues, rejected] using
+              ih values tailSize tailEach runtime tailCapacity
+
+/-- A related closure transports retain capacity from its complete semantic
+capture list to the exact object-word list visited by the concrete runtime. -/
+theorem ClosureObjectRel.closureOwnedValuesCapacity
+    {state : MemoryState} {witness : RefinementWitness}
+    {dispatch : ClosureDispatchTable} {descriptors : ClosureDescriptorTable}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {captures : Array Value}
+    (related : ClosureObjectRel state witness dispatch descriptors address
+      function arity captureKinds captures)
+    (runtime : RuntimeState)
+    (capacity : ClosureRetainCapacity runtime captures.toList) :
+    ClosureRetainCapacity runtime
+      (closureOwnedValues captureKinds.toList captures.toList) := by
+  apply closureOwnedValues_capacity_of_each witness captureKinds.toList
+    captures.toList
+  · simpa using related.captureKindsSize
+  · intro offset kind value kindAt valueAt
+    obtain ⟨lane, _, laneRelated⟩ := related.captures offset kind value
+      (by simpa using kindAt) (by simpa using valueAt)
+    exact ⟨lane, laneRelated⟩
+  · exact capacity
+
+/-- Ordered ownership correspondence lifts the complete shared-application
+retain fold through the concrete heap. This is a direct simulation theorem;
+the only extra premise is the finite-word resource boundary above. -/
+theorem OwnershipValuesRel.foldlM_retainClosureCaptures_refines
+    {state : MemoryState} {witness : RefinementWitness}
+    {runtime finalRuntime : RuntimeState}
+    {words : List Word32} {values : List Value}
+    (related : OwnershipValuesRel witness words values)
+    (heap : LiveHeapRel state witness runtime)
+    (capacity : ClosureRetainCapacity runtime values)
+    (semanticOperation :
+      values.foldlM (init := runtime) retainOwnedValue = .ok finalRuntime) :
+    ∃ finalState,
+      words.foldlM (init := state) retainClosureCapture = .ok finalState ∧
+      LiveHeapRel finalState witness finalRuntime := by
+  induction related generalizing state runtime finalRuntime with
+  | nil =>
+      simp only [List.foldlM_nil] at semanticOperation ⊢
+      have runtimeEq := Except.ok.inj semanticOperation
+      subst finalRuntime
+      exact ⟨state, rfl, heap⟩
+  | @cons word value words values head tail ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
+      cases headOperation : retainOwnedValue runtime value with
+      | error fault =>
+          rw [headOperation] at semanticOperation
+          contradiction
+      | ok nextRuntime =>
+          rw [headOperation] at semanticOperation
+          rcases head.retainClosureCaptureStep heap with heapStep | noOpStep
+          · obtain ⟨location, valueEq, mapped⟩ := heapStep
+            subst value
+            cases found : findCell? runtime.heap location with
+            | none =>
+                simp only [retainOwnedValue, incLocation, getLiveCell, found,
+                  Bind.bind, Except.bind] at headOperation
+                contradiction
+            | some cell =>
+                have live : cell.live = true := by
+                  cases liveEq : cell.live with
+                  | false =>
+                      simp only [retainOwnedValue, incLocation, getLiveCell,
+                        found, liveEq, Bool.false_eq_true, if_false, Bind.bind,
+                        Except.bind] at headOperation
+                      contradiction
+                  | true => rfl
+                have fits : cell.rc + 1 < UInt32.size :=
+                  capacity [] location values runtime cell (by simp) rfl found live
+                have wordHeap : word.classify = .heap :=
+                  heap.witnessWellFormed.locationHeap location word mapped
+                have wordValueNeZero : word.value ≠ 0 := by
+                  intro wordValueZero
+                  have wordSentinel : word.classify = .sentinel := by
+                    simp [Word32.classify, wordValueZero]
+                  rw [wordSentinel] at wordHeap
+                  contradiction
+                have wordZeroCheck : (word == Word32.zero) = false := by
+                  change (word.value == 0) = false
+                  simp [wordValueNeZero]
+                have retainHead :
+                    retainClosureCapture state word =
+                      incrementReference state word 1 true := by
+                  simp [retainClosureCapture, wordZeroCheck]
+                obtain ⟨nextState, semanticNext, concreteHead, semanticHead,
+                    nextHeap⟩ :=
+                  heap.incrementReference_refines mapped found live 1 fits true
+                have semanticHead' :
+                    Fir.LeanIR.Impure.incValue runtime
+                        (.object (.heap location)) 1 true = .ok nextRuntime := by
+                  simpa [retainOwnedValue, Fir.LeanIR.Impure.incValue] using
+                    headOperation
+                rw [semanticHead'] at semanticHead
+                have nextRuntimeEq := Except.ok.inj semanticHead
+                subst semanticNext
+                have tailCapacity : ClosureRetainCapacity nextRuntime values := by
+                  intro prior child suffix before childCell valuesEq priorOperation
+                    childFound childLive
+                  apply capacity (.object (.heap location) :: prior) child suffix
+                    before childCell
+                  · simp [valuesEq]
+                  · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                    rw [headOperation]
+                    exact priorOperation
+                  · exact childFound
+                  · exact childLive
+                obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+                  ih nextHeap tailCapacity semanticOperation
+                refine ⟨finalState, ?_, finalHeap⟩
+                simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                rw [retainHead, concreteHead]
+                exact concreteTail
+          · obtain ⟨concreteHead, semanticNoOp⟩ := noOpStep
+            rw [headOperation] at semanticNoOp
+            have nextRuntimeEq := Except.ok.inj semanticNoOp
+            subst nextRuntime
+            have tailCapacity : ClosureRetainCapacity runtime values := by
+              intro prior child suffix before childCell valuesEq priorOperation
+                childFound childLive
+              apply capacity (value :: prior) child suffix before childCell
+              · simp [valuesEq]
+              · simp only [List.foldlM_cons, Bind.bind, Except.bind]
+                rw [headOperation]
+                exact priorOperation
+              · exact childFound
+              · exact childLive
+            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+              ih heap tailCapacity semanticOperation
+            refine ⟨finalState, ?_, finalHeap⟩
+            simp only [List.foldlM_cons, Bind.bind, Except.bind]
+            rw [concreteHead]
+            exact concreteTail
+
+
 /-- Folding state transitions that individually preserve the heap frontier
 also preserves it for the complete successful fold. -/
 private theorem List.foldlM_memoryState_preserves_heapCursor
