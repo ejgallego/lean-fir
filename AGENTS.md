@@ -41,6 +41,28 @@ These rules apply to every agent and worktree in this repository.
 - `coordination/BOARD.md` is the portable coordination snapshot. Only the
   integration owner edits it; lane owners send board updates in the format
   documented there so the board does not become a shared-file race.
+- `coordination/lanes/` contains single-writer lane mailboxes. Each lane owner
+  edits only its assigned file; the integration owner may seed a mailbox when
+  a milestone starts but does not edit another lane's subsequent updates.
+  `coordination/lanes/README.md` defines the schema and branch-head resolution
+  rule. These mailboxes are the sole exception to integration ownership of
+  cross-lane coordination files.
+
+## Milestone-scoped integration lease
+
+- `coordination/BOARD.md` names one integration owner and integration branch
+  for each active cross-lane milestone. The lease ends when that milestone is
+  linked/accepted, explicitly parked, or explicitly reassigned on the board.
+- The integration owner may also own a feature lane when that lane is waiting
+  at the shared-contract boundary. The lease does not grant permission to edit
+  files owned by another lane.
+- Lane owners publish status by committing their own mailbox file on their own
+  branch. The integration owner resolves the actual handoff head from the
+  named branch, so a mailbox never attempts to contain the hash of the commit
+  that contains itself.
+- The integration owner synthesizes accepted mailbox updates into
+  `coordination/BOARD.md`, validates candidate stacks, and alone fast-forwards
+  `main`. No coordination daemon or generated state is required.
 
 ## Shared semantic contracts
 
@@ -117,3 +139,9 @@ Every handoff to the integration owner reports:
 - known follow-ups.
 
 The worktree must be clean at handoff.
+
+For a parallel milestone, commit the same information in the lane's assigned
+`coordination/lanes/*.md` mailbox. `functional-head` identifies the last code
+or proof commit; the integration owner obtains the containing status commit
+from the branch named in the mailbox. A `ready` mailbox with
+`clean-at-update: false` is invalid.

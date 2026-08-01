@@ -13,6 +13,35 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
+- Integration owner: `wasm-gen`, temporarily while generation waits at the
+  shared-contract boundary.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Lease boundary: ends when the closure stack is `linked/accepted`, parked, or
+  explicitly reassigned here.
+- Scope: publish the stable contract base, validate and land lane handoffs in
+  dependency order, rebase W7, then hand fixture admission to test-fixtures.
+  The lease grants no permission to edit proof-, W6-, or validation-owned
+  implementation files.
+
+The live dependency order is:
+
+```text
+integration contract d392e194
+  -> lcnf-proof and wasm-proof in parallel
+  -> integration landing
+  -> wasm-gen adapter 2ed6deb4
+  -> test-fixtures admission of 32 scalar-closure cases
+```
+
+Each active agent owns exactly one record under `coordination/lanes/`.
+Integration reads those committed records directly from the lane branches and
+is the only writer of this board. This is intentionally a Markdown protocol,
+not a coordination program.
+
 ## Current landing gate
 
 This section is authoritative for the current integration boundary; older
