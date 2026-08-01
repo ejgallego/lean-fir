@@ -2456,8 +2456,8 @@ theorem shadowMatchCoreResult
           cases transition
           rename_i response
           have targetExternal :
-              externals request targetBefore.runtime response := by
-            rw [← beforeRelated.runtime_eq]
+              externals request targetWaiting.runtime response := by
+            rw [← waitingRelated.runtime_eq]
             exact externalProof
           exact ⟨resumeExternal request targetWaiting response,
             NonLockstep.reaches_of_step
@@ -2996,8 +2996,8 @@ theorem shadowMatchCoreResult_right
           cases transition
           rename_i response
           have sourceExternal :
-              externals request sourceBefore.runtime response := by
-            rw [beforeRelated.runtime_eq]
+              externals request sourceWaiting.runtime response := by
+            rw [waitingRelated.runtime_eq]
             exact externalProof
           exact ⟨resumeExternal request sourceWaiting response,
             NonLockstep.reaches_of_step

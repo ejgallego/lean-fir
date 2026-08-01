@@ -652,13 +652,18 @@ def ownershipValueExternalRequest : ExternalRequest := {
 def ownershipValueExternalWaiting : MachineState := {
   ownershipValueExternalState with
   env := bind [] ownershipExternalArgument .erased
+  runtime := { ownershipExternalClosureRuntime with
+    heap := [(0, {
+      object := .closure `ownershipUnaryExternal 1 #[.erased]
+      rc := 0
+      live := false })] }
 }
 
 def ownershipValueExternalResponse : ExternalResponse := {
   value := .erased
-  heap := ownershipValueExternalState.runtime.heap
-  nextLocation := ownershipValueExternalState.runtime.nextLocation
-  world := ownershipValueExternalState.runtime.world + 1
+  heap := ownershipValueExternalWaiting.runtime.heap
+  nextLocation := ownershipValueExternalWaiting.runtime.nextLocation
+  world := ownershipValueExternalWaiting.runtime.world + 1
 }
 
 theorem ownershipValueExternalTransition :
@@ -666,7 +671,9 @@ theorem ownershipValueExternalTransition :
       .external ownershipValueExternalRequest
         ownershipValueExternalWaiting := by
   simp [ownershipValueExternalState, ownershipExternalClosureRuntime,
-    coreStep, invokeClosure, getLiveCell, findCell?,
+    coreStep, invokeClosure, takeClosureApplication, getLiveCell, findCell?,
+    setCell, replaceCell,
+    Bind.bind, Except.bind, Pure.pure, Except.pure,
     ownershipUnaryExternalProgram, ownershipUnaryExternalDecl,
     Program.findDecl?, invokeDecl, bindParams, decl, param,
     ownershipExternalArgument, ownershipValueExternalRequest,
@@ -713,17 +720,11 @@ theorem ownershipValueExternalFixture :
     ownershipValueExternalState_owned.invokeValueExternalWaiting
       (function := .object (.heap 0)) (arguments := #[])
       argumentsBelow ownershipValueExternalTransition
-  have waitingRuntime :
-      ownershipValueExternalWaiting.runtime =
-        ownershipValueExternalState.runtime :=
-    coreStep_invokeValue_external_runtime_eq
-      (step := ownershipValueExternalTransition)
   have external :
       ownershipEchoExternalSpec ownershipValueExternalRequest
         ownershipValueExternalWaiting.runtime
         ownershipValueExternalResponse := by
-    rw [waitingRuntime]
-    exact ⟨ownershipValueExternalState_owned.heap, rfl⟩
+    exact ⟨waiting.heap, rfl⟩
   exact ⟨waiting,
     waiting.resumeExternal
       ownershipEchoExternalSpec_sourceCompatible external⟩
@@ -5932,16 +5933,30 @@ noncomputable def deletedBoxLedgerResult :
 
 theorem deletedBoxSourceOnlyKeepsAllocationLedger :
     deletedBoxLedgerResult.runtime.ledger.owner = fun _ => 0 := by
-  simp [deletedBoxLedgerResult,
-    LedgerShadowRuntimeRel.boxScalarLeftGarbage,
-    LedgerShadowRuntimeRel.allocLeftGarbage,
-    ScalarValue.toUInt64, maxTaggedPayload,
-    TargetAllocationLedger.empty]
+  have notTagged : boxUsesTaggedRepresentation u64Type
+      (ScalarValue.uint64 18446744073709551615).toUInt64 = false := by
+    native_decide
+  have notTaggedTrue : ¬ boxUsesTaggedRepresentation u64Type
+      (ScalarValue.uint64 18446744073709551615).toUInt64 = true := by
+    simp [notTagged]
+  unfold deletedBoxLedgerResult
+    LedgerShadowRuntimeRel.boxScalarLeftGarbage
+  rw [dif_neg notTaggedTrue]
+  rfl
 
 theorem deletedBoxHeapResultSourceOnly :
     SourceOnlyUnderTargetLedger
       deletedBoxLedgerResult.runtime.ledger 0 :=
-  deletedBoxLedgerResult.heapSourceOnly 0 (by rfl)
+  deletedBoxLedgerResult.heapSourceOnly 0 (by
+    have notTagged : boxUsesTaggedRepresentation u64Type
+        (ScalarValue.uint64 18446744073709551615).toUInt64 = false := by
+      native_decide
+    have notTaggedTrue : ¬ boxUsesTaggedRepresentation u64Type
+        (ScalarValue.uint64 18446744073709551615).toUInt64 = true := by
+      simp [notTagged]
+    simp [deletedBoxLedgerResult,
+      LedgerShadowRuntimeRel.boxScalarLeftGarbage, notTaggedTrue,
+      deletedBoxSourceState, alloc])
 
 /-- A retained heap reset keeps its token result live.  The concrete object
 owns one erased field, so resetting that field exercises the successful
@@ -8892,6 +8907,11 @@ def ownershipValueFullState : MachineState :=
 
 def ownershipValueFullAfterState : MachineState :=
   { ownershipValueFullState with
+    runtime := { ownershipValueFullRuntime with
+      heap := [(0, {
+        object := ownershipValueFullObject
+        rc := 0
+        live := false })] }
     env := bind (bind [] x .erased) y .erased
     joins := []
     control := .code (.return x) }
@@ -8950,12 +8970,20 @@ def ownershipValuePartialState : MachineState :=
 def ownershipValuePartialAfterState : MachineState :=
   { ownershipValuePartialState with
     runtime :=
-      (alloc ownershipValuePartialState.runtime
+      (alloc { ownershipValuePartialRuntime with
+          heap := [(0, {
+            object := ownershipValuePartialObject
+            rc := 0
+            live := false })] }
         (.closure `first firstDecl.params.size #[.erased])).1
     control :=
       .yielded
         (.object
-          (alloc ownershipValuePartialState.runtime
+          (alloc { ownershipValuePartialRuntime with
+              heap := [(0, {
+                object := ownershipValuePartialObject
+                rc := 0
+                live := false })] }
             (.closure `first firstDecl.params.size #[.erased])).2) }
 
 theorem ownershipValuePartialStateBelowFrontier :
@@ -15433,6 +15461,9 @@ theorem closedPapBoxSourceBoxStep
         ¬(ScalarValue.uint64 18446744073709551615).toUInt64.toNat ≤
           9223372036854775807 := by
       native_decide
+    have notTagged : boxUsesTaggedRepresentation u64Type
+        (ScalarValue.uint64 18446744073709551615).toUInt64 = false := by
+      native_decide
     simp [evalLetValue, closedPapBoxSourceBoxState,
       closedPapBoxAfterInputCode,
       closedPapBoxBoxDecl, letDecl,
@@ -15440,7 +15471,7 @@ theorem closedPapBoxSourceBoxStep
       closedPapBoxPapArgEnv, closedReuseLiveEnv,
       lookupValue, Impure.bind, lookup,
       boxInputVar, papGarbageVar, papArgVar,
-      box, maxTaggedPayload, large,
+      box, notTagged, maxTaggedPayload, large,
       closedPapBoxFinalRuntime, closedPapBoxPapRuntime, alloc,
       Bind.bind, Except.bind, Pure.pure, Except.pure]
   change coreStep {
@@ -16278,11 +16309,17 @@ theorem retainedPrefixReuseTargetAllocationControlInvariant_step
                 simpa [found] using objectRead
               cases liveEq : cell.live <;> cases step with
               | internal transition =>
-                  simp [coreStep, control, invokeClosure, getLiveCell,
-                    found, liveEq, object, fail] at transition
+                  simp [coreStep, control, invokeClosure,
+                    takeClosureApplication, getLiveCell,
+                    found, liveEq, object, fail,
+                    Bind.bind, Except.bind, Pure.pure, Except.pure]
+                    at transition
               | external transition response =>
-                  simp [coreStep, control, invokeClosure, getLiveCell,
-                    found, liveEq, object, fail] at transition
+                  simp [coreStep, control, invokeClosure,
+                    takeClosureApplication, getLiveCell,
+                    found, liveEq, object, fail,
+                    Bind.bind, Except.bind, Pure.pure, Except.pure]
+                    at transition
 
 /-- A structurally related active source state can meet the target's static
 allocation/control invariant only after the retained literal allocation.
@@ -16822,14 +16859,18 @@ theorem retainedPrefixReuseSourceInvokingPlan
       simp [retainedPrefixReuseSourceInvokingState,
         retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
         nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
-        nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
-        coreStep, invokeClosure, fail] at transition
+        nonemptyLedgerPairedRuntime, takeClosureApplication,
+        getLiveCell, findCell?,
+        coreStep, invokeClosure, fail,
+        Bind.bind, Except.bind, Pure.pure, Except.pure] at transition
   | external transition response =>
       simp [retainedPrefixReuseSourceInvokingState,
         retainedPrefixReuseFinalRuntime, nonemptyLedgerResetRuntime,
         nonemptyLedgerSourceRuntime, nonemptyLedgerTargetRuntime,
-        nonemptyLedgerPairedRuntime, getLiveCell, findCell?,
-        coreStep, invokeClosure, fail] at transition
+        nonemptyLedgerPairedRuntime, takeClosureApplication,
+        getLiveCell, findCell?,
+        coreStep, invokeClosure, fail,
+        Bind.bind, Except.bind, Pure.pure, Except.pure] at transition
 
 /-- Yield dispatch keeps only generic non-code readiness and selects one of
 the two terminal local plans. -/

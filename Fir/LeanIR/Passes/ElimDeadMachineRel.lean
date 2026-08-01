@@ -228,6 +228,38 @@ theorem relatedFault_terminal
       ObservationRel sourceObservation targetObservation :=
   relatedFaultRel_terminal runtime (.same fault) sourceDone targetDone done
 
+/-- Terminal faults may be observed in a runtime produced while dispatching
+the current control. Closure application uses this form because it transfers
+or retains captures before `invokeDecl` reports its terminal fault. -/
+theorem relatedFault_after_terminal
+    (runtime : ShadowRuntimeRel rho sourceAfter.runtime targetAfter.runtime
+      sourceRoots targetRoots)
+    (sourceDone : coreStep sourceBefore =
+      .done (observe sourceAfter (.fault fault)))
+    (targetDone : coreStep targetBefore =
+      .done (observe targetAfter (.fault fault)))
+    (done : coreStep sourceBefore = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals targetBefore targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  have observations : ObservationRel
+      (observe sourceAfter (.fault fault))
+      (observe targetAfter (.fault fault)) := by
+    apply runtime.observationRel
+        (leftOutcome := .fault fault) (rightOutcome := .fault fault)
+    · exact .same fault
+    · intro value member
+      simp [outcomeRoots] at member
+    · intro value member
+      simp [outcomeRoots] at member
+  have observationEq : sourceObservation =
+      observe sourceAfter (.fault fault) := by
+    rw [sourceDone] at done
+    exact (CoreResult.done.inj done).symm
+  refine ⟨observe targetAfter (.fault fault), ?_, ?_⟩
+  · exact ⟨0, targetBefore, .refl targetBefore, targetDone⟩
+  · simpa [observationEq] using observations
+
 /-- One-way, reachable-observation correctness for a same-phase pass.  This
 is the compiler-facing statement appropriate for transformations that may
 change unreachable heap garbage. -/
@@ -1584,60 +1616,6 @@ theorem coreStep_invokeName_external_runtime_eq
       simpa [coreStep, empty] using step
     simpa using invokeDecl_external_runtime_eq (step := invocation)
 
-/-- A value invocation can suspend only after reading a live closure and
-delegating to declaration invocation, which also preserves the runtime. -/
-theorem coreStep_invokeValue_external_runtime_eq
-    (state waiting : MachineState)
-    (function : Value)
-    (arguments : Array Value)
-    (request : ExternalRequest)
-    (step : coreStep { state with
-      control := .invokeValue function arguments } =
-        .external request waiting) :
-    waiting.runtime = state.runtime := by
-  cases function with
-  | object reference =>
-    cases reference with
-    | tagged payload =>
-        simp [coreStep, invokeClosure, fail] at step
-    | heap location =>
-        cases read : getLiveCell state.runtime location with
-        | error fault =>
-            simp [coreStep, invokeClosure, read, fail] at step
-        | ok cell =>
-            cases object : cell.object with
-            | ctor object =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | closure name arity fixed =>
-                have invocation :
-                    invokeDecl { state with
-                      control := .invokeValue (.object (.heap location))
-                        arguments }
-                      name (fixed ++ arguments) =
-                        .external request waiting := by
-                  simpa [coreStep, invokeClosure, read, object] using step
-                simpa using invokeDecl_external_runtime_eq (step := invocation)
-            | boxed type value =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | string value =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | natural value =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | integer value =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | byteArray value =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-            | «opaque» typeName =>
-                simp [coreStep, invokeClosure, read, object, fail] at step
-  | usize value =>
-      simp [coreStep, invokeClosure, fail] at step
-  | scalar value =>
-      simp [coreStep, invokeClosure, fail] at step
-  | erased =>
-      simp [coreStep, invokeClosure, fail] at step
-  | reuseToken location? =>
-      cases location? <;> simp [coreStep, invokeClosure, fail] at step
-
 /-- A declaration-ready named call to an unknown declaration satisfies the
 terminal simulation contract immediately. -/
 theorem coreStep_invokeName_unknown_terminal
@@ -2602,20 +2580,12 @@ theorem waitExternalClosure_reachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (targetCellFound : findCell? targetState.runtime.heap targetLocation =
-      some targetCell)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
-    (targetObject : targetCell.object =
-      .closure name arity targetFixed)
     (fixed : ArrayRel (ValueRel rho) sourceFixed targetFixed)
     (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
-      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
-        sourceFrameRoots)
-      ((.object (.heap targetLocation) :: targetArguments.toList) ++
-        targetFrameRoots)) :
+      ((.object (.heap sourceLocation) ::
+        (sourceFixed ++ sourceArguments).toList) ++ sourceFrameRoots)
+      ((.object (.heap targetLocation) ::
+        (targetFixed ++ targetArguments).toList) ++ targetFrameRoots)) :
     let sourceCallArguments := sourceFixed ++ sourceArguments
     let targetCallArguments := targetFixed ++ targetArguments
     let sourceExtraArguments :=
@@ -2661,10 +2631,6 @@ theorem waitExternalClosure_reachableRelated
       (sourceFixed ++ sourceArguments).size
   have preparedFrames := frames.prepareCall name params combinedArguments
     extraArguments
-  have sourcePartition :=
-    array_extract_partition (sourceFixed ++ sourceArguments) params.size
-  have targetPartition :=
-    array_extract_partition (targetFixed ++ targetArguments) params.size
   have sourcePreparedSubset : RootSubset
       (if ((sourceFixed ++ sourceArguments).extract params.size
           (sourceFixed ++ sourceArguments).size).isEmpty
@@ -2693,61 +2659,57 @@ theorem waitExternalClosure_reachableRelated
     ·
       exact List.mem_append_right _ member
     · exact member
-  have waitingRuntime := runtime.reindexExtra
-    (listRel_append (.cons (.heap mapping) arguments)
-      preparedFrames.roots)
-    (by
-      intro location reachable
-      apply reachable_monoRootReachability ?_ reachable
-      intro candidate member
-      simp only [runtimeRoots, List.mem_append] at member
-      rcases member with ((waitingRoot | globalRoot) | traceRoot)
-      · rcases waitingRoot with controlRoot | preparedRoot
-        · exact .root (by
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            exact controlRoot)
-        · rcases List.mem_append.mp
-              (sourcePreparedSubset _ preparedRoot) with
-            extraRoot | frameRoot
-          · apply closureCallRoots_reachable sourceCellFound sourceObject
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            rw [← sourcePartition]
-            exact List.mem_append_right _ extraRoot
-          · exact .root (by
-              apply extra_subset_runtimeRoots
-              exact List.mem_append_right _ frameRoot)
-      · exact .root (by
-          simp [runtimeRoots, globalRoot])
-      · exact .root (by
-          simp [runtimeRoots, traceRoot]))
-    (by
-      intro location reachable
-      apply reachable_monoRootReachability ?_ reachable
-      intro candidate member
-      simp only [runtimeRoots, List.mem_append] at member
-      rcases member with ((waitingRoot | globalRoot) | traceRoot)
-      · rcases waitingRoot with controlRoot | preparedRoot
-        · exact .root (by
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            exact controlRoot)
-        · rcases List.mem_append.mp
-              (targetPreparedSubset _ preparedRoot) with
-            extraRoot | frameRoot
-          · apply closureCallRoots_reachable targetCellFound targetObject
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            rw [← targetPartition]
-            exact List.mem_append_right _ extraRoot
-          · exact .root (by
-              apply extra_subset_runtimeRoots
-              exact List.mem_append_right _ frameRoot)
-      · exact .root (by
-          simp [runtimeRoots, globalRoot])
-      · exact .root (by
-          simp [runtimeRoots, traceRoot]))
+  have sourceWaitingSubset : RootSubset
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        (if ((sourceFixed ++ sourceArguments).extract params.size
+            (sourceFixed ++ sourceArguments).size).isEmpty
+          then sourceFrameRoots
+          else ((sourceFixed ++ sourceArguments).extract params.size
+            (sourceFixed ++ sourceArguments).size).toList ++ sourceFrameRoots))
+      ((.object (.heap sourceLocation) ::
+        (sourceFixed ++ sourceArguments).toList) ++ sourceFrameRoots) := by
+    intro value member
+    rcases List.mem_append.mp member with controlRoot | preparedRoot
+    · rcases List.mem_cons.mp controlRoot with same | argumentRoot
+      · subst value
+        exact List.mem_append_left _ List.mem_cons_self
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        rw [Array.toList_append]
+        exact List.mem_append_right _ argumentRoot
+    · rcases List.mem_append.mp
+          (sourcePreparedSubset _ preparedRoot) with extraRoot | frameRoot
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        exact array_mem_of_mem_extract _ extraRoot
+      · exact List.mem_append_right _ frameRoot
+  have targetWaitingSubset : RootSubset
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        (if ((targetFixed ++ targetArguments).extract params.size
+            (targetFixed ++ targetArguments).size).isEmpty
+          then targetFrameRoots
+          else ((targetFixed ++ targetArguments).extract params.size
+            (targetFixed ++ targetArguments).size).toList ++ targetFrameRoots))
+      ((.object (.heap targetLocation) ::
+        (targetFixed ++ targetArguments).toList) ++ targetFrameRoots) := by
+    intro value member
+    rcases List.mem_append.mp member with controlRoot | preparedRoot
+    · rcases List.mem_cons.mp controlRoot with same | argumentRoot
+      · subst value
+        exact List.mem_append_left _ List.mem_cons_self
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        rw [Array.toList_append]
+        exact List.mem_append_right _ argumentRoot
+    · rcases List.mem_append.mp
+          (targetPreparedSubset _ preparedRoot) with extraRoot | frameRoot
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        exact array_mem_of_mem_extract _ extraRoot
+      · exact List.mem_append_right _ frameRoot
+  have waitingRuntime := runtime.restrictExtra
+    (listRel_append (.cons (.heap mapping) arguments) preparedFrames.roots)
+    sourceWaitingSubset targetWaitingSubset
   unfold ReachableMachineRelated
   exact ⟨(.object (.heap sourceLocation) :: sourceArguments.toList),
     (.object (.heap targetLocation) :: targetArguments.toList),
@@ -2778,20 +2740,12 @@ theorem waitExternalClosure_binderReadyReachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (targetCellFound : findCell? targetState.runtime.heap targetLocation =
-      some targetCell)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
-    (targetObject : targetCell.object =
-      .closure name arity targetFixed)
     (fixed : ArrayRel (ValueRel rho) sourceFixed targetFixed)
     (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
-      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
-        sourceFrameRoots)
-      ((.object (.heap targetLocation) :: targetArguments.toList) ++
-        targetFrameRoots)) :
+      ((.object (.heap sourceLocation) ::
+        (sourceFixed ++ sourceArguments).toList) ++ sourceFrameRoots)
+      ((.object (.heap targetLocation) ::
+        (targetFixed ++ targetArguments).toList) ++ targetFrameRoots)) :
     let sourceCallArguments := sourceFixed ++ sourceArguments
     let targetCallArguments := targetFixed ++ targetArguments
     let sourceExtraArguments :=
@@ -2837,10 +2791,6 @@ theorem waitExternalClosure_binderReadyReachableRelated
       (sourceFixed ++ sourceArguments).size
   have preparedFrames := frames.prepareCall name params combinedArguments
     extraArguments
-  have sourcePartition :=
-    array_extract_partition (sourceFixed ++ sourceArguments) params.size
-  have targetPartition :=
-    array_extract_partition (targetFixed ++ targetArguments) params.size
   have sourcePreparedSubset : RootSubset
       (if ((sourceFixed ++ sourceArguments).extract params.size
           (sourceFixed ++ sourceArguments).size).isEmpty
@@ -2867,61 +2817,57 @@ theorem waitExternalClosure_binderReadyReachableRelated
     split at member
     · exact List.mem_append_right _ member
     · exact member
-  have waitingRuntime := runtime.reindexExtra
-    (listRel_append (.cons (.heap mapping) arguments)
-      preparedFrames.roots)
-    (by
-      intro location reachable
-      apply reachable_monoRootReachability ?_ reachable
-      intro candidate member
-      simp only [runtimeRoots, List.mem_append] at member
-      rcases member with ((waitingRoot | globalRoot) | traceRoot)
-      · rcases waitingRoot with controlRoot | preparedRoot
-        · exact .root (by
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            exact controlRoot)
-        · rcases List.mem_append.mp
-              (sourcePreparedSubset _ preparedRoot) with
-            extraRoot | frameRoot
-          · apply closureCallRoots_reachable sourceCellFound sourceObject
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            rw [← sourcePartition]
-            exact List.mem_append_right _ extraRoot
-          · exact .root (by
-              apply extra_subset_runtimeRoots
-              exact List.mem_append_right _ frameRoot)
-      · exact .root (by
-          simp [runtimeRoots, globalRoot])
-      · exact .root (by
-          simp [runtimeRoots, traceRoot]))
-    (by
-      intro location reachable
-      apply reachable_monoRootReachability ?_ reachable
-      intro candidate member
-      simp only [runtimeRoots, List.mem_append] at member
-      rcases member with ((waitingRoot | globalRoot) | traceRoot)
-      · rcases waitingRoot with controlRoot | preparedRoot
-        · exact .root (by
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            exact controlRoot)
-        · rcases List.mem_append.mp
-              (targetPreparedSubset _ preparedRoot) with
-            extraRoot | frameRoot
-          · apply closureCallRoots_reachable targetCellFound targetObject
-            apply extra_subset_runtimeRoots
-            apply List.mem_append_left
-            rw [← targetPartition]
-            exact List.mem_append_right _ extraRoot
-          · exact .root (by
-              apply extra_subset_runtimeRoots
-              exact List.mem_append_right _ frameRoot)
-      · exact .root (by
-          simp [runtimeRoots, globalRoot])
-      · exact .root (by
-          simp [runtimeRoots, traceRoot]))
+  have sourceWaitingSubset : RootSubset
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        (if ((sourceFixed ++ sourceArguments).extract params.size
+            (sourceFixed ++ sourceArguments).size).isEmpty
+          then sourceFrameRoots
+          else ((sourceFixed ++ sourceArguments).extract params.size
+            (sourceFixed ++ sourceArguments).size).toList ++ sourceFrameRoots))
+      ((.object (.heap sourceLocation) ::
+        (sourceFixed ++ sourceArguments).toList) ++ sourceFrameRoots) := by
+    intro value member
+    rcases List.mem_append.mp member with controlRoot | preparedRoot
+    · rcases List.mem_cons.mp controlRoot with same | argumentRoot
+      · subst value
+        exact List.mem_append_left _ List.mem_cons_self
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        rw [Array.toList_append]
+        exact List.mem_append_right _ argumentRoot
+    · rcases List.mem_append.mp
+          (sourcePreparedSubset _ preparedRoot) with extraRoot | frameRoot
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        exact array_mem_of_mem_extract _ extraRoot
+      · exact List.mem_append_right _ frameRoot
+  have targetWaitingSubset : RootSubset
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        (if ((targetFixed ++ targetArguments).extract params.size
+            (targetFixed ++ targetArguments).size).isEmpty
+          then targetFrameRoots
+          else ((targetFixed ++ targetArguments).extract params.size
+            (targetFixed ++ targetArguments).size).toList ++ targetFrameRoots))
+      ((.object (.heap targetLocation) ::
+        (targetFixed ++ targetArguments).toList) ++ targetFrameRoots) := by
+    intro value member
+    rcases List.mem_append.mp member with controlRoot | preparedRoot
+    · rcases List.mem_cons.mp controlRoot with same | argumentRoot
+      · subst value
+        exact List.mem_append_left _ List.mem_cons_self
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        rw [Array.toList_append]
+        exact List.mem_append_right _ argumentRoot
+    · rcases List.mem_append.mp
+          (targetPreparedSubset _ preparedRoot) with extraRoot | frameRoot
+      · apply List.mem_append_left
+        apply List.mem_cons_of_mem
+        exact array_mem_of_mem_extract _ extraRoot
+      · exact List.mem_append_right _ frameRoot
+  have waitingRuntime := runtime.restrictExtra
+    (listRel_append (.cons (.heap mapping) arguments) preparedFrames.roots)
+    sourceWaitingSubset targetWaitingSubset
   unfold BinderReadyReachableMachineRelated
   exact ⟨(.object (.heap sourceLocation) :: sourceArguments.toList),
     (.object (.heap targetLocation) :: targetArguments.toList),
@@ -2949,11 +2895,8 @@ theorem coreStep_invokeValue_closure_foundExtern_reachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .extern metadata)
@@ -2976,15 +2919,17 @@ theorem coreStep_invokeValue_closure_foundExtern_reachableRelated
         control := .invokeValue (.object (.heap targetLocation))
           targetArguments } = .external targetRequest targetWaiting ∧
       ReachableMachineRelated fuel rho sourceWaiting targetWaiting := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -2996,13 +2941,6 @@ theorem coreStep_invokeValue_closure_foundExtern_reachableRelated
       sourceInvoke.frames targetInvoke.frames sourceFrameRoots
       targetFrameRoots := by
     simpa [sourceInvoke, targetInvoke] using frames
-  have invokeRuntime : ShadowRuntimeRel rho
-      sourceInvoke.runtime targetInvoke.runtime
-      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
-        sourceFrameRoots)
-      ((.object (.heap targetLocation) :: targetArguments.toList) ++
-        targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using runtime
   have found := programs.findDecl? name
   rw [sourceDeclFound] at found
   generalize targetFound : targetState.program.findDecl? name = targetResult
@@ -3125,19 +3063,12 @@ theorem coreStep_invokeValue_closure_foundExtern_reachableRelated
                       simpa [targetInvoke] using targetFound]
                     simp only
                     rw [if_neg targetEnough, targetBinding', targetValueEq]
-                  have sourceRead :
-                      getLiveCell sourceState.runtime sourceLocation =
-                        .ok sourceCell := by
-                    simp [getLiveCell, sourceCellFound, sourceLive]
-                  have targetRead :
-                      getLiveCell targetState.runtime targetLocation =
-                        .ok targetCell := by
-                    simp [getLiveCell, targetCellFound, targetLive]
                   have waiting := waitExternalClosure_reachableRelated
-                    (fuel := fuel) (rho := rho) sourceState targetState name
-                    sourceDeclaration.params sourceEnv targetEnv programs
-                    frames arguments mapping sourceCellFound targetCellFound
-                    sourceObject targetObject fixed runtime
+                    (fuel := fuel) (rho := rho) sourceInvoke targetInvoke name
+                    sourceDeclaration.params sourceEnv targetEnv invokePrograms
+                    invokeFrames arguments mapping fixed (by
+                      simpa [sourceInvoke, targetInvoke] using
+                        applicationRuntime)
                   have waiting' : ReachableMachineRelated fuel rho
                       sourceWaiting targetWaiting := by
                     simpa [sourceWaiting, targetWaiting, sourcePreparedFrames,
@@ -3147,9 +3078,9 @@ theorem coreStep_invokeValue_closure_foundExtern_reachableRelated
                   exact ⟨sourceRequest, targetRequest, sourceWaiting,
                     targetWaiting, requests,
                     by simpa [sourceInvoke, coreStep, invokeClosure,
-                      sourceRead, sourceObject] using sourceStep,
+                      sourceApplication] using sourceStep,
                     by simpa [targetInvoke, coreStep, invokeClosure,
-                      targetRead, targetObject] using targetStep,
+                      targetApplication] using targetStep,
                     waiting'⟩
 
 /-- A fully applied external declaration reached through a mapped closure
@@ -3164,11 +3095,8 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .extern metadata)
@@ -3192,15 +3120,17 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
           targetArguments } = .external targetRequest targetWaiting ∧
       BinderReadyReachableMachineRelated fuel rho
         sourceWaiting targetWaiting := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -3212,13 +3142,6 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
       sourceInvoke.frames targetInvoke.frames sourceFrameRoots
       targetFrameRoots := by
     simpa [sourceInvoke, targetInvoke] using frames
-  have invokeRuntime : ShadowRuntimeRel rho
-      sourceInvoke.runtime targetInvoke.runtime
-      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
-        sourceFrameRoots)
-      ((.object (.heap targetLocation) :: targetArguments.toList) ++
-        targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using runtime
   have found := programs.findDecl? name
   rw [sourceDeclFound] at found
   generalize targetFound : targetState.program.findDecl? name = targetResult
@@ -3341,20 +3264,13 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
                       simpa [targetInvoke] using targetFound]
                     simp only
                     rw [if_neg targetEnough, targetBinding', targetValueEq]
-                  have sourceRead :
-                      getLiveCell sourceState.runtime sourceLocation =
-                        .ok sourceCell := by
-                    simp [getLiveCell, sourceCellFound, sourceLive]
-                  have targetRead :
-                      getLiveCell targetState.runtime targetLocation =
-                        .ok targetCell := by
-                    simp [getLiveCell, targetCellFound, targetLive]
                   have waiting :=
                     waitExternalClosure_binderReadyReachableRelated
-                      (fuel := fuel) (rho := rho) sourceState targetState name
-                      sourceDeclaration.params sourceEnv targetEnv programs
-                      frames arguments mapping sourceCellFound targetCellFound
-                      sourceObject targetObject fixed runtime
+                      (fuel := fuel) (rho := rho) sourceInvoke targetInvoke name
+                      sourceDeclaration.params sourceEnv targetEnv invokePrograms
+                      invokeFrames arguments mapping fixed (by
+                        simpa [sourceInvoke, targetInvoke] using
+                          applicationRuntime)
                   have waiting' :
                       BinderReadyReachableMachineRelated fuel rho
                         sourceWaiting targetWaiting := by
@@ -3365,9 +3281,9 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
                   exact ⟨sourceRequest, targetRequest, sourceWaiting,
                     targetWaiting, requests,
                     by simpa [sourceInvoke, coreStep, invokeClosure,
-                      sourceRead, sourceObject] using sourceStep,
+                      sourceApplication] using sourceStep,
                     by simpa [targetInvoke, coreStep, invokeClosure,
-                      targetRead, targetObject] using targetStep,
+                      targetApplication] using targetStep,
                     waiting'⟩
 
 /-- Invoking a reachable mapped closure reads related fixed arguments from
@@ -3382,11 +3298,8 @@ theorem coreStep_invokeValue_closure_foundCode_reachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .code sourceCode)
@@ -3408,15 +3321,17 @@ theorem coreStep_invokeValue_closure_foundCode_reachableRelated
         control := .invokeValue (.object (.heap targetLocation))
           targetArguments } = .next targetAfter ∧
       ReachableMachineRelated fuel rho sourceAfter targetAfter := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -3435,24 +3350,27 @@ theorem coreStep_invokeValue_closure_foundCode_reachableRelated
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append combinedArguments frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_foundCode_reachableRelated
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
       invokeFrames combinedArguments invokeFound sourceDeclValue sourceEnough
       sourceBinding invokeRuntime with
     ⟨targetDeclaration, targetCode, targetEnv, sourceAfter, targetAfter,
       targetDeclFound, targetDeclValue, sourceStep, targetStep, nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- The same reachable closure read supports retained under-application: the
 combined fixed/fresh arguments allocate related closures and extend the
@@ -3466,11 +3384,8 @@ theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceTooFew : (sourceFixed ++ sourceArguments).size <
@@ -3489,15 +3404,17 @@ theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
         control := .invokeValue (.object (.heap targetLocation))
           targetArguments } = .next targetAfter ∧
       ReachableMachineRelated fuel larger sourceAfter targetAfter := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -3516,23 +3433,26 @@ theorem coreStep_invokeValue_closure_foundPartial_reachableRelated
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append combinedArguments frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_foundPartial_reachableRelated
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
       invokeFrames combinedArguments invokeFound sourceTooFew invokeRuntime with
     ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
       nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨larger, sourceAfter, targetAfter, extension, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- A reachable mapped closure whose declaration is absent on the source has
 an absent declaration on the target as well.  Reading the closure and
@@ -3547,11 +3467,8 @@ theorem coreStep_invokeValue_closure_unknown_terminal
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name = none)
     (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
       ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
@@ -3568,15 +3485,17 @@ theorem coreStep_invokeValue_closure_unknown_terminal
             targetArguments }
         targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have invokePrograms : ProgramRelated (ShadowCodeRelated fuel)
       sourceInvoke.program targetInvoke.program := by
@@ -3587,29 +3506,35 @@ theorem coreStep_invokeValue_closure_unknown_terminal
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append (arrayRel_append fixed arguments) frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_unknown_reachableObservation
       (fuel := fuel) sourceInvoke targetInvoke invokePrograms invokeFound
       invokeRuntime with
     ⟨targetDeclFound, sourceFault, targetFault, _observations⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
-  have sourceCore : coreStep sourceInvoke =
+  have sourceCore : coreStep { sourceState with
+        control := .invokeValue (.object (.heap sourceLocation))
+          sourceArguments } =
       .done (observe sourceInvoke (.fault (.unknownDecl name))) := by
-    simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceFault
-  have targetCore : coreStep targetInvoke =
+    simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceFault
+  have targetCore : coreStep { targetState with
+        control := .invokeValue (.object (.heap targetLocation))
+          targetArguments } =
       .done (observe targetInvoke (.fault (.unknownDecl name))) := by
-    simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetFault
-  have terminal := relatedFault_terminal
+    simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetFault
+  exact relatedFault_after_terminal
     (externals := externals) invokeRuntime sourceCore targetCore
-    (by simpa [sourceInvoke] using done)
-  simpa [targetInvoke] using terminal
+    done
 
 /-- A reachable mapped closure whose combined fixed and fresh arguments fail
 parameter binding terminates with the same address-free binding fault on both
@@ -3623,11 +3548,8 @@ theorem coreStep_invokeValue_closure_bindingFault_terminal
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceEnough : ¬ (sourceFixed ++ sourceArguments).size <
@@ -3650,15 +3572,17 @@ theorem coreStep_invokeValue_closure_bindingFault_terminal
             targetArguments }
         targetObservation ∧
       ObservationRel sourceObservation targetObservation := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -3673,30 +3597,36 @@ theorem coreStep_invokeValue_closure_bindingFault_terminal
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append combinedArguments frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_bindingFault_reachableObservation
       (fuel := fuel) sourceInvoke targetInvoke invokePrograms
       combinedArguments invokeFound sourceEnough sourceBinding invokeRuntime with
     ⟨targetDeclaration, targetDeclFound, sourceFault, targetFault,
       _observations⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
-  have sourceCore : coreStep sourceInvoke =
+  have sourceCore : coreStep { sourceState with
+        control := .invokeValue (.object (.heap sourceLocation))
+          sourceArguments } =
       .done (observe sourceInvoke (.fault fault)) := by
-    simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceFault
-  have targetCore : coreStep targetInvoke =
+    simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceFault
+  have targetCore : coreStep { targetState with
+        control := .invokeValue (.object (.heap targetLocation))
+          targetArguments } =
       .done (observe targetInvoke (.fault fault)) := by
-    simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetFault
-  have terminal := relatedFault_terminal
+    simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetFault
+  exact relatedFault_after_terminal
     (externals := externals) invokeRuntime sourceCore targetCore
-    (by simpa [sourceInvoke] using done)
-  simpa [targetInvoke] using terminal
+    done
 
 /-- Related immediate values and reuse tokens are equally invalid as closure
 callees.  Their invocation terminates with the address-free
@@ -3735,6 +3665,37 @@ theorem coreStep_invokeValue_nonHeap_terminal
     (externals := externals) invokeRuntime faults.1 faults.2
     (by simpa [sourceInvoke] using done)
   simpa [targetInvoke] using terminal
+
+theorem takeClosureApplication_expectedClosure
+    (found : findCell? runtime.heap location = some cell)
+    (live : cell.live = true)
+    (notClosure : ∀ name arity fixed,
+      cell.object ≠ .closure name arity fixed) :
+    takeClosureApplication runtime location = .error .expectedClosure := by
+  have throwEq {α : Type} :
+      (throw .expectedClosure : Except RuntimeFault α) =
+        .error .expectedClosure := rfl
+  have read : getLiveCell runtime location = .ok cell := by
+    simp [getLiveCell, found, live]
+  rw [takeClosureApplication, read]
+  cases object : cell.object with
+  | closure name arity fixed =>
+      exact (notClosure name arity fixed object).elim
+  | ctor | boxed | string | natural | integer | byteArray | «opaque» =>
+      simpa [Bind.bind, Except.bind, object] using
+        (throwEq (α := RuntimeState × Name × Nat × Array Value))
+
+theorem takeClosureApplication_dead
+    (found : findCell? runtime.heap location = some cell)
+    (dead : cell.live = false) :
+    takeClosureApplication runtime location = .error (.deadObject location) := by
+  have read : getLiveCell runtime location = .error (.deadObject location) := by
+    simp [getLiveCell, found, dead]
+  rw [takeClosureApplication, read]
+  change (Except.error (.deadObject location) :
+    Except RuntimeFault (RuntimeState × Name × Nat × Array Value)) =
+      .error (.deadObject location)
+  rfl
 
 /-- A live mapped heap cell whose object is not a closure has a related live
 non-closure target cell, so both invocations terminate with
@@ -3782,14 +3743,29 @@ theorem coreStep_invokeValue_liveNonClosure_terminal
   have targetRead : getLiveCell targetState.runtime targetLocation =
       .ok targetCell := by
     simp [getLiveCell, targetCellFound, targetLive]
+  have targetNotClosure : ∀ name arity fixed,
+      targetCell.object ≠ .closure name arity fixed := by
+    intro targetName targetArity targetFixed targetClosure
+    have targetObjectClosure : targetObject =
+        .closure targetName targetArity targetFixed := by
+      rw [← targetObjectEq]
+      exact targetClosure
+    rw [targetObjectClosure] at objects
+    cases objects with
+    | closure fixed =>
+      exact sourceNotClosure targetName targetArity _ sourceObjectEq
+  have sourceApplication := takeClosureApplication_expectedClosure
+    sourceCellFound sourceLive sourceNotClosure
+  have targetApplication := takeClosureApplication_expectedClosure
+    targetCellFound targetLive targetNotClosure
   have faults :
       coreStep sourceInvoke =
           .done (observe sourceInvoke (.fault .expectedClosure)) ∧
         coreStep targetInvoke =
           .done (observe targetInvoke (.fault .expectedClosure)) := by
-    cases objects <;>
-      simp_all [sourceInvoke, targetInvoke, coreStep, invokeClosure,
-        sourceRead, targetRead, fail]
+    constructor
+    · simp [sourceInvoke, coreStep, invokeClosure, sourceApplication, fail]
+    · simp [targetInvoke, coreStep, invokeClosure, targetApplication, fail]
   have invokeRuntime : ShadowRuntimeRel rho
       sourceInvoke.runtime targetInvoke.runtime
       ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
@@ -3837,14 +3813,16 @@ theorem coreStep_invokeValue_dead_terminal
   let targetInvoke := {
     targetState with
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
+  have sourceApplication :=
+    takeClosureApplication_dead sourceCellFound sourceDead
+  have targetApplication :=
+    takeClosureApplication_dead targetCellFound targetDead
   have sourceFault : coreStep sourceInvoke =
       .done (observe sourceInvoke (.fault (.deadObject sourceLocation))) := by
-    simp [sourceInvoke, coreStep, invokeClosure, getLiveCell,
-      sourceCellFound, sourceDead, fail]
+    simp [sourceInvoke, coreStep, invokeClosure, sourceApplication, fail]
   have targetFault : coreStep targetInvoke =
       .done (observe targetInvoke (.fault (.deadObject targetLocation))) := by
-    simp [targetInvoke, coreStep, invokeClosure, getLiveCell,
-      targetCellFound, targetDead, fail]
+    simp [targetInvoke, coreStep, invokeClosure, targetApplication, fail]
   have invokeRuntime : ShadowRuntimeRel rho
       sourceInvoke.runtime targetInvoke.runtime
       ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
@@ -4550,11 +4528,8 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .code sourceCode)
@@ -4577,15 +4552,17 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
           targetArguments } = .next targetAfter ∧
       BinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -4604,24 +4581,27 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append combinedArguments frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_foundCode_binderReadyReachableRelated
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
       invokeFrames combinedArguments invokeFound sourceDeclValue sourceEnough
       sourceBinding invokeRuntime with
     ⟨targetDeclaration, targetCode, sourceAfter, targetAfter,
       targetDeclFound, targetDeclValue, sourceStep, targetStep, nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- Under-applying a mapped closure allocates related closures under an
 extended renaming while retaining hereditary program and frame provenance. -/
@@ -4634,11 +4614,8 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceTooFew : (sourceFixed ++ sourceArguments).size <
@@ -4658,15 +4635,17 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
           targetArguments } = .next targetAfter ∧
       BinderReadyReachableMachineRelated fuel larger
         sourceAfter targetAfter := by
-  rcases runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -4685,23 +4664,26 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
       sourceInvoke.runtime targetInvoke.runtime
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := by
-    simpa [sourceInvoke, targetInvoke] using invocationRuntime
+    apply applicationRuntime.restrictExtra
+      (listRel_append combinedArguments frames.roots)
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
+    · intro value member
+      rcases List.mem_append.mp member with callRoot | frameRoot
+      · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+      · exact List.mem_append_right _ frameRoot
   rcases invokeDecl_foundPartial_binderReadyReachableRelated
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
       invokeFrames combinedArguments invokeFound sourceTooFew invokeRuntime with
     ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
       nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨larger, sourceAfter, targetAfter, extension, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- A retained return narrows the active runtime roots from the complete live
 environment to the returned value, while keeping all saved-frame roots. -/
@@ -9044,16 +9026,17 @@ theorem HeapOwnershipBelowFrontier.box
     HeapOwnershipBelowFrontier result := by
   cases input with
   | scalar scalar =>
-      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
         subst result
         exact bounded
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9064,16 +9047,16 @@ theorem HeapOwnershipBelowFrontier.box
             (by simp [HeapObject.ownedValues])
             false
   | usize word =>
-      by_cases small : word.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type word = true
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
         subst result
         exact bounded
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9095,9 +9078,10 @@ theorem box_resultBelowFrontier
     RuntimeValueBelowFrontier runtime result value := by
   cases input with
   | scalar scalar =>
-      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9107,7 +9091,7 @@ theorem box_resultBelowFrontier
         · intro location member
           simp at member
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9115,9 +9099,9 @@ theorem box_resultBelowFrontier
         exact alloc_resultBelowFrontier runtime
           (.boxed type (.scalar scalar))
   | usize word =>
-      by_cases small : word.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type word = true
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9127,7 +9111,7 @@ theorem box_resultBelowFrontier
         · intro location member
           simp at member
       · have normalized := effect
-        simp [Fir.LeanIR.Impure.box, small, Bind.bind, Except.bind,
+        simp [Fir.LeanIR.Impure.box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨valueEq, runtimeEq⟩
         subst value
@@ -9269,6 +9253,173 @@ theorem incValue_nextLocation_eq_of_ok
   | scalar value => simp [incValue] at effect
   | erased => simp [incValue] at effect
   | reuseToken location? => simp [incValue] at effect
+
+/-- Retaining one transferred owned value never advances the allocation
+frontier. -/
+theorem retainOwnedValue_nextLocation_eq_of_ok
+    (effect : retainOwnedValue runtime value = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact incLocation_nextLocation_eq_of_ok
+            (effect := by simpa [retainOwnedValue] using effect)
+      | tagged payload =>
+          have okEq : (Except.ok runtime :
+              Except RuntimeFault RuntimeState) = .ok result := by
+            simpa [retainOwnedValue] using effect
+          have same := Except.ok.inj okEq
+          subst result
+          rfl
+  | usize value | scalar value | erased | reuseToken location? =>
+      have okEq : (Except.ok runtime :
+          Except RuntimeFault RuntimeState) = .ok result := by
+        simpa [retainOwnedValue] using effect
+      have same := Except.ok.inj okEq
+      subst result
+      rfl
+
+/-- Folding capture retention over a list preserves the allocation
+frontier whenever the fold succeeds. -/
+theorem retainOwnedValues_nextLocation_eq_of_ok
+    (values : List Value) (runtime result : RuntimeState)
+    (effect : values.foldlM (init := runtime) retainOwnedValue = .ok result) :
+    result.nextLocation = runtime.nextLocation := by
+  induction values generalizing runtime with
+  | nil =>
+      simp only [List.foldlM_nil] at effect
+      change (Except.ok runtime : Except RuntimeFault RuntimeState) =
+        .ok result at effect
+      have same := Except.ok.inj effect
+      subst result
+      rfl
+  | cons value values ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at effect
+      generalize retainedEq : retainOwnedValue runtime value = retainedResult
+        at effect
+      cases retainedResult with
+      | error fault => simp at effect
+      | ok retainedRuntime =>
+          simp only at effect
+          exact (ih retainedRuntime effect).trans
+            (retainOwnedValue_nextLocation_eq_of_ok retainedEq)
+
+/-- Consuming a closure application only mutates existing cells and hence
+preserves the allocation frontier. -/
+theorem takeClosureApplication_nextLocation_eq_of_ok
+    (effect : takeClosureApplication runtime location =
+      .ok (result, name, arity, fixed)) :
+    result.nextLocation = runtime.nextLocation := by
+  unfold takeClosureApplication at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize cellEq : getLiveCell runtime location = cellResult at effect
+  cases cellResult with
+  | error fault => simp at effect
+  | ok cell =>
+      cases objectEq : cell.object with
+      | ctor object => simp [objectEq] at effect
+      | boxed type value => simp [objectEq] at effect
+      | string value => simp [objectEq] at effect
+      | natural value => simp [objectEq] at effect
+      | integer value => simp [objectEq] at effect
+      | byteArray value => simp [objectEq] at effect
+      | «opaque» typeName => simp [objectEq] at effect
+      | closure function closureArity captures =>
+          simp only [objectEq] at effect
+          by_cases persistent : cell.persistent = true
+          · simp [persistent] at effect
+            cases effect
+            rfl
+          · rw [if_neg persistent] at effect
+            by_cases zero : cell.rc = 0
+            · simp [zero] at effect
+            · rw [if_neg zero] at effect
+              by_cases exclusive : cell.rc = 1
+              · rw [if_pos exclusive] at effect
+                generalize updateEq :
+                    Fir.LeanIR.Impure.setCell runtime location
+                      { object := .closure function closureArity captures
+                        rc := 0
+                        persistent := cell.persistent
+                        live := false } = updated
+                    at effect
+                cases updated with
+                | error fault => simp at effect
+                | ok updatedRuntime =>
+                    simp only [pure] at effect
+                    cases effect
+                    exact setCell_nextLocation_eq_of_ok updateEq
+              · rw [if_neg exclusive] at effect
+                generalize updateEq :
+                    Fir.LeanIR.Impure.setCell runtime location
+                      { object := .closure function closureArity captures
+                        rc := cell.rc - 1
+                        persistent := cell.persistent
+                        live := cell.live } = updated at effect
+                cases updated with
+                | error fault => simp at effect
+                | ok updatedRuntime =>
+                    simp only [Bind.bind, Except.bind] at effect
+                    generalize retainedEq :
+                        Array.foldlM retainOwnedValue updatedRuntime captures =
+                          retained at effect
+                    cases retained with
+                    | error fault => simp at effect
+                    | ok retainedRuntime =>
+                      have retainedFrontier :=
+                        retainOwnedValues_nextLocation_eq_of_ok
+                          captures.toList updatedRuntime retainedRuntime
+                          (by simpa only [Array.foldlM_toList] using retainedEq)
+                      simp only [pure] at effect
+                      cases effect
+                      exact retainedFrontier.trans
+                        (setCell_nextLocation_eq_of_ok updateEq)
+
+/-- A closure call that suspends for an external response preserves the
+allocation frontier even though consuming the closure may change ownership
+inside the heap. -/
+theorem coreStep_invokeValue_external_runtime_eq
+    (state waiting : MachineState)
+    (function : Value)
+    (arguments : Array Value)
+    (request : ExternalRequest)
+    (step : coreStep { state with
+      control := .invokeValue function arguments } =
+        .external request waiting) :
+    waiting.runtime.nextLocation = state.runtime.nextLocation := by
+  cases function with
+  | object reference =>
+      cases reference with
+      | tagged payload =>
+          simp [coreStep, invokeClosure, fail] at step
+      | heap location =>
+          cases applicationEq :
+              takeClosureApplication state.runtime location with
+          | error fault =>
+              simp [coreStep, invokeClosure, applicationEq, fail] at step
+          | ok application =>
+              obtain ⟨applicationRuntime, name, arity, fixed⟩ := application
+              have invocation :
+                  invokeDecl { state with
+                    runtime := applicationRuntime
+                    control := .invokeValue (.object (.heap location))
+                      arguments }
+                    name (fixed ++ arguments) =
+                      .external request waiting := by
+                simpa [coreStep, invokeClosure, applicationEq] using step
+              calc
+                waiting.runtime.nextLocation =
+                    applicationRuntime.nextLocation := by
+                  simpa using congrArg RuntimeState.nextLocation
+                    (invokeDecl_external_runtime_eq (step := invocation))
+                _ = state.runtime.nextLocation :=
+                  takeClosureApplication_nextLocation_eq_of_ok applicationEq
+  | usize value => simp [coreStep, invokeClosure, fail] at step
+  | scalar value => simp [coreStep, invokeClosure, fail] at step
+  | erased => simp [coreStep, invokeClosure, fail] at step
+  | reuseToken location? =>
+      cases location? <;> simp [coreStep, invokeClosure, fail] at step
 
 /-- A successful delete is a no-op for the erased sentinel or replaces one
 existing live cell. -/
@@ -9598,6 +9749,147 @@ theorem HeapOwnershipBelowFrontier.incValue
   | scalar value => simp [Fir.LeanIR.Impure.incValue] at effect
   | erased => simp [Fir.LeanIR.Impure.incValue] at effect
   | reuseToken location? => simp [Fir.LeanIR.Impure.incValue] at effect
+
+/-- Retaining an owned field is either a header-only heap update or a
+runtime no-op, so it preserves heap ownership well-formedness. -/
+theorem HeapOwnershipBelowFrontier.retainOwnedValue
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect : Fir.LeanIR.Impure.retainOwnedValue runtime value = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact wellFormed.incLocation
+            (by simpa [Fir.LeanIR.Impure.retainOwnedValue] using effect)
+      | tagged payload =>
+          have same : runtime = result := Except.ok.inj (by
+            change (Except.ok runtime : Except RuntimeFault RuntimeState) =
+              .ok result
+            simpa [Fir.LeanIR.Impure.retainOwnedValue] using effect)
+          subst result
+          exact wellFormed
+  | usize value | scalar value | erased | reuseToken location? =>
+      have same : runtime = result := Except.ok.inj (by
+        change (Except.ok runtime : Except RuntimeFault RuntimeState) =
+          .ok result
+        simpa [Fir.LeanIR.Impure.retainOwnedValue] using effect)
+      subst result
+      exact wellFormed
+
+/-- A successful fold of owned-field retention preserves heap ownership
+well-formedness. -/
+theorem HeapOwnershipBelowFrontier.retainOwnedValues
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (values : List Value)
+    (effect : values.foldlM (init := runtime)
+      Fir.LeanIR.Impure.retainOwnedValue = .ok result) :
+    HeapOwnershipBelowFrontier result := by
+  induction values generalizing runtime with
+  | nil =>
+      simp only [List.foldlM_nil] at effect
+      change (Except.ok runtime : Except RuntimeFault RuntimeState) =
+        .ok result at effect
+      have same := Except.ok.inj effect
+      subst result
+      exact wellFormed
+  | cons value values ih =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind] at effect
+      generalize retainedEq :
+          Fir.LeanIR.Impure.retainOwnedValue runtime value = retainedResult
+        at effect
+      cases retainedResult with
+      | error fault => simp at effect
+      | ok retainedRuntime =>
+          simp only at effect
+          exact ih (wellFormed.retainOwnedValue retainedEq) effect
+
+/-- Consuming a closure preserves heap ownership and leaves every exposed
+fixed argument below the unchanged allocation frontier. -/
+theorem HeapOwnershipBelowFrontier.takeClosureApplication
+    (wellFormed : HeapOwnershipBelowFrontier runtime)
+    (effect : Fir.LeanIR.Impure.takeClosureApplication runtime location =
+      .ok (result, name, arity, fixed)) :
+    HeapOwnershipBelowFrontier result ∧
+      HeapLocationsBelowFrontier result fixed.toList := by
+  have frontier :=
+    takeClosureApplication_nextLocation_eq_of_ok effect
+  unfold Fir.LeanIR.Impure.takeClosureApplication at effect
+  simp only [Bind.bind, Except.bind] at effect
+  generalize cellEq : getLiveCell runtime location = cellResult at effect
+  cases cellResult with
+  | error fault => simp at effect
+  | ok cell =>
+      have found := (getLiveCell_shape_of_ok cellEq).1
+      cases objectEq : cell.object with
+      | ctor object => simp [objectEq] at effect
+      | boxed type value => simp [objectEq] at effect
+      | string value => simp [objectEq] at effect
+      | natural value => simp [objectEq] at effect
+      | integer value => simp [objectEq] at effect
+      | byteArray value => simp [objectEq] at effect
+      | «opaque» typeName => simp [objectEq] at effect
+      | closure function closureArity captures =>
+          have capturesBelow :
+              HeapLocationsBelowFrontier runtime captures.toList := by
+            intro child member
+            apply wellFormed.owned_lt found
+            simpa [objectEq, HeapObject.ownedValues] using member
+          have capturesBelowResult :
+              HeapLocationsBelowFrontier result captures.toList := by
+            intro child member
+            simpa [frontier] using capturesBelow member
+          simp only [objectEq] at effect
+          by_cases persistent : cell.persistent = true
+          · simp [persistent] at effect
+            cases effect
+            exact ⟨wellFormed, capturesBelow⟩
+          · rw [if_neg persistent] at effect
+            by_cases zero : cell.rc = 0
+            · simp [zero] at effect
+            · rw [if_neg zero] at effect
+              by_cases exclusive : cell.rc = 1
+              · rw [if_pos exclusive] at effect
+                generalize updateEq :
+                    Fir.LeanIR.Impure.setCell runtime location
+                      { object := .closure function closureArity captures
+                        rc := 0
+                        persistent := cell.persistent
+                        live := false } = updated at effect
+                cases updated with
+                | error fault => simp at effect
+                | ok updatedRuntime =>
+                    simp only [pure] at effect
+                    cases effect
+                    exact ⟨wellFormed.setCell_sameObject found
+                      (by simpa [objectEq]) updateEq, capturesBelowResult⟩
+              · rw [if_neg exclusive] at effect
+                generalize updateEq :
+                    Fir.LeanIR.Impure.setCell runtime location
+                      { object := .closure function closureArity captures
+                        rc := cell.rc - 1
+                        persistent := cell.persistent
+                        live := cell.live } = updated at effect
+                cases updated with
+                | error fault => simp at effect
+                | ok updatedRuntime =>
+                    simp only [Bind.bind, Except.bind] at effect
+                    generalize retainedEq :
+                        Array.foldlM Fir.LeanIR.Impure.retainOwnedValue
+                          updatedRuntime captures = retained at effect
+                    cases retained with
+                    | error fault => simp at effect
+                    | ok retainedRuntime =>
+                        have updatedOwnership :=
+                          wellFormed.setCell_sameObject found
+                            (by simpa [objectEq]) updateEq
+                        have retainedOwnership :=
+                          updatedOwnership.retainOwnedValues captures.toList
+                            (by simpa only [Array.foldlM_toList]
+                              using retainedEq)
+                        simp only [pure] at effect
+                        cases effect
+                        exact ⟨retainedOwnership, capturesBelowResult⟩
 
 /-- Deleting the erased sentinel is a no-op; deleting a live heap reference
 changes only its cell header and therefore preserves ownership. -/
@@ -12153,59 +12445,47 @@ theorem SourceMachineOwnershipBelowFrontier.invokeValueNext
       | tagged payload =>
           simp [coreStep, invokeClosure, fail] at transition
       | heap location =>
-          cases read : getLiveCell state.runtime location with
+          cases applicationEq :
+              takeClosureApplication state.runtime location with
           | error fault =>
-              simp [coreStep, invokeClosure, read, fail] at transition
-          | ok cell =>
-              cases object : cell.object with
-              | ctor object =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | boxed type value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | string value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | natural value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | integer value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | byteArray value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | «opaque» typeName =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | closure name arity fixed =>
-                  have fixedBelow :
-                      HeapLocationsBelowFrontier
-                        state.runtime fixed.toList := by
-                    intro child member
-                    apply bounded.heap.owned_lt
-                      (getLiveCell_shape_of_ok read).1
-                    simpa [object, HeapObject.ownedValues] using member
-                  have callArgumentsBelow :
-                      HeapLocationsBelowFrontier state.runtime
-                        (fixed ++ arguments).toList :=
-                    HeapLocationsBelowFrontier.append
-                      fixed arguments fixedBelow argumentsBelow
-                  have invocation :
-                      invokeDecl
-                          { state with
-                            control := .invokeValue
-                              (.object (.heap location)) arguments }
-                          name (fixed ++ arguments) =
-                        .next after := by
-                    simpa [coreStep, invokeClosure, read, object] using
-                      transition
-                  exact
-                    (bounded.withControlAndJoins
-                      (.invokeValue (.object (.heap location)) arguments)
-                      state.joins)
-                      |>.invokeDeclNext callArgumentsBelow invocation
+              simp [coreStep, invokeClosure, applicationEq, fail]
+                at transition
+          | ok application =>
+              obtain ⟨applicationRuntime, name, arity, fixed⟩ := application
+              have applicationOwnership :=
+                bounded.heap.takeClosureApplication applicationEq
+              have frontier :=
+                takeClosureApplication_nextLocation_eq_of_ok applicationEq
+              have argumentsBelowAfter :
+                  HeapLocationsBelowFrontier applicationRuntime
+                    arguments.toList :=
+                argumentsBelow.monoFrontier (by simpa [frontier])
+              have callArgumentsBelow :
+                  HeapLocationsBelowFrontier applicationRuntime
+                    (fixed ++ arguments).toList :=
+                HeapLocationsBelowFrontier.append fixed arguments
+                  applicationOwnership.2 argumentsBelowAfter
+              have invocation :
+                  invokeDecl
+                      { state with
+                        runtime := applicationRuntime
+                        control := .invokeValue
+                          (.object (.heap location)) arguments }
+                      name (fixed ++ arguments) = .next after := by
+                simpa [coreStep, invokeClosure, applicationEq] using
+                  transition
+              have invokeOwnership : SourceMachineOwnershipBelowFrontier
+                  { state with
+                    runtime := applicationRuntime
+                    control := .invokeValue
+                      (.object (.heap location)) arguments } := by
+                exact (bounded.withRuntimeMonoFrontier
+                    applicationOwnership.1 (by simpa [frontier]))
+                  |>.withControlAndJoins
+                    (.invokeValue (.object (.heap location)) arguments)
+                    state.joins
+              exact invokeOwnership.invokeDeclNext
+                callArgumentsBelow invocation
   | usize value =>
       simp [coreStep, invokeClosure, fail] at transition
   | scalar value =>
@@ -12236,60 +12516,48 @@ theorem SourceMachineOwnershipBelowFrontier.invokeValueExternalWaiting
       | tagged payload =>
           simp [coreStep, invokeClosure, fail] at transition
       | heap location =>
-          cases read : getLiveCell state.runtime location with
+          cases applicationEq :
+              takeClosureApplication state.runtime location with
           | error fault =>
-              simp [coreStep, invokeClosure, read, fail] at transition
-          | ok cell =>
-              cases object : cell.object with
-              | ctor object =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | boxed type value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | string value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | natural value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | integer value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | byteArray value =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | «opaque» typeName =>
-                  simp [coreStep, invokeClosure, read, object, fail]
-                    at transition
-              | closure name arity fixed =>
-                  have fixedBelow :
-                      HeapLocationsBelowFrontier
-                        state.runtime fixed.toList := by
-                    intro child member
-                    apply bounded.heap.owned_lt
-                      (getLiveCell_shape_of_ok read).1
-                    simpa [object, HeapObject.ownedValues] using member
-                  have callArgumentsBelow :
-                      HeapLocationsBelowFrontier state.runtime
-                        (fixed ++ arguments).toList :=
-                    HeapLocationsBelowFrontier.append
-                      fixed arguments fixedBelow argumentsBelow
-                  have invocation :
-                      invokeDecl
-                          { state with
-                            control := .invokeValue
-                              (.object (.heap location)) arguments }
-                          name (fixed ++ arguments) =
-                        .external request waiting := by
-                    simpa [coreStep, invokeClosure, read, object] using
-                      transition
-                  exact
-                    (bounded.withControlAndJoins
-                      (.invokeValue (.object (.heap location)) arguments)
-                      state.joins)
-                      |>.invokeDeclExternalWaiting
-                        callArgumentsBelow invocation
+              simp [coreStep, invokeClosure, applicationEq, fail]
+                at transition
+          | ok application =>
+              obtain ⟨applicationRuntime, name, arity, fixed⟩ := application
+              have applicationOwnership :=
+                bounded.heap.takeClosureApplication applicationEq
+              have frontier :=
+                takeClosureApplication_nextLocation_eq_of_ok applicationEq
+              have argumentsBelowAfter :
+                  HeapLocationsBelowFrontier applicationRuntime
+                    arguments.toList :=
+                argumentsBelow.monoFrontier (by simpa [frontier])
+              have callArgumentsBelow :
+                  HeapLocationsBelowFrontier applicationRuntime
+                    (fixed ++ arguments).toList :=
+                HeapLocationsBelowFrontier.append fixed arguments
+                  applicationOwnership.2 argumentsBelowAfter
+              have invocation :
+                  invokeDecl
+                      { state with
+                        runtime := applicationRuntime
+                        control := .invokeValue
+                          (.object (.heap location)) arguments }
+                      name (fixed ++ arguments) =
+                    .external request waiting := by
+                simpa [coreStep, invokeClosure, applicationEq] using
+                  transition
+              have invokeOwnership : SourceMachineOwnershipBelowFrontier
+                  { state with
+                    runtime := applicationRuntime
+                    control := .invokeValue
+                      (.object (.heap location)) arguments } := by
+                exact (bounded.withRuntimeMonoFrontier
+                    applicationOwnership.1 (by simpa [frontier]))
+                  |>.withControlAndJoins
+                    (.invokeValue (.object (.heap location)) arguments)
+                    state.joins
+              exact invokeOwnership.invokeDeclExternalWaiting
+                callArgumentsBelow invocation
   | usize value =>
       simp [coreStep, invokeClosure, fail] at transition
   | scalar value =>
@@ -14770,9 +15038,10 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           ⟨target, targetMember, targetRelated⟩
         cases targetRelated
         exact targetMember
-      by_cases small : scalar.toUInt64.toNat ≤ maxTaggedPayload
+      by_cases tagged :
+          boxUsesTaggedRepresentation type scalar.toUInt64 = true
       · have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
@@ -14783,10 +15052,10 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           rightResult := .object (.tagged scalar.toUInt64)
           extension := RenamingExtends.refl rho
           leftEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           rightEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           values := .tagged _
           runtime := {
@@ -14816,7 +15085,7 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
         let allocated :=
           related.allocBoth objects leftOwned rightOwned false
         have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
@@ -14827,10 +15096,10 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           rightResult := .object (alloc right rightObject).2
           extension := allocated.extension
           leftEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           rightEffect := by
-            simp [box, small, rightObject, Bind.bind, Except.bind,
+            simp [box, tagged, rightObject, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           values := allocated.values
           runtime := allocated.runtime
@@ -14841,9 +15110,9 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           ⟨target, targetMember, targetRelated⟩
         cases targetRelated
         exact targetMember
-      by_cases small : word.toNat ≤ maxTaggedPayload
+      by_cases tagged : boxUsesTaggedRepresentation type word = true
       · have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
@@ -14854,10 +15123,10 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           rightResult := .object (.tagged word)
           extension := RenamingExtends.refl rho
           leftEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           rightEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           values := .tagged _
           runtime := {
@@ -14887,7 +15156,7 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
         let allocated :=
           related.allocBoth objects leftOwned rightOwned false
         have normalized := sourceBox
-        simp [box, small, Bind.bind, Except.bind,
+        simp [box, tagged, Bind.bind, Except.bind,
           Pure.pure, Except.pure] at normalized
         rcases normalized with ⟨resultEq, runtimeEq⟩
         subst leftResult
@@ -14898,10 +15167,10 @@ theorem LedgerShadowRuntimeRel.boxBoth_of_related_nonempty
           rightResult := .object (alloc right rightObject).2
           extension := allocated.extension
           leftEffect := by
-            simp [box, small, Bind.bind, Except.bind,
+            simp [box, tagged, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           rightEffect := by
-            simp [box, small, rightObject, Bind.bind, Except.bind,
+            simp [box, tagged, rightObject, Bind.bind, Except.bind,
               Pure.pure, Except.pure]
           values := allocated.values
           runtime := allocated.runtime
@@ -14945,14 +15214,14 @@ noncomputable def LedgerShadowRuntimeRel.boxScalarLeftGarbage
     LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
       type (.scalar scalar) := by
   let payload := scalar.toUInt64
-  by_cases small : payload.toNat ≤ maxTaggedPayload
+  by_cases tagged : boxUsesTaggedRepresentation type payload = true
   · exact {
       nextRuntime := left
       value := .object (.tagged payload)
       effect := by
         unfold box
         simp only [Bind.bind, Except.bind]
-        rw [if_pos (by simpa [payload] using small)]
+        rw [if_pos tagged]
         rfl
       runtime := related
       heapSourceOnly := by
@@ -14966,7 +15235,7 @@ noncomputable def LedgerShadowRuntimeRel.boxScalarLeftGarbage
       effect := by
         unfold box
         simp only [Bind.bind, Except.bind]
-        rw [if_neg (by simpa [payload] using small)]
+        rw [if_neg tagged]
         rfl
       runtime := related.allocLeftGarbage object false
       heapSourceOnly := by
@@ -14983,14 +15252,14 @@ noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
     (type : Expr) (word : UInt64) :
     LedgerBoxLeftGarbageResult rho left right leftExtra rightExtra
       type (.usize word) := by
-  by_cases small : word.toNat ≤ maxTaggedPayload
+  by_cases tagged : boxUsesTaggedRepresentation type word = true
   · exact {
       nextRuntime := left
       value := .object (.tagged word)
       effect := by
         unfold box
         simp only [Bind.bind, Except.bind]
-        rw [if_pos small]
+        rw [if_pos tagged]
         rfl
       runtime := related
       heapSourceOnly := by
@@ -15004,7 +15273,7 @@ noncomputable def LedgerShadowRuntimeRel.boxUSizeLeftGarbage
       effect := by
         unfold box
         simp only [Bind.bind, Except.bind]
-        rw [if_neg small]
+        rw [if_neg tagged]
         rfl
       runtime := related.allocLeftGarbage object false
       heapSourceOnly := by
@@ -15547,11 +15816,8 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledge
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .code sourceCode)
@@ -15575,15 +15841,17 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledge
           targetArguments } = .next targetAfter ∧
       LedgerBinderReadyReachableMachineRelated fuel rho
         sourceAfter targetAfter := by
-  rcases runtime.runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -15603,9 +15871,20 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledge
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := {
     runtime := by
-      simpa [sourceInvoke, targetInvoke] using invocationRuntime
+      apply applicationRuntime.restrictExtra
+        (listRel_append combinedArguments frames.roots)
+      · intro value member
+        rcases List.mem_append.mp member with callRoot | frameRoot
+        · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+        · exact List.mem_append_right _ frameRoot
+      · intro value member
+        rcases List.mem_append.mp member with callRoot | frameRoot
+        · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+        · exact List.mem_append_right _ frameRoot
     ledger := by
-      simpa [targetInvoke] using runtime.ledger
+      have frontier :=
+        takeClosureApplication_nextLocation_eq_of_ok targetApplication
+      simpa [targetInvoke, frontier] using runtime.ledger
   }
   rcases invokeDecl_foundCode_binderReadyReachableRelated_ledger
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
@@ -15613,17 +15892,11 @@ theorem coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledge
       sourceBinding invokeRuntime with
     ⟨targetDeclaration, targetCode, sourceAfter, targetAfter,
       targetDeclFound, targetDeclValue, sourceStep, targetStep, nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨sourceAfter, targetAfter, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- Under-applying a live mapped closure records the single paired closure
 allocation performed by declaration invocation. -/
@@ -15636,11 +15909,8 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_le
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceTooFew : (sourceFixed ++ sourceArguments).size <
@@ -15661,15 +15931,17 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_le
           targetArguments } = .next targetAfter ∧
       LedgerBinderReadyReachableMachineRelated fuel larger
         sourceAfter targetAfter := by
-  rcases runtime.runtime.readMappedClosure mapping sourceCellFound sourceLive
-      sourceObject arguments frames.roots with
-    ⟨targetCell, targetFixed, targetCellFound, targetLive, targetObject,
-      fixed, invocationRuntime⟩
+  rcases runtime.runtime.takeClosureApplicationBoth_of_ok mapping arguments
+      frames.roots sourceApplication with
+    ⟨targetRuntime, targetFixed, targetApplication, fixed,
+      applicationRuntime⟩
   let sourceInvoke := {
     sourceState with
+    runtime := sourceRuntime
     control := .invokeValue (.object (.heap sourceLocation)) sourceArguments }
   let targetInvoke := {
     targetState with
+    runtime := targetRuntime
     control := .invokeValue (.object (.heap targetLocation)) targetArguments }
   have combinedArguments : ArrayRel (ValueRel rho)
       (sourceFixed ++ sourceArguments) (targetFixed ++ targetArguments) :=
@@ -15689,26 +15961,31 @@ theorem coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_le
       ((sourceFixed ++ sourceArguments).toList ++ sourceFrameRoots)
       ((targetFixed ++ targetArguments).toList ++ targetFrameRoots) := {
     runtime := by
-      simpa [sourceInvoke, targetInvoke] using invocationRuntime
+      apply applicationRuntime.restrictExtra
+        (listRel_append combinedArguments frames.roots)
+      · intro value member
+        rcases List.mem_append.mp member with callRoot | frameRoot
+        · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+        · exact List.mem_append_right _ frameRoot
+      · intro value member
+        rcases List.mem_append.mp member with callRoot | frameRoot
+        · exact List.mem_append_left _ (List.mem_cons_of_mem _ callRoot)
+        · exact List.mem_append_right _ frameRoot
     ledger := by
-      simpa [targetInvoke] using runtime.ledger
+      have frontier :=
+        takeClosureApplication_nextLocation_eq_of_ok targetApplication
+      simpa [targetInvoke, frontier] using runtime.ledger
   }
   rcases invokeDecl_foundPartial_binderReadyReachableRelated_ledger
       (fuel := fuel) (rho := rho) sourceInvoke targetInvoke invokePrograms
       invokeFrames combinedArguments invokeFound sourceTooFew invokeRuntime with
     ⟨larger, sourceAfter, targetAfter, extension, sourceStep, targetStep,
       nextRelated⟩
-  have sourceRead : getLiveCell sourceState.runtime sourceLocation =
-      .ok sourceCell := by
-    simp [getLiveCell, sourceCellFound, sourceLive]
-  have targetRead : getLiveCell targetState.runtime targetLocation =
-      .ok targetCell := by
-    simp [getLiveCell, targetCellFound, targetLive]
   refine ⟨larger, sourceAfter, targetAfter, extension, ?_, ?_, nextRelated⟩
-  · simpa [sourceInvoke, coreStep, invokeClosure, sourceRead,
-      sourceObject] using sourceStep
-  · simpa [targetInvoke, coreStep, invokeClosure, targetRead,
-      targetObject] using targetStep
+  · simpa [sourceInvoke, coreStep, invokeClosure, sourceApplication]
+      using sourceStep
+  · simpa [targetInvoke, coreStep, invokeClosure, targetApplication]
+      using targetStep
 
 /-- Suspending a declaration-ready named external call preserves the target
 allocation ledger because request construction does not mutate either
@@ -15770,11 +16047,8 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_led
     (arguments : ArrayRel (ValueRel rho)
       sourceArguments targetArguments)
     (mapping : rho.forward sourceLocation = some targetLocation)
-    (sourceCellFound : findCell? sourceState.runtime.heap sourceLocation =
-      some sourceCell)
-    (sourceLive : sourceCell.live = true)
-    (sourceObject : sourceCell.object =
-      .closure name arity sourceFixed)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .ok (sourceRuntime, name, arity, sourceFixed))
     (sourceDeclFound : sourceState.program.findDecl? name =
       some sourceDeclaration)
     (sourceDeclValue : sourceDeclaration.value = .extern metadata)
@@ -15802,8 +16076,8 @@ theorem coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_led
   rcases
       coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
         sourceState targetState programs frames arguments mapping
-        sourceCellFound sourceLive sourceObject sourceDeclFound sourceDeclValue
-        sourceEnough sourceBinding runtime.runtime with
+        sourceApplication sourceDeclFound sourceDeclValue sourceEnough
+        sourceBinding runtime.runtime with
     ⟨sourceRequest, targetRequest, sourceWaiting, targetWaiting, requests,
       sourceStep, targetStep, waiting⟩
   have ledger :
@@ -20194,9 +20468,9 @@ def ReachableExternalSpecCompatible (externals : ExternalSpec)
     coreStep sourceBefore = .external sourceRequest sourceWaiting →
     coreStep targetBefore = .external targetRequest targetWaiting →
     ReachableMachineRelated fuel rho sourceWaiting targetWaiting →
-    externals sourceRequest sourceBefore.runtime sourceResponse →
+    externals sourceRequest sourceWaiting.runtime sourceResponse →
       ∃ targetResponse,
-        externals targetRequest targetBefore.runtime targetResponse ∧
+        externals targetRequest targetWaiting.runtime targetResponse ∧
         SomeReachableMachineRelated fuel
           (resumeExternal sourceRequest sourceWaiting sourceResponse)
           (resumeExternal targetRequest targetWaiting targetResponse)
@@ -20213,9 +20487,9 @@ def BinderReadyReachableExternalSpecCompatible
     coreStep targetBefore = .external targetRequest targetWaiting →
     BinderReadyReachableMachineRelated fuel rho
       sourceWaiting targetWaiting →
-    externals sourceRequest sourceBefore.runtime sourceResponse →
+    externals sourceRequest sourceWaiting.runtime sourceResponse →
       ∃ targetResponse,
-        externals targetRequest targetBefore.runtime targetResponse ∧
+        externals targetRequest targetWaiting.runtime targetResponse ∧
         SomeBinderReadyReachableMachineRelated fuel
           (resumeExternal sourceRequest sourceWaiting sourceResponse)
           (resumeExternal targetRequest targetWaiting targetResponse)
@@ -20234,10 +20508,10 @@ def LedgerBinderReadyReachableExternalSpecCompatible
     coreStep targetBefore = .external targetRequest targetWaiting →
     LedgerBinderReadyReachableMachineRelated fuel rho
       sourceWaiting targetWaiting →
-    externals sourceRequest sourceBefore.runtime sourceResponse →
+    externals sourceRequest sourceWaiting.runtime sourceResponse →
       ∃ larger targetResponse,
         RenamingExtends rho larger ∧
-        externals targetRequest targetBefore.runtime targetResponse ∧
+        externals targetRequest targetWaiting.runtime targetResponse ∧
         LedgerBinderReadyReachableMachineRelated fuel larger
           (resumeExternal sourceRequest sourceWaiting sourceResponse)
           (resumeExternal targetRequest targetWaiting targetResponse)
@@ -20368,7 +20642,7 @@ structure ReachableInvariantLaws (externals : ExternalSpec) (fuel : Nat)
     SomeReachableMachineRelated fuel sourceBefore targetBefore →
     invariant sourceBefore targetBefore →
     coreStep sourceBefore = .external request waiting →
-    externals request sourceBefore.runtime response →
+    externals request waiting.runtime response →
       ∃ targetAfter,
         NonLockstep.Reaches externals targetBefore targetAfter ∧
         SomeReachableMachineRelated fuel
@@ -36104,145 +36378,94 @@ theorem SomeReachableMachineRelated.matchInvokeValueNext
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_reachableRelated
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_reachableRelated
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              runtime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        cases sourceTransition'
+                        exact ⟨targetNext,
+                          by simpa only [targetSame] using targetStep,
+                          ⟨larger, nextRelated⟩⟩
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_reachableRelated
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       runtime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 cases sourceTransition'
                                 exact ⟨targetNext,
                                   by simpa only [targetSame] using targetStep,
-                                  ⟨larger, nextRelated⟩⟩
-                              · cases sourceBinding :
+                                  ⟨rho, nextRelated⟩⟩
+                            | extern sourceInfo =>
+                                have sourceBindingInvoke :
                                     bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_reachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨targetNext,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          ⟨rho, nextRelated⟩⟩
-                                    | extern sourceInfo =>
-                                        have sourceInvoke :
-                                            coreStep { source with
-                                              control := .invokeValue
-                                                (.object
-                                                  (.heap sourceLocation))
-                                                sourceArguments } =
-                                              invokeDecl { source with
-                                                control := .invokeValue
-                                                  (.object
-                                                    (.heap sourceLocation))
-                                                  sourceArguments }
-                                                name
-                                                (sourceFixed ++
-                                                  sourceArguments) := by
-                                          simp [coreStep, invokeClosure,
-                                            getLiveCell, sourceCellFound,
-                                            sourceLive, sourceObject]
-                                        rw [sourceInvoke] at sourceTransition'
-                                        unfold invokeDecl at sourceTransition'
-                                        rw [sourceDeclFound]
-                                          at sourceTransition'
-                                        simp only at sourceTransition'
-                                        rw [if_neg sourceTooFew, sourceBinding,
-                                          sourceValue] at sourceTransition'
-                                        contradiction
+                                        (sourceFixed.extract 0
+                                            sourceDeclaration.params.size ++
+                                          sourceArguments.extract 0
+                                            (sourceDeclaration.params.size -
+                                              sourceFixed.size)) =
+                                      .ok sourceEnv := by
+                                  simpa only [Array.extract_append,
+                                    Nat.zero_sub] using sourceBinding
+                                simp [coreStep, invokeClosure,
+                                  sourceApplication, invokeDecl,
+                                  sourceDeclFound, sourceEnoughInvoke,
+                                  sourceBindingInvoke, sourceValue]
+                                  at sourceTransition'
 
 /-- Hereditary closure-call matcher for every internal transition.  Live
 mapped closures either allocate a related partial application under an
@@ -36302,145 +36525,94 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeValueNext
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              runtime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        cases sourceTransition'
+                        exact ⟨targetNext,
+                          by simpa only [targetSame] using targetStep,
+                          ⟨larger, nextRelated⟩⟩
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       runtime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 cases sourceTransition'
                                 exact ⟨targetNext,
                                   by simpa only [targetSame] using targetStep,
-                                  ⟨larger, nextRelated⟩⟩
-                              · cases sourceBinding :
+                                  ⟨rho, nextRelated⟩⟩
+                            | extern sourceInfo =>
+                                have sourceBindingInvoke :
                                     bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨targetNext,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          ⟨rho, nextRelated⟩⟩
-                                    | extern sourceInfo =>
-                                        have sourceInvoke :
-                                            coreStep { source with
-                                              control := .invokeValue
-                                                (.object
-                                                  (.heap sourceLocation))
-                                                sourceArguments } =
-                                              invokeDecl { source with
-                                                control := .invokeValue
-                                                  (.object
-                                                    (.heap sourceLocation))
-                                                  sourceArguments }
-                                                name
-                                                (sourceFixed ++
-                                                  sourceArguments) := by
-                                          simp [coreStep, invokeClosure,
-                                            getLiveCell, sourceCellFound,
-                                            sourceLive, sourceObject]
-                                        rw [sourceInvoke] at sourceTransition'
-                                        unfold invokeDecl at sourceTransition'
-                                        rw [sourceDeclFound]
-                                          at sourceTransition'
-                                        simp only at sourceTransition'
-                                        rw [if_neg sourceTooFew, sourceBinding,
-                                          sourceValue] at sourceTransition'
-                                        contradiction
+                                        (sourceFixed.extract 0
+                                            sourceDeclaration.params.size ++
+                                          sourceArguments.extract 0
+                                            (sourceDeclaration.params.size -
+                                              sourceFixed.size)) =
+                                      .ok sourceEnv := by
+                                  simpa only [Array.extract_append,
+                                    Nat.zero_sub] using sourceBinding
+                                simp [coreStep, invokeClosure,
+                                  sourceApplication, invokeDecl,
+                                  sourceDeclFound, sourceEnoughInvoke,
+                                  sourceBindingInvoke, sourceValue]
+                                  at sourceTransition'
 
 /-- The exact value-call relation publishes the dynamic source arguments as
 control roots. Combined with the heap carrier's bound on closure-owned fixed
@@ -36628,145 +36800,94 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueNext
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_ledger
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_ledger
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              ledgerRuntime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        cases sourceTransition'
+                        exact ⟨targetNext,
+                          by simpa only [targetSame] using targetStep,
+                          ⟨larger, nextRelated⟩⟩
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledger
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       ledgerRuntime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 cases sourceTransition'
                                 exact ⟨targetNext,
                                   by simpa only [targetSame] using targetStep,
-                                  ⟨larger, nextRelated⟩⟩
-                              · cases sourceBinding :
+                                  ⟨rho, nextRelated⟩⟩
+                            | extern sourceInfo =>
+                                have sourceBindingInvoke :
                                     bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledger
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              ledgerRuntime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨targetNext,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          ⟨rho, nextRelated⟩⟩
-                                    | extern sourceInfo =>
-                                        have sourceInvoke :
-                                            coreStep { source with
-                                              control := .invokeValue
-                                                (.object
-                                                  (.heap sourceLocation))
-                                                sourceArguments } =
-                                              invokeDecl { source with
-                                                control := .invokeValue
-                                                  (.object
-                                                    (.heap sourceLocation))
-                                                  sourceArguments }
-                                                name
-                                                (sourceFixed ++
-                                                  sourceArguments) := by
-                                          simp [coreStep, invokeClosure,
-                                            getLiveCell, sourceCellFound,
-                                            sourceLive, sourceObject]
-                                        rw [sourceInvoke] at sourceTransition'
-                                        unfold invokeDecl at sourceTransition'
-                                        rw [sourceDeclFound]
-                                          at sourceTransition'
-                                        simp only at sourceTransition'
-                                        rw [if_neg sourceTooFew, sourceBinding,
-                                          sourceValue] at sourceTransition'
-                                        contradiction
+                                        (sourceFixed.extract 0
+                                            sourceDeclaration.params.size ++
+                                          sourceArguments.extract 0
+                                            (sourceDeclaration.params.size -
+                                              sourceFixed.size)) =
+                                      .ok sourceEnv := by
+                                  simpa only [Array.extract_append,
+                                    Nat.zero_sub] using sourceBinding
+                                simp [coreStep, invokeClosure,
+                                  sourceApplication, invokeDecl,
+                                  sourceDeclFound, sourceEnoughInvoke,
+                                  sourceBindingInvoke, sourceValue]
+                                  at sourceTransition'
 
 /-- State-level closure-call matcher for an external source transition.
 The only surviving control path is a live mapped closure whose fully applied
@@ -36827,132 +36948,83 @@ theorem SomeReachableMachineRelated.matchInvokeValueExternal
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_reachableRelated
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_reachableRelated
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              runtime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        contradiction
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_reachableRelated
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       runtime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 contradiction
-                              · cases sourceBinding :
-                                    bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_reachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        contradiction
-                                    | extern sourceInfo =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundExtern_reachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨matchedSourceRequest, targetRequest,
-                                            matchedSourceWaiting,
-                                            targetWaiting, requests,
-                                            sourceStep, targetStep, waiting⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨rho, targetRequest,
-                                          targetWaiting, requests,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          waiting⟩
+                            | extern sourceInfo =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundExtern_reachableRelated
+                                      source target programs frames arguments
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
+                                      runtime with
+                                  ⟨matchedSourceRequest, targetRequest,
+                                    matchedSourceWaiting, targetWaiting,
+                                    requests, sourceStep, targetStep, waiting⟩
+                                rw [sourceStep] at sourceTransition'
+                                cases sourceTransition'
+                                exact ⟨rho, targetRequest, targetWaiting,
+                                  requests,
+                                  by simpa only [targetSame] using targetStep,
+                                  waiting⟩
 
 /-- Hereditary closure-call matcher for an external source transition.  The
 only surviving branch is a fully applied external declaration, whose paired
@@ -37014,132 +37086,83 @@ theorem SomeBinderReadyReachableMachineRelated.matchInvokeValueExternal
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              runtime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        contradiction
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       runtime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 contradiction
-                              · cases sourceBinding :
-                                    bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        contradiction
-                                    | extern sourceInfo =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨matchedSourceRequest, targetRequest,
-                                            matchedSourceWaiting,
-                                            targetWaiting, requests,
-                                            sourceStep, targetStep, waiting⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨rho, targetRequest,
-                                          targetWaiting, requests,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          waiting⟩
+                            | extern sourceInfo =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated
+                                      source target programs frames arguments
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
+                                      runtime with
+                                  ⟨matchedSourceRequest, targetRequest,
+                                    matchedSourceWaiting, targetWaiting,
+                                    requests, sourceStep, targetStep, waiting⟩
+                                rw [sourceStep] at sourceTransition'
+                                cases sourceTransition'
+                                exact ⟨rho, targetRequest, targetWaiting,
+                                  requests,
+                                  by simpa only [targetSame] using targetStep,
+                                  waiting⟩
 
 /-- Ledger-aware closure-call matcher for external suspension. The live
 closure lookup and foreign request construction retain the exact target
@@ -37211,132 +37234,83 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.matchInvokeValueExternal
           | reuseSome mapping =>
               simp [coreStep, invokeClosure, fail] at sourceTransition'
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  simp [coreStep, invokeClosure, getLiveCell,
-                    sourceCellFound, fail] at sourceTransition'
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      simp [coreStep, invokeClosure, getLiveCell,
-                        sourceCellFound, sourceLive, fail]
-                        at sourceTransition'
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | boxed type value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | string value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | natural value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | integer value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | byteArray value =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | «opaque» typeName =>
-                          simp [coreStep, invokeClosure, getLiveCell,
-                            sourceCellFound, sourceLive, sourceObject, fail]
-                            at sourceTransition'
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              simp [coreStep, invokeClosure, getLiveCell,
-                                sourceCellFound, sourceLive, sourceObject,
-                                invokeDecl, sourceDeclFound, fail]
-                                at sourceTransition'
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_ledger
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error fault =>
+                  simp [coreStep, invokeClosure, sourceApplication, fail]
+                    at sourceTransition'
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      simp [coreStep, invokeClosure, sourceApplication,
+                        invokeDecl, sourceDeclFound, fail] at sourceTransition'
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_binderReadyReachableRelated_ledger
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              ledgerRuntime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at sourceTransition'
+                        contradiction
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have sourceEnoughInvoke :
+                                ¬ sourceFixed.size + sourceArguments.size <
+                                    sourceDeclaration.params.size := by
+                              simpa only [Array.size_append]
+                                using sourceTooFew
+                            have sourceBindingInvoke :
+                                bindParams sourceDeclaration.params
+                                    (sourceFixed.extract 0
+                                        sourceDeclaration.params.size ++
+                                      sourceArguments.extract 0
+                                        (sourceDeclaration.params.size -
+                                          sourceFixed.size)) =
+                                  .error fault := by
+                              simpa only [Array.extract_append, Nat.zero_sub]
+                                using sourceBinding
+                            simp [coreStep, invokeClosure, sourceApplication,
+                              invokeDecl, sourceDeclFound, sourceEnoughInvoke,
+                              sourceBindingInvoke, fail] at sourceTransition'
+                        | ok sourceEnv =>
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledger
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       ledgerRuntime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at sourceTransition'
                                 contradiction
-                              · cases sourceBinding :
-                                    bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have sourceInvoke :
-                                        coreStep { source with
-                                          control := .invokeValue
-                                            (.object (.heap sourceLocation))
-                                            sourceArguments } =
-                                          invokeDecl { source with
-                                            control := .invokeValue
-                                              (.object (.heap sourceLocation))
-                                              sourceArguments }
-                                            name
-                                            (sourceFixed ++
-                                              sourceArguments) := by
-                                      simp [coreStep, invokeClosure,
-                                        getLiveCell, sourceCellFound,
-                                        sourceLive, sourceObject]
-                                    rw [sourceInvoke] at sourceTransition'
-                                    unfold invokeDecl at sourceTransition'
-                                    rw [sourceDeclFound] at sourceTransition'
-                                    simp only at sourceTransition'
-                                    rw [if_neg sourceTooFew, sourceBinding]
-                                      at sourceTransition'
-                                    contradiction
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_binderReadyReachableRelated_ledger
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              ledgerRuntime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        contradiction
-                                    | extern sourceInfo =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_ledger
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              ledgerRuntime with
-                                          ⟨matchedSourceRequest, targetRequest,
-                                            matchedSourceWaiting,
-                                            targetWaiting, requests,
-                                            sourceStep, targetStep, waiting⟩
-                                        rw [sourceStep] at sourceTransition'
-                                        cases sourceTransition'
-                                        exact ⟨rho, targetRequest,
-                                          targetWaiting, requests,
-                                          by simpa only [targetSame] using
-                                            targetStep,
-                                          waiting⟩
+                            | extern sourceInfo =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundExtern_binderReadyReachableRelated_ledger
+                                      source target programs frames arguments
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
+                                      ledgerRuntime with
+                                  ⟨matchedSourceRequest, targetRequest,
+                                    matchedSourceWaiting, targetWaiting,
+                                    requests, sourceStep, targetStep, waiting⟩
+                                rw [sourceStep] at sourceTransition'
+                                cases sourceTransition'
+                                exact ⟨rho, targetRequest, targetWaiting,
+                                  requests,
+                                  by simpa only [targetSame] using targetStep,
+                                  waiting⟩
 
 /-- Match a named external call through its allocation-capable response.
 Request suspension preserves the incoming ledger; the foreign compatibility
@@ -37352,7 +37326,7 @@ theorem
     (sourceTransition :
       coreStep source = .external sourceRequest sourceWaiting)
     (externalProof :
-      externals sourceRequest source.runtime sourceResponse) :
+      externals sourceRequest sourceWaiting.runtime sourceResponse) :
     ∃ larger targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       LedgerBinderReadyReachableMachineRelated fuel larger
@@ -37384,7 +37358,7 @@ theorem
     (sourceTransition :
       coreStep source = .external sourceRequest sourceWaiting)
     (externalProof :
-      externals sourceRequest source.runtime sourceResponse) :
+      externals sourceRequest sourceWaiting.runtime sourceResponse) :
     ∃ larger targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       LedgerBinderReadyReachableMachineRelated fuel larger
@@ -37401,6 +37375,67 @@ theorem
     NonLockstep.reaches_of_step
       (.external targetTransition targetExternal),
     resumedRelated⟩
+
+/-- A closure-application fault is related before declaration dispatch. The
+operation is transactional on failure, so both observations are made in the
+incoming related runtimes. -/
+theorem coreStep_invokeValue_closure_applicationFault_terminal
+    (sourceState targetState : MachineState)
+    (arguments : ArrayRel (ValueRel rho)
+      sourceArguments targetArguments)
+    (frames : ListRel (ValueRel rho)
+      sourceFrameRoots targetFrameRoots)
+    (mapping : rho.forward sourceLocation = some targetLocation)
+    (sourceApplication : takeClosureApplication sourceState.runtime
+      sourceLocation = .error sourceFault)
+    (runtime : ShadowRuntimeRel rho sourceState.runtime targetState.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots))
+    (done : coreStep { sourceState with
+      control := .invokeValue (.object (.heap sourceLocation))
+        sourceArguments } = .done sourceObservation) :
+    ∃ targetObservation,
+      EvaluatesState externals
+        { targetState with
+          control := .invokeValue (.object (.heap targetLocation))
+            targetArguments }
+        targetObservation ∧
+      ObservationRel sourceObservation targetObservation := by
+  let sourceInvoke := { sourceState with
+    control := .invokeValue (.object (.heap sourceLocation))
+      sourceArguments }
+  let targetInvoke := { targetState with
+    control := .invokeValue (.object (.heap targetLocation))
+      targetArguments }
+  have invokeRuntime : ShadowRuntimeRel rho
+      sourceInvoke.runtime targetInvoke.runtime
+      ((.object (.heap sourceLocation) :: sourceArguments.toList) ++
+        sourceFrameRoots)
+      ((.object (.heap targetLocation) :: targetArguments.toList) ++
+        targetFrameRoots) := by
+    simpa [sourceInvoke, targetInvoke] using runtime
+  have applications := runtime.takeClosureApplicationBoth_related
+    mapping arguments frames
+  rw [sourceApplication] at applications
+  cases targetApplication :
+      takeClosureApplication targetState.runtime targetLocation with
+  | ok application =>
+      rw [targetApplication] at applications
+      cases applications
+  | error targetFault =>
+      rw [targetApplication] at applications
+      cases applications with
+      | error faults =>
+          have terminal := relatedFaultRel_terminal
+            (externals := externals) invokeRuntime faults
+            (by simp [sourceInvoke, coreStep, invokeClosure,
+              sourceApplication, fail])
+            (by simp [targetInvoke, coreStep, invokeClosure,
+              targetApplication, fail])
+            (by simpa [sourceInvoke] using done)
+          simpa [sourceInvoke, targetInvoke] using terminal
 
 /-- State-level terminal dispatcher for closure calls.  Invalid immediate
 callees, mapped dead cells, live non-closures, unknown declarations, and
@@ -37482,173 +37517,84 @@ theorem SomeReachableMachineRelated.invokeValue_terminal
                 intro location equality
                 cases equality)
           | @heap sourceLocation targetLocation mapping =>
-              cases sourceCellFound :
-                  findCell? source.runtime.heap sourceLocation with
-              | none =>
-                  have sourceReachable : Reachable source.runtime.heap
-                      (runtimeRoots source.runtime
-                        ((.object (.heap sourceLocation) ::
-                          sourceArguments.toList) ++ sourceFrameRoots))
-                      sourceLocation := by
-                    apply Reachable.root
-                    apply extra_subset_runtimeRoots
-                    exact List.mem_append_left _ List.mem_cons_self
-                  rcases runtime.heap.1 sourceLocation sourceReachable with
-                    ⟨mapped, sourceCell, targetCell, mappedEq,
-                      sourceFound, targetFound, cells⟩
-                  rw [sourceCellFound] at sourceFound
-                  contradiction
-              | some sourceCell =>
-                  cases sourceLive : sourceCell.live with
-                  | false =>
-                      have terminal := coreStep_invokeValue_dead_terminal
-                        (externals := externals) source target mapping
-                        sourceCellFound sourceLive runtime done'
+              cases sourceApplication :
+                  takeClosureApplication source.runtime sourceLocation with
+              | error sourceFault =>
+                  have terminal :=
+                    coreStep_invokeValue_closure_applicationFault_terminal
+                      (externals := externals) source target arguments
+                      frames.roots mapping sourceApplication runtime done'
+                  simpa only [targetSame] using terminal
+              | ok application =>
+                  obtain ⟨sourceRuntime, name, arity, sourceFixed⟩ :=
+                    application
+                  cases sourceDeclFound : source.program.findDecl? name with
+                  | none =>
+                      have terminal :=
+                        coreStep_invokeValue_closure_unknown_terminal
+                          (externals := externals) source target programs
+                          frames arguments mapping sourceApplication
+                          sourceDeclFound runtime done'
                       simpa only [targetSame] using terminal
-                  | true =>
-                      cases sourceObject : sourceCell.object with
-                      | ctor object =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | boxed type value =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | string value =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | natural value =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | integer value =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | byteArray value =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | «opaque» typeName =>
-                          have terminal :=
-                            coreStep_invokeValue_liveNonClosure_terminal
-                              (externals := externals) source target mapping
-                              sourceCellFound sourceLive (by
-                                intro name arity fixed equality
-                                rw [sourceObject] at equality
-                                cases equality) runtime done'
-                          simpa only [targetSame] using terminal
-                      | closure name arity sourceFixed =>
-                          cases sourceDeclFound :
-                              source.program.findDecl? name with
-                          | none =>
-                              have terminal :=
-                                coreStep_invokeValue_closure_unknown_terminal
-                                  (externals := externals) source target
-                                  programs frames arguments mapping
-                                  sourceCellFound sourceLive sourceObject
-                                  sourceDeclFound runtime done'
-                              simpa only [targetSame] using terminal
-                          | some sourceDeclaration =>
-                              by_cases sourceTooFew :
-                                  (sourceFixed ++ sourceArguments).size <
-                                    sourceDeclaration.params.size
-                              · rcases
-                                    coreStep_invokeValue_closure_foundPartial_reachableRelated
+                  | some sourceDeclaration =>
+                      by_cases sourceTooFew :
+                          (sourceFixed ++ sourceArguments).size <
+                            sourceDeclaration.params.size
+                      · rcases
+                            coreStep_invokeValue_closure_foundPartial_reachableRelated
+                              source target programs frames arguments mapping
+                              sourceApplication sourceDeclFound sourceTooFew
+                              runtime with
+                          ⟨larger, sourceNext, targetNext, extension,
+                            sourceStep, targetStep, nextRelated⟩
+                        rw [sourceStep] at done'
+                        contradiction
+                      · cases sourceBinding :
+                            bindParams sourceDeclaration.params
+                              ((sourceFixed ++ sourceArguments).extract 0
+                                sourceDeclaration.params.size) with
+                        | error fault =>
+                            have terminal :=
+                              coreStep_invokeValue_closure_bindingFault_terminal
+                                (externals := externals) source target programs
+                                frames arguments mapping sourceApplication
+                                sourceDeclFound sourceTooFew sourceBinding
+                                runtime done'
+                            simpa only [targetSame] using terminal
+                        | ok sourceEnv =>
+                            cases sourceValue : sourceDeclaration.value with
+                            | code sourceCode =>
+                                rcases
+                                    coreStep_invokeValue_closure_foundCode_reachableRelated
                                       source target programs frames arguments
-                                      mapping sourceCellFound sourceLive
-                                      sourceObject sourceDeclFound sourceTooFew
+                                      mapping sourceApplication sourceDeclFound
+                                      sourceValue sourceTooFew sourceBinding
                                       runtime with
-                                  ⟨larger, sourceNext, targetNext, extension,
-                                    sourceStep, targetStep, nextRelated⟩
+                                  ⟨sourceNext, targetNext, sourceStep,
+                                    targetStep, nextRelated⟩
                                 rw [sourceStep] at done'
                                 contradiction
-                              · cases sourceBinding :
+                            | extern sourceInfo =>
+                                have sourceEnoughInvoke :
+                                    ¬ sourceFixed.size +
+                                        sourceArguments.size <
+                                      sourceDeclaration.params.size := by
+                                  simpa only [Array.size_append]
+                                    using sourceTooFew
+                                have sourceBindingInvoke :
                                     bindParams sourceDeclaration.params
-                                      ((sourceFixed ++ sourceArguments).extract
-                                        0 sourceDeclaration.params.size) with
-                                | error fault =>
-                                    have terminal :=
-                                      coreStep_invokeValue_closure_bindingFault_terminal
-                                        (externals := externals) source target
-                                        programs frames arguments mapping
-                                        sourceCellFound sourceLive sourceObject
-                                        sourceDeclFound sourceTooFew
-                                        sourceBinding runtime done'
-                                    simpa only [targetSame] using terminal
-                                | ok sourceEnv =>
-                                    cases sourceValue :
-                                        sourceDeclaration.value with
-                                    | code sourceCode =>
-                                        rcases
-                                            coreStep_invokeValue_closure_foundCode_reachableRelated
-                                              source target programs frames
-                                              arguments mapping sourceCellFound
-                                              sourceLive sourceObject
-                                              sourceDeclFound sourceValue
-                                              sourceTooFew sourceBinding
-                                              runtime with
-                                          ⟨sourceNext, targetNext, sourceStep,
-                                            targetStep, nextRelated⟩
-                                        rw [sourceStep] at done'
-                                        contradiction
-                                    | extern sourceInfo =>
-                                        have sourceInvoke :
-                                            coreStep { source with
-                                              control := .invokeValue
-                                                (.object
-                                                  (.heap sourceLocation))
-                                                sourceArguments } =
-                                              invokeDecl { source with
-                                                control := .invokeValue
-                                                  (.object
-                                                    (.heap sourceLocation))
-                                                  sourceArguments }
-                                                name
-                                                (sourceFixed ++
-                                                  sourceArguments) := by
-                                          simp [coreStep, invokeClosure,
-                                            getLiveCell, sourceCellFound,
-                                            sourceLive, sourceObject]
-                                        rw [sourceInvoke] at done'
-                                        unfold invokeDecl at done'
-                                        rw [sourceDeclFound] at done'
-                                        simp only at done'
-                                        rw [if_neg sourceTooFew, sourceBinding,
-                                          sourceValue] at done'
-                                        contradiction
+                                        (sourceFixed.extract 0
+                                            sourceDeclaration.params.size ++
+                                          sourceArguments.extract 0
+                                            (sourceDeclaration.params.size -
+                                              sourceFixed.size)) =
+                                      .ok sourceEnv := by
+                                  simpa only [Array.extract_append,
+                                    Nat.zero_sub] using sourceBinding
+                                simp [coreStep, invokeClosure,
+                                  sourceApplication, invokeDecl,
+                                  sourceDeclFound, sourceEnoughInvoke,
+                                  sourceBindingInvoke, sourceValue] at done'
 
 /-- A retained join declaration takes the same administrative step on both
 sides and installs related declaration bodies under the common identifier. -/
@@ -44043,7 +43989,7 @@ theorem SomeBinderReadyReachableMachineRelated.matchExternalStep_of_ready
       BinderReadyReachableExternalSpecCompatible externals fuel)
     (ready : BinderReadyReachableMachineReadyAt fuel source target)
     (transition : coreStep source = .external request waiting)
-    (externalProof : externals request source.runtime response) :
+    (externalProof : externals request waiting.runtime response) :
     ∃ targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       SomeBinderReadyReachableMachineRelated fuel
@@ -44166,7 +44112,7 @@ theorem
       LedgerBinderReadyReachableExternalSpecCompatible externals fuel)
     (ready : LedgerBinderReadyReachableMachineReadyAt fuel source target)
     (transition : coreStep source = .external request waiting)
-    (externalProof : externals request source.runtime response) :
+    (externalProof : externals request waiting.runtime response) :
     ∃ targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       SomeLedgerBinderReadyReachableMachineRelated fuel
@@ -44555,7 +44501,7 @@ theorem
     (ready : BinderReadyReachableMachineReadyAt fuel source target)
     (ownership : SourceMachineOwnershipBelowFrontier source)
     (transition : coreStep source = .external request waiting)
-    (externalProof : externals request source.runtime response) :
+    (externalProof : externals request waiting.runtime response) :
     ∃ targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       SomeBinderReadyReachableMachineRelated fuel
@@ -44574,24 +44520,8 @@ theorem
       have waitingOwnership :=
         related.sourceOwnership_matchInvokeNameExternalWaiting
           ownership sourceControl transition
-      have sourceSame :
-          { source with
-            control := .invokeName name sourceArguments } = source := by
-        cases source
-        simp_all
-      have waitingRuntime :
-          waiting.runtime = source.runtime :=
-        coreStep_invokeName_external_runtime_eq
-          (state := source) (waiting := waiting)
-          (name := name) (arguments := sourceArguments)
-          (request := request)
-          (step := by simpa only [sourceSame] using transition)
-      have waitingExternal :
-          externals request waiting.runtime response := by
-        rw [waitingRuntime]
-        exact externalProof
       have afterOwnership :=
-        waitingOwnership.resumeExternal sourceCompatible waitingExternal
+        waitingOwnership.resumeExternal sourceCompatible externalProof
       rcases related.matchInvokeNameExternal sourceControl transition with
         ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
           waitingRelated⟩
@@ -44606,25 +44536,8 @@ theorem
       have waitingOwnership :=
         related.sourceOwnership_matchInvokeValueExternalWaiting
           ownership sourceControl transition
-      have sourceSame :
-          { source with
-            control :=
-              .invokeValue sourceFunction sourceArguments } = source := by
-        cases source
-        simp_all
-      have waitingRuntime :
-          waiting.runtime = source.runtime :=
-        coreStep_invokeValue_external_runtime_eq
-          (state := source) (waiting := waiting)
-          (function := sourceFunction) (arguments := sourceArguments)
-          (request := request)
-          (step := by simpa only [sourceSame] using transition)
-      have waitingExternal :
-          externals request waiting.runtime response := by
-        rw [waitingRuntime]
-        exact externalProof
       have afterOwnership :=
-        waitingOwnership.resumeExternal sourceCompatible waitingExternal
+        waitingOwnership.resumeExternal sourceCompatible externalProof
       rcases related.matchInvokeValueExternal sourceControl transition with
         ⟨rho, targetRequest, targetWaiting, requests, targetTransition,
           waitingRelated⟩
@@ -44697,48 +44610,14 @@ theorem SomeBinderReadyReachableMachineRelated.sourceOwnership_step
           have waitingOwnership :=
             related.sourceOwnership_matchInvokeNameExternalWaiting
               ownership sourceControl transition
-          have sourceSame :
-              { source with
-                control := .invokeName name sourceArguments } = source := by
-            cases source
-            simp_all
-          have waitingRuntime :
-              waiting.runtime = source.runtime :=
-            coreStep_invokeName_external_runtime_eq
-              (state := source) (waiting := waiting)
-              (name := name) (arguments := sourceArguments)
-              (request := request)
-              (step := by simpa only [sourceSame] using transition)
-          have waitingExternal :
-              externals request waiting.runtime response := by
-            rw [waitingRuntime]
-            exact externalProof
           exact waitingOwnership.resumeExternal
-            sourceCompatible waitingExternal
+            sourceCompatible externalProof
       | invokeValue sourceFunction sourceArguments =>
           have waitingOwnership :=
             related.sourceOwnership_matchInvokeValueExternalWaiting
               ownership sourceControl transition
-          have sourceSame :
-              { source with
-                control :=
-                  .invokeValue sourceFunction sourceArguments } = source := by
-            cases source
-            simp_all
-          have waitingRuntime :
-              waiting.runtime = source.runtime :=
-            coreStep_invokeValue_external_runtime_eq
-              (state := source) (waiting := waiting)
-              (function := sourceFunction)
-              (arguments := sourceArguments)
-              (request := request)
-              (step := by simpa only [sourceSame] using transition)
-          have waitingExternal :
-              externals request waiting.runtime response := by
-            rw [waitingRuntime]
-            exact externalProof
           exact waitingOwnership.resumeExternal
-            sourceCompatible waitingExternal
+            sourceCompatible externalProof
 
 /-- Unified ownership-preserving non-lockstep dispatcher for an arbitrary
 source semantic step. Compiler readiness handles internal execution; external
@@ -44914,7 +44793,7 @@ theorem SomeReachableMachineRelated.matchExternalStep_of_ready
     (compatible : ReachableExternalSpecCompatible externals fuel)
     (ready : ReachableMachineReadyAt fuel source target)
     (transition : coreStep source = .external request waiting)
-    (externalProof : externals request source.runtime response) :
+    (externalProof : externals request waiting.runtime response) :
     ∃ targetAfter,
       NonLockstep.Reaches externals target targetAfter ∧
       SomeReachableMachineRelated fuel

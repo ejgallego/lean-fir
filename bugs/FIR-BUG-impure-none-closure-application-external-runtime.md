@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-impure-none-closure-application-external-runtime
-status: candidate
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: dbd7d934863ada33d50b6db82ad89164793f5f03
@@ -9,7 +9,7 @@ pass: none
 discovered-by: proof
 first-seen: 2026-08-01
 reproduction: Fir/LeanIR/Interpreter.lean
-regression: none
+regression: Fir/LeanIR/Passes/ElimDeadExamples.lean
 ---
 
 # Summary
@@ -98,4 +98,13 @@ none
 
 ## Resolution and regression
 
-unresolved
+Resolved by corrected shared-contract base
+`89fda41ae9d347aadc00bb1a6f18f7451d1e24f2`: external execution and
+`Step.external` now pass the suspended waiting runtime. The proof cone now
+relates exclusive, shared, and persistent closure application results through
+the ownership transition, and the external fixtures assert that exclusive
+closures remain consumed while waiting and after response.
+
+Regression coverage lives in
+`Fir/LeanIR/Passes/ElimDeadExamples.lean`; the dependency cone
+`Fir.LeanIR.Passes.ElimDeadExamples` builds successfully.

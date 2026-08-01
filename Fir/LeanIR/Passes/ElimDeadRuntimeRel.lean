@@ -3227,6 +3227,80 @@ theorem ShadowRuntimeRel.reindexClosureCall
     exact reachable_monoRootReachability
       (closureCallRoots_reachable rightFound rightObject) reachable
 
+/-- Keep the consumed closure reference alongside the fixed and fresh call
+arguments.  External waiting states still carry the original `invokeValue`
+control even though declaration execution consumes only the call arguments. -/
+theorem ShadowRuntimeRel.reindexClosureApplication
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftArguments.toList) ++
+        leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightArguments.toList) ++
+        rightFrameRoots))
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (leftFound : findCell? left.heap leftLocation = some leftCell)
+    (rightFound : findCell? right.heap rightLocation = some rightCell)
+    (leftObject : leftCell.object =
+      .closure name arity leftFixed)
+    (rightObject : rightCell.object =
+      .closure name arity rightFixed)
+    (fixed : ArrayRel (ValueRel rho) leftFixed rightFixed)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots) :
+    ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) ::
+          (leftFixed ++ leftArguments).toList) ++ leftFrameRoots)
+      ((.object (.heap rightLocation) ::
+          (rightFixed ++ rightArguments).toList) ++ rightFrameRoots) := by
+  apply related.reindexExtra
+    (listRel_append
+      (.cons (.heap mapping)
+        (arrayRel_append fixed arguments))
+      frames)
+  · intro location reachable
+    apply reachable_monoRootReachability ?_ reachable
+    intro candidate member
+    simp only [runtimeRoots, Array.toList_append, List.mem_append,
+      List.mem_cons] at member
+    rcases member with
+      ((closureOrCall | frameRoot) | globalRoot) | traceRoot
+    · rcases closureOrCall with closureRoot | fixedOrArgument
+      · cases closureRoot
+        exact .root (by simp [runtimeRoots])
+      rcases fixedOrArgument with fixedRoot | argumentRoot
+      · have closureReachable : Reachable left.heap
+            (runtimeRoots left
+              ((.object (.heap leftLocation) :: leftArguments.toList) ++
+                leftFrameRoots)) leftLocation :=
+          .root (by simp [runtimeRoots])
+        exact .child closureReachable leftFound
+          (by simpa [leftObject, HeapObject.ownedValues] using fixedRoot) rfl
+      · exact .root (by simp [runtimeRoots, argumentRoot])
+    · exact .root (by simp [runtimeRoots, frameRoot])
+    · exact .root (by simp [runtimeRoots, globalRoot])
+    · exact .root (by simp [runtimeRoots, traceRoot])
+  · intro location reachable
+    apply reachable_monoRootReachability ?_ reachable
+    intro candidate member
+    simp only [runtimeRoots, Array.toList_append, List.mem_append,
+      List.mem_cons] at member
+    rcases member with
+      ((closureOrCall | frameRoot) | globalRoot) | traceRoot
+    · rcases closureOrCall with closureRoot | fixedOrArgument
+      · cases closureRoot
+        exact .root (by simp [runtimeRoots])
+      rcases fixedOrArgument with fixedRoot | argumentRoot
+      · have closureReachable : Reachable right.heap
+            (runtimeRoots right
+              ((.object (.heap rightLocation) :: rightArguments.toList) ++
+                rightFrameRoots)) rightLocation :=
+          .root (by simp [runtimeRoots])
+        exact .child closureReachable rightFound
+          (by simpa [rightObject, HeapObject.ownedValues] using fixedRoot) rfl
+      · exact .root (by simp [runtimeRoots, argumentRoot])
+    · exact .root (by simp [runtimeRoots, frameRoot])
+    · exact .root (by simp [runtimeRoots, globalRoot])
+    · exact .root (by simp [runtimeRoots, traceRoot])
+
 /-- Results of reading a live constructor preserve the concrete heap
 location, the complete cell relation, and the constructor payload relation. -/
 def ConstructorReadRel (rho : AddressRenaming) :
@@ -6284,6 +6358,7 @@ fixed arguments, while relating the ownership-adjusted runtimes under the
 call roots consumed by `invokeDecl`. -/
 def ClosureApplicationResultRel
     (rho : AddressRenaming)
+    (leftLocation rightLocation : Location)
     (leftArguments rightArguments : Array Value)
     (leftFrameRoots rightFrameRoots : List Value) :
     (RuntimeState × Name × Nat × Array Value) →
@@ -6294,8 +6369,10 @@ def ClosureApplicationResultRel
       leftArity = rightArity ∧
       ArrayRel (ValueRel rho) leftFixed rightFixed ∧
       ShadowRuntimeRel rho leftRuntime rightRuntime
-        ((leftFixed ++ leftArguments).toList ++ leftFrameRoots)
-        ((rightFixed ++ rightArguments).toList ++ rightFrameRoots)
+        ((.object (.heap leftLocation) ::
+          (leftFixed ++ leftArguments).toList) ++ leftFrameRoots)
+        ((.object (.heap rightLocation) ::
+          (rightFixed ++ rightArguments).toList) ++ rightFrameRoots)
 
 /-- Applying mapped closure roots performs matching ownership transitions.
 Exclusive closures transfer their captures and die, shared closures decrement
@@ -6310,8 +6387,8 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
     (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
     (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots) :
     ExceptRel (RuntimeFaultRel rho)
-      (ClosureApplicationResultRel rho leftArguments rightArguments
-        leftFrameRoots rightFrameRoots)
+      (ClosureApplicationResultRel rho leftLocation rightLocation
+        leftArguments rightArguments leftFrameRoots rightFrameRoots)
       (takeClosureApplication left leftLocation)
       (takeClosureApplication right rightLocation) := by
   have throwEq (fault : RuntimeFault) {α : Type} :
@@ -6336,8 +6413,8 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
         leftLive, rightLive, Bind.bind, Except.bind] using
         (ExceptRel.error (RuntimeFaultRel.deadObject mapping) :
           ExceptRel (RuntimeFaultRel rho)
-            (ClosureApplicationResultRel rho leftArguments rightArguments
-              leftFrameRoots rightFrameRoots)
+            (ClosureApplicationResultRel rho leftLocation rightLocation
+              leftArguments rightArguments leftFrameRoots rightFrameRoots)
             (.error (.deadObject leftLocation))
             (.error (.deadObject rightLocation)))
   | true =>
@@ -6347,13 +6424,13 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
       generalize rightObjectEq : rightCell.object = rightObject at objects
       have expectedClosureRelated :
           ExceptRel (RuntimeFaultRel rho)
-            (ClosureApplicationResultRel rho leftArguments rightArguments
-              leftFrameRoots rightFrameRoots)
+            (ClosureApplicationResultRel rho leftLocation rightLocation
+              leftArguments rightArguments leftFrameRoots rightFrameRoots)
             (throw .expectedClosure)
             (throw .expectedClosure) := by
         change ExceptRel (RuntimeFaultRel rho)
-          (ClosureApplicationResultRel rho leftArguments rightArguments
-            leftFrameRoots rightFrameRoots)
+          (ClosureApplicationResultRel rho leftLocation rightLocation
+            leftArguments rightArguments leftFrameRoots rightFrameRoots)
           (.error .expectedClosure) (.error .expectedClosure)
         exact .error (.same .expectedClosure)
       cases objects with
@@ -6393,17 +6470,19 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
             Bind.bind, Except.bind, MonadExceptOf.throw,
             instMonadExceptOfExcept] using expectedClosureRelated
       | @closure leftFixed rightFixed name arity fixed =>
-          have callRelated := related.reindexClosureCall leftFound rightFound
-            leftObjectEq rightObjectEq fixed arguments frames
+          have applicationRelated := related.reindexClosureApplication mapping
+            leftFound rightFound leftObjectEq rightObjectEq fixed arguments
+            frames
           cases leftPersistent : leftCell.persistent with
           | true =>
               have rightPersistent : rightCell.persistent = true := by
                 simpa [leftPersistent] using persistentEq.symm
               have result : ClosureApplicationResultRel rho
-                  leftArguments rightArguments leftFrameRoots rightFrameRoots
+                  leftLocation rightLocation leftArguments rightArguments
+                  leftFrameRoots rightFrameRoots
                   (left, name, arity, leftFixed)
                   (right, name, arity, rightFixed) :=
-                ⟨rfl, rfl, fixed, callRelated⟩
+                ⟨rfl, rfl, fixed, applicationRelated⟩
               simpa [takeClosureApplication, getLiveCell, leftFound,
                 rightFound, leftLive, rightLive, leftPersistent,
                 rightPersistent, leftObjectEq, rightObjectEq,
@@ -6411,8 +6490,8 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                 instMonadExceptOfExcept] using
                 (ExceptRel.ok result :
                   ExceptRel (RuntimeFaultRel rho)
-                    (ClosureApplicationResultRel rho leftArguments
-                      rightArguments leftFrameRoots rightFrameRoots)
+                    (ClosureApplicationResultRel rho leftLocation rightLocation
+                      leftArguments rightArguments leftFrameRoots rightFrameRoots)
                     (.ok (left, name, arity, leftFixed))
                     (.ok (right, name, arity, rightFixed)))
           | false =>
@@ -6430,8 +6509,8 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                   (ExceptRel.error
                     (RuntimeFaultRel.referenceCountUnderflow mapping) :
                     ExceptRel (RuntimeFaultRel rho)
-                      (ClosureApplicationResultRel rho leftArguments
-                        rightArguments leftFrameRoots rightFrameRoots)
+                      (ClosureApplicationResultRel rho leftLocation rightLocation
+                        leftArguments rightArguments leftFrameRoots rightFrameRoots)
                       (.error (.referenceCountUnderflow leftLocation))
                       (.error (.referenceCountUnderflow rightLocation)))
               · have rightZero : rightCell.rc ≠ 0 := by
@@ -6452,12 +6531,13 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                       persistentEq, by simp [leftReplacement, rightReplacement], ?_⟩
                     simpa [leftReplacement, rightReplacement, leftObjectEq,
                       rightObjectEq] using (HeapObjectRel.closure fixed)
-                  rcases callRelated.setCellBoth mapping leftFound rightFound
+                  rcases applicationRelated.setCellBoth mapping leftFound rightFound
                       (by simp [leftReplacement])
                       (by simp [rightReplacement]) replacement with
                     ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
                   have result : ClosureApplicationResultRel rho
-                      leftArguments rightArguments leftFrameRoots rightFrameRoots
+                      leftLocation rightLocation leftArguments rightArguments
+                      leftFrameRoots rightFrameRoots
                       (leftResult, name, arity, leftFixed)
                       (rightResult, name, arity, rightFixed) :=
                     ⟨rfl, rfl, fixed, next⟩
@@ -6498,12 +6578,14 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                       persistentEq, liveEq, ?_⟩
                     simpa [leftReplacement, rightReplacement, leftObjectEq,
                       rightObjectEq] using (HeapObjectRel.closure fixed)
-                  rcases callRelated.setCellBoth mapping leftFound rightFound
+                  rcases applicationRelated.setCellBoth mapping leftFound rightFound
                       (by simp [leftReplacement])
                       (by simp [rightReplacement]) replacement with
                     ⟨leftParent, rightParent, leftEffect, rightEffect, next⟩
                   have leftPublished : RootSubset leftFixed.toList
-                      ((leftFixed ++ leftArguments).toList ++ leftFrameRoots) := by
+                      ((.object (.heap leftLocation) ::
+                        (leftFixed ++ leftArguments).toList) ++
+                          leftFrameRoots) := by
                     intro value member
                     simp [Array.toList_append, member]
                   have retained := next.retainOwnedValuesBoth_related
@@ -6512,8 +6594,8 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                     (fun runtime => (runtime, name, arity, leftFixed))
                     (fun runtime => (runtime, name, arity, rightFixed))
                     (fun next => show ClosureApplicationResultRel rho
-                        leftArguments rightArguments leftFrameRoots
-                        rightFrameRoots
+                        leftLocation rightLocation leftArguments rightArguments
+                        leftFrameRoots rightFrameRoots
                         (_, name, arity, leftFixed)
                         (_, name, arity, rightFixed) from
                       ⟨rfl, rfl, fixed, next⟩)
@@ -6545,6 +6627,46 @@ theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
                       using rightApplied
                   rw [leftTake, rightTake]
                   simpa only [Array.foldlM_toList] using applicationResults
+
+/-- Interpreter-facing closure application. A successful source application
+fixes the same declaration and arity on the target, exposes related fixed
+arguments, and relates the two ownership-adjusted runtimes. -/
+theorem ShadowRuntimeRel.takeClosureApplicationBoth_of_ok
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftArguments.toList) ++
+        leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightArguments.toList) ++
+        rightFrameRoots))
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots)
+    (sourceEffect : takeClosureApplication left leftLocation =
+      .ok (leftResult, name, arity, leftFixed)) :
+    ∃ rightResult rightFixed,
+      takeClosureApplication right rightLocation =
+          .ok (rightResult, name, arity, rightFixed) ∧
+        ArrayRel (ValueRel rho) leftFixed rightFixed ∧
+        ShadowRuntimeRel rho leftResult rightResult
+          ((.object (.heap leftLocation) ::
+            (leftFixed ++ leftArguments).toList) ++ leftFrameRoots)
+          ((.object (.heap rightLocation) ::
+            (rightFixed ++ rightArguments).toList) ++ rightFrameRoots) := by
+  have paired := related.takeClosureApplicationBoth_related mapping
+    arguments frames
+  rw [sourceEffect] at paired
+  generalize targetEffect : takeClosureApplication right rightLocation = result
+    at paired
+  cases result with
+  | error fault => cases paired
+  | ok result =>
+      obtain ⟨rightResult, rightName, rightArity, rightFixed⟩ := result
+      cases paired with
+      | ok application =>
+          rcases application with
+            ⟨nameEq, arityEq, fixed, runtime⟩
+          subst rightName
+          subst rightArity
+          exact ⟨rightResult, rightFixed, rfl, fixed, runtime⟩
 
 /-- Interpreter-facing retained increment. A successful source effect fixes
 the same successful target effect for related live operands. -/

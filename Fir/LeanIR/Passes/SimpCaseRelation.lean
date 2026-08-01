@@ -1251,8 +1251,8 @@ theorem match_coreResult
           cases transition
           rename_i response
           have targetExternal :
-              externals request rightBefore.runtime response := by
-            rw [← beforeRelated.runtime_eq]
+              externals request rightWaiting.runtime response := by
+            rw [← waitingRelated.runtime_eq]
             exact externalProof
           exact ⟨resumeExternal request rightWaiting response,
             reaches_of_step (.external rightResultEq targetExternal),
@@ -1320,8 +1320,8 @@ theorem match_coreResult_right
           cases transition
           rename_i response
           have sourceExternal :
-              externals request leftBefore.runtime response := by
-            rw [beforeRelated.runtime_eq]
+              externals request leftWaiting.runtime response := by
+            rw [waitingRelated.runtime_eq]
             exact externalProof
           exact ⟨resumeExternal request leftWaiting response,
             reaches_of_step (.external leftResultEq sourceExternal),

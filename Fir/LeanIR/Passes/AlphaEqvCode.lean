@@ -2603,7 +2603,7 @@ theorem step_forward
       cases results with
       | external request waitingRelated =>
           have rightExternal := external
-          rw [related.runtime_eq] at rightExternal
+          rw [waitingRelated.runtime_eq] at rightExternal
           exact ⟨_, .external rightTransition rightExternal,
             ⟨_, _, _, _, _, resumeExternal_related waitingRelated⟩⟩
 
