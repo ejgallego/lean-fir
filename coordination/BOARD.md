@@ -20,13 +20,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   shared-contract boundary.
 - Integration branch/worktree: `integration/closure-ownership` in
   `.worktrees/integration-closure-ownership`.
-- Published contract base: standalone commit `dbd7d934`, rebased from W7
-  provenance commit `d392e194` onto coordination-enabled `main` at
-  `00dcd516`. Proof lanes consume `dbd7d934`; they do not base new proof work
-  on the W7 branch. Current `main` has since advanced to coordination-only
-  commit `65290f45`, so the integration branch must rebase before publishing
-  the next shared-contract head; `dbd7d934` remains provenance, not the final
-  landing identity.
+- Published corrected contract head: `89fda41a` on current `main` at
+  `65290f45`. Standalone ownership commit `528fdd1a` is the rebased identity
+  of proof-base provenance `dbd7d934` and W7 provenance `d392e194`.
+  Standalone external-runtime repair `89fda41a`, replayed from historical
+  validation commit `2f301de5`, makes executable and relational external
+  calls consume the post-application `waiting.runtime`. Proof lanes rebase
+  onto `89fda41a`; they do not base new proof work on the W7 branch.
 - Lease boundary: ends when the closure stack is `linked/accepted`, parked, or
   explicitly reassigned here.
 - Scope: publish the stable contract base, validate and land lane handoffs in
@@ -37,9 +37,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 The live dependency order is:
 
 ```text
-current main 65290f45
-  -> rebase integration/closure-ownership and replay contract dbd7d934
-  -> repair external execution to use the post-application waiting.runtime
+corrected integration contract 89fda41a on current main 65290f45
   -> rebase lcnf-proof, finish ElimDeadMachineRel/Examples, mark ready
   -> fast-forward the integration candidate to the green proof head
   -> rebase wasm-proof b811c39a, rerun root/Talos gates, mark ready
@@ -76,14 +74,19 @@ identities.
   though `takeClosureApplication` stores its ownership transition in
   `waiting.runtime`. An external response can therefore resurrect an
   exclusive closure or discard the shared decrement and capture retains.
-  The immediate integration action is to coordinate the shared interpreter
-  repair, using `waiting.runtime` or an equivalent explicitly post-application
-  contract in both executable and relational semantics. Then lcnf-proof
-  rebases once, completes `ElimDeadMachineRel` and `ElimDeadExamples`, resolves
-  the card, and marks ready. Only after that green proof head is in the
-  integration candidate does W6 rebase and rerun its full root gate. W7
-  generation remains independent while analyzing this sequencing change and
-  rebases adapter `2ed6deb4` only after the contract/proof/W6 stack lands.
+  Integration repair `89fda41a` now selects `waiting.runtime` in executable
+  and relational semantics and adds an interpreter regression for closure-
+  mediated external application. Beam sync reports zero errors for both
+  changed modules, `lake build Fir.LeanIR.InterpreterExamples` and
+  `git diff --check` pass, and the required root `make check` reaches the
+  expected proof-owned `AlphaEqvCode` failures because `62033cdb` is not yet
+  composed onto this corrected base. The next action is for lcnf-proof to
+  rebase once onto `89fda41a`, complete `ElimDeadMachineRel` and
+  `ElimDeadExamples`, resolve the card, and mark ready. Only after that green
+  proof head is in the integration candidate does W6 rebase and rerun its full
+  root gate. W7 generation remains independent while analyzing this sequencing
+  change and rebases adapter `2ed6deb4` only after the contract/proof/W6 stack
+  lands.
 
 - Validation's validated pre-record coordination head is `3ae6c37d`, with
   functional head `96eec154` on semantic base `fff91175` and coordination head
@@ -362,9 +365,9 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `main` | active | Main is green through accepted W7 float functional head `2b4d9d23` and coordination protocol `00dcd516`. The integration lease branch publishes standalone closure contract base `dbd7d934`; the root gate remains 633 native/LCNF cases, 9 direct cases, and 601 native/LCNF/V8 cases: 642 unique cases and 1,844 equal comparisons. | Float representation, reinterpretation, manifest transport, and the zero-import package are released. Seven isolated shared-contract domains remain queued. Closure contract `dbd7d934` and W7 adapter provenance `2ed6deb4` stay outside `main` until pass-proof and W6 adaptations are green. |
-| Lean pass proof | pass-proof owner | `proof/simpcase` | blocked | Clean checkpoint `ae995ba8` contains the float-box proof adaptation now landed on `main` through `8a8d1387`. The source-owned/ledger simulation remains checked through `LoweringCorrect`; the integrated float stack passes all required gates. | Deliberately stopped; resume only on explicit direction. The next shared-contract task is the queued closure-application adaptation exposed by `AlphaEqvCode`; general reset/reuse proof work remains separate. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Clean handoff `8a8d1387` on base `ae995ba8` is landed on `main`. Float boxes, packed scalar storage/projection/mutation, resolver support, concrete refinement, raw-bit normalization, and reuse-capacity proof adaptation pass all 3,123 Talos jobs. | Float runtime work is complete. Closure-application refinement remains a separate W6-owned queue item and is not part of the landed float stack. |
+| Integration | integration owner | `main` | active | Main remains green at `65290f45`. The integration lease branch publishes corrected closure contract head `89fda41a`: ownership commit `528fdd1a` plus the post-application external-runtime repair. The previously recorded root gate remains 633 native/LCNF cases, 9 direct cases, and 601 native/LCNF/V8 cases: 642 unique cases and 1,844 equal comparisons. | Float representation, reinterpretation, manifest transport, and the zero-import package are released. Seven isolated shared-contract domains remain queued. Corrected closure contract `89fda41a` and W7 adapter provenance `2ed6deb4` stay outside `main` until pass-proof and W6 adaptations are green. |
+| Lean pass proof | pass-proof owner | `proof/simpcase` | blocked | Functional commit `62033cdb` on old contract base `dbd7d934` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. Its direct cone and root gate pass; the explicit `ElimDeadExamples` cone exposed the external-runtime bug. | Rebase onto corrected contract `89fda41a`, finish `ElimDeadMachineRel` and `ElimDeadExamples`, resolve `FIR-BUG-impure-none-closure-application-external-runtime`, rerun the full gates, and mark ready. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | blocked | Functional commit `b811c39a` on old contract base `dbd7d934` implements and refines persistent, exclusive-transfer, and shared-retain closure application. Its Beam, concrete/Talos, bug-card, and `make talos-check` gates pass; root `make check` awaits the composed pass-proof stack. | Rebase only after the corrected contract and green pass-proof head are published, rerun root plus Talos gates, and mark ready without editing proof-owned files. |
 | W7 generation | generation owner | `wasm/generation` | released | Accepted functional head `2b4d9d23` contains the seven W7 float commits plus one split-boundary test correction. It executes exact Float32/Float64 arguments and results through the integer-lane facade and publishes the zero-import `prettyM` package. The original branch is clean at `2ed6deb4` and carries exactly two queued closure commits on the released float code. | The accepted slice passes `make check`, all 3,130 Talos jobs, and the full artifact/browser/native-oracle gate. Closure commits `d392e194`/`2ed6deb4` remain isolated; rebase later coordination-only main commits before the next functional slice. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. W7 candidate `2b4d9d23` consumes the released bit-exact float transport and passes the same root oracle gate. | Rebase the long branch after the W7 float landing. Closure, alias, termination, IO, and stream-capture contracts remain isolated; float representation and reinterpretation no longer block validation consumers. |
@@ -390,7 +393,8 @@ moving global snapshot hash.
 | `FLOAT-SCALAR-RUNTIME` | integration/validation | pass proof, W6, W7, validation | released | landed stack through `8a8d1387` | Adds bit-exact `float32Bits`/`float64Bits`, heap-only boxes, stable box-kind/layout signatures, exact ABI adapters, and concrete/proof refinements without the unrelated closure-ownership stack. The integrated stack passes `make check` and all 3,123 Talos jobs. W7 consumes it in candidate `2b4d9d23`. |
 | `WASM-FLOAT-REINTERPRET` | integration | W6, W7, Talos adapter | released | landed stack through `8a8d1387` | Symbolic, binary, Talos-adapter, runtime, and proof support for `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, and `f64.reinterpret_i64` is landed. W7's integer-lane facade preserves signaling-NaN payloads across JavaScript without numeric coercion. |
 | `BIT-EXACT-FLOAT-MANIFEST-TRANSPORT` | integration | W7, validation, artifact clients | released | contract `8ad80ad3`; canonical validation consumer `57f13122` | Defines the version-1 `wasm-reinterpret-i32-i64` capability, exact entry selection, integer-lane argument/result codecs, and semantic observation bridge. Floating manifests without the capability and capabilities with unknown fields, versions, encodings, entries, arities, kinds, or ranges fail closed. The standalone suite covers signed zero, infinities, quiet/signaling NaNs, maximal payloads, mixed signatures, and every malformed constructor path without JavaScript numeric coercion; the root validation runner now consumes the facade and passes the complete 613-case native/LCNF plus 581-case V8 gate. |
-| `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | active | published integration contract `dbd7d934` on base `00dcd516`; W7 provenance `d392e194`; adapter `2ed6deb4` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Both proof owners base on `dbd7d934`. The W7 executable adapter remains isolated; the contract candidate is expected to fail `AlphaEqvCode` and `Correctness.Semantics` until their separate handoffs arrive. |
+| `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | active | corrected integration head `89fda41a` on `65290f45`; ownership commit `528fdd1a`; provenance `dbd7d934`/`d392e194`; adapter `2ed6deb4` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Proof lanes now rebase onto `89fda41a`; the W7 executable adapter remains isolated until both adaptations are green. |
+| `EXTERNAL-WAITING-RUNTIME` | integration/validation | pass proof, W6, validation | active | standalone repair `89fda41a`; historical validation provenance `2f301de5` | `Step.external`, `executeStep`, and soundness use the post-core-step `waiting.runtime`, so external responses cannot resurrect a consumed closure or discard shared closure decrements and retained captures. Discovered by `FIR-BUG-impure-none-closure-application-external-runtime`; pass-proof completion and downstream gate reruns remain pending. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |
