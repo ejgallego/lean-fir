@@ -34,11 +34,30 @@ inductive ExceptRel (errorRel : ε₁ → ε₂ → Prop)
       ExceptRel errorRel valueRel (.ok left) (.ok right)
 
 theorem ExceptRel.mapValue
+    {errorRel : ε₁ → ε₂ → Prop}
+    {valueRel resultRel : α₁ → α₂ → Prop}
+    {left : Except ε₁ α₁} {right : Except ε₂ α₂}
     (related : ExceptRel errorRel valueRel left right)
-    (map : ∀ {leftValue rightValue},
+    (map : ∀ {leftValue : α₁} {rightValue : α₂},
       valueRel leftValue rightValue →
         resultRel leftValue rightValue) :
     ExceptRel errorRel resultRel left right := by
+  cases related with
+  | error errors => exact .error errors
+  | ok values => exact .ok (map values)
+
+theorem ExceptRel.mapBoth
+    {errorRel : ε₁ → ε₂ → Prop}
+    {valueRel : α₁ → α₂ → Prop}
+    {resultRel : β₁ → β₂ → Prop}
+    {left : Except ε₁ α₁} {right : Except ε₂ α₂}
+    (related : ExceptRel errorRel valueRel left right)
+    (leftMap : α₁ → β₁) (rightMap : α₂ → β₂)
+    (map : ∀ {leftValue : α₁} {rightValue : α₂},
+      valueRel leftValue rightValue →
+        resultRel (leftMap leftValue) (rightMap rightValue)) :
+    ExceptRel errorRel resultRel
+      (left.map leftMap) (right.map rightMap) := by
   cases related with
   | error errors => exact .error errors
   | ok values => exact .ok (map values)
@@ -6208,6 +6227,324 @@ theorem ShadowRuntimeRel.incValueBoth_related
               incLocation right rightLocation amount by rfl,
             leftEffect, rightEffect]
           exact .ok next
+
+/-- Retaining one related owned value preserves the runtime relation, or
+fails with address-renamed faults when the related heap references are dead. -/
+theorem ShadowRuntimeRel.retainOwnedValueBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (leftPublished : leftValue ∈ leftExtra)
+    (values : ValueRel rho leftValue rightValue) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (retainOwnedValue left leftValue)
+      (retainOwnedValue right rightValue) := by
+  cases values with
+  | tagged | usize | scalar | erased | reuseNone | reuseSome =>
+      exact .ok related
+  | heap mapping =>
+      simpa [retainOwnedValue, incValue] using
+        related.incValueBoth_related leftPublished
+          (.heap mapping) (amount := 1) (check := false)
+
+/-- Retaining a related list of already-published owned values preserves the
+runtime relation at every prefix and relates any fault from the first failing
+heap capture. -/
+theorem ShadowRuntimeRel.retainOwnedValuesBoth_related
+    (related : ShadowRuntimeRel rho left right leftExtra rightExtra)
+    (values : ListRel (ValueRel rho) leftValues rightValues)
+    (leftPublished : RootSubset leftValues leftExtra) :
+    ExceptRel (RuntimeFaultRel rho)
+      (fun leftResult rightResult =>
+        ShadowRuntimeRel rho leftResult rightResult leftExtra rightExtra)
+      (leftValues.foldlM (init := left) retainOwnedValue)
+      (rightValues.foldlM (init := right) retainOwnedValue) := by
+  induction values generalizing left right with
+  | nil => exact .ok related
+  | @cons leftHead rightHead leftTail rightTail heads tails tailIH =>
+      simp only [List.foldlM_cons, Bind.bind, Except.bind]
+      have headPublished : leftHead ∈ leftExtra :=
+        leftPublished leftHead List.mem_cons_self
+      have tailPublished : RootSubset leftTail leftExtra := by
+        intro value member
+        exact leftPublished value (List.mem_cons_of_mem leftHead member)
+      generalize leftEffect :
+        retainOwnedValue left leftHead = leftResult
+      generalize rightEffect :
+        retainOwnedValue right rightHead = rightResult
+      have headRelated :=
+        related.retainOwnedValueBoth_related headPublished heads
+      rw [leftEffect, rightEffect] at headRelated
+      cases headRelated with
+      | error errors => exact .error errors
+      | ok next => exact tailIH next tailPublished
+
+/-- Successful closure application exposes the same declaration and related
+fixed arguments, while relating the ownership-adjusted runtimes under the
+call roots consumed by `invokeDecl`. -/
+def ClosureApplicationResultRel
+    (rho : AddressRenaming)
+    (leftArguments rightArguments : Array Value)
+    (leftFrameRoots rightFrameRoots : List Value) :
+    (RuntimeState × Name × Nat × Array Value) →
+      (RuntimeState × Name × Nat × Array Value) → Prop
+  | (leftRuntime, leftName, leftArity, leftFixed),
+      (rightRuntime, rightName, rightArity, rightFixed) =>
+    leftName = rightName ∧
+      leftArity = rightArity ∧
+      ArrayRel (ValueRel rho) leftFixed rightFixed ∧
+      ShadowRuntimeRel rho leftRuntime rightRuntime
+        ((leftFixed ++ leftArguments).toList ++ leftFrameRoots)
+        ((rightFixed ++ rightArguments).toList ++ rightFrameRoots)
+
+/-- Applying mapped closure roots performs matching ownership transitions.
+Exclusive closures transfer their captures and die, shared closures decrement
+the parent and retain every capture, and persistent closures are unchanged. -/
+theorem ShadowRuntimeRel.takeClosureApplicationBoth_related
+    (related : ShadowRuntimeRel rho left right
+      ((.object (.heap leftLocation) :: leftArguments.toList) ++
+        leftFrameRoots)
+      ((.object (.heap rightLocation) :: rightArguments.toList) ++
+        rightFrameRoots))
+    (mapping : rho.forward leftLocation = some rightLocation)
+    (arguments : ArrayRel (ValueRel rho) leftArguments rightArguments)
+    (frames : ListRel (ValueRel rho) leftFrameRoots rightFrameRoots) :
+    ExceptRel (RuntimeFaultRel rho)
+      (ClosureApplicationResultRel rho leftArguments rightArguments
+        leftFrameRoots rightFrameRoots)
+      (takeClosureApplication left leftLocation)
+      (takeClosureApplication right rightLocation) := by
+  have throwEq (fault : RuntimeFault) {α : Type} :
+      (throw fault : Except RuntimeFault α) = .error fault := rfl
+  have leftReachable : Reachable left.heap
+      (runtimeRoots left
+        ((.object (.heap leftLocation) :: leftArguments.toList) ++
+          leftFrameRoots)) leftLocation := by
+    exact .root (by simp [runtimeRoots])
+  rcases related.heap.1 leftLocation leftReachable with
+    ⟨mapped, leftCell, rightCell, mappedEq, leftFound, rightFound, cells⟩
+  have mappedSame : mapped = rightLocation := by
+    rw [mapping] at mappedEq
+    exact (Option.some.inj mappedEq).symm
+  subst mapped
+  rcases cells with ⟨rcEq, persistentEq, liveEq, objects⟩
+  cases leftLive : leftCell.live with
+  | false =>
+      have rightLive : rightCell.live = false := by
+        simpa [leftLive] using liveEq.symm
+      simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+        leftLive, rightLive, Bind.bind, Except.bind] using
+        (ExceptRel.error (RuntimeFaultRel.deadObject mapping) :
+          ExceptRel (RuntimeFaultRel rho)
+            (ClosureApplicationResultRel rho leftArguments rightArguments
+              leftFrameRoots rightFrameRoots)
+            (.error (.deadObject leftLocation))
+            (.error (.deadObject rightLocation)))
+  | true =>
+      have rightLive : rightCell.live = true := by
+        simpa [leftLive] using liveEq.symm
+      generalize leftObjectEq : leftCell.object = leftObject at objects
+      generalize rightObjectEq : rightCell.object = rightObject at objects
+      have expectedClosureRelated :
+          ExceptRel (RuntimeFaultRel rho)
+            (ClosureApplicationResultRel rho leftArguments rightArguments
+              leftFrameRoots rightFrameRoots)
+            (throw .expectedClosure)
+            (throw .expectedClosure) := by
+        change ExceptRel (RuntimeFaultRel rho)
+          (ClosureApplicationResultRel rho leftArguments rightArguments
+            leftFrameRoots rightFrameRoots)
+          (.error .expectedClosure) (.error .expectedClosure)
+        exact .error (.same .expectedClosure)
+      cases objects with
+      | ctor tag fields usizes scalars =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | boxed value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | string value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | natural value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | integer value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | byteArray value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | «opaque» value =>
+          simpa [takeClosureApplication, getLiveCell, leftFound, rightFound,
+            leftLive, rightLive, leftObjectEq, rightObjectEq,
+            Bind.bind, Except.bind, MonadExceptOf.throw,
+            instMonadExceptOfExcept] using expectedClosureRelated
+      | @closure leftFixed rightFixed name arity fixed =>
+          have callRelated := related.reindexClosureCall leftFound rightFound
+            leftObjectEq rightObjectEq fixed arguments frames
+          cases leftPersistent : leftCell.persistent with
+          | true =>
+              have rightPersistent : rightCell.persistent = true := by
+                simpa [leftPersistent] using persistentEq.symm
+              have result : ClosureApplicationResultRel rho
+                  leftArguments rightArguments leftFrameRoots rightFrameRoots
+                  (left, name, arity, leftFixed)
+                  (right, name, arity, rightFixed) :=
+                ⟨rfl, rfl, fixed, callRelated⟩
+              simpa [takeClosureApplication, getLiveCell, leftFound,
+                rightFound, leftLive, rightLive, leftPersistent,
+                rightPersistent, leftObjectEq, rightObjectEq,
+                Bind.bind, Except.bind, Pure.pure, Except.pure,
+                instMonadExceptOfExcept] using
+                (ExceptRel.ok result :
+                  ExceptRel (RuntimeFaultRel rho)
+                    (ClosureApplicationResultRel rho leftArguments
+                      rightArguments leftFrameRoots rightFrameRoots)
+                    (.ok (left, name, arity, leftFixed))
+                    (.ok (right, name, arity, rightFixed)))
+          | false =>
+              have rightPersistent : rightCell.persistent = false := by
+                simpa [leftPersistent] using persistentEq.symm
+              by_cases leftZero : leftCell.rc = 0
+              · have rightZero : rightCell.rc = 0 := by
+                  simpa [leftZero] using rcEq.symm
+                simpa [takeClosureApplication, getLiveCell, leftFound,
+                  rightFound, leftLive, rightLive, leftPersistent,
+                  rightPersistent, leftZero, rightZero, leftObjectEq,
+                  rightObjectEq, Bind.bind, Except.bind,
+                  MonadExceptOf.throw, instMonadExceptOfExcept,
+                  throwEq] using
+                  (ExceptRel.error
+                    (RuntimeFaultRel.referenceCountUnderflow mapping) :
+                    ExceptRel (RuntimeFaultRel rho)
+                      (ClosureApplicationResultRel rho leftArguments
+                        rightArguments leftFrameRoots rightFrameRoots)
+                      (.error (.referenceCountUnderflow leftLocation))
+                      (.error (.referenceCountUnderflow rightLocation)))
+              · have rightZero : rightCell.rc ≠ 0 := by
+                  intro zero
+                  apply leftZero
+                  rw [rcEq]
+                  exact zero
+                by_cases leftOne : leftCell.rc = 1
+                · have rightOne : rightCell.rc = 1 := by
+                    simpa [leftOne] using rcEq.symm
+                  let leftReplacement : HeapCell :=
+                    { leftCell with rc := 0, live := false }
+                  let rightReplacement : HeapCell :=
+                    { rightCell with rc := 0, live := false }
+                  have replacement : HeapCellRel rho
+                      leftReplacement rightReplacement := by
+                    refine ⟨by simp [leftReplacement, rightReplacement],
+                      persistentEq, by simp [leftReplacement, rightReplacement], ?_⟩
+                    simpa [leftReplacement, rightReplacement, leftObjectEq,
+                      rightObjectEq] using (HeapObjectRel.closure fixed)
+                  rcases callRelated.setCellBoth mapping leftFound rightFound
+                      (by simp [leftReplacement])
+                      (by simp [rightReplacement]) replacement with
+                    ⟨leftResult, rightResult, leftEffect, rightEffect, next⟩
+                  have result : ClosureApplicationResultRel rho
+                      leftArguments rightArguments leftFrameRoots rightFrameRoots
+                      (leftResult, name, arity, leftFixed)
+                      (rightResult, name, arity, rightFixed) :=
+                    ⟨rfl, rfl, fixed, next⟩
+                  have leftMapped := congrArg
+                    (fun operation => operation.map fun runtime =>
+                      (runtime, name, arity, leftFixed)) leftEffect
+                  have rightMapped := congrArg
+                    (fun operation => operation.map fun runtime =>
+                      (runtime, name, arity, rightFixed)) rightEffect
+                  have leftTake : takeClosureApplication left leftLocation =
+                      .ok (leftResult, name, arity, leftFixed) := by
+                    simpa [takeClosureApplication, getLiveCell, leftFound,
+                      leftLive, leftPersistent, leftZero, leftOne,
+                      leftReplacement, leftObjectEq, Bind.bind, Except.bind,
+                      Functor.map, Except.map, Pure.pure, Except.pure] using
+                      leftMapped
+                  have rightTake : takeClosureApplication right rightLocation =
+                      .ok (rightResult, name, arity, rightFixed) := by
+                    simpa [takeClosureApplication, getLiveCell, rightFound,
+                      rightLive, rightPersistent, rightZero, rightOne,
+                      rightReplacement, rightObjectEq, Bind.bind, Except.bind,
+                      Functor.map, Except.map, Pure.pure, Except.pure] using
+                      rightMapped
+                  rw [leftTake, rightTake]
+                  exact .ok result
+                · have rightOne : rightCell.rc ≠ 1 := by
+                    intro one
+                    apply leftOne
+                    rw [rcEq]
+                    exact one
+                  let leftReplacement : HeapCell :=
+                    { leftCell with rc := leftCell.rc - 1 }
+                  let rightReplacement : HeapCell :=
+                    { rightCell with rc := rightCell.rc - 1 }
+                  have replacement : HeapCellRel rho
+                      leftReplacement rightReplacement := by
+                    refine ⟨by simp [leftReplacement, rightReplacement, rcEq],
+                      persistentEq, liveEq, ?_⟩
+                    simpa [leftReplacement, rightReplacement, leftObjectEq,
+                      rightObjectEq] using (HeapObjectRel.closure fixed)
+                  rcases callRelated.setCellBoth mapping leftFound rightFound
+                      (by simp [leftReplacement])
+                      (by simp [rightReplacement]) replacement with
+                    ⟨leftParent, rightParent, leftEffect, rightEffect, next⟩
+                  have leftPublished : RootSubset leftFixed.toList
+                      ((leftFixed ++ leftArguments).toList ++ leftFrameRoots) := by
+                    intro value member
+                    simp [Array.toList_append, member]
+                  have retained := next.retainOwnedValuesBoth_related
+                    fixed leftPublished
+                  have applicationResults := retained.mapBoth
+                    (fun runtime => (runtime, name, arity, leftFixed))
+                    (fun runtime => (runtime, name, arity, rightFixed))
+                    (fun next => show ClosureApplicationResultRel rho
+                        leftArguments rightArguments leftFrameRoots
+                        rightFrameRoots
+                        (_, name, arity, leftFixed)
+                        (_, name, arity, rightFixed) from
+                      ⟨rfl, rfl, fixed, next⟩)
+                  have leftApplied := congrArg
+                    (fun operation => operation >>= fun runtime =>
+                      (Array.foldlM retainOwnedValue runtime leftFixed).map
+                        fun runtime => (runtime, name, arity, leftFixed))
+                    leftEffect
+                  have rightApplied := congrArg
+                    (fun operation => operation >>= fun runtime =>
+                      (Array.foldlM retainOwnedValue runtime rightFixed).map
+                        fun runtime => (runtime, name, arity, rightFixed))
+                    rightEffect
+                  have leftTake : takeClosureApplication left leftLocation =
+                      (Array.foldlM retainOwnedValue leftParent leftFixed).map
+                        (fun runtime => (runtime, name, arity, leftFixed)) := by
+                    simpa [takeClosureApplication, getLiveCell, leftFound,
+                      leftLive, leftPersistent, leftZero, leftOne,
+                      leftReplacement, leftObjectEq, Bind.bind, Except.bind,
+                      Functor.map, Except.map, Pure.pure, Except.pure]
+                      using leftApplied
+                  have rightTake : takeClosureApplication right rightLocation =
+                      (Array.foldlM retainOwnedValue rightParent rightFixed).map
+                        (fun runtime => (runtime, name, arity, rightFixed)) := by
+                    simpa [takeClosureApplication, getLiveCell, rightFound,
+                      rightLive, rightPersistent, rightZero, rightOne,
+                      rightReplacement, rightObjectEq, Bind.bind, Except.bind,
+                      Functor.map, Except.map, Pure.pure, Except.pure]
+                      using rightApplied
+                  rw [leftTake, rightTake]
+                  simpa only [Array.foldlM_toList] using applicationResults
 
 /-- Interpreter-facing retained increment. A successful source effect fixes
 the same successful target effect for related live operands. -/

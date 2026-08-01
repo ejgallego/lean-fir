@@ -2236,28 +2236,32 @@ theorem invokeClosure_shadowRelated
           exact failure .expectedClosure
       | heap location =>
           simp only
-          have cellEq : getLiveCell source.runtime location =
-              getLiveCell target.runtime location :=
-            congrArg (fun runtime => getLiveCell runtime location)
+          have applicationEq :
+              takeClosureApplication source.runtime location =
+                takeClosureApplication target.runtime location :=
+            congrArg
+              (fun runtime => takeClosureApplication runtime location)
               related.runtime_eq
-          rw [cellEq]
-          generalize cellRead : getLiveCell target.runtime location = result
+          rw [applicationEq]
+          generalize applicationRead :
+            takeClosureApplication target.runtime location = result
           cases result with
           | error fault =>
               simp only
               exact failure fault
-          | ok cell =>
+          | ok application =>
+              rcases application with ⟨runtime, name, arity, fixed⟩
               simp only
-              cases cell.object with
-              | closure name arity fixed =>
-                  exact invokeDecl_shadowRelated invokeRelated
-              | ctor object => exact failure .expectedClosure
-              | boxed type value => exact failure .expectedClosure
-              | string value => exact failure .expectedClosure
-              | natural value => exact failure .expectedClosure
-              | integer value => exact failure .expectedClosure
-              | byteArray value => exact failure .expectedClosure
-              | «opaque» typeName => exact failure .expectedClosure
+              have appliedRelated : ShadowMachineRelated fuel
+                  { sourceInvoke with runtime }
+                  { targetInvoke with runtime } := {
+                programs := related.programs
+                runtime_eq := rfl
+                frames := related.frames
+                control := .invokeValue
+                  (.object (.heap location)) arguments
+              }
+              exact invokeDecl_shadowRelated appliedRelated
   | usize value =>
       simp only
       exact failure .expectedClosure

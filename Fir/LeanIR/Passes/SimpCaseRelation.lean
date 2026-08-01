@@ -388,8 +388,8 @@ theorem invokeDecl_related
                   control := related.control
                 }
 
-/-- Closure invocation reads the same heap cell and delegates to related
-top-level declaration lookup when the cell is a closure. -/
+/-- Closure invocation performs the same ownership transition in equal runtimes
+and delegates to related top-level declaration lookup on the returned state. -/
 theorem invokeClosure_related
     (related : MachineRelated (CodeRel validCase) left right)
     (function : Value) (args : Array Value) :
@@ -421,29 +421,37 @@ theorem invokeClosure_related
           exact failRelated .expectedClosure
       | heap location =>
           simp only
-          have cellEq :
-              getLiveCell left.runtime location = getLiveCell right.runtime location :=
-            congrArg (fun runtime => getLiveCell runtime location) related.runtime_eq
-          rw [cellEq]
-          generalize cellRead : getLiveCell right.runtime location = result
+          have applicationEq :
+              takeClosureApplication left.runtime location =
+                takeClosureApplication right.runtime location :=
+            congrArg
+              (fun runtime => takeClosureApplication runtime location)
+              related.runtime_eq
+          rw [applicationEq]
+          generalize applicationRead :
+            takeClosureApplication right.runtime location = result
           cases result with
           | error fault =>
               simp only
               exact failRelated fault
-          | ok cell =>
+          | ok application =>
+              rcases application with ⟨runtime, name, arity, fixed⟩
               simp only
-              cases cell.object with
-              | closure name arity fixed =>
-                  exact invokeDecl_related
-                    (left := leftInvoke) (right := rightInvoke)
-                    (name := name) (args := fixed ++ args) invokeRelated
-              | ctor object => exact failRelated .expectedClosure
-              | boxed type value => exact failRelated .expectedClosure
-              | string value => exact failRelated .expectedClosure
-              | natural value => exact failRelated .expectedClosure
-              | integer value => exact failRelated .expectedClosure
-              | byteArray value => exact failRelated .expectedClosure
-              | «opaque» typeName => exact failRelated .expectedClosure
+              have appliedRelated :
+                  MachineRelated (CodeRel validCase)
+                    { leftInvoke with runtime }
+                    { rightInvoke with runtime } := {
+                programs := related.programs
+                runtime_eq := rfl
+                env_eq := related.env_eq
+                joins := related.joins
+                frames := related.frames
+                control := .invokeValue (.object (.heap location)) args
+              }
+              exact invokeDecl_related
+                (left := { leftInvoke with runtime })
+                (right := { rightInvoke with runtime })
+                (name := name) (args := fixed ++ args) appliedRelated
   | usize value =>
       simp only
       exact failRelated .expectedClosure

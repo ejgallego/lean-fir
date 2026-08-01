@@ -1383,28 +1383,32 @@ theorem invokeClosure_liveRelated
           exact failure .expectedClosure
       | heap location =>
           simp only
-          have cellEq : getLiveCell left.runtime location =
-              getLiveCell right.runtime location :=
-            congrArg (fun runtime => getLiveCell runtime location)
+          have applicationEq :
+              takeClosureApplication left.runtime location =
+                takeClosureApplication right.runtime location :=
+            congrArg
+              (fun runtime => takeClosureApplication runtime location)
               related.runtime_eq
-          rw [cellEq]
-          generalize cellRead : getLiveCell right.runtime location = result
+          rw [applicationEq]
+          generalize applicationRead :
+            takeClosureApplication right.runtime location = result
           cases result with
           | error fault =>
               simp only
               exact failure fault
-          | ok cell =>
+          | ok application =>
+              rcases application with ⟨runtime, name, arity, fixed⟩
               simp only
-              cases cell.object with
-              | closure name arity fixed =>
-                  exact invokeDecl_liveRelated invokeRelated
-              | ctor object => exact failure .expectedClosure
-              | boxed type value => exact failure .expectedClosure
-              | string value => exact failure .expectedClosure
-              | natural value => exact failure .expectedClosure
-              | integer value => exact failure .expectedClosure
-              | byteArray value => exact failure .expectedClosure
-              | «opaque» typeName => exact failure .expectedClosure
+              have appliedRelated : LiveMachineRelated
+                  { leftInvoke with runtime }
+                  { rightInvoke with runtime } := {
+                program_eq := related.program_eq
+                runtime_eq := rfl
+                frames := related.frames
+                control := .invokeValue
+                  (.object (.heap location)) arguments
+              }
+              exact invokeDecl_liveRelated appliedRelated
   | usize value =>
       simp only
       exact failure .expectedClosure

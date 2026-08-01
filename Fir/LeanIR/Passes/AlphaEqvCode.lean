@@ -2167,8 +2167,8 @@ theorem invokeDecl_related
                               resultType := leftDecl.type
                               args := callArgs }) nextRelated
 
-/-- Closure invocation observes the same heap cell and delegates to the
-related named-declaration simulation when that cell is a closure. -/
+/-- Closure invocation performs the same ownership transition in equal runtimes
+and delegates to the related named-declaration simulation on the returned state. -/
 theorem invokeClosure_related
     {leftJoins rightJoins : List FVarId}
     (leftState rightState : MachineState)
@@ -2202,31 +2202,27 @@ theorem invokeClosure_related
           exact failRelated .expectedClosure
       | heap location =>
           simp only
-          have cellEq :
-              getLiveCell leftState.runtime location =
-                getLiveCell rightState.runtime location :=
-            congrArg (fun runtime => getLiveCell runtime location) runtimeEq
-          rw [cellEq]
-          generalize cellRead : getLiveCell rightState.runtime location = result
+          have applicationEq :
+              takeClosureApplication leftState.runtime location =
+                takeClosureApplication rightState.runtime location :=
+            congrArg
+              (fun runtime => takeClosureApplication runtime location) runtimeEq
+          rw [applicationEq]
+          generalize applicationRead :
+            takeClosureApplication rightState.runtime location = result
           cases result with
           | error fault =>
               simp only
               exact failRelated fault
-          | ok cell =>
+          | ok application =>
+              rcases application with ⟨runtime, name, arity, fixed⟩
               simp only
-              cases cell.object with
-              | closure name arity fixed =>
-                  exact invokeDecl_related leftInvoke rightInvoke
-                    programEq runtimeEq joinEnvs framesRelated agree
-                    renamingScoped joinRenamingScoped
-                    (.invokeValue (.object (.heap location)) args)
-              | ctor object => exact failRelated .expectedClosure
-              | boxed type value => exact failRelated .expectedClosure
-              | string value => exact failRelated .expectedClosure
-              | natural value => exact failRelated .expectedClosure
-              | integer value => exact failRelated .expectedClosure
-              | byteArray value => exact failRelated .expectedClosure
-              | «opaque» typeName => exact failRelated .expectedClosure
+              exact invokeDecl_related
+                { leftInvoke with runtime }
+                { rightInvoke with runtime }
+                programEq rfl joinEnvs framesRelated agree
+                renamingScoped joinRenamingScoped
+                (.invokeValue (.object (.heap location)) args)
   | usize value =>
       simp only
       exact failRelated .expectedClosure
@@ -2353,21 +2349,15 @@ theorem invokeClosure_preserves_program (state : MachineState)
           trivial
       | heap location =>
           simp only
-          generalize cellRead : getLiveCell state.runtime location = result
+          generalize applicationRead :
+            takeClosureApplication state.runtime location = result
           cases result with
           | error fault => trivial
-          | ok cell =>
+          | ok application =>
+              rcases application with ⟨runtime, name, arity, fixed⟩
               simp only
-              cases cell.object with
-              | closure name arity fixed =>
-                  exact invokeDecl_preserves_program state name (fixed ++ args)
-              | ctor object => trivial
-              | boxed type value => trivial
-              | string value => trivial
-              | natural value => trivial
-              | integer value => trivial
-              | byteArray value => trivial
-              | «opaque» typeName => trivial
+              exact invokeDecl_preserves_program
+                { state with runtime } name (fixed ++ args)
   | usize value =>
       simp only
       trivial
