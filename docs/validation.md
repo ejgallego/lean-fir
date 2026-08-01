@@ -1776,6 +1776,23 @@ surface. All twenty execute in V8 and compare on all three native/LCNF/V8
 edges; no W7 source change or compiler-side workaround is involved. Matching
 source and V8 coverage domains require the full matrix, both Wasm lanes, every
 width and boundary, and all ten sign-bit results.
+The first closure-ownership fixture extraction deliberately pairs one use with
+two uses of the same mixed-kind closure. Both source programs capture a large
+`Nat`, `String`, `ByteArray`, boxed `USize` and `UInt32`, and exact-bit
+`Float32`/`Float` values. They allocate the full mixed-layout result internally
+but expose only its `Nat` argument projection (or a pair of projections), so
+the regression does not import the historical general mixed-constructor wire
+codec. The single-use case pins 36 total transitions; the repeated-application
+case pins 62, including the shared-closure increment, both `fvar` invocations,
+eight unboxes, ten decrements, two mixed constructors, their `uset`/`sset`
+writes, projections, and the final result pair. Matching coverage domains
+require the unique/single-use control and the shared/multiplicity path
+separately. The fixtures consume the published closure-ownership contract and
+remain `wasm-generation-pending` until the proof, W6, and W7 handoffs are
+linked; only then may a fresh V8 triangle remove that fence. The captured
+aliased-`ByteArray` taken/skipped pair remains deferred because it additionally
+depends on the separately queued argument-alias materialization and boxed
+effect-wrapper contracts; those dependencies are not copied into this slice.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and

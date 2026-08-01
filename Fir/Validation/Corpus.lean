@@ -1529,6 +1529,50 @@ def capture17List
        x10, x11, x12, x13, x14, x15, x16, x17, z])
     y
 
+/--
+An internal closure result spanning every final-LCNF storage lane.  Validation
+observes only its `argument` projection so this ownership regression does not
+depend on the general mixed-constructor wire codec.
+-/
+structure MixedClosureCapture where
+  natural : Nat
+  text : String
+  bytes : ByteArray
+  usize : USize
+  word : UInt32
+  single : Float32
+  double : Float
+  argument : Nat
+
+@[noinline]
+def applyMixedClosureCapture
+    (f : Nat → MixedClosureCapture) (argument : Nat) : Nat :=
+  (f argument).argument
+
+@[noinline]
+def applyMixedClosureCaptureTwice
+    (f : Nat → MixedClosureCapture) (first second : Nat) : Nat × Nat :=
+  ((f first).argument, (f second).argument)
+
+def captureMixedClosure
+    (natural : Nat) (text : String) (bytes : ByteArray) (usize : USize)
+    (word : UInt32) (single : Float32) (double : Float) (argument : Nat) : Nat :=
+  applyMixedClosureCapture
+    (fun capturedArgument =>
+      { natural, text, bytes, usize, word, single, double,
+        argument := capturedArgument })
+    argument
+
+def captureMixedClosureTwice
+    (natural : Nat) (text : String) (bytes : ByteArray) (usize : USize)
+    (word : UInt32) (single : Float32) (double : Float)
+    (first second : Nat) : Nat × Nat :=
+  applyMixedClosureCaptureTwice
+    (fun capturedArgument =>
+      { natural, text, bytes, usize, word, single, double,
+        argument := capturedArgument })
+    first second
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -1970,6 +2014,12 @@ private def stringPairDatum (value : String × String) : ValidationDatum :=
 private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
 
+private def float32Datum (value : Float32) : ValidationDatum :=
+  .bits 32 (UInt64.ofNat value.toBits.toNat)
+
+private def float64Datum (value : Float) : ValidationDatum :=
+  .bits 64 value.toBits
+
 private def intPairDatum (value : Int × Int) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.int value.1, .int value.2]
 
@@ -1988,6 +2038,34 @@ private def mixedLayoutText : String :=
 
 private def mixedLayoutBytes : ByteArray :=
   ⟨#[0, 127, 128, 255]⟩
+
+private def mixedClosureSingle : Float32 :=
+  Float32.ofBits 0x7fc12345
+
+private def mixedClosureDouble : Float :=
+  Float.ofBits 0x8000000000000000
+
+private def mixedClosureBaseArgs : Array ValidationDatum :=
+  #[.nat Source.largeNat, .string mixedLayoutText, byteArrayDatum mixedLayoutBytes,
+    .usize (UInt64.ofNat Source.maxUSize.toNat), .bits 32 0xdeadbeef,
+    float32Datum mixedClosureSingle, float64Datum mixedClosureDouble]
+
+private def mixedClosureBaseArgSchemas : Array ValidationSchema :=
+  #[.nat, .string, .bytes, .usize, .bits 32, .float32, .float64]
+
+private def mixedClosureOnceArgs : Array ValidationDatum :=
+  mixedClosureBaseArgs.push (.nat 99)
+
+private def mixedClosureOnceArgSchemas : Array ValidationSchema :=
+  mixedClosureBaseArgSchemas.push .nat
+
+private def mixedClosureTwiceArgs : Array ValidationDatum :=
+  mixedClosureBaseArgs
+    |>.push (.nat 17)
+    |>.push (.nat 340282366920938463463374607431768211473)
+
+private def mixedClosureTwiceArgSchemas : Array ValidationSchema :=
+  mixedClosureBaseArgSchemas.push .nat |>.push .nat
 
 private def mixedLayoutArgs : Array ValidationDatum :=
   #[.nat Source.largeNat, .string mixedLayoutText, byteArrayDatum mixedLayoutBytes,
@@ -2204,6 +2282,21 @@ private def recursiveEmptyFormTrace : Array String :=
 
 private def scalarEnumFormTrace : Array String :=
   #["fap", "lit", "fap", "cases", "lit", "return", "return", "inc", "return"]
+
+private def mixedClosureOnceFormTrace : Array String :=
+  #["box", "box", "box", "box", "pap", "fap", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "return", "return"]
+
+private def mixedClosureTwiceFormTrace : Array String :=
+  #["box", "box", "box", "box", "pap", "fap", "inc", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "ctor", "return", "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -5455,6 +5548,83 @@ private def postConversionCases : Array Case := #[
     requiredExecutedLcnfForms := #["pap", "fap", "fvar", "ctor", "return"]
     provenance := leanCompileProvenance "tests/compile/closure_bug1.lean"
       "Pure list-valued adaptation retaining 17 captured values" },
+  { id := "mixed-closure-capture-once"
+    entry := ``Source.captureMixedClosure
+    dependencies := #[``Source.applyMixedClosureCapture]
+    args := mixedClosureOnceArgs
+    argSchemas := mixedClosureOnceArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.captureMixedClosure Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize 0xdeadbeef mixedClosureSingle mixedClosureDouble 99)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
+        "float", "float32", "float64", "exact-bits", "heap", "ownership", "unique",
+        "single-use", "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "dec", "ctor", "uset", "sset",
+        "return", "oproj", "inc"]
+    requiredExecutedLcnfForms :=
+      #["box", "pap", "fap", "fvar", "unbox", "dec", "ctor", "uset", "sset",
+        "return", "oproj", "inc"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 2, maximum := some 2 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 5, maximum := some 5 },
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "uset", minimum := 1, maximum := some 1 },
+        { form := "sset", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "inc", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some mixedClosureOnceFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Consume one mixed-kind closure application and observe its argument projection" },
+  { id := "mixed-closure-capture-twice"
+    entry := ``Source.captureMixedClosureTwice
+    dependencies := #[``Source.applyMixedClosureCaptureTwice]
+    args := mixedClosureTwiceArgs
+    argSchemas := mixedClosureTwiceArgSchemas
+    resultSchema := .ctor "Prod.mk" 0 #[.nat, .nat]
+    native := fun _ => natPairDatum
+      (Source.captureMixedClosureTwice Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize 0xdeadbeef mixedClosureSingle mixedClosureDouble 17
+        340282366920938463463374607431768211473)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
+        "float", "float32", "float64", "exact-bits", "heap", "ownership", "shared",
+        "multiplicity", "repeated-application", "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
+        "sset", "return", "oproj"]
+    requiredExecutedLcnfForms :=
+      #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
+        "sset", "return", "oproj"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 3, maximum := some 3 },
+        { form := "inc", minimum := 3, maximum := some 3 },
+        { form := "fvar", minimum := 2, maximum := some 2 },
+        { form := "unbox", minimum := 8, maximum := some 8 },
+        { form := "dec", minimum := 10, maximum := some 10 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "uset", minimum := 2, maximum := some 2 },
+        { form := "sset", minimum := 6, maximum := some 6 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "oproj", minimum := 2, maximum := some 2 }]
+    requiredExecutedLcnfFormTrace := some mixedClosureTwiceFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Apply one shared mixed-kind closure twice and preserve both argument projections" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]
