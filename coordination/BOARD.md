@@ -23,7 +23,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Published contract base: standalone commit `dbd7d934`, rebased from W7
   provenance commit `d392e194` onto coordination-enabled `main` at
   `00dcd516`. Proof lanes consume `dbd7d934`; they do not base new proof work
-  on the W7 branch.
+  on the W7 branch. Current `main` has since advanced to coordination-only
+  commit `65290f45`, so the integration branch must rebase before publishing
+  the next shared-contract head; `dbd7d934` remains provenance, not the final
+  landing identity.
 - Lease boundary: ends when the closure stack is `linked/accepted`, parked, or
   explicitly reassigned here.
 - Scope: publish the stable contract base, validate and land lane handoffs in
@@ -34,10 +37,14 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 The live dependency order is:
 
 ```text
-integration contract dbd7d934
-  -> lcnf-proof and wasm-proof in parallel
-  -> integration landing
-  -> wasm-gen adapter 2ed6deb4
+current main 65290f45
+  -> rebase integration/closure-ownership and replay contract dbd7d934
+  -> repair external execution to use the post-application waiting.runtime
+  -> rebase lcnf-proof, finish ElimDeadMachineRel/Examples, mark ready
+  -> fast-forward the integration candidate to the green proof head
+  -> rebase wasm-proof b811c39a, rerun root/Talos gates, mark ready
+  -> validate and land the complete contract/proof/W6 stack on main
+  -> rebase and validate wasm-gen adapter 2ed6deb4
   -> test-fixtures admission of 32 scalar-closure cases
 ```
 
@@ -52,6 +59,31 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `CLOSURE-APPLICATION-OWNERSHIP` has a newly discovered sequencing gate.
+  Lane-local failures in `Fir/LeanIR/Passes/AlphaEqvCode.lean` are expected:
+  all consumers are based on semantic commit `dbd7d934`, while the matching
+  proof adaptation is proof-owned commit `62033cdb`. W6 functional commit
+  `b811c39a` passes its Beam, concrete/Talos, and bug-card gates and must not
+  patch `AlphaEqvCode`; its root `make check` waits for the proof stack.
+  Proof commit `62033cdb` relates persistent, exclusive-transfer, and
+  shared-decrement/retain applications and passes its direct dependency cone
+  plus the repository root gate, but the explicit
+  `Fir.LeanIR.Passes.ElimDeadExamples` cone exposes a shared semantic
+  inconsistency recorded as
+  `FIR-BUG-impure-none-closure-application-external-runtime`: `executeStep`
+  and relational `Step.external` select the pre-application runtime even
+  though `takeClosureApplication` stores its ownership transition in
+  `waiting.runtime`. An external response can therefore resurrect an
+  exclusive closure or discard the shared decrement and capture retains.
+  The immediate integration action is to coordinate the shared interpreter
+  repair, using `waiting.runtime` or an equivalent explicitly post-application
+  contract in both executable and relational semantics. Then lcnf-proof
+  rebases once, completes `ElimDeadMachineRel` and `ElimDeadExamples`, resolves
+  the card, and marks ready. Only after that green proof head is in the
+  integration candidate does W6 rebase and rerun its full root gate. W7
+  generation remains independent while analyzing this sequencing change and
+  rebases adapter `2ed6deb4` only after the contract/proof/W6 stack lands.
 
 - Validation's validated pre-record coordination head is `3ae6c37d`, with
   functional head `96eec154` on semantic base `fff91175` and coordination head
