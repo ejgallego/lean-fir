@@ -451,7 +451,7 @@ private theorem executeStep_withFrameSuffix
       simp [stepped] at transition
   | external request waiting =>
       simp only [stepped] at transition
-      cases called : externals.call request before.runtime with
+      cases called : externals.call request waiting.runtime with
       | error fault =>
           simp [called] at transition
       | ok response =>
@@ -460,7 +460,7 @@ private theorem executeStep_withFrameSuffix
           rw [coreStep_external_withFrameSuffix stepped]
           have calledSuffix :
               externals.call request
-                  (withFrameSuffix before suffix).runtime = .ok response := by
+                  (withFrameSuffix waiting suffix).runtime = .ok response := by
             simpa [withFrameSuffix] using called
           simp only [calledSuffix]
           rw [resumeExternal_withFrameSuffix]
