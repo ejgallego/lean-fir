@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-closure-application-ownership
-status: confirmed
+status: fixed
 classification: fir-semantics
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -91,5 +91,17 @@ none
 
 ## Resolution and regression
 
-Unresolved. The regression must cover exclusive, shared, and persistent
-closures with heap and immediate captures, including repeated application.
+Resolved by the landed shared contract and proof stack through `229640de` and
+the rebased W7 adapter `fd6a51e3`. `closureMatches` now implements the
+application boundary: it consumes an exclusive closure without recursively
+releasing its captures, decrements a shared closure and retains each heap
+capture, and leaves persistent closures unchanged. `closureProj` transfers
+from an application snapshot, so projections remain valid after an exclusive
+closure becomes dead and cannot transfer the same capture twice.
+
+`scripts/test_wasm_validation_externals.mjs` covers exclusive, shared, and
+persistent closures, heap captures, repeated application, metadata mismatch,
+and duplicate projection. The packaged semantic-host test additionally pins
+immediate-capture projection after exclusive consumption. Root validation,
+Talos, and `integration/talos/artifact/check.sh` exercise the complete linked
+path.
