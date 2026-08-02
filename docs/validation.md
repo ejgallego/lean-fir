@@ -1793,6 +1793,28 @@ linked; only then may a fresh V8 triangle remove that fence. The captured
 aliased-`ByteArray` taken/skipped pair remains deferred because it additionally
 depends on the separately queued argument-alias materialization and boxed
 effect-wrapper contracts; those dependencies are not copied into this slice.
+The next fixture-only ownership pair retains one source `ByteArray` outside a
+single-use closure. The read case borrows the captured alias through
+`ByteArray.get!`, converts the byte to a generic-constructor-safe `Nat`, and
+returns it with the unchanged outside alias. Its exact 27-step trace executes
+one `inc`, one `pap`, one `fvar`, `ByteArray.get!`, `UInt8.toNat`, two
+decrements, and the final pair constructor. The mutation case consumes the
+captured alias through `ByteArray.set!`; native and LCNF return the unchanged
+outside alias beside a freshly updated copy. Its exact 25-step trace executes
+one `inc`, one `pap`, one `fvar`, scalar box/unbox, and one consuming external.
+There is deliberately no standalone `dec` in that compiled path: exclusive
+closure application transfers the fixed capture and the external consumes its
+argument. Separate coverage domains require the borrowed and consuming paths,
+their shared outside alias, retain/release classification, and the mutation
+case's observable allocation/copy-on-write result. Both cases remain behind
+the same W7 admission fence as the mixed closure pair.
+
+The first read probe returned `ByteArray × UInt8` and exposed
+`FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
+the validation result codec could not decode the boxed `UInt8` stored in
+generic `Prod`. The discrepancy was recorded before the compact fixture
+changed its observation to `Nat`; the general boxed-scalar protocol repair is
+kept separate from this ownership slice.
 A heap-backed Unicode `String → String` round trip retains the
 compiler-produced ownership increment and returns the reconstructed string
 through the semantic host.  Signed `Int` identity programs cover positive and

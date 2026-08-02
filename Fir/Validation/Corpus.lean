@@ -1573,6 +1573,33 @@ def captureMixedClosureTwice
         argument := capturedArgument })
     first second
 
+@[noinline]
+def applyCapturedByteArrayRead
+    (f : Nat → Nat) (index : Nat) : Nat :=
+  f index
+
+@[noinline]
+def applyCapturedByteArrayMutation
+    (f : UInt8 → ByteArray) (byte : UInt8) : ByteArray :=
+  f byte
+
+/-- Retain a ByteArray outside a closure while borrowing its captured alias. -/
+def capturedByteArrayOutsideAliasRead
+    (source : ByteArray) : ByteArray × Nat :=
+  let observed := applyCapturedByteArrayRead
+    (fun index => (source.get! index).toNat) 0
+  (source, observed)
+
+/--
+Retain a ByteArray outside a closure while consuming its captured alias. The
+captured mutation must copy, leaving the independently retained alias intact.
+-/
+def capturedByteArrayOutsideAliasMutation
+    (source : ByteArray) : ByteArray × ByteArray :=
+  let updated := applyCapturedByteArrayMutation
+    (fun byte => source.set! 0 byte) 42
+  (source, updated)
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -2008,6 +2035,10 @@ private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
+private def byteArrayNatPairDatum
+    (value : ByteArray × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1, .nat value.2]
+
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
@@ -2297,6 +2328,14 @@ private def mixedClosureTwiceFormTrace : Array String :=
     "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
     "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
     "oproj", "inc", "dec", "ctor", "return", "return"]
+
+private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
+  #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
+    "extern", "return", "dec", "dec", "return", "return", "ctor", "return"]
+
+private def capturedByteArrayOutsideAliasMutationFormTrace : Array String :=
+  #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "fap", "lit",
+    "fap", "extern", "return", "return", "return", "ctor", "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -5625,6 +5664,85 @@ private def postConversionCases : Array Case := #[
       #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Apply one shared mixed-kind closure twice and preserve both argument projections" },
+  { id := "captured-byte-array-outside-alias-read"
+    entry := ``Source.capturedByteArrayOutsideAliasRead
+    dependencies := #[``Source.applyCapturedByteArrayRead]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := .ctor "Prod.mk" 0 #[.bytes, .nat]
+    native := fun _ => byteArrayNatPairDatum
+      (Source.capturedByteArrayOutsideAliasRead mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "outside-alias", "shared",
+        "borrow", "read", "retain", "release", "single-use",
+        "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some capturedByteArrayOutsideAliasReadFormTrace
+    requiredExternals := #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternals := #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!, ``UInt8.toNat]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Borrow one captured ByteArray while preserving an independently retained alias" },
+  { id := "captured-byte-array-outside-alias-mutation"
+    entry := ``Source.capturedByteArrayOutsideAliasMutation
+    dependencies := #[``Source.applyCapturedByteArrayMutation]
+    args := #[byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bytes]
+    resultSchema := byteArrayPairSchema
+    native := fun _ => byteArrayPairDatum
+      (Source.capturedByteArrayOutsideAliasMutation mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "outside-alias", "shared",
+        "consume", "mutation", "copy-on-write", "allocation", "retain", "release",
+        "single-use",
+        "wasm-generation-pending"]
+    requiredLcnfForms :=
+      #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "extern", "return",
+        "ctor"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "extern", "return",
+        "ctor"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "fap", minimum := 3, maximum := some 3 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some capturedByteArrayOutsideAliasMutationFormTrace
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Consume a captured ByteArray through copy-on-write while preserving its outside alias" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]
