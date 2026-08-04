@@ -432,7 +432,7 @@ theorem instructions_compileClosureDispatch
         initial closureId closureIndex address))
     (candidatesEq :
       context.program.decls.toList.flatMap (fun target =>
-        compileClosureCandidatesForTarget declId closureId resultKind
+        compileClosureCandidatesForTarget context.program declId closureId resultKind
           argumentCode argumentKinds target) =
         candidates.map (·.source))
     (closureFound :
@@ -837,7 +837,7 @@ theorem compileClosureDispatch_correct_of_selected
     (Q : Wasm.Assertion Host)
     (candidatesEq :
       context.program.decls.toList.flatMap (fun target =>
-        compileClosureCandidatesForTarget declId closureId resultKind
+        compileClosureCandidatesForTarget context.program declId closureId resultKind
           argumentCode argumentKinds target) =
         (before ++ selected :: suffix).map (·.source))
     (closureFound :

@@ -849,7 +849,8 @@ theorem ConcreteRuntimeRel.boxScalar
     {runtime : RuntimeState} {result : MemoryState}
     {scalar : BoxedScalar} {word : Word32}
     (related : ConcreteRuntimeRel concrete witness runtime)
-    (boxed : boxScalar concrete.heap scalar = .ok (result, word)) :
+    (boxed : Fir.Wasm.Concrete.boxScalar concrete.heap scalar =
+      .ok (result, word)) :
     ∃ nextRuntime sourceValue nextWitness,
       witness.Extends nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness
@@ -920,6 +921,70 @@ theorem ConcreteRuntimeRel.boxScalar
       trace := by
         simpa [semanticBoxResult] using
           related.trace.witnessExtension extension }
+
+/-- The representation selected by production lowering is justified by the
+same concrete boxing step. In particular, `UInt8` is always in FIR's tagged
+range, so its result may be related at the precise `.tagged` ABI kind; the
+other supported integer kinds retain the representation-polymorphic
+`.tobject` relation. -/
+theorem ConcreteRuntimeRel.boxScalarAtResultKind
+    {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
+    {runtime : RuntimeState} {result : MemoryState}
+    {scalar : BoxedScalar} {word : Word32}
+    (related : ConcreteRuntimeRel concrete witness runtime)
+    (boxed : Fir.Wasm.Concrete.boxScalar concrete.heap scalar =
+      .ok (result, word)) :
+    ∃ nextRuntime sourceValue nextWitness,
+      witness.Extends nextWitness ∧
+      ConcreteRuntimeRel { concrete with heap := result } nextWitness
+        nextRuntime ∧
+      ValueRel nextWitness
+        (Fir.Wasm.boxResultKind scalar.kind.semanticType .tobject)
+        (.word32 word) sourceValue ∧
+      box runtime scalar.kind.semanticType scalar.semanticValue =
+        .ok (nextRuntime, sourceValue) := by
+  obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
+      nextRelated, valueRelated, semanticStep⟩ :=
+    FirTalos.Concrete.ConcreteRuntimeRel.boxScalar related boxed
+  cases scalar with
+  | uint8 value =>
+      have tagged : (BoxedScalar.uint8 value).payload.toNat ≤ maxTaggedPayload := by
+        have small := UInt8.toNat_lt_size value
+        have sizeLe : UInt8.size ≤ maxTaggedPayload + 1 := by native_decide
+        change value.toNat ≤ maxTaggedPayload
+        omega
+      have canonical := semanticBox_tagged_eq runtime (.uint8 value) tagged
+      rw [canonical] at semanticStep
+      simp only [Except.ok.injEq, Prod.mk.injEq] at semanticStep
+      rcases semanticStep with ⟨runtimeEq, sourceValueEq⟩
+      subst nextRuntime
+      subst sourceValue
+      refine ⟨runtime,
+        .object (.tagged (BoxedScalar.uint8 value).payload), nextWitness,
+        extension, nextRelated, ?_, canonical⟩
+      simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+        Fir.Wasm.boxResultKind_uint8_tobject] using
+          valueRelated.tobject_tagged_to_tagged
+  | uint16 value =>
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+        by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+          Fir.Wasm.boxResultKind_uint16_tobject] using valueRelated,
+        semanticStep⟩
+  | uint32 value =>
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+        by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+          Fir.Wasm.boxResultKind_uint32_tobject] using valueRelated,
+        semanticStep⟩
+  | uint64 value =>
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+        by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+          Fir.Wasm.boxResultKind_uint64_tobject] using valueRelated,
+        semanticStep⟩
+  | usize value =>
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+        by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
+          Fir.Wasm.boxResultKind_usize_tobject] using valueRelated,
+        semanticStep⟩
 
 /-- Failures at the concrete Talos host boundary retain either the exact W6
 runtime trap or a Wasm ABI-shape error detected before the operation runs. -/
@@ -2050,6 +2115,7 @@ with the grown runtime witness and canonical FIR allocation step. -/
 theorem boxStep_of_refines
     {initial : Wasm.Store Host}
     {runtime nextHeap : RuntimeState} {kind : BoxedScalarKind}
+    {resultKind : AbiKind}
     {scalar : BoxedScalar} {heap : MemoryState} {word : Word32}
     {sourceValue : Value} {nextWitness : RefinementWitness}
     (kindEq : scalar.kind = kind)
@@ -2058,12 +2124,12 @@ theorem boxStep_of_refines
       .ok (nextHeap, sourceValue))
     (nextRelated : ConcreteRuntimeRel
       { initial.host.runtime with heap := heap } nextWitness nextHeap)
-    (valueRelated : ValueRel nextWitness .tobject (.word32 word) sourceValue) :
-    boxStep kind .tobject initial [physicalOfLane scalar.lane] =
+    (valueRelated : ValueRel nextWitness resultKind (.word32 word) sourceValue) :
+    boxStep kind resultKind initial [physicalOfLane scalar.lane] =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime
         nextWitness nextHeap ∧
-      ValueRel nextWitness .tobject (.word32 word) sourceValue := by
+      ValueRel nextWitness resultKind (.word32 word) sourceValue := by
   subst kind
   refine ⟨?_, ?_, valueRelated⟩
   · unfold boxStep
@@ -10970,12 +11036,14 @@ theorem letStepSimulates_box
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure} {sourceEnv : Env}
-    {scalarId : Lean.FVarId} {kind : BoxedScalarKind}
+    {scalarId : Lean.FVarId} {kind : BoxedScalarKind} {resultKind : AbiKind}
     {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
     {scalarIndex resultIndex : Nat} {scalar : BoxedScalar}
     {heap : MemoryState} {word : Word32}
     {sourceRuntime : RuntimeState} {witness : RefinementWitness}
     (kindEq : scalar.kind = kind)
+    (resultKindEq :
+      resultKind = Fir.Wasm.boxResultKind kind.semanticType .tobject)
     (valueEq : decl.value = .box kind.semanticType scalarId)
     (sourceLookup : lookup sourceEnv scalarId = some scalar.semanticValue)
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
@@ -10984,13 +11052,13 @@ theorem letStepSimulates_box
       findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
     (resultKindAt :
       (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
-        some .tobject)
+        some resultKind)
     (hScalar : locals.get scalarIndex = some (physicalOfLane scalar.lane))
     (boxed : boxScalar initial.host.runtime.heap scalar = .ok (heap, word))
     (hImp : module.imports[id]? = some imp)
     (hSat : hostEnv.Satisfies module spec)
     (hi : id < module.imports.length)
-    (hContract : spec.contracts[id]? = some (boxContract kind .tobject))
+    (hContract : spec.contracts[id]? = some (boxContract kind resultKind))
     (hParams : imp.params.length = 1)
     (hResults : imp.results.length = 1)
     (targetSet : locals.set? resultIndex
@@ -10999,7 +11067,7 @@ theorem letStepSimulates_box
       witness.Extends nextWitness ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         nextRuntime ∧
-      PhysicalValueRel nextWitness .tobject
+      PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat word.value)) sourceValue ∧
       LetStepSimulates context sourceFunction module hostEnv decl
         [.localGet scalarIndex, .call id]
@@ -11007,12 +11075,15 @@ theorem letStepSimulates_box
         (replaceHeap initial heap) locals updated resultIndex witness
         nextWitness := by
   subst kind
+  subst resultKind
   obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
       nextRuntimeRelated, valueRelated, semanticStep⟩ :=
-    FirTalos.Concrete.ConcreteRuntimeRel.boxScalar initialRelated.1 boxed
+    FirTalos.Concrete.ConcreteRuntimeRel.boxScalarAtResultKind
+      initialRelated.1 boxed
   obtain ⟨operation, _, _⟩ :=
     boxStep_of_refines rfl boxed semanticStep nextRuntimeRelated valueRelated
-  have physicalRelated : PhysicalValueRel nextWitness .tobject
+  have physicalRelated : PhysicalValueRel nextWitness
+      (Fir.Wasm.boxResultKind scalar.kind.semanticType .tobject)
       (.i32 (UInt32.ofNat word.value)) sourceValue :=
     .word32 valueRelated
   have failureClear : (replaceHeap initial heap).host.failure? = none := by
@@ -11226,7 +11297,7 @@ theorem codeWP_box_let
     {id : Nat} {imp : Wasm.ImportDecl}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure} {sourceEnv : Env}
-    {scalarId : Lean.FVarId} {kind : BoxedScalarKind}
+    {scalarId : Lean.FVarId} {kind : BoxedScalarKind} {resultKind : AbiKind}
     {initial : Wasm.Store Host} {locals updated : Wasm.Locals}
     {scalarIndex resultIndex : Nat} {scalar : BoxedScalar}
     {heap : MemoryState} {word : Word32}
@@ -11234,14 +11305,16 @@ theorem codeWP_box_let
     {targetRest : Wasm.Program} {tail : List Wasm.Value}
     {Q : Wasm.Assertion Host}
     (kindEq : scalar.kind = kind)
+    (resultKindEq :
+      resultKind = Fir.Wasm.boxResultKind kind.semanticType .tobject)
     (valueEq : decl.value = .box kind.semanticType scalarId)
     (valueCompiled : Fir.Wasm.compileLetValue context decl =
       .ok [.localGet scalarId,
-        .call (.runtime (.box kind.abiKind .tobject))])
+        .call (.runtime (.box kind.abiKind resultKind))])
     (scalarFound :
       findFVar? (functionBindings sourceFunction) scalarId = some scalarIndex)
     (callFound : callIndex? sourceModule
-      (.runtime (.box kind.abiKind .tobject)) = some id)
+      (.runtime (.box kind.abiKind resultKind)) = some id)
     (sourceLookup : lookup sourceEnv scalarId = some scalar.semanticValue)
     (initialRelated : StateRelated sourceFunction sourceRuntime sourceEnv
       initial locals witness)
@@ -11249,13 +11322,13 @@ theorem codeWP_box_let
       findFVar? (functionBindings sourceFunction) decl.fvarId = some resultIndex)
     (resultKindAt :
       (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
-        some .tobject)
+        some resultKind)
     (hScalar : locals.get scalarIndex = some (physicalOfLane scalar.lane))
     (boxed : boxScalar initial.host.runtime.heap scalar = .ok (heap, word))
     (hImp : module.imports[id]? = some imp)
     (hSat : hostEnv.Satisfies module spec)
     (hi : id < module.imports.length)
-    (hContract : spec.contracts[id]? = some (boxContract kind .tobject))
+    (hContract : spec.contracts[id]? = some (boxContract kind resultKind))
     (hParams : imp.params.length = 1)
     (hResults : imp.results.length = 1)
     (targetSet : locals.set? resultIndex
@@ -11264,7 +11337,7 @@ theorem codeWP_box_let
       witness.Extends nextWitness →
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         nextRuntime →
-      PhysicalValueRel nextWitness .tobject
+      PhysicalValueRel nextWitness resultKind
         (.i32 (UInt32.ofNat word.value)) sourceValue →
       CodeWP context sourceModule sourceFunction labels module hostEnv
         nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
@@ -11276,7 +11349,7 @@ theorem codeWP_box_let
   have valueAdapted :
       instructions sourceModule sourceFunction labels
           [.localGet scalarId,
-            .call (.runtime (.box kind.abiKind .tobject))] =
+            .call (.runtime (.box kind.abiKind resultKind))] =
         .ok [.localGet scalarIndex, .call id] := by
     have scalarFound' :
         findFVar? (sourceFunction.params.toList ++ sourceFunction.locals.toList)
@@ -11286,8 +11359,8 @@ theorem codeWP_box_let
     rfl
   obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
       nextRuntimeRelated, valueRelated, step⟩ :=
-    letStepSimulates_box (context := context) kindEq valueEq sourceLookup
-      initialRelated resultFound resultKindAt hScalar boxed hImp hSat hi
+    letStepSimulates_box (context := context) kindEq resultKindEq valueEq
+      sourceLookup initialRelated resultFound resultKindAt hScalar boxed hImp hSat hi
       hContract hParams hResults targetSet
   have nextCode := continued nextRuntime sourceValue nextWitness extension
     nextRuntimeRelated valueRelated

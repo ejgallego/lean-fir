@@ -96,6 +96,15 @@ TargetBehaviorRel observation targetBody
 their operation results are migrated. They are not premises of the final
 compiler theorem.
 
+Representation and admission facts such as “this compiler-declared `tobject`
+parameter is used only as an erased generic argument” or “every `UInt8` box is
+tagged” are local inputs to this structural proof. They may refine lowering,
+the supported gate, and one operation theorem, but they are not alternative
+program-specific correctness certificates and must not become premises of the
+public theorem. The public theorem continues to quantify over admitted
+compiler output and derive the matching target behavior from the source
+evaluation and the general state relation.
+
 `ConcreteSupportedExport.correctReturn` is the first completed T2 case. It
 derives the emitted return body, ABI kind, numeric local, exact target return,
 and source execution from the static pipeline and source return evaluation.

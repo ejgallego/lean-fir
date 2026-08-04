@@ -6219,9 +6219,11 @@ numeric index, allocation result, or execution witness is admitted here.
 inductive BoxSupported (context : Fir.Wasm.Context) :
     LCNF.LetDecl .impure → Prop where
   | intro
-      (scalarId : FVarId) (kind : BoxedScalarKind)
+      (scalarId : FVarId) (kind : BoxedScalarKind) (resultKind : AbiKind)
       (valueEq : decl.value = .box kind.semanticType scalarId)
-      (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+      (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+      (resultKindEq :
+        resultKind = Fir.Wasm.boxResultKind kind.semanticType .tobject)
       (scalarCompiled :
         Fir.Wasm.getLocal context scalarId =
           .ok (.localGet scalarId, kind.abiKind))
@@ -6229,7 +6231,7 @@ inductive BoxSupported (context : Fir.Wasm.Context) :
         Fir.Wasm.checkedAbiKind kind.semanticType = .ok kind.abiKind)
       (resultCompiled :
         Fir.Wasm.getLocal context decl.fvarId =
-          .ok (.localGet decl.fvarId, .tobject)) :
+          .ok (.localGet decl.fvarId, resultKind)) :
       BoxSupported context decl
 
 /--
@@ -13397,14 +13399,14 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
     supported allocationFits budgeted sourceStep stateRelated valueCompiled
     valueAdapted resultFound
   rcases supported with
-    ⟨scalarId, kind, valueEq, valueKind, scalarCompiled, annotationKind,
-      resultCompiled⟩
+    ⟨scalarId, kind, resultKind, valueEq, valueKind, resultKindEq,
+      scalarCompiled, annotationKind, resultCompiled⟩
   obtain ⟨sourceScalar, sourceLookup, _⟩ :=
     sourceLetResult_box_eq valueEq sourceStep
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
         .ok [.localGet scalarId,
-          .call (.runtime (.box kind.abiKind .tobject))] :=
+          .call (.runtime (.box kind.abiKind resultKind))] :=
     compileLetValue_box valueEq valueKind scalarCompiled annotationKind
   rw [expectedCompiled] at valueCompiled
   injection valueCompiled with valueCodeEq
@@ -13412,7 +13414,7 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
   obtain ⟨indices, callIndex, scalarFound, callFound, targetValueEq⟩ :=
     instructions_localGets_call_eq
       (fvarIds := [scalarId])
-      (operation := .box kind.abiKind .tobject) valueAdapted
+      (operation := .box kind.abiKind resultKind) valueAdapted
   cases scalarFound with
   | cons scalarFound noMore =>
       cases noMore
@@ -13446,8 +13448,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
         spec.boxCall callFound
       obtain ⟨actualRuntime, actualValue, nextWitness, extension,
           nextRuntimeRelated, valueRelated, step⟩ :=
-        letStepSimulates_box (context := context) kindEq valueEq sourceLookup
-          stateRelated resultFound resultKindAt hScalar boxed imported
+        letStepSimulates_box (context := context) kindEq resultKindEq valueEq
+          sourceLookup stateRelated resultFound resultKindAt hScalar boxed imported
           spec.hostsSatisfy inBounds contracted params results targetSet
       obtain ⟨runtimeEq, sourceValueEq⟩ :=
         SourceLetResult.deterministic sourceStep step.1
@@ -15033,15 +15035,15 @@ theorem
     supported allocationFits invariant sourceStep valueCompiled valueAdapted
     resultFound
   rcases supported with
-    ⟨scalarId, kind, valueEq, valueKind, scalarCompiled, annotationKind,
-      resultCompiled⟩
+    ⟨scalarId, kind, resultKind, valueEq, valueKind, resultKindEq,
+      scalarCompiled, annotationKind, resultCompiled⟩
   obtain ⟨related, ordinaryTokens, frameAligned, budget⟩ := invariant
   obtain ⟨sourceScalar, sourceLookup, semanticBox⟩ :=
     sourceLetResult_box_eq valueEq sourceStep
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
         .ok [.localGet scalarId,
-          .call (.runtime (.box kind.abiKind .tobject))] :=
+          .call (.runtime (.box kind.abiKind resultKind))] :=
     compileLetValue_box valueEq valueKind scalarCompiled annotationKind
   rw [expectedCompiled] at valueCompiled
   injection valueCompiled with valueCodeEq
@@ -15049,7 +15051,7 @@ theorem
   obtain ⟨indices, callIndex, scalarFound, callFound, targetValueEq⟩ :=
     instructions_localGets_call_eq
       (fvarIds := [scalarId])
-      (operation := .box kind.abiKind .tobject) valueAdapted
+      (operation := .box kind.abiKind resultKind) valueAdapted
   cases scalarFound with
   | cons scalarFound noMore =>
       cases noMore
@@ -15083,8 +15085,8 @@ theorem
         spec.boxCall callFound
       obtain ⟨actualRuntime, actualValue, nextWitness, extension,
           nextRuntimeRelated, valueRelated, step⟩ :=
-        letStepSimulates_box (context := context) kindEq valueEq sourceLookup
-          related.stateRelated resultFound resultKindAt hScalar boxed imported
+        letStepSimulates_box (context := context) kindEq resultKindEq valueEq
+          sourceLookup related.stateRelated resultFound resultKindAt hScalar boxed imported
           spec.hostsSatisfy inBounds contracted params results targetSet
       obtain ⟨runtimeEq, sourceValueEq⟩ :=
         SourceLetResult.deterministic sourceStep step.1

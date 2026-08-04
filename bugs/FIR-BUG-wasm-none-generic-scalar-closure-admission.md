@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-generic-scalar-closure-admission
-status: candidate
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-02
 reproduction: Fir/Validation/Corpus.lean
-regression: none
+regression: integration/talos/FirTalos/ConcreteCompilerCorrectnessContract.lean
 ---
 
 # Summary
@@ -103,4 +103,31 @@ none
 
 ## Resolution and regression
 
-unresolved
+The W6 lowerer now derives an effective `.erased` parameter kind when a raw
+`tobject` declaration parameter is used only by exact forwarding to a
+statically known erased parameter. The admission is structural: it neither
+matches `_boxed` names nor adds `erased ≤ tobject` to the ABI refinement
+order. Partial-application descriptors, declaration locals, supported
+lowering, and closure dispatch all consume the same effective parameter-kind
+calculation.
+
+`UInt8` boxing now selects `.tagged` in `boxResultKind`. The concrete boxing
+refinement theorem proves this precise result from the existing 63-bit tagged
+bound, and the general `BoxSupported` direct-let simulation consumes the
+representation-sensitive result kind.
+
+The contract module contains an executable synthetic final-LCNF facade
+fixture. The real unfenced validation command
+
+```text
+python3 scripts/validate_interpreters.py \
+  --provider-config validation-providers/lean-wasm-semantic-scalars.json \
+  --adapter-config validation-adapters/v8-scalars.json \
+  --pair native:lcnf --pair native:v8 --pair lcnf:v8 \
+  --tag wasm-generation-pending \
+  --out-dir _build/w6-scalar-closure-admission-full-2
+```
+
+passes all 32 cases and all 96 directed comparisons with zero findings. The
+corpus tag remains for the integration/test-fixture owner to remove when this
+W6 slice lands.

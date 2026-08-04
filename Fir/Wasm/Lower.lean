@@ -254,6 +254,148 @@ def letValueReferencesFVar (target : FVarId) : LCNF.LetValue .impure → Bool
   | .reuse fvarId _ _ args =>
       sameFVar target fvarId || argsReferenceFVar target args
 
+/-- One argument position either does not mention the tracked parameter or
+forwards it exactly to a parameter whose final-LCNF type is erased. -/
+def argUsesOnlyAtErasedParameter (tracked : FVarId)
+    (param : LCNF.Param .impure) (arg : LCNF.Arg .impure) : Bool :=
+  match arg with
+  | .erased => true
+  | .fvar fvarId =>
+      !sameFVar tracked fvarId || param.type == LCNF.ImpureType.erased
+  | .type _ h => nomatch h
+
+/-- Check the tracked parameter's uses in one statically named call. -/
+def namedArgsUseOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+  if !argsReferenceFVar tracked args then
+    true
+  else
+    match program.findDecl? name with
+    | some target =>
+        args.size <= target.params.size &&
+          ((target.params.extract 0 args.size).zip args |>.all fun pair =>
+            argUsesOnlyAtErasedParameter tracked pair.fst pair.snd)
+    | none => false
+
+/-- A let-value use is admissible for an erased-only parameter exactly when
+it is forwarded through a statically named erased parameter. -/
+def letValueUsesOnlyAtErasedParameters (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) : LCNF.LetValue .impure → Bool
+  | .fap name args | .pap name args =>
+      namedArgsUseOnlyAtErasedParameters program tracked name args
+  | value => !letValueReferencesFVar tracked value
+
+/-
+Conservative structural recognizer for the compiler's erased type-parameter
+facade. A tracked parameter may be absent or forwarded through named erased
+parameters, but may not participate in a value operation, ownership effect,
+closure call, branch, case, or return.
+-/
+mutual
+
+partial def fvarUsesOnlyAtErasedParameters
+    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+    LCNF.Code .impure → Bool
+  | .let decl continuation =>
+      !sameFVar decl.fvarId tracked &&
+        letValueUsesOnlyAtErasedParameters program tracked decl.value &&
+        fvarUsesOnlyAtErasedParameters program tracked continuation
+  | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      !decl.params.any (fun param => sameFVar param.fvarId tracked) &&
+        fvarUsesOnlyAtErasedParameters program tracked decl.value &&
+        fvarUsesOnlyAtErasedParameters program tracked continuation
+  | .jmp _ args => !argsReferenceFVar tracked args
+  | .cases cases =>
+      !sameFVar tracked cases.discr &&
+        cases.alts.all (fvarUsesOnlyAtErasedParametersAlt program tracked)
+  | .return fvarId => !sameFVar tracked fvarId
+  | .unreach _ => true
+  | .oset objectId _ arg continuation =>
+      !(sameFVar tracked objectId || argReferencesFVar tracked arg) &&
+        fvarUsesOnlyAtErasedParameters program tracked continuation
+  | .uset objectId _ fieldId continuation
+  | .sset objectId _ _ fieldId _ continuation =>
+      !(sameFVar tracked objectId || sameFVar tracked fieldId) &&
+        fvarUsesOnlyAtErasedParameters program tracked continuation
+  | .setTag objectId _ continuation
+  | .inc objectId _ _ _ continuation
+  | .dec objectId _ _ _ _ continuation
+  | .del objectId continuation =>
+      !sameFVar tracked objectId &&
+        fvarUsesOnlyAtErasedParameters program tracked continuation
+
+partial def fvarUsesOnlyAtErasedParametersAlt
+    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+    LCNF.Alt .impure → Bool
+  | .ctorAlt _ code | .default code =>
+      fvarUsesOnlyAtErasedParameters program tracked code
+  | .alt _ _ _ h => nomatch h
+
+end
+
+def namedArgsForwardToErasedParameter (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) (name : Name) (args : Array (LCNF.Arg .impure)) : Bool :=
+  match program.findDecl? name with
+  | some target =>
+      ((target.params.extract 0 args.size).zip args).any fun pair =>
+        match pair.snd with
+        | .fvar fvarId =>
+            sameFVar tracked fvarId && pair.fst.type == LCNF.ImpureType.erased
+        | .erased => false
+        | .type _ h => nomatch h
+  | none => false
+
+def letValueForwardsToErasedParameter (program : Fir.LeanIR.ImpureProgram)
+    (tracked : FVarId) : LCNF.LetValue .impure → Bool
+  | .fap name args | .pap name args =>
+      namedArgsForwardToErasedParameter program tracked name args
+  | _ => false
+
+mutual
+
+partial def fvarForwardedToErasedParameter
+    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+    LCNF.Code .impure → Bool
+  | .let decl continuation =>
+      letValueForwardsToErasedParameter program tracked decl.value ||
+        fvarForwardedToErasedParameter program tracked continuation
+  | .fun _ _ h => nomatch h
+  | .jp decl continuation =>
+      fvarForwardedToErasedParameter program tracked decl.value ||
+        fvarForwardedToErasedParameter program tracked continuation
+  | .cases cases =>
+      cases.alts.any (fvarForwardedToErasedParameterAlt program tracked)
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation =>
+      fvarForwardedToErasedParameter program tracked continuation
+  | .jmp .. | .return .. | .unreach .. => false
+
+partial def fvarForwardedToErasedParameterAlt
+    (program : Fir.LeanIR.ImpureProgram) (tracked : FVarId) :
+    LCNF.Alt .impure → Bool
+  | .ctorAlt _ code | .default code =>
+      fvarForwardedToErasedParameter program tracked code
+  | .alt _ _ _ h => nomatch h
+
+end
+
+/-- A compiler-declared `tobject` parameter which is semantically erased by
+every use in its declaration body. -/
+def erasedOnlyParameter (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Bool :=
+  param.type == LCNF.ImpureType.tobject &&
+    match decl.value with
+    | .code code =>
+        fvarUsesOnlyAtErasedParameters program param.fvarId code &&
+          fvarForwardedToErasedParameter program param.fvarId code
+    | .extern _ => false
+
 /-
 Check the source-level control invariant emitted by Lean 4.32's
 `ExpandResetReuse`: an optional object parameter may be consumed only below
@@ -327,16 +469,81 @@ def checkedJoinParamKind (decl : LCNF.FunDecl .impure)
   return if kind == .tobject && guardedObjectJoinParam decl param then .object else kind
 
 /--
-Refine compiler-declared `tobject` boxes whose source type guarantees a heap
-representation. Lean 4.32 always heap-allocates Float32 and Float boxes; the
-precise `.object` kind lets closure capture and unchecked release retain that
-fact without changing the physical i32 lane.
+Refine compiler-declared `tobject` boxes when their source type fixes the
+representation. Every `UInt8` payload is tagged; Lean 4.32 always
+heap-allocates Float32 and Float boxes. Precise kinds let closure capture and
+ownership retain those facts without changing the physical i32 lane.
 -/
 def boxResultKind (type : Expr) (declared : AbiKind) : AbiKind :=
-  if type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float then
+  if type == LCNF.ImpureType.uint8 then
+    .tagged
+  else if type == LCNF.ImpureType.float32 || type == LCNF.ImpureType.float then
     .object
   else
     declared
+
+@[simp] theorem boxResultKind_uint8_tobject :
+    boxResultKind LCNF.ImpureType.uint8 .tobject = .tagged := by
+  have same :
+      (LCNF.ImpureType.uint8 == LCNF.ImpureType.uint8) = true := by
+    native_decide
+  simp only [boxResultKind, same, if_true]
+
+@[simp] theorem boxResultKind_uint16_tobject :
+    boxResultKind LCNF.ImpureType.uint16 .tobject = .tobject := by
+  have not8 :
+      (LCNF.ImpureType.uint16 == LCNF.ImpureType.uint8) = false := by
+    native_decide
+  have notF32 :
+      (LCNF.ImpureType.uint16 == LCNF.ImpureType.float32) = false := by
+    native_decide
+  have notF :
+      (LCNF.ImpureType.uint16 == LCNF.ImpureType.float) = false := by
+    native_decide
+  simp only [boxResultKind, not8, notF32, notF, Bool.false_or,
+    Bool.false_eq_true, if_false]
+
+@[simp] theorem boxResultKind_uint32_tobject :
+    boxResultKind LCNF.ImpureType.uint32 .tobject = .tobject := by
+  have not8 :
+      (LCNF.ImpureType.uint32 == LCNF.ImpureType.uint8) = false := by
+    native_decide
+  have notF32 :
+      (LCNF.ImpureType.uint32 == LCNF.ImpureType.float32) = false := by
+    native_decide
+  have notF :
+      (LCNF.ImpureType.uint32 == LCNF.ImpureType.float) = false := by
+    native_decide
+  simp only [boxResultKind, not8, notF32, notF, Bool.false_or,
+    Bool.false_eq_true, if_false]
+
+@[simp] theorem boxResultKind_uint64_tobject :
+    boxResultKind LCNF.ImpureType.uint64 .tobject = .tobject := by
+  have not8 :
+      (LCNF.ImpureType.uint64 == LCNF.ImpureType.uint8) = false := by
+    native_decide
+  have notF32 :
+      (LCNF.ImpureType.uint64 == LCNF.ImpureType.float32) = false := by
+    native_decide
+  have notF :
+      (LCNF.ImpureType.uint64 == LCNF.ImpureType.float) = false := by
+    native_decide
+  simp only [boxResultKind, not8, notF32, notF, Bool.false_or,
+    Bool.false_eq_true, if_false]
+
+@[simp] theorem boxResultKind_usize_tobject :
+    boxResultKind LCNF.ImpureType.usize .tobject = .tobject := by
+  have not8 :
+      (LCNF.ImpureType.usize == LCNF.ImpureType.uint8) = false := by
+    native_decide
+  have notF32 :
+      (LCNF.ImpureType.usize == LCNF.ImpureType.float32) = false := by
+    native_decide
+  have notF :
+      (LCNF.ImpureType.usize == LCNF.ImpureType.float) = false := by
+    native_decide
+  simp only [boxResultKind, not8, notF32, notF, Bool.false_or,
+    Bool.false_eq_true, if_false]
 
 def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
   match decl.value with
@@ -345,12 +552,79 @@ def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
   | .box type _ => return boxResultKind type (← checkedAbiKind decl.type)
   | _ => checkedAbiKind decl.type
 
+/-- Proof-relevant parameter kind selected for one complete declaration.
+Compiler-declared `tobject` parameters whose uses are structurally erased are
+tracked as `.erased`; every other parameter retains its declared ABI kind. -/
+def declarationParamKind? (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) : Option AbiKind :=
+  match abiKind? param.type with
+  | .ok (some kind) =>
+      if kind == .tobject && erasedOnlyParameter program decl param then
+        some .erased
+      else
+        some kind
+  | _ => none
+
+def checkedDeclarationParamKind (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) (param : LCNF.Param .impure) :
+    Except CompileError AbiKind := do
+  let kind ← checkedAbiKind param.type
+  return if kind == .tobject && erasedOnlyParameter program decl param then
+    .erased
+  else
+    kind
+
+def declarationParameterKinds? (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) : Option (Array AbiKind) :=
+  decl.params.mapM (declarationParamKind? program decl)
+
+def checkedDeclarationParameterKinds (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) : Except CompileError (Array AbiKind) :=
+  decl.params.mapM (checkedDeclarationParamKind program decl)
+
+/-- The refined erased ABI is selected exactly at the structural admission
+boundary: the compiler declared an ordinary `tobject` lane, while this
+declaration uses it only by forwarding it to a genuinely erased parameter.
+This is the proof-facing contract; no declaration-name convention and no
+global ABI subtyping rule is involved. -/
+theorem declarationParamKind?_eq_erased_iff
+    (program : Fir.LeanIR.ImpureProgram) (decl : LCNF.Decl .impure)
+    (param : LCNF.Param .impure)
+    (declared : abiKind? param.type = .ok (some .tobject)) :
+    declarationParamKind? program decl param = some .erased ↔
+      erasedOnlyParameter program decl param = true := by
+  unfold declarationParamKind?
+  rw [declared]
+  change (if ((AbiKind.tobject == AbiKind.tobject) &&
+      erasedOnlyParameter program decl param) = true then
+      some AbiKind.erased else some AbiKind.tobject) = some AbiKind.erased ↔
+    erasedOnlyParameter program decl param = true
+  have same : (AbiKind.tobject == AbiKind.tobject) = true := by decide
+  rw [same]
+  simp
+
 def addParams (locals : LocalKinds) (params : Array (LCNF.Param .impure)) :
     Except CompileError LocalKinds := do
   params.foldlM (init := locals) fun locals param => do
     match ← checkedAbiKind? param.type with
     | some kind => return insertLocal locals param.fvarId kind
     | none => return locals
+
+/-- Add declaration parameters using the same erased-only refinement consumed
+by partial-application descriptors and closure dispatch. -/
+def addDeclarationParams (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) (locals : LocalKinds := []) :
+    Except CompileError LocalKinds := do
+  decl.params.foldlM (init := locals) fun locals param => do
+    match ← checkedAbiKind? param.type with
+    | none => return locals
+    | some kind =>
+        let kind :=
+          if kind == .tobject && erasedOnlyParameter program decl param then
+            .erased
+          else
+            kind
+        return insertLocal locals param.fvarId kind
 
 def addJoinParams (locals : LocalKinds) (decl : LCNF.FunDecl .impure) :
     Except CompileError LocalKinds := do
@@ -397,6 +671,32 @@ def compileArgs (context : Context) (args : Array (LCNF.Arg .impure)) :
   args.foldlM (init := ([], #[])) fun (instructions, kinds) arg => do
     let (argument, kind) ← compileArg context arg
     return (instructions ++ argument, kinds.push kind)
+
+/-- Compile one fixed argument against the effective parameter slot it will
+occupy in a closure. Compiler-declared `tobject` parameters which are
+structurally erased have already been refined to `.erased`; no global
+`erased ≤ tobject` compatibility is introduced here. -/
+def compilePartialArgument (context : Context) (expected : AbiKind)
+    (arg : LCNF.Arg .impure) :
+    Except CompileError (List Instruction × AbiKind) := do
+  let (argument, actual) ← compileArg context arg
+  if !actual.refines expected then
+    throw (.malformed "partial-application argument does not refine its parameter ABI")
+  return (argument, actual)
+
+/-- Compile the supplied prefix of a partial application's effective target
+parameters. The returned kinds are the exact closure-capture descriptor. -/
+def compilePartialArguments (context : Context)
+    (target : LCNF.Decl .impure) (args : Array (LCNF.Arg .impure)) :
+    Except CompileError (List Instruction × Array AbiKind) := do
+  if args.size > target.params.size then
+    throw (.malformed "partial application fixes too many parameters")
+  let expectedKinds ← checkedDeclarationParameterKinds context.program target
+  (expectedKinds.extract 0 args.size).zip args |>.foldlM
+    (init := ([], #[])) fun (instructions, kinds) pair => do
+      let expected := pair.fst
+      let (argument, kind) ← compilePartialArgument context expected pair.snd
+      return (instructions ++ argument, kinds.push kind)
 
 def directAbiKind? (type : Expr) : Option AbiKind :=
   match abiKind? type with
@@ -446,11 +746,12 @@ def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
     if !targetResult.refines resultKind then none else
     some (matcher, fields ++ [.call (.declaration target.name), .localSet declId])
 
-def compileClosureCandidatesForTarget (declId closureId : FVarId)
+def compileClosureCandidatesForTarget (program : Fir.LeanIR.ImpureProgram)
+    (declId closureId : FVarId)
     (resultKind : AbiKind)
     (argumentCode : List Instruction) (argumentKinds : Array AbiKind)
     (target : LCNF.Decl .impure) : List (List Instruction × List Instruction) :=
-  match parameterKinds? target.params with
+  match declarationParameterKinds? program target with
   | none => []
   | some paramKinds =>
       if argumentKinds.isEmpty || argumentKinds.size > paramKinds.size then [] else
@@ -471,8 +772,8 @@ def compileClosureDispatch (context : Context) (declId closureId : FVarId)
     (resultKind : AbiKind) (argumentCode : List Instruction)
     (argumentKinds : Array AbiKind) : List Instruction :=
   let candidates := context.program.decls.toList.flatMap fun target =>
-    compileClosureCandidatesForTarget declId closureId resultKind argumentCode
-      argumentKinds target
+    compileClosureCandidatesForTarget context.program declId closureId resultKind
+      argumentCode argumentKinds target
   compileClosureCandidateChain candidates ++ [.localGet declId]
 
 def getLocal (context : Context) (fvarId : FVarId) :
@@ -543,10 +844,10 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       else
         return arguments ++ [.call (.declaration name)]
   | .pap name args =>
-      let (arguments, kinds) ← compileArgs context args
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
       if args.size >= target.params.size then
         throw (.malformed s!"partial application {name} fixes too many parameters")
+      let (arguments, kinds) ← compilePartialArguments context target args
       return arguments ++ [
         .call (.runtime (.partialApply name target.params.size args.size kinds resultKind))]
   | .reset count fvarId =>
@@ -607,7 +908,9 @@ theorem compileLetValue_pap
     (resultKind : AbiKind) (argumentCode : List Instruction)
     (argumentKinds : Array AbiKind)
     (kindEq : checkedAbiKind type = .ok resultKind)
-    (argumentsEq : compileArgs context args = .ok (argumentCode, argumentKinds))
+    (argumentsEq :
+      compilePartialArguments context target args =
+        .ok (argumentCode, argumentKinds))
     (targetEq : context.program.findDecl? name = some target)
     (fixedLt : args.size < target.params.size) :
     compileLetValue context {
@@ -1278,7 +1581,7 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
   match decl.value with
   | .extern _ => return none
   | .code code =>
-      let paramLocals ← addParams [] decl.params
+      let paramLocals ← addDeclarationParams program decl
       let allLocals ← collectLocals paramLocals code
       let context : Context := { program, localKinds := allLocals, cachedDeclarations }
       let body ← compileCode context code

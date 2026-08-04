@@ -204,9 +204,11 @@ execution witness.
 -/
 example
     {context : Fir.Wasm.Context} {decl : LCNF.LetDecl .impure}
-    (scalarId : FVarId) (kind : BoxedScalarKind)
+    (scalarId : FVarId) (kind : BoxedScalarKind) (resultKind : AbiKind)
     (valueEq : decl.value = .box kind.semanticType scalarId)
-    (valueKind : Fir.Wasm.letValueKind decl = .ok .tobject)
+    (valueKind : Fir.Wasm.letValueKind decl = .ok resultKind)
+    (resultKindEq :
+      resultKind = Fir.Wasm.boxResultKind kind.semanticType .tobject)
     (scalarCompiled :
       Fir.Wasm.getLocal context scalarId =
         .ok (.localGet scalarId, kind.abiKind))
@@ -214,10 +216,10 @@ example
       Fir.Wasm.checkedAbiKind kind.semanticType = .ok kind.abiKind)
     (resultCompiled :
       Fir.Wasm.getLocal context decl.fvarId =
-        .ok (.localGet decl.fvarId, .tobject)) :
+        .ok (.localGet decl.fvarId, resultKind)) :
     BoxSupported context decl :=
-  .intro scalarId kind valueEq valueKind scalarCompiled annotationKind
-    resultCompiled
+  .intro scalarId kind resultKind valueEq valueKind resultKindEq
+    scalarCompiled annotationKind resultCompiled
 
 /--
 The fixed one-slot reservation constructs any concrete boxing branch and
@@ -4399,5 +4401,97 @@ example
       (writeWasmGlobal valueStore (2 * index) (.i32 1)) :=
   related.publish initializerFound signature runtimeEq valueRelated
     valueStoreEq
+
+/-!
+The erased generic-parameter admission used by compiler-generated `_boxed`
+facades is deliberately structural. This executable proof fixture mirrors the
+relevant final-LCNF shape without relying on a declaration suffix: a raw
+`tobject` parameter is accepted as `.erased` only because its sole use is an
+exact forwarding call to a parameter whose final-LCNF type is erased.
+-/
+
+private def erasedFacadeAlpha : FVarId :=
+  ⟨`FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeAlpha⟩
+
+private def erasedFacadeCaptured : FVarId :=
+  ⟨`FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeCaptured⟩
+
+private def erasedFacadeValue : FVarId :=
+  ⟨`FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeValue⟩
+
+private def erasedFacadeResult : FVarId :=
+  ⟨`FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeResult⟩
+
+private def erasedFacadeClosure : FVarId :=
+  ⟨`FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeClosure⟩
+
+private def erasedFacadeParam (id : FVarId) (type : Expr) :
+    LCNF.Param .impure :=
+  { fvarId := id, binderName := id.name, type, borrow := false }
+
+private def erasedFacadeTarget : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeTarget
+    levelParams := []
+    type := LCNF.ImpureType.tobject
+    params := #[
+      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.erased,
+      erasedFacadeParam erasedFacadeCaptured LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeValue LCNF.ImpureType.tobject]
+    value := .code (.return erasedFacadeCaptured)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
+private def erasedFacade : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.erasedFacade
+    levelParams := []
+    type := LCNF.ImpureType.tobject
+    params := #[
+      erasedFacadeParam erasedFacadeAlpha LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeCaptured LCNF.ImpureType.tobject,
+      erasedFacadeParam erasedFacadeValue LCNF.ImpureType.tobject]
+    value := .code <| .let
+      { fvarId := erasedFacadeResult
+        binderName := erasedFacadeResult.name
+        type := LCNF.ImpureType.tobject
+        value := .fap erasedFacadeTarget.name #[
+          .fvar erasedFacadeAlpha,
+          .fvar erasedFacadeCaptured,
+          .fvar erasedFacadeValue] }
+      (.return erasedFacadeResult)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
+private def erasedFacadeCaller : LCNF.Decl .impure :=
+  { name := `FirTalos.Concrete.CompilerCorrectnessContract.erasedFacadeCaller
+    levelParams := []
+    type := LCNF.ImpureType.tobject
+    params := #[]
+    value := .code <| .let
+      { fvarId := erasedFacadeClosure
+        binderName := erasedFacadeClosure.name
+        type := LCNF.ImpureType.tobject
+        value := .pap erasedFacade.name #[.erased] }
+      (.return erasedFacadeClosure)
+    safe := true
+    recursive := false
+    inlineAttr? := none }
+
+private def erasedFacadeProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[erasedFacadeTarget, erasedFacade, erasedFacadeCaller] }
+
+#guard Fir.Wasm.erasedOnlyParameter erasedFacadeProgram erasedFacade
+  erasedFacade.params[0]!
+
+#guard Fir.Wasm.declarationParameterKinds? erasedFacadeProgram erasedFacade ==
+  some #[.erased, .tobject, .tobject]
+
+#guard
+  match Fir.Wasm.lowerSupported erasedFacadeProgram with
+  | .error _ => false
+  | .ok module =>
+      module.runtimeOperations.contains <|
+        .partialApply erasedFacade.name 3 1 #[.erased] .tobject
 
 end FirTalos.Concrete.CompilerCorrectnessContract

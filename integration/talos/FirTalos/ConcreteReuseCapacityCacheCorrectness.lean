@@ -4886,7 +4886,8 @@ structure SaturatedClosureCallResolution
   targetFound :
     context.program.findDecl? function = some target
   parametersKnown :
-    Fir.Wasm.parameterKinds? target.params = some parameterKinds
+    Fir.Wasm.declarationParameterKinds? context.program target =
+      some parameterKinds
   arityEq : arity = parameterKinds.size
   saturated :
     captures.size + site.argumentKinds.size = parameterKinds.size
@@ -4966,7 +4967,8 @@ theorem SaturatedClosureCallResolution.candidateSource_exists
     (resolution :
       SaturatedClosureCallResolution context sourceRuntime site) :
     ∃ candidate ∈
-        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId
           site.resultKind site.argumentCode site.argumentKinds
           resolution.target,
       candidate.1 = [
@@ -5044,7 +5046,8 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
         initial site.closureId closureIndex address))
     (candidatesEq :
       context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId
           site.resultKind site.argumentCode site.argumentKinds target) =
         candidates.map (·.source)) :
     ∃ candidate ∈ candidates,
@@ -5061,7 +5064,8 @@ theorem SaturatedClosureCallResolution.containsCandidateIdentity
     simpa [targetAt] using found
   have generatedMem :
       source ∈ context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId
           site.resultKind site.argumentCode site.argumentKinds target) :=
     List.mem_flatMap.mpr ⟨resolution.target, targetMem, sourceMem⟩
   rw [candidatesEq] at generatedMem
@@ -5183,7 +5187,8 @@ theorem
         initial site.closureId closureIndex address))
     (candidatesEq :
       context.program.decls.toList.flatMap (fun target =>
-        Fir.Wasm.compileClosureCandidatesForTarget decl.fvarId site.closureId
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId
           site.resultKind site.argumentCode site.argumentKinds target) =
         candidates.map (·.source)) :
     ∃ (before : List
@@ -5306,7 +5311,8 @@ def SaturatedClosureDispatchSelectionInduction
                 (physicalArgs : List Wasm.Value) (physical : Wasm.Value),
               DeclarationContextsCoherent context calleeContext ∧
                 context.program.decls.toList.flatMap (fun target =>
-                  compileClosureCandidatesForTarget decl.fvarId site.closureId
+                  compileClosureCandidatesForTarget context.program decl.fvarId
+                    site.closureId
                     site.resultKind site.argumentCode site.argumentKinds
                     target) =
                   (before ++ selected :: suffix).map (·.source) ∧
@@ -5382,7 +5388,7 @@ def SaturatedClosureCandidateResolutionInduction
                   targetModule.wasmModule hosts.spec initial site.closureId
                   closureIndex address),
                   context.program.decls.toList.flatMap (fun target =>
-                      compileClosureCandidatesForTarget decl.fvarId
+                      compileClosureCandidatesForTarget context.program decl.fvarId
                         site.closureId site.resultKind site.argumentCode
                         site.argumentKinds target) =
                     candidates.map (·.source) ∧
@@ -7158,7 +7164,7 @@ structure LoweredInternalDeclaration
   abiResults : Array AbiKind
   bodyEq : declaration.value = .code sourceCode
   paramsAdded :
-    Fir.Wasm.addParams [] declaration.params = .ok paramLocals
+    Fir.Wasm.addDeclarationParams program declaration = .ok paramLocals
   localsCollected :
     Fir.Wasm.collectLocals paramLocals sourceCode = .ok localKinds
   bodyCompiled :
@@ -7271,7 +7277,7 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
       sourceCode sourceFunction) := by
   unfold Fir.Wasm.lowerDecl at lowered
   rw [bodyEq] at lowered
-  cases paramsResult : Fir.Wasm.addParams [] declaration.params with
+  cases paramsResult : Fir.Wasm.addDeclarationParams program declaration with
   | error error =>
       simp only [paramsResult, Bind.bind, Except.bind] at lowered
       contradiction
@@ -7331,7 +7337,7 @@ theorem lowerDecl_some_of_code
   | none =>
       unfold Fir.Wasm.lowerDecl at lowered
       rw [bodyEq] at lowered
-      cases paramsResult : Fir.Wasm.addParams [] declaration.params with
+      cases paramsResult : Fir.Wasm.addDeclarationParams program declaration with
       | error error =>
           simp only [paramsResult, Bind.bind, Except.bind] at lowered
           contradiction

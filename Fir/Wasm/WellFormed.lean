@@ -59,10 +59,31 @@ def addSupportedParams? (locals : LocalKinds) (params : Array (LCNF.Param .impur
       | some kind => some (insertLocal locals param.fvarId kind)
       | none => some locals
 
+def addSupportedDeclarationParams? (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.Decl .impure) (locals : LocalKinds := []) :
+    Option LocalKinds := do
+  decl.params.foldlM (init := locals) fun locals param => do
+    if !abiTypeKnown param.type then none
+    match abiValueKind? param.type with
+    | none => some locals
+    | some _ => do
+        let kind ← declarationParamKind? program decl param
+        some (insertLocal locals param.fvarId kind)
+
 def supportedArgKind? (locals : LocalKinds) : LCNF.Arg .impure → Option AbiKind
   | .erased => some .erased
   | .fvar fvarId => findLocalKind? locals fvarId
   | .type _ h => nomatch h
+
+/-- Validate the fixed capture descriptor against the effective declaration
+parameter kinds selected by the lowerer. -/
+def supportedPartialArgumentKinds? (locals : LocalKinds)
+    (args : Array (LCNF.Arg .impure)) (expected : Array AbiKind) :
+    Option (Array AbiKind) := do
+  if args.size != expected.size then none
+  (args.zip expected).mapM fun pair => do
+    let actual ← supportedArgKind? locals pair.fst
+    if actual.refines pair.snd then some actual else none
 
 def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
     (locals : LocalKinds) (declared : AbiKind) (name : Name)
@@ -71,7 +92,7 @@ def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
   | none => false
   | some target =>
       match target.value, abiValueKind? target.type,
-          target.params.mapM (fun param => abiValueKind? param.type),
+          declarationParameterKinds? program target,
           args.mapM (supportedArgKind? locals) with
       | .extern _, some result, some paramKinds, some argKinds
       | .code _, some result, some paramKinds, some argKinds =>
@@ -85,10 +106,11 @@ def supportedPartialApply (program : Fir.LeanIR.ImpureProgram)
   match program.findDecl? name,
       args.mapM (supportedArgKind? locals) with
   | some target, some argKinds =>
-      match target.params.mapM (fun param => abiValueKind? param.type) with
+      match declarationParameterKinds? program target with
       | some paramKinds =>
           argKinds.size < paramKinds.size && declared.isObjectLike &&
-            kindsRefine argKinds (paramKinds.extract 0 argKinds.size)
+            (supportedPartialArgumentKinds? locals args
+              (paramKinds.extract 0 argKinds.size)).isSome
       | none => false
   | _, _ => false
 
@@ -100,7 +122,7 @@ def supportedClosureCall (program : Fir.LeanIR.ImpureProgram)
   | some closureKind, some argKinds =>
       if args.isEmpty then closureKind.refines declared
       else closureKind.isObjectLike && program.decls.any fun target =>
-        match target.params.mapM (fun param => abiValueKind? param.type),
+        match declarationParameterKinds? program target,
             abiValueKind? target.type with
         | some paramKinds, some resultKind =>
             argKinds.size <= paramKinds.size &&
@@ -736,7 +758,7 @@ theorem reuseCapacitySafeProgram_code
 def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) : Bool :=
   abiTypeKnown decl.type &&
-    match addSupportedParams? [] decl.params, decl.value with
+    match addSupportedDeclarationParams? program decl, decl.value with
     | some _, .extern _ => true
     | some locals, .code code =>
         supportedCode program locals (abiValueKind? decl.type) code
