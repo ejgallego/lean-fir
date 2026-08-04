@@ -82,10 +82,12 @@ Startup timings (`fetchMs`, `compileMs`, and `instantiateMs`) are exposed as
 `adapter.startupTimings`; each result reports normalization, resident
 allocation, raw encoding, execution, decoding, and aggregate timings.
 
-The resident String byte walkers use structured Wasm loops rather than
-recursive helper calls. The packaged Node and Chrome checks render exactly
-1 MiB of UTF-8 text under a 131-bit tag and width, require module-owned memory
-to grow, compare the full styling event stream, and then perform 32 additional
+The generated `prettyM` work-list worker and the resident String byte walkers
+use structured Wasm loops rather than recursive tail calls. The packaged Node
+and Chrome checks make a balanced 2,047-node `Format` the first substantial
+entry call in a fresh instance. They also render exactly 1 MiB of UTF-8 text
+under a 131-bit tag and width, require module-owned memory to grow, compare the
+full styling event stream, and then perform 32 additional
 frontier-synchronized calls on the same adapter instance.
 
 The adapter borrows the JavaScript input and never mutates it. Each call

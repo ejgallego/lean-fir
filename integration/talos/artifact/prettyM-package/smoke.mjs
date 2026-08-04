@@ -86,6 +86,7 @@ for (const [name, kind] of requiredExports) {
     `current package is missing ${kind} export ${name}`);
 }
 
+console.log(await checkPrettyMBrowserAdapter({ bytes, manifest, build }));
 const host = new ConcreteHost(
   manifest.imports,
   undefined,
@@ -95,4 +96,3 @@ const host = new ConcreteHost(
 );
 const artifact = await instantiateModuleArtifact({ bytes, manifest, host });
 console.log(checkConcretePrettyFormatTraceModule(artifact));
-console.log(await checkPrettyMBrowserAdapter({ bytes, manifest, build }));

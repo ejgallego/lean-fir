@@ -385,7 +385,19 @@ run_cmd do
         stringArtifact.module.closureDescriptors &&
       closedArtifact.formattedLcnf == stringArtifact.formattedLcnf do
     throwError "resident styled fallback linking changed source or closure metadata"
-  match ← closedArtifact.write
+  let stackSafeArtifact ← match
+      Fir.Wasm.Emit.ResidentPrettyFormat.eliminateDirectSelfCalls closedArtifact with
+    | .ok artifact => pure artifact
+    | .error error =>
+        throwError "failed to eliminate resident styled self-tail calls: {repr error}"
+  unless stackSafeArtifact.module.imports.isEmpty &&
+      stackSafeArtifact.module.closureDispatch == closedArtifact.module.closureDispatch &&
+      stackSafeArtifact.module.closureDescriptors ==
+        closedArtifact.module.closureDescriptors &&
+      stackSafeArtifact.formattedLcnf == closedArtifact.formattedLcnf do
+    throwError
+      "resident styled tail-call elimination changed imports, source, or closure metadata"
+  match ← stackSafeArtifact.write
       "_build/source-pretty-format-trace-resident-closed.wasm" with
   | .ok () => pure ()
   | .error error =>

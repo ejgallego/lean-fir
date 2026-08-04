@@ -108,6 +108,30 @@ const numericCoverageEvents = (value) => [
 const stressUtf8Bytes = 1024 * 1024;
 const stressText = "λ".repeat(stressUtf8Bytes / 2);
 const stressRepeatedCalls = 32;
+const coldBalancedDepth = 10;
+
+function balancedAppendTree(depth) {
+  if (depth === 0) {
+    return F.text("x");
+  }
+  const child = balancedAppendTree(depth - 1);
+  return F.append(child, child);
+}
+
+function checkColdBalancedResult(result) {
+  const leafCount = 1 << coldBalancedDepth;
+  requireCondition(result.memory.formatNodes === 2 * leafCount - 1,
+    "cold balanced append tree node count changed");
+  requireCondition(result.trace.text === "x".repeat(leafCount),
+    "cold balanced append tree text changed");
+  requireCondition(result.trace.events.length === 2 * leafCount &&
+    result.trace.events.every((entry, index) =>
+      index % 2 === 0 ?
+        entry.kind === 0 && entry.text === "x" && entry.value === 0n :
+        entry.kind === 3 && entry.text === "" && entry.value === 0n),
+  "cold balanced append tree event stream changed");
+  checkTimings(result);
+}
 
 function checkTimings(result) {
   for (const [name, value] of Object.entries(result.timings)) {
@@ -201,9 +225,14 @@ export async function checkPrettyMBrowserAdapter({
   build,
 }) {
   const adapter = await createPrettyMAdapter({ bytes, manifest, build });
+  const coldBalanced = adapter.render({
+    format: balancedAppendTree(coldBalancedDepth),
+    width: 80,
+  });
+  checkColdBalancedResult(coldBalanced);
   const input = coverageFormat();
   const first = adapter.render({ format: input, width: 80 });
-  checkResult(first);
+  checkResult(first, coldBalanced);
   const prepared = adapter.prepare({
     format: input,
     width: (1n << 130n) + 17n,
@@ -236,8 +265,13 @@ export async function checkPrettyMBrowserAdapter({
 
 export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
   const adapter = await fetchPrettyMAdapter(artifactUrl);
+  const coldBalanced = adapter.render({
+    format: balancedAppendTree(coldBalancedDepth),
+    width: 80,
+  });
+  checkColdBalancedResult(coldBalanced);
   const first = adapter.render({ format: coverageFormat(), width: 80 });
-  checkResult(first);
+  checkResult(first, coldBalanced);
   const prepared = adapter.prepare({
     format: coverageFormat(),
     width: "1361129467683753853853498429727072845841",

@@ -12,6 +12,7 @@ import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
 import Fir.Wasm.Emit.ResidentString
+import Fir.Wasm.Emit.TailCall
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
 
@@ -429,9 +430,31 @@ def compileClosedModule (entry : Name) :
   let result ← compileStringModule entry
   return result.bind internalizeFallbacks
 
+/--
+Eliminate direct self calls in tail position after closing the resident
+runtime. Lean's `Std.Format.prettyM` work-list worker uses this shape for each
+document step; retaining ordinary Wasm calls makes a cold engine's native
+stack proportional to the document size.
+-/
+def eliminateDirectSelfCalls (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let result ← Fir.Wasm.Emit.TailCall.eliminateDirectSelfCalls artifact.module
+    |>.mapError fun message => .manifest message
+  unless result.rewrittenCalls > 0 do
+    throw (.manifest "prettyM closure contains no direct self-tail calls")
+  let bytes ← Fir.Wasm.Emit.encode result.module
+    |>.mapError Source.CompileError.encoding
+  return { artifact with module := result.module, bytes }
+
+/-- Close the resident runtime and make compiler-generated self-tail calls stack-safe. -/
+def compileStackSafeModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let result ← compileClosedModule entry
+  return result.bind eliminateDirectSelfCalls
+
 /-- Current furthest W7 resident-runtime checkpoint for compiler consumers. -/
 def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) :=
-  compileClosedModule entry
+  compileStackSafeModule entry
 
 end Fir.Wasm.Emit.ResidentPrettyFormat
