@@ -13,6 +13,29 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `SCALAR-CLOSURE-ADMISSION`.
+- Integration owner: `wasm-gen`; this is a short lease around the shared
+  lowering boundary. W7 remains the generation owner and does not edit W6
+  lowering or refinement files.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published validation checkpoint: clean coordination head `4c94d173` on
+  `validation/closure-ownership-fixtures`, rebased from `main` at
+  `26ed9fff` and clean at handoff.
+- Current boundary: integration repair `5987c17e` accepts and validates the
+  canonical source-plus-bit-exact-facade export shape. Both validation-only
+  mixed closure products compile and execute through Node's real
+  `WebAssembly` adapter. `FIR-BUG-validation-none-mixed-closure-facade-export`
+  is fixed. The remaining 32 scalar-closure cases stop earlier at the shared
+  supported-lowering validator and are queued as
+  `SCALAR-CLOSURE-ABI-ADMISSION`.
+- Scope: land the provider repair and bug records; publish the two exact
+  validator transitions to W6; after a standalone shared-contract repair
+  lands, rebase W7 and remove the 32 validation fences. This lease grants no
+  permission to edit proof-, W6-, or validation-owned implementation files.
+
 ## Completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
@@ -95,6 +118,13 @@ identities.
   `FIR-BUG-wasm-none-prettyM-cold-entry-call-stack-overflow` is fixed. A
   correctness theorem for the post-lowering transform is a separate possible
   W6 follow-up and does not invalidate any resident-helper proof.
+- Validation facade repair `5987c17e` accepts the exact source export plus the
+  canonical bit-exact integer-lane facade for floating signatures, while
+  retaining the singleton source-export requirement for non-floating entries.
+  Lean Beam, `lake lean FirValidationWasm.lean`, the complete root gate, and
+  direct Node execution of the validation-only one-use and two-use mixed
+  closure products pass. The corresponding validation bug is fixed; fixture
+  admission remains separate from this provider repair.
 - `CLOSURE-APPLICATION-OWNERSHIP` is green through the shared contract, LCNF
   pass-proof, W6 concrete-runtime refinement, and W7 executable adapter.
   Corrected runtime
@@ -431,6 +461,7 @@ moving global snapshot hash.
 | `BIT-EXACT-FLOAT-MANIFEST-TRANSPORT` | integration | W7, validation, artifact clients | released | contract `8ad80ad3`; canonical validation consumer `57f13122` | Defines the version-1 `wasm-reinterpret-i32-i64` capability, exact entry selection, integer-lane argument/result codecs, and semantic observation bridge. Floating manifests without the capability and capabilities with unknown fields, versions, encodings, entries, arities, kinds, or ranges fail closed. The standalone suite covers signed zero, infinities, quiet/signaling NaNs, maximal payloads, mixed signatures, and every malformed constructor path without JavaScript numeric coercion; the root validation runner now consumes the facade and passes the complete 613-case native/LCNF plus 581-case V8 gate. |
 | `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | released | landed proof/runtime stack `229640de`; corrected contract `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; ownership `528fdd1a`; W7 adapter `fd6a51e3` and ready head `fdaa8bd1` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Pass, concrete-runtime, and executable-adapter layers are green and linked/accepted. |
 | `EXTERNAL-WAITING-RUNTIME` | integration/validation | pass proof, W6, validation | released | landed stack `229640de`; standalone repair `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; historical validation provenance `2f301de5` | `Step.external`, `executeStep`, soundness, and the Talos frame refinement use the post-core-step `waiting.runtime`, so external responses cannot resurrect a consumed closure or discard shared closure decrements and retained captures. `FIR-BUG-impure-none-closure-application-external-runtime` is fixed with executable and proof regressions. |
+| `SCALAR-CLOSURE-ABI-ADMISSION` | W6/shared lowering | W7, validation, integration | active | none; diagnostic base `d73112a4`; bug card `FIR-BUG-wasm-none-generic-scalar-closure-admission` | The executable closure adapter is already linked. Admission now fails at two strict final-LCNF representation checks: generic `_boxed` partial applications pass the literal erased type argument to a compiler-declared `tobject` parameter, and `UInt8` boxing is tracked as imprecise `tobject` although every payload is a tagged immediate, so the Boolean `_boxed` target's `tagged` capture is rejected. W6 should isolate the smallest sound compatibility/box-kind contract change with lowering guards and proof-cone checks. After it lands on `main`, W7 consumes it unchanged and validation removes the 32 fences. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |

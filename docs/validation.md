@@ -1695,10 +1695,12 @@ through its public `compileValidationInvocation` API.  The integration-owned
 `LCNF.main`; the shared API encodes corpus schemas and datums into semantic ABI
 values, checks the result schema against the emitted result lane, and attaches
 the invocation to the reusable module.  It emits deterministic `.wasm` and
-ABI-manifest products only for that ordered selection and checks that each
-module exactly exports its source entry.  Manifests may include the encoded
-initial FIR runtime and semantic imports needed by heap-backed invocations;
-the driver does not modify or add policy to `Fir/Wasm`.
+ABI-manifest products only for that ordered selection and checks each module's
+exact public export shape. Non-floating signatures export only the source
+entry; floating signatures additionally export the canonical integer-lane
+facade selected by the manifest. Manifests may include the encoded initial FIR
+runtime and semantic imports needed by heap-backed invocations; the driver
+does not modify or add policy to `Fir/Wasm`.
 
 The external adapter then loads those exact retained bytes in Node's real
 `WebAssembly` engine.  It and the Talos artifact runner consume the same
@@ -1717,8 +1719,10 @@ return Lean 4.32's unboxed Boolean as `uint8`, covering both one and zero; the
 LCNF and V8 schema decoders accept only those values for that representation.
 The first W5 additions compile a dependency-bearing polymorphic box/unbox call
 and a packed constructor initialized through `uset`/`sset`, projected through
-`uproj`, and released through `dec`.  Source artifact compilation retains
-captured helpers internally while exporting only the selected entry.
+`uproj`, and released through `dec`. Source artifact compilation retains
+captured helpers internally while exporting only the selected public entry
+surface (the source entry plus its bit-exact facade when floating transport
+requires one).
 Compiler-generated direct calls, captured and underapplied closures, recursive
 empty and traversal paths, and an exact `Nat.add` external now run in V8 as
 well. The Boolean-capture regression currently carries

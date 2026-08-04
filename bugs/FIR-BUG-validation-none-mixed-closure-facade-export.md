@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-validation-none-mixed-closure-facade-export
-status: candidate
+status: fixed
 classification: validation-harness
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: differential-test
 first-seen: 2026-08-02
 reproduction: FirValidationWasm.lean
-regression: none
+regression: FirValidationWasm.lean
 ---
 
 # Summary
@@ -85,8 +85,7 @@ compare floating values through JavaScript numbers.
 
 ## Workaround
 
-Keep the mixed-closure cases behind `wasm-generation-pending` until the
-provider accepts and executes the canonical facade path.
+none
 
 ## Upstream tracking
 
@@ -94,4 +93,14 @@ none
 
 ## Resolution and regression
 
-unresolved
+Fixed in `5987c17e` by deriving the exact expected export shape from
+`Fir.Wasm.Emit.BitExactFloat.descriptor?`. Non-floating entries still require
+the singleton source export; floating entries require the source export plus
+the validated canonical integer-lane facade. A symbolic `Float32` guard pins
+that distinction.
+
+The validation-only `mixed-closure-capture-once` and
+`mixed-closure-capture-twice` products were then compiled with the repaired
+provider and invoked through the real Node `WebAssembly` adapter. Both passed,
+returning `99` and `(17, 340282366920938463463374607431768211473)`
+respectively. Fixture admission remains a separate lane action.
