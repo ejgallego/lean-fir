@@ -75,6 +75,42 @@ def selectedCaseIds : IO (Array String) := do
     | return caseIds
   IO.ofExcept (parseSelectedCaseIds raw)
 
+/--
+The validation provider publishes the source entry and, for floating
+signatures, the canonical integer-lane facade selected by the checked
+manifest. Recovering the descriptor here both validates the facade body and
+keeps the provider's export check aligned with the released bit-exact
+transport contract.
+-/
+def expectedValidationExports (module : Fir.Wasm.Module) (entry : Name) :
+    Except String (Array Name) := do
+  let descriptor? ← Fir.Wasm.Emit.BitExactFloat.descriptor? module entry
+  return match descriptor? with
+    | none => #[entry]
+    | some descriptor => #[entry, descriptor.entry]
+
+private def exportShapeEntry : Name := `firValidationExportShape
+private def exportShapeArgument : FVarId := ⟨`firValidationExportShapeArgument⟩
+
+private def exportShapeModule : Fir.Wasm.Module := {
+  imports := #[]
+  functions := #[{
+    name := exportShapeEntry
+    params := #[(exportShapeArgument, .float32)]
+    results := #[.float32]
+    locals := #[]
+    body := [.localGet exportShapeArgument, .ret] }]
+  exports := #[exportShapeEntry]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+#guard match Fir.Wasm.Emit.BitExactFloat.install exportShapeModule exportShapeEntry with
+  | .ok module => match expectedValidationExports module exportShapeEntry with
+      | .ok exports => exports == #[exportShapeEntry,
+          Fir.Wasm.Emit.BitExactFloat.facadeName exportShapeEntry]
+      | .error _ => false
+  | .error _ => false
+
 syntax (name := firValidationWasm) "#fir_validation_wasm" : command
 
 @[command_elab firValidationWasm]
@@ -104,8 +140,14 @@ def elabFirValidationWasm : CommandElab := fun _ => do
       | .ok artifact => pure artifact
       | .error error =>
           throwError "Wasm compilation failed for {caseId}: {repr error}"
-    unless artifact.module.exports == #[validationCase.entry] do
-      throwError "Wasm module does not export {validationCase.entry}"
+    let expectedExports ←
+      match expectedValidationExports artifact.module validationCase.entry with
+      | .ok exports => pure exports
+      | .error error =>
+          throwError "Wasm module export verification failed for {caseId}: {error}"
+    unless artifact.module.exports == expectedExports do
+      throwError
+        "Wasm module export mismatch for {caseId}: expected {repr expectedExports}, got {repr artifact.module.exports}"
     let modulePath := moduleDirectory / s!"{caseId}.wasm"
     liftIO <| IO.FS.writeBinFile modulePath artifact.bytes
     liftIO <| IO.FS.writeFile (modulePath.toString ++ ".json")
