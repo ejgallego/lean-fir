@@ -6,16 +6,16 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 229640de2cc2e9779d730a529772e3871a3dd70a
-functional-head: 56d183620ef64572647e8a48ca79d6f12e62794e
-contract-base: 229640de2cc2e9779d730a529772e3871a3dd70a on main
+base: 26ed9fff3c642c48169c970123c93de2e35d091e
+functional-head: 4404aba07aa90fb96dc43b5ca056ca38a32fd4bc
+contract-base: 26ed9fff3c642c48169c970123c93de2e35d091e on main
 clean-at-update: true
-slice: Executable closure-application ownership adapter and exclusive/shared/persistent regression, rebased onto the landed contract and proof stack
-files: scripts/wasm_semantic_host.mjs; scripts/test_wasm_validation_externals.mjs; integration/talos/artifact/test-semantic-host.mjs; bugs/FIR-BUG-wasm-none-closure-application-ownership.md
-contracts: consumes released CLOSURE-APPLICATION-OWNERSHIP and EXTERNAL-WAITING-RUNTIME exactly; changes no shared contract
-checks: PASS git diff --check; PASS node scripts/test_wasm_validation_externals.mjs; PASS node integration/talos/artifact/test-semantic-host.mjs; PASS make check (122 validator tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 comparisons equal, findings 0); PASS make talos-setup and make talos-check (3125/3125 jobs); PASS bash integration/talos/artifact/check.sh including deterministic rebuilds, zero-function-import text/styled prettyM, browser adapter, semantic host, concrete/native-oracle paths, and packaged release
-bug-cards: FIR-BUG-wasm-none-closure-application-ownership fixed
+slice: Stack-safe cold-entry prettyM generation: validated post-lowering direct self-tail-call elimination, cold 2,047-node packaged regression, and atomic zero-import artifact refresh
+files: Fir/Wasm/Emit/TailCall.lean; Fir/Wasm/Emit/ResidentPrettyFormat.lean; integration/talos/artifact/FirWasmSourceExample.lean; integration/talos/artifact/FirWasmPrettyTraceExample.lean; integration/talos/artifact/check-prettyM-browser-adapter.mjs; integration/talos/artifact/prettyM-package/smoke.mjs; integration/talos/artifact/prettyM-package/README.md; bugs/FIR-BUG-wasm-none-prettyM-cold-entry-call-stack-overflow.md
+contracts: none; consumes the existing symbolic loop/branch surface and changes no shared layout, ABI, resident-helper signature, final LCNF, or W6 helper contract
+checks: PASS Lean Beam sync/save for Fir/Wasm/Emit/TailCall.lean and Fir/Wasm/Emit/ResidentPrettyFormat.lean; PASS lake build Fir.Wasm.Emit.TailCall Fir.Wasm.Emit.ResidentPrettyFormat; PASS fresh Node cold 2,047-node balanced append, reported fresh 1,026-node grouped document, and fresh 32,767-node balanced stress; PASS integration/talos/artifact/package-pretty-format.sh --no-build on temporary and canonical releases; PASS git diff --check; PASS make check (122 validator tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 comparisons equal, findings 0); PASS make talos-setup; PASS make talos-check (3125 jobs); PASS bash integration/talos/artifact/check.sh including deterministic source artifacts, resident helper clients, zero-function-import prettyM, cold browser-adapter regression, semantic/concrete/native-oracle paths, and atomic package smoke
+bug-cards: FIR-BUG-wasm-none-prettyM-cold-entry-call-stack-overflow fixed
 blockers: none
-handoff: integrate functional head 56d183620ef64572647e8a48ca79d6f12e62794e plus this ready mailbox commit; package prettyM-current-releases/56d183620ef6-18387878afbd3b7b has 104788-byte prettyM.wasm digest e7ccd1ac678900e0f6583a0d2251b0ef4d43de0b388d18033bbc86344eed4af7
-next: integration fast-forwards this green W7 slice and updates coordination/BOARD.md; test-fixtures may then admit the 32 scalar-closure cases
+handoff: integrate functional head 4404aba07aa90fb96dc43b5ca056ca38a32fd4bc plus this ready mailbox commit; package prettyM-current-releases/4404aba07aa9-c040c75c6ef0cf70 has 104833-byte prettyM.wasm digest bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792
+next: integration fast-forwards this green W7 slice and updates coordination/BOARD.md; wasm-proof may schedule a separate correctness theorem for the post-lowering self-tail-call elimination, with no resident-helper proof invalidated
 ```
