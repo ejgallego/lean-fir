@@ -15,6 +15,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Completed integration lease
 
+- Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
+- Integration owner: `wasm-gen`; the user assigned this short integration
+  lease after the preceding cross-lane lease had completed. The owner returns
+  to the generation lane when this board update and the validated stack land.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`, reused as the clean integration
+  worktree rather than creating additional coordination infrastructure.
+- Published W7 stack: functional head `4404aba0` plus ready mailbox
+  `7f122148`, based directly on `main` at `26ed9fff`.
+- Lease boundary: satisfied. The W7 artifact eliminates direct self-tail-call
+  growth after lowering, makes the reported cold 2,047-node `prettyM` case the
+  package's first execution, and republishes the zero-function-import artifact
+  atomically. It changes no shared ABI, final LCNF, resident-helper signature,
+  concrete-runtime layout, or W6 contract.
+- Validation: Lean Beam sync/save; focused `lake build`; fresh cold 2,047-node,
+  1,026-node grouped, and 32,767-node stress checks; `git diff --check`;
+  complete `make check` (1,844/1,844 comparisons equal); all 3,125 Talos jobs;
+  and the complete deterministic artifact/package gate pass. Artifact
+  `prettyM-current-releases/4404aba07aa9-c040c75c6ef0cf70` is 104,833 bytes
+  with digest
+  `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
+
+## Previous completed integration lease
+
 - Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
 - Integration owner: `wasm-gen`; the temporary lease is complete and the
   owner has returned to the generation lane.
@@ -59,6 +83,18 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- W7 functional head `4404aba0` and ready mailbox `7f122148` are
+  `linked/accepted`. The final closed `prettyM` modules now rewrite validated
+  direct self-tail calls into parameter reassignment plus a structured Wasm
+  loop, so the engine stack no longer grows with the formatter worklist. Cold
+  balanced documents with 2,047 and 32,767 nodes and the reported 1,026-node
+  grouped shape pass before any warm-up. The canonical artifact remains
+  self-contained with zero function imports and unchanged public ABI; its
+  digest is
+  `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
+  `FIR-BUG-wasm-none-prettyM-cold-entry-call-stack-overflow` is fixed. A
+  correctness theorem for the post-lowering transform is a separate possible
+  W6 follow-up and does not invalidate any resident-helper proof.
 - `CLOSURE-APPLICATION-OWNERSHIP` is green through the shared contract, LCNF
   pass-proof, W6 concrete-runtime refinement, and W7 executable adapter.
   Corrected runtime
