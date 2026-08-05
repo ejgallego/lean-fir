@@ -5598,7 +5598,7 @@ private def postConversionCases : Array Case := #[
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
         "float", "float32", "float64", "exact-bits", "heap", "ownership", "unique",
-        "single-use", "wasm-generation-pending"]
+        "single-use"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "fvar", "unbox", "dec", "ctor", "uset", "sset",
         "return", "oproj", "inc"]
@@ -5637,7 +5637,7 @@ private def postConversionCases : Array Case := #[
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
         "float", "float32", "float64", "exact-bits", "heap", "ownership", "shared",
-        "multiplicity", "repeated-application", "wasm-generation-pending"]
+        "multiplicity", "repeated-application"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
         "sset", "return", "oproj"]

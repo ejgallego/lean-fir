@@ -15,13 +15,13 @@ the same heap layout.
 
 | Milestone | State | Current checkpoint | Next acceptance step |
 | --- | --- | --- | --- |
-| M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions | Rebase after the closure contract/proof/W6 stack lands, admit the W7 adapter, run V8, and land |
+| M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the fixture-only admission on `main` |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair are prepared | Cover zero/three uses and unique/shared final application |
 | M3 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M4 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M5 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
-| M6 Real-engine promotion | continuous | Existing eligible cases run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M6 Real-engine promotion | continuous | Scalar closures and the mixed one-use/two-use pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, or `parked`. A prepared
 slice is committed and locally validated but still waits at a named cross-lane

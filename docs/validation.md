@@ -1786,9 +1786,10 @@ case pins 62, including the shared-closure increment, both `fvar` invocations,
 eight unboxes, ten decrements, two mixed constructors, their `uset`/`sset`
 writes, projections, and the final result pair. Matching coverage domains
 require the unique/single-use control and the shared/multiplicity path
-separately. The fixtures consume the published closure-ownership contract and
-remain `wasm-generation-pending` until the proof, W6, and W7 handoffs are
-linked; only then may a fresh V8 triangle remove that fence. The captured
+separately. After the closure-ownership and scalar-closure stacks landed, both
+cases compile through the public provider and agree across native Lean, LCNF,
+and V8. Their exact LCNF traces remain the ownership witness even though the
+real-engine tier records only the observable result. The captured
 aliased-`ByteArray` taken/skipped pair remains deferred because it additionally
 depends on the separately queued argument-alias materialization and boxed
 effect-wrapper contracts; those dependencies are not copied into this slice.

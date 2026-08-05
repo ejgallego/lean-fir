@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 633,
-        "minimumComparisons": 1266,
+        "minimumCases": 635,
+        "minimumComparisons": 1270,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -78,8 +78,8 @@
     ],
     "aggregate": {
       "minimumUniqueCases": 646,
-      "minimumTierCases": 1279,
-      "minimumComparisons": 1912
+      "minimumTierCases": 1281,
+      "minimumComparisons": 1916
     },
     "machine": {
       "minimumCases": 646,
@@ -657,7 +657,7 @@
       {
         "tier": "source-lcnf",
         "tag": "wasm-generation-pending",
-        "minimumCases": 4
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -677,12 +677,12 @@
       {
         "tier": "wasm-v8",
         "tag": "closure",
-        "minimumCases": 34
+        "minimumCases": 36
       },
       {
         "tier": "wasm-v8",
         "tag": "constructor",
-        "minimumCases": 14
+        "minimumCases": 16
       },
       {
         "tier": "wasm-v8",
@@ -712,7 +712,7 @@
       {
         "tier": "wasm-v8",
         "tag": "heap",
-        "minimumCases": 80
+        "minimumCases": 82
       },
       {
         "tier": "wasm-v8",
@@ -742,17 +742,17 @@
       {
         "tier": "wasm-v8",
         "tag": "object",
-        "minimumCases": 17
+        "minimumCases": 19
       },
       {
         "tier": "wasm-v8",
         "tag": "ownership",
-        "minimumCases": 15
+        "minimumCases": 17
       },
       {
         "tier": "wasm-v8",
         "tag": "partial-application",
-        "minimumCases": 33
+        "minimumCases": 35
       },
       {
         "tier": "wasm-v8",
@@ -762,7 +762,7 @@
       {
         "tier": "wasm-v8",
         "tag": "scalar",
-        "minimumCases": 409
+        "minimumCases": 411
       },
       {
         "tier": "wasm-v8",
@@ -1446,13 +1446,58 @@
         "tier": "wasm-v8",
         "name": "closure-capture",
         "allTags": ["capture", "closure"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-boxed-captures",
+        "allTags": [
+          "closure-ownership",
+          "exact-bits",
+          "float",
+          "float32",
+          "float64",
+          "heap",
+          "scalar",
+          "usize"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-mixed-layout",
+        "allTags": [
+          "capture",
+          "closure-ownership",
+          "constructor",
+          "mixed-layout",
+          "ownership",
+          "projection"
+        ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-repeated-application",
+        "allTags": [
+          "closure-ownership",
+          "multiplicity",
+          "repeated-application",
+          "shared"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-single-use",
+        "allTags": ["closure-ownership", "single-use", "unique"],
         "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
         "name": "closure-partial-application",
         "allTags": ["closure", "partial-application"],
-        "minimumCases": 33
+        "minimumCases": 35
       },
       {
         "tier": "wasm-v8",
