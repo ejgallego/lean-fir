@@ -2465,7 +2465,7 @@ private def exactCapturedFixedWidthEntryCase (codec : FixedWidthCaseCodec α)
   native := fun _ => codec.datum (operation captured applied)
   tags := #[
     "quick", "scalar", "closure", "partial-application", "entry-abi",
-    "generic-application", "boundary", "wasm-generation-pending"] ++ tags
+    "generic-application", "boundary"] ++ tags
   requiredLcnfForms := #["box", "dec", "fap", "fvar", "inc", "pap", "return", "unbox"]
   requiredExecutedLcnfForms :=
     #["box", "dec", "fap", "fvar", "inc", "pap", "return", "unbox"]
@@ -2948,8 +2948,7 @@ private def preConversionCases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.capturedBoolPartial true 2)
     tags := #[
-      "quick", "bool", "closure", "partial-application", "scalar", "boundary",
-      "wasm-generation-pending"]
+      "quick", "bool", "closure", "partial-application", "scalar", "boundary"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
     requiredExecutedLcnfForms :=
@@ -2967,8 +2966,7 @@ private def preConversionCases : Array Case := #[
     resultSchema := .nat
     native := fun _ => .nat (Source.capturedBoolPartial false 2)
     tags := #[
-      "quick", "bool", "closure", "partial-application", "scalar", "boundary",
-      "wasm-generation-pending"]
+      "quick", "bool", "closure", "partial-application", "scalar", "boundary"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "fvar", "unbox", "cases", "lit", "dec", "return"]
     requiredExecutedLcnfForms :=

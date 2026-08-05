@@ -1725,14 +1725,13 @@ surface (the source entry plus its bit-exact facade when floating transport
 requires one).
 Compiler-generated direct calls, captured and underapplied closures, recursive
 empty and traversal paths, and an exact `Nat.add` external now run in V8 as
-well. The Boolean-capture regression currently carries
-`wasm-generation-pending`: even after the closure-application ownership stack
-and W7 executable adapter landed, the public compiler surface still returns
-the typed `unsupportedCode` validation error before product emission. The V8
-plans therefore exclude only that explicit tag while native/LCNF keeps both
-cases. `FIR-BUG-wasm-none-generic-scalar-closure-admission` records the failed
-post-link admission; replacing the generic closure fixture with a weaker
-monomorphic case is not a lane-4 workaround.
+well. The two Boolean-capture regressions execute on all three
+native/LCNF/V8 edges. Their exact traces require tagged Boolean boxing,
+partial application, closure invocation, unboxing, and ownership operations;
+the structural erased-facade and precise UInt8-boxing repair recorded by
+`FIR-BUG-wasm-none-generic-scalar-closure-admission` therefore remains an
+executable admission requirement rather than being replaced by a weaker
+monomorphic fixture.
 The source-oracle tier extends that boundary into an unsigned entry-ABI matrix
 for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and `USize`. Each width runs both
 zero and maximum as the captured value, with the opposite boundary supplied as
@@ -1745,10 +1744,10 @@ interpreter steps. The `entry-abi` and `generic-application` coverage domains
 independently require both boundaries and both cases for every width. The ten
 fixtures carry an explicit `unsigned` tag, and every unsigned entry domain
 requires it, so later signed fixtures cannot satisfy those floors accidentally.
-A post-link compiler probe for the fixed-width matrix still returns the same
-typed `unsupportedCode` admission result as the Boolean closure. Consequently
-these cases also carry `wasm-generation-pending`; they expand the native/LCNF
-oracle without claiming a V8 execution or changing W7 lowering.
+After the structural scalar-closure admission landed, all ten unsigned cases
+compile through the public provider and agree across native Lean, LCNF, and
+V8. Matching source and V8 coverage domains require the complete five-width,
+zero/maximum matrix.
 The signed companion matrix covers `Int8`, `Int16`, `Int32`, `Int64`, and
 semantic Lean64 `ISize` at minimum, negative one, zero, and maximum. Every
 captured value is paired with a distinct applied value, including opposite
@@ -1759,10 +1758,10 @@ an empty-heap guard checks all twenty encodings before execution. These cases
 share the unsigned matrix's exact 17-form/27-step closure trace. Separate
 coverage domains require all four values for every signed width, both Wasm
 lanes, the five sign-bit pairs, and the complete twenty-case closure family.
-The post-link public-compiler probe fails first at
-`capturedInt16Partial` with the same typed `unsupportedCode` result, so all
-twenty cases remain behind the existing `wasm-generation-pending` admission
-fence rather than overlapping W7 lowering work.
+All twenty signed closures now compile through the same public provider and
+agree across native Lean, LCNF, and V8. Matching source and V8 coverage
+domains require all five widths, all four boundary values, both Wasm lanes,
+and every sign-bit pair.
 The complementary signed result-ABI matrix removes argument decoding from the
 experiment. Twenty argument-free `Int8`, `Int16`, `Int32`, `Int64`, and
 semantic Lean64 `ISize` entries return minimum, negative one, zero, or maximum
