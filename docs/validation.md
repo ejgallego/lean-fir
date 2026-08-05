@@ -1806,8 +1806,11 @@ There is deliberately no standalone `dec` in that compiled path: exclusive
 closure application transfers the fixed capture and the external consumes its
 argument. Separate coverage domains require the borrowed and consuming paths,
 their shared outside alias, retain/release classification, and the mutation
-case's observable allocation/copy-on-write result. Both cases remain behind
-the same W7 admission fence as the mixed closure pair.
+case's observable allocation/copy-on-write result. Both cases compile through
+the public provider and agree across native Lean, LCNF, and V8. This real-engine
+admission does not claim concrete Talos execution: the concrete-product client
+still records initial-runtime `ByteArray` layout and the `ByteArray.get!`/
+`ByteArray.set!` concrete external registrations as explicit boundaries.
 
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but

@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 635,
-        "minimumComparisons": 1270,
+        "minimumCases": 637,
+        "minimumComparisons": 1274,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -78,8 +78,8 @@
     ],
     "aggregate": {
       "minimumUniqueCases": 646,
-      "minimumTierCases": 1281,
-      "minimumComparisons": 1916
+      "minimumTierCases": 1283,
+      "minimumComparisons": 1920
     },
     "machine": {
       "minimumCases": 646,
@@ -656,11 +656,6 @@
       },
       {
         "tier": "source-lcnf",
-        "tag": "wasm-generation-pending",
-        "minimumCases": 2
-      },
-      {
-        "tier": "source-lcnf",
         "tag": "zero",
         "minimumCases": 22
       },
@@ -677,7 +672,7 @@
       {
         "tier": "wasm-v8",
         "tag": "closure",
-        "minimumCases": 36
+        "minimumCases": 38
       },
       {
         "tier": "wasm-v8",
@@ -702,7 +697,7 @@
       {
         "tier": "wasm-v8",
         "tag": "external",
-        "minimumCases": 298
+        "minimumCases": 300
       },
       {
         "tier": "wasm-v8",
@@ -712,7 +707,7 @@
       {
         "tier": "wasm-v8",
         "tag": "heap",
-        "minimumCases": 82
+        "minimumCases": 84
       },
       {
         "tier": "wasm-v8",
@@ -732,7 +727,7 @@
       {
         "tier": "wasm-v8",
         "tag": "mutation",
-        "minimumCases": 26
+        "minimumCases": 27
       },
       {
         "tier": "wasm-v8",
@@ -747,12 +742,12 @@
       {
         "tier": "wasm-v8",
         "tag": "ownership",
-        "minimumCases": 17
+        "minimumCases": 19
       },
       {
         "tier": "wasm-v8",
         "tag": "partial-application",
-        "minimumCases": 35
+        "minimumCases": 37
       },
       {
         "tier": "wasm-v8",
@@ -1422,19 +1417,19 @@
         "tier": "wasm-v8",
         "name": "bytearray-copy-on-write",
         "allTags": ["bytearray", "copy-on-write"],
-        "minimumCases": 5
+        "minimumCases": 6
       },
       {
         "tier": "wasm-v8",
         "name": "bytearray-mutation",
         "allTags": ["bytearray", "mutation"],
-        "minimumCases": 11
+        "minimumCases": 12
       },
       {
         "tier": "wasm-v8",
         "name": "bytes-external",
         "allTags": ["bytes", "external"],
-        "minimumCases": 15
+        "minimumCases": 17
       },
       {
         "tier": "wasm-v8",
@@ -1446,7 +1441,20 @@
         "tier": "wasm-v8",
         "name": "closure-capture",
         "allTags": ["capture", "closure"],
-        "minimumCases": 3
+        "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-borrowed-outside-alias",
+        "allTags": [
+          "borrow",
+          "closure-ownership",
+          "outside-alias",
+          "read",
+          "release",
+          "retain"
+        ],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1465,6 +1473,27 @@
       },
       {
         "tier": "wasm-v8",
+        "name": "closure-ownership-bytearray",
+        "allTags": ["bytearray", "closure-ownership", "heap", "ownership"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-consuming-outside-alias",
+        "allTags": [
+          "allocation",
+          "closure-ownership",
+          "consume",
+          "copy-on-write",
+          "mutation",
+          "outside-alias",
+          "release",
+          "retain"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
         "name": "closure-ownership-mixed-layout",
         "allTags": [
           "capture",
@@ -1474,6 +1503,12 @@
           "ownership",
           "projection"
         ],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "closure-ownership-outside-alias",
+        "allTags": ["capture", "closure-ownership", "outside-alias", "shared"],
         "minimumCases": 2
       },
       {
@@ -1489,6 +1524,12 @@
       },
       {
         "tier": "wasm-v8",
+        "name": "closure-ownership-single-application",
+        "allTags": ["closure-ownership", "single-use"],
+        "minimumCases": 3
+      },
+      {
+        "tier": "wasm-v8",
         "name": "closure-ownership-single-use",
         "allTags": ["closure-ownership", "single-use", "unique"],
         "minimumCases": 1
@@ -1497,7 +1538,7 @@
         "tier": "wasm-v8",
         "name": "closure-partial-application",
         "allTags": ["closure", "partial-application"],
-        "minimumCases": 35
+        "minimumCases": 37
       },
       {
         "tier": "wasm-v8",
@@ -1653,13 +1694,13 @@
         "tier": "wasm-v8",
         "name": "ownership-copy-on-write",
         "allTags": ["copy-on-write", "ownership"],
-        "minimumCases": 4
+        "minimumCases": 5
       },
       {
         "tier": "wasm-v8",
         "name": "ownership-shared",
         "allTags": ["ownership", "shared"],
-        "minimumCases": 6
+        "minimumCases": 8
       },
       {
         "tier": "wasm-v8",

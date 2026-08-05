@@ -5673,8 +5673,7 @@ private def postConversionCases : Array Case := #[
     tags :=
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "bytearray", "bytes", "external", "heap", "ownership", "outside-alias", "shared",
-        "borrow", "read", "retain", "release", "single-use",
-        "wasm-generation-pending"]
+        "borrow", "read", "retain", "release", "single-use"]
     requiredLcnfForms :=
       #["inc", "pap", "lit", "fap", "fvar", "extern", "return", "dec", "ctor"]
     requiredExecutedLcnfForms :=
@@ -5711,8 +5710,7 @@ private def postConversionCases : Array Case := #[
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "bytearray", "bytes", "external", "heap", "ownership", "outside-alias", "shared",
         "consume", "mutation", "copy-on-write", "allocation", "retain", "release",
-        "single-use",
-        "wasm-generation-pending"]
+        "single-use"]
     requiredLcnfForms :=
       #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "extern", "return",
         "ctor"]

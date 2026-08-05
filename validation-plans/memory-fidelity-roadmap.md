@@ -17,7 +17,7 @@ the same heap layout.
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the fixture-only admission on `main` |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair are prepared | Cover zero/three uses and unique/shared final application |
+| M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair pass native/LCNF/V8 | Cover zero/three uses and unique/shared final application |
 | M3 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M4 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M5 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
@@ -77,7 +77,8 @@ Every memory-fidelity fixture must satisfy the applicable requirements below.
 
 ### S1: outside-alias ByteArray capture
 
-State: `prepared` on `validation/closure-ownership-fixtures`.
+State: `prepared` and real-engine validated on
+`validation/closure-ownership-fixtures`.
 
 Pair a closure that borrows a captured ByteArray with a closure that consumes
 and mutates it through `ByteArray.set!`. Both retain the original ByteArray
@@ -85,6 +86,11 @@ outside the closure. The mutation case must therefore allocate a copy and
 return both the unchanged outside alias and the updated result. Pin `pap`,
 closure invocation, capture projection, increment/decrement, external dispatch,
 constructor return, and exact ordered traces.
+
+Both cases pass native Lean, the LCNF interpreter, and V8. Concrete-product
+execution remains outside this fixture slice because the concrete consumer
+still treats initial-runtime ByteArray layout and the `ByteArray.get!`/
+`ByteArray.set!` external registrations as blocked.
 
 This slice uses the existing ByteArray protocol and does not depend on argument
 alias materialization or the effect-wrapper contracts.
