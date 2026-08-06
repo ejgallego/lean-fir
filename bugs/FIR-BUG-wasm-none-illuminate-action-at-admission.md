@@ -43,7 +43,7 @@ be implemented and tested independently.
 
 ## Actual behavior
 
-Lean 4.32 erases the monomorphic result of ten reachable `Array.get!` and
+Lean 4.32 erases the monomorphic result of eleven reachable `Array.get!` and
 `Array.get?` calls to `tobject`. Their actual `StepInfo`, `Segment`, and
 `String` element values are heap-only objects, but later `oproj` lowering
 correctly requires `object`. The first mismatch appeared in `actionAt`.
@@ -64,12 +64,14 @@ be emitted as Wasm, so the native third participant cannot join Illuminate's
 
 The failure occurs after successful source elaboration and final-LCNF capture,
 inside FIR's supported Wasm lowering validator. It is an erased generic-result
-ABI mismatch, not an unsupported state-machine operation.
+ABI mismatch, not an unsupported state-machine operation. The complete
+runtime link includes the one owned `Array.get!Internal` call in `tick` in the
+same fail-closed inventory.
 
 ## Workaround
 
 The Illuminate capture applies a fail-closed monomorphic ABI recovery. It
-checks the exact two target declarations, all ten expected caller sites, and
+checks the exact three target declarations, all eleven expected caller sites, and
 the original `tobject` signatures before changing the target and call results
 to `object`.
 

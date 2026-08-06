@@ -1,0 +1,432 @@
+import Fir.Wasm.Emit.ResidentNumeric
+
+namespace Fir.Wasm.Emit.ResidentArray
+
+open Fir.Wasm
+open Fir.Wasm.Concrete
+open Lean
+
+/-!
+# Persistent arena arrays for whole-trace execution
+
+The Illuminate package transfers one complete input graph and decodes one
+complete output graph. Arrays therefore use a module-private persistent arena
+layout: every push allocates a fresh array, and reclamation happens when the
+Wasm instance is discarded. JavaScript only writes this documented layout;
+all Array semantics below execute in Wasm.
+-/
+
+inductive LinkError where
+  | invalidInput (error : SymbolicError)
+  | missingAllocator
+  | missingNumericHelper (name : Name)
+  | reservedDeclaration (name : Name)
+  | missingExternal (name : Name)
+  | incompatibleExternal (name : Name)
+  | incompatibleMemory
+  | invalidOutput (error : SymbolicError)
+  deriving Inhabited, Repr
+
+private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
+
+/-- ASCII `ARRY`, stored in `opaque.aux0`. -/
+def arrayMarker : UInt32 := 0x41525259
+
+def allocateEmptyName : Name := `fir_array_allocate_empty
+
+def externalDeclarations : Array Name := #[
+  `Array.size,
+  `Array.get!InternalBorrowed,
+  `Array.emptyWithCapacity,
+  `Array.mkEmpty,
+  `Array.getInternalBorrowed,
+  `Array.push,
+  `Array.get!Internal]
+
+def externalName (declaration : Name) : Name :=
+  Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
+
+def externalHelperNames : Array Name := externalDeclarations.map externalName
+def helperNames : Array Name := #[allocateEmptyName] ++ externalHelperNames
+
+private def erasedParam : FVarId := ⟨`erased⟩
+private def defaultParam : FVarId := ⟨`default⟩
+private def arrayParam : FVarId := ⟨`array⟩
+private def indexParam : FVarId := ⟨`index⟩
+private def proofParam : FVarId := ⟨`proof⟩
+private def capacityParam : FVarId := ⟨`capacity⟩
+private def valueParam : FVarId := ⟨`value⟩
+
+private def addressLocal : FVarId := ⟨`address⟩
+private def sizeLocal : FVarId := ⟨`size⟩
+private def indexLocal : FVarId := ⟨`indexValue⟩
+private def countLocal : FVarId := ⟨`count⟩
+private def sourceCursorLocal : FVarId := ⟨`sourceCursor⟩
+private def targetCursorLocal : FVarId := ⟨`targetCursor⟩
+private def allocationBytesLocal : FVarId := ⟨`allocationBytes⟩
+private def elementLocal : FVarId := ⟨`element⟩
+private def rawLocal : FVarId := ⟨`raw⟩
+private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
+private def objectResultLocal : FVarId := ⟨`objectResult⟩
+private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
+
+private def elementLoopLabel : FVarId := ⟨`elementLoop⟩
+private def byteLoopLabel : FVarId := ⟨`byteLoop⟩
+private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
+
+private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
+  [.i32Const kind value, .i32Eq]
+
+private def trapUnless (condition : List Instruction) : List Instruction :=
+  condition ++ [.ifElse [] [.unreachable]]
+
+private def requireArray (array : FVarId) : List Instruction :=
+  trapUnless ([
+    .localGet array,
+    .i32Const .uint32 (u32 heapBase),
+    .i32LtU] ++ equalsConst .uint32 0) ++
+  trapUnless (
+    [.localGet array,
+      .i32Const .uint32 (u32 (target.heapAlignment - 1)),
+      .i32And] ++ equalsConst .uint32 0) ++
+  trapUnless (
+    [.localGet array,
+      .i32Load .uint32 (u32 headerFlagsOffset),
+      .i32Const .uint32 (persistentFlag + liveFlag),
+      .i32And] ++ equalsConst .uint32 (persistentFlag + liveFlag)) ++
+  trapUnless (
+    [.localGet array,
+      .i32Load .uint32 (u32 headerKindOffset)] ++
+      equalsConst .uint32 ObjectKind.opaque.code) ++
+  trapUnless (
+    [.localGet array,
+      .i32Load .uint32 (u32 headerAux0Offset)] ++
+      equalsConst .uint32 arrayMarker)
+
+private def loadSize (array : FVarId) : List Instruction := [
+  .localGet array,
+  .i32Load .uint32 (u32 headerAux1Offset),
+  .localSet sizeLocal]
+
+private def decodeIndex : List Instruction := [
+  .localGet indexParam,
+  .call (.declaration ResidentNumeric.validateNaturalName),
+  .localGet indexParam,
+  .call (.declaration ResidentNumeric.naturalHighName),
+  .i32Const .uint32 0,
+  .i32Eq,
+  .ifElse [] [.unreachable],
+  .localGet indexParam,
+  .call (.declaration ResidentNumeric.naturalLowName),
+  .localSet indexLocal]
+
+private def storeHeaderWord (offset : Nat) (value : List Instruction) :
+    List Instruction :=
+  [.localGet addressLocal] ++ value ++ [.i32Store .uint32 (u32 offset)]
+
+private def initializeHeader (newSize : List Instruction) : List Instruction :=
+  storeHeaderWord headerKindOffset
+      [.i32Const .uint32 ObjectKind.opaque.code] ++
+  storeHeaderWord headerFlagsOffset
+      [.i32Const .uint32 (persistentFlag + liveFlag)] ++
+  storeHeaderWord headerRefCountOffset [.i32Const .uint32 0] ++
+  storeHeaderWord headerAllocationBytesOffset
+      [.localGet allocationBytesLocal] ++
+  storeHeaderWord headerAux0Offset [.i32Const .uint32 arrayMarker] ++
+  storeHeaderWord headerAux1Offset newSize ++
+  storeHeaderWord headerAux2Offset newSize ++
+  storeHeaderWord headerAux3Offset [.i32Const .uint32 0]
+
+private def retypeAddress : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet addressLocal,
+  .i32Store .uint32 0,
+  .i32Const .uint32 0,
+  .i32Load .object 0,
+  .localSet objectResultLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0,
+  .localGet objectResultLocal,
+  .ret]
+
+private def retypeTagged : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet rawLocal,
+  .i32Store .uint32 0,
+  .i32Const .uint32 0,
+  .i32Load .tagged 0,
+  .localSet taggedResultLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0,
+  .localGet taggedResultLocal,
+  .ret]
+
+def allocateEmptyFunction : Function := {
+  name := allocateEmptyName
+  params := #[]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (allocationBytesLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
+  body := [
+    .i32Const .uint32 (u32 headerBytes),
+    .localSet allocationBytesLocal,
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+    initializeHeader [.i32Const .uint32 0] ++
+    retypeAddress }
+
+def sizeFunction : Function := {
+  name := externalName `Array.size
+  params := #[(erasedParam, .erased), (arrayParam, .object)]
+  results := #[.tagged]
+  locals := #[(sizeLocal, .uint32), (rawLocal, .uint32),
+    (savedScratchLocal, .uint32), (taggedResultLocal, .tagged)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet sizeLocal,
+    .localGet sizeLocal,
+    .i32Add,
+    .i32Const .uint32 1,
+    .i32Add,
+    .localSet rawLocal] ++ retypeTagged }
+
+private def elementAddress : List Instruction := [
+  .localGet arrayParam,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet sourceCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop elementLoopLabel [
+    .localGet countLocal,
+    .localGet indexLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet sourceCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet sourceCursorLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br elementLoopLabel] []]]
+
+private def getBody (useDefault : Bool) : List Instruction :=
+  requireArray arrayParam ++ loadSize arrayParam ++ decodeIndex ++ [
+    .localGet indexLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse
+      (elementAddress ++ [
+        .localGet sourceCursorLocal,
+        .i32Load .object 0,
+        .ret])
+      (if useDefault then [.localGetObject defaultParam, .ret]
+       else [.unreachable])]
+
+private def getBangFunction (declaration : Name) : Function := {
+  name := externalName declaration
+  params := #[(erasedParam, .erased), (defaultParam, .tobject),
+    (arrayParam, .object), (indexParam, .tobject)]
+  results := #[.object]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
+  body := getBody true }
+
+def getBangBorrowedFunction : Function :=
+  getBangFunction `Array.get!InternalBorrowed
+
+def getBangOwnedFunction : Function :=
+  getBangFunction `Array.get!Internal
+
+def getBorrowedFunction : Function := {
+  name := externalName `Array.getInternalBorrowed
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .tobject), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
+  body := getBody false }
+
+private def emptyWrapper (declaration : Name) : Function := {
+  name := externalName declaration
+  params := #[(erasedParam, .erased), (capacityParam, .tobject)]
+  results := #[.object]
+  locals := #[]
+  body := [.call (.declaration allocateEmptyName), .ret] }
+
+def emptyWithCapacityFunction : Function :=
+  emptyWrapper `Array.emptyWithCapacity
+
+def mkEmptyFunction : Function := emptyWrapper `Array.mkEmpty
+
+private def allocationBytesBody : List Instruction := [
+  .i32Const .uint32 (u32 (headerBytes + target.semanticSlotBytes)),
+  .localSet allocationBytesLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop byteLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet allocationBytesLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet allocationBytesLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br byteLoopLabel] []]]
+
+private def copyElementsBody : List Instruction := [
+  .localGet arrayParam,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet sourceCursorLocal,
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet targetCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop copyLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet targetCursorLocal,
+      .localGet sourceCursorLocal,
+      .i32Load .object 0,
+      .i32Store .object 0,
+      .localGet sourceCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet sourceCursorLocal,
+      .localGet targetCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet targetCursorLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br copyLoopLabel] []]]
+
+def pushFunction : Function := {
+  name := externalName `Array.push
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (valueParam, .tobject)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object),
+    (elementLocal, .object)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++
+    allocationBytesBody ++ [
+      .localGet allocationBytesLocal,
+      .call (.declaration ResidentAllocator.allocateName),
+      .localSet addressLocal] ++
+    initializeHeader [
+      .localGet sizeLocal,
+      .i32Const .uint32 1,
+      .i32Add] ++
+    copyElementsBody ++ [
+      .localGet targetCursorLocal,
+      .localGet valueParam,
+      .i32Store .tobject 0] ++
+    retypeAddress }
+
+def functions : Array Function := #[
+  allocateEmptyFunction,
+  sizeFunction,
+  getBangBorrowedFunction,
+  emptyWithCapacityFunction,
+  mkEmptyFunction,
+  getBorrowedFunction,
+  pushFunction,
+  getBangOwnedFunction]
+
+private partial def rewriteInstruction : Instruction → Instruction
+  | .call (.declaration declaration) =>
+      if externalDeclarations.contains declaration then
+        .call (.declaration (externalName declaration))
+      else .call (.declaration declaration)
+  | .block label body => .block label (body.map rewriteInstruction)
+  | .loop label body => .loop label (body.map rewriteInstruction)
+  | .ifElse thenBody elseBody =>
+      .ifElse (thenBody.map rewriteInstruction) (elseBody.map rewriteInstruction)
+  | instruction => instruction
+
+private def expectedSignature? (declaration : Name) : Option Signature :=
+  if declaration == `Array.size then
+    some { params := #[.erased, .object], results := #[.tagged] }
+  else if declaration == `Array.get!InternalBorrowed ||
+      declaration == `Array.get!Internal then
+    some {
+      params := #[.erased, .tobject, .object, .tobject]
+      results := #[.object] }
+  else if declaration == `Array.emptyWithCapacity ||
+      declaration == `Array.mkEmpty then
+    some { params := #[.erased, .tobject], results := #[.object] }
+  else if declaration == `Array.getInternalBorrowed then
+    some {
+      params := #[.erased, .object, .tobject, .erased]
+      results := #[.object] }
+  else if declaration == `Array.push then
+    some { params := #[.erased, .object, .tobject], results := #[.object] }
+  else none
+
+def internalize (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+    throw .missingAllocator
+  unless module.memory == some ResidentRuntime.residentMemory do
+    throw .incompatibleMemory
+  for name in #[ResidentNumeric.validateNaturalName,
+      ResidentNumeric.naturalLowName, ResidentNumeric.naturalHighName] do
+    unless module.functions.any (·.name == name) do
+      throw (.missingNumericHelper name)
+  for name in helperNames do
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) || module.exports.contains name then
+      throw (.reservedDeclaration name)
+  for declaration in externalDeclarations do
+    let imports := module.imports.filter (·.declaration? == some declaration)
+    unless imports.size == 1 do
+      throw (.missingExternal declaration)
+    let some signature := expectedSignature? declaration |
+      throw (.incompatibleExternal declaration)
+    unless imports[0]!.signature == signature do
+      throw (.incompatibleExternal declaration)
+  let linkedFunctions := module.functions.map fun function =>
+    { function with body := function.body.map rewriteInstruction }
+  let linkedFunctions := linkedFunctions ++ functions
+  let imports := module.imports.filter fun import_ =>
+    match import_.declaration? with
+    | some declaration => !externalDeclarations.contains declaration
+    | none => true
+  let result : Module := {
+    module with
+    functions := linkedFunctions
+    imports
+    exports := helperNames.foldl Fir.Wasm.addUnique module.exports
+    runtimeOperations := Fir.Wasm.collectRuntimeOps linkedFunctions }
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
+end Fir.Wasm.Emit.ResidentArray

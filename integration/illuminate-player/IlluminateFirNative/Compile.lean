@@ -1,4 +1,7 @@
 import Fir.Wasm.Emit.ResidentPrettyFormat
+import Fir.Wasm.Emit.ResidentFloat
+import Fir.Wasm.Emit.ResidentDeadCode
+import Fir.Wasm.Emit.ResidentArray
 import IlluminateFirNative.Facade
 
 namespace IlluminateFirNative.Compile
@@ -47,8 +50,10 @@ private def arrayGetBangName : Name := ``Array.get!InternalBorrowed
 
 private def arrayGetName : Name := ``Array.getInternalBorrowed
 
+private def arrayGetBangOwnedName : Name := ``Array.get!Internal
+
 private def isArrayGetName (name : Name) : Bool :=
-  name == arrayGetBangName || name == arrayGetName
+  name == arrayGetBangName || name == arrayGetName || name == arrayGetBangOwnedName
 
 private def expectedArrayGetCaller (target caller : Name) : Bool :=
   let suffix := caller.toString
@@ -63,6 +68,8 @@ private def expectedArrayGetCaller (target caller : Name) : Bool :=
       suffix.endsWith "Illuminate.AnimationPlayer.loopAt" ||
       suffix.endsWith "Illuminate.AnimationPlayer.tick" ||
       suffix.endsWith "Illuminate.AnimationPlayer.findStepEnd"
+  else if target == arrayGetBangOwnedName then
+    suffix.endsWith "Illuminate.AnimationPlayer.tick"
   else
     false
 
@@ -195,7 +202,7 @@ real Illuminate player and rejects closure drift.
 -/
 def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
     Except String Fir.Validation.Lcnf.Artifact := do
-  for targetName in #[arrayGetBangName, arrayGetName] do
+  for targetName in #[arrayGetBangName, arrayGetName, arrayGetBangOwnedName] do
     let targets := artifact.program.decls.filter (fun decl => decl.name == targetName)
     unless targets.size == 1 do
       throw s!"expected one {targetName} declaration, found {targets.size}"
@@ -216,7 +223,7 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
         let (code, sites) ← refineArrayGetCalls decl.name code
         return ({ decl with value := .code code }, sites)
   let sites := results.foldl (init := #[]) fun sites result => sites ++ result.2
-  unless sites.size == 10 &&
+  unless sites.size == 11 &&
       arrayGetSiteCount sites arrayGetBangName
         "Illuminate.AnimationPlayer.findCurrentStep.loop" == 1 &&
       arrayGetSiteCount sites arrayGetBangName
@@ -234,7 +241,9 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.tick" == 1 &&
       arrayGetSiteCount sites arrayGetName
-        "Illuminate.AnimationPlayer.findStepEnd" == 1 do
+        "Illuminate.AnimationPlayer.findStepEnd" == 1 &&
+      arrayGetSiteCount sites arrayGetBangOwnedName
+        "Illuminate.AnimationPlayer.tick" == 1 do
     throw s!"Illuminate array-read call-site inventory changed: {sites.map (fun site => (site.1.toString, site.2.toString))}"
   let program : Fir.LeanIR.ImpureProgram := { decls := results.map (fun result => result.1) }
   return { artifact with
@@ -273,6 +282,42 @@ private def internalizeAvailableNumeric
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
 
+private def internalizeFloat
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentFloat.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to internalize Illuminate Float operations: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def internalizeArrays
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentArray.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to internalize Illuminate Array operations: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def pruneLinkedModule
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentDeadCode.prune artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to prune the linked Illuminate module: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
 /-- Link every reusable resident helper family already accepted by W7. -/
 def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
@@ -292,7 +337,10 @@ def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) 
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeCacheSets artifact
   let artifact ← internalizeAvailableNumeric artifact
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeBigNumeric artifact
-  Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
+  let artifact ← internalizeFloat artifact
+  let artifact ← internalizeArrays artifact
+  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
+  pruneLinkedModule artifact
 
 /-- Compile and link the currently reusable Wasm-resident runtime frontier. -/
 def compileResidentModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
