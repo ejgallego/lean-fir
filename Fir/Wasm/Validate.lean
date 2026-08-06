@@ -257,6 +257,8 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
       unless kind.valueType == .i64 do
         throw (.invalidConstant context.function.name kind .i64)
       return { fallthrough := stack?.map (· ++ [kind]) }
+  | .f64Const _ =>
+      return { fallthrough := stack?.map (· ++ [.float]) }
   | .localGet fvarId => do
       let some kind := findLocalKind? context.locals fvarId |
         throw (.unknownLocal context.function.name fvarId)
@@ -316,6 +318,41 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         unless operands.all (·.valueType == .i32) do
           throw (.stackMismatch context.function.name [.uint32, .uint32] operands)
         return remaining ++ [.uint32]
+      return { fallthrough := stack? }
+  | .i64Or | .i64Shl | .i64ShrU => do
+      let stack? ← stack?.mapM fun stack => do
+        if stack.length < 2 then
+          throw (.stackUnderflow context.function.name [.uint64, .uint64])
+        let remaining := stack.take (stack.length - 2)
+        let operands := stack.drop (stack.length - 2)
+        unless operands.all (·.valueType == .i64) do
+          throw (.stackMismatch context.function.name [.uint64, .uint64] operands)
+        return remaining ++ [.uint64]
+      return { fallthrough := stack? }
+  | .i64LtU => do
+      let stack? ← stack?.mapM fun stack => do
+        if stack.length < 2 then
+          throw (.stackUnderflow context.function.name [.uint64, .uint64])
+        let remaining := stack.take (stack.length - 2)
+        let operands := stack.drop (stack.length - 2)
+        unless operands.all (·.valueType == .i64) do
+          throw (.stackMismatch context.function.name [.uint64, .uint64] operands)
+        return remaining ++ [.uint32]
+      return { fallthrough := stack? }
+  | .f64Eq | .f64Lt | .f64Le => do
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.float, .float]
+        return stack ++ [.uint32]
+      return { fallthrough := stack? }
+  | .f64Add | .f64Sub | .f64Mul | .f64Div => do
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.float, .float]
+        return stack ++ [.float]
+      return { fallthrough := stack? }
+  | .f64Ceil | .f64Floor => do
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.float]
+        return stack ++ [.float]
       return { fallthrough := stack? }
   | .i32Store8 value _
   | .i32Store16 value _
@@ -404,6 +441,31 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
         unless operand.valueType == .i64 do
           throw (.stackMismatch context.function.name [.uint64] [operand])
         return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .i64ExtendI32U result => do
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      let stack? ← stack?.mapM fun stack => do
+        if stack.isEmpty then
+          throw (.stackUnderflow context.function.name [.uint32])
+        let remaining := stack.take (stack.length - 1)
+        let some operand := stack.getLast? |
+          throw (.stackUnderflow context.function.name [.uint32])
+        unless operand.valueType == .i32 do
+          throw (.stackMismatch context.function.name [.uint32] [operand])
+        return remaining ++ [result]
+      return { fallthrough := stack? }
+  | .f64ConvertI64U => do
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.uint64]
+        return stack ++ [.float]
+      return { fallthrough := stack? }
+  | .i64TruncSatF64U result => do
+      unless result.valueType == .i64 do
+        throw (.invalidConstant context.function.name result .i64)
+      let stack? ← stack?.mapM fun stack => do
+        let stack ← popKinds context.function.name stack [.float]
+        return stack ++ [result]
       return { fallthrough := stack? }
   | .i32ReinterpretF32 result => do
       unless result.valueType == .i32 do

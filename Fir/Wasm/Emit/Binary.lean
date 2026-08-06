@@ -121,6 +121,7 @@ mutual
 private partial def encodeInstruction (context : Context) : Instruction → Except EncodeError Bytes
   | .i32Const _ value => return #[0x41] ++ encodeI32 value
   | .i64Const _ value => return #[0x42] ++ encodeI64 value
+  | .f64Const bits => return #[0x44] ++ encodeF64 bits
   | .localGet fvarId => do
       let locals := context.function.params.toList ++ context.function.locals.toList
       let some index := findFVarIndex? locals fvarId |
@@ -148,6 +149,19 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .i32Add => return #[0x6a]
   | .i32Sub => return #[0x6b]
   | .i32LtU => return #[0x49]
+  | .i64Or => return #[0x84]
+  | .i64Shl => return #[0x86]
+  | .i64ShrU => return #[0x88]
+  | .i64LtU => return #[0x54]
+  | .f64Eq => return #[0x61]
+  | .f64Lt => return #[0x63]
+  | .f64Le => return #[0x65]
+  | .f64Add => return #[0xa0]
+  | .f64Sub => return #[0xa1]
+  | .f64Mul => return #[0xa2]
+  | .f64Div => return #[0xa3]
+  | .f64Ceil => return #[0x9b]
+  | .f64Floor => return #[0x9c]
   | .i32Load _ offset => return #[0x28, 0x02] ++ encodeU32 offset.toNat
   | .i32Load8U _ offset => return #[0x2d, 0x00] ++ encodeU32 offset.toNat
   | .i32Load16U _ offset => return #[0x2f, 0x01] ++ encodeU32 offset.toNat
@@ -159,6 +173,9 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .memorySize => return #[0x3f, 0x00]
   | .memoryGrow => return #[0x40, 0x00]
   | .i32WrapI64 _ => return #[0xa7]
+  | .i64ExtendI32U _ => return #[0xad]
+  | .f64ConvertI64U => return #[0xba]
+  | .i64TruncSatF64U _ => return #[0xfc, 0x07]
   | .i32ReinterpretF32 _ => return #[0xbc]
   | .i64ReinterpretF64 _ => return #[0xbd]
   | .f32ReinterpretI32 _ => return #[0xbe]

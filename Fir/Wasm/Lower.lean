@@ -13,6 +13,8 @@ inductive CallTarget where
 inductive Instruction where
   | i32Const (kind : AbiKind) (value : UInt32)
   | i64Const (kind : AbiKind) (value : UInt64)
+  /-- A bit-exact IEEE-754 binary64 constant. -/
+  | f64Const (bits : UInt64)
   | localGet (fvarId : FVarId)
   /-- Read a `tobject` local under a proved `isShared(value) == 0` heap refinement. -/
   | localGetObject (fvarId : FVarId)
@@ -28,6 +30,21 @@ inductive Instruction where
   | i32Add
   | i32Sub
   | i32LtU
+  /-- Physical wasm64 integer operations used by numeric conversion helpers. -/
+  | i64Or
+  | i64Shl
+  | i64ShrU
+  | i64LtU
+  /-- IEEE-754 binary64 comparisons and arithmetic used by resident externals. -/
+  | f64Eq
+  | f64Lt
+  | f64Le
+  | f64Add
+  | f64Sub
+  | f64Mul
+  | f64Div
+  | f64Ceil
+  | f64Floor
   /-- Load from the module-owned memory at `address + offset`. -/
   | i32Load (result : AbiKind) (offset : UInt32)
   /-- Zero-extend one byte from module-owned memory at `address + offset`. -/
@@ -45,6 +62,12 @@ inductive Instruction where
   | memoryGrow
   /-- Retag the low 32 bits of an i64 physical lane. -/
   | i32WrapI64 (result : AbiKind)
+  /-- Zero-extend an i32 physical lane to i64. -/
+  | i64ExtendI32U (result : AbiKind)
+  /-- Convert an unsigned i64 lane to IEEE-754 binary64. -/
+  | f64ConvertI64U
+  /-- Lean-compatible saturating conversion from binary64 to unsigned i64. -/
+  | i64TruncSatF64U (result : AbiKind)
   /-- Preserve the exact 32-bit payload while retagging an `f32` lane as `i32`. -/
   | i32ReinterpretF32 (result : AbiKind)
   /-- Preserve the exact 64-bit payload while retagging an `f64` lane as `i64`. -/

@@ -15,24 +15,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `SCALAR-CLOSURE-ADMISSION`.
-- Integration owner: `wasm-gen`; the W6 landing lease ended when
-  `SCALAR-CLOSURE-ABI-ADMISSION` became linked/accepted, and the user returned
-  control to the generation lane for consumption and fixture coordination.
+- Milestone: `ILLUMINATE-FLOAT-MACHINE`.
+- Integration owner: `wasm-gen`; this short lease isolates the shared symbolic
+  Wasm vocabulary required by the W7 Illuminate timestamp runtime.
 - Integration branch/worktree: `integration/closure-ownership` in
   `.worktrees/integration-closure-ownership`.
-- Published stack: W6 functional head `cf1ed73f` plus ready mailbox
-  `4013a6ba` is accepted on `main` at `b1713877`; W7 consumption is published
-  by ready mailbox `6f5b5b5c` on that exact base, with no W7 implementation
-  delta.
-- Current boundary: the public W7 compiler emits all 30 fixed-width generic
-  closure entries and both Boolean closure entries. Node's real WebAssembly
-  engine agrees with native Lean and LCNF on all 32 cases and all 96 directed
-  comparisons. Test-fixtures now owns removal of the
-  `wasm-generation-pending` tags and promotion into the default V8 triangle.
-- Scope: land the W7 acceptance mailbox, consume the test-fixtures handoff,
-  and close this milestone. This lease grants no permission to edit proof-,
-  W6-, or validation-owned implementation files.
+- Published stack: none yet; W7 checkpoint `6c37cf79` remains on
+  `wasm/generation` until this standalone contract lands on `main`.
+- Current boundary: add bit-exact binary64 constants, arithmetic/comparisons,
+  round-building primitives, unsigned integer conversion, and the minimal i64
+  assembly operations needed by resident Float/Nat helpers. The vocabulary
+  assigns only Wasm stack semantics; W7 separately assigns Lean extern
+  semantics and W6 may prove those helpers later.
+- Scope: validate and land this shared instruction contract, rebase W7, and
+  return to the generation lane. This lease grants no permission to edit
+  proof-, W6-, or validation-owned implementation files.
 
 ## Completed integration lease
 
@@ -468,6 +465,7 @@ moving global snapshot hash.
 | `W7-RESIDENT-LITERALS` | W7 | W6, integration, artifact clients | released | `64831f6` | Adds a zero-import literal fixture, internalizes immediate Naturals in linked `prettyM`, retains Strings until their JavaScript consumers become resident, and advances text/styled checkpoints to 152/153 imports |
 | `FLOAT-SCALAR-RUNTIME` | integration/validation | pass proof, W6, W7, validation | released | landed stack through `8a8d1387` | Adds bit-exact `float32Bits`/`float64Bits`, heap-only boxes, stable box-kind/layout signatures, exact ABI adapters, and concrete/proof refinements without the unrelated closure-ownership stack. The integrated stack passes `make check` and all 3,123 Talos jobs. W7 consumes it in candidate `2b4d9d23`. |
 | `WASM-FLOAT-REINTERPRET` | integration | W6, W7, Talos adapter | released | landed stack through `8a8d1387` | Symbolic, binary, Talos-adapter, runtime, and proof support for `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, and `f64.reinterpret_i64` is landed. W7's integer-lane facade preserves signaling-NaN payloads across JavaScript without numeric coercion. |
+| `ILLUMINATE-FLOAT-MACHINE` | integration | W7, W6 | candidate | current `integration/closure-ownership` functional head | Adds only the typed symbolic and binary Wasm operations needed to implement Lean 4.32 Float subtraction/division/multiplication/comparison, round-away-from-zero, saturating `toUInt64`, and Nat-to-Float conversion. W7 consumes the vocabulary in resident helpers; the later W6 bridge proves those helpers against the concrete runtime contracts. |
 | `BIT-EXACT-FLOAT-MANIFEST-TRANSPORT` | integration | W7, validation, artifact clients | released | contract `8ad80ad3`; canonical validation consumer `57f13122` | Defines the version-1 `wasm-reinterpret-i32-i64` capability, exact entry selection, integer-lane argument/result codecs, and semantic observation bridge. Floating manifests without the capability and capabilities with unknown fields, versions, encodings, entries, arities, kinds, or ranges fail closed. The standalone suite covers signed zero, infinities, quiet/signaling NaNs, maximal payloads, mixed signatures, and every malformed constructor path without JavaScript numeric coercion; the root validation runner now consumes the facade and passes the complete 613-case native/LCNF plus 581-case V8 gate. |
 | `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | released | landed proof/runtime stack `229640de`; corrected contract `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; ownership `528fdd1a`; W7 adapter `fd6a51e3` and ready head `fdaa8bd1` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Pass, concrete-runtime, and executable-adapter layers are green and linked/accepted. |
 | `EXTERNAL-WAITING-RUNTIME` | integration/validation | pass proof, W6, validation | released | landed stack `229640de`; standalone repair `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; historical validation provenance `2f301de5` | `Step.external`, `executeStep`, soundness, and the Talos frame refinement use the post-core-step `waiting.runtime`, so external responses cannot resurrect a consumed closure or discard shared closure decrements and retained captures. `FIR-BUG-impure-none-closure-application-external-runtime` is fixed with executable and proof regressions. |

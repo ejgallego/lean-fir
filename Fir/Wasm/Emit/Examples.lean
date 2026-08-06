@@ -273,6 +273,7 @@ standard Wasm module for the lazy-cache path. -/
 #guard (encodeProgram Fir.Wasm.abiClosureCallProgram).isOk
 #guard (encodeProgram Fir.Wasm.abiClosureUnderApplyProgram).isOk
 #guard (encodeProgram Fir.Wasm.abiRecursiveCallProgram).isOk
+#guard (Fir.Wasm.Emit.encode Fir.Wasm.floatMachineModule).isOk
 
 def residentAddress : Lean.FVarId := ⟨`residentAddress⟩
 

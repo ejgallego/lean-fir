@@ -1042,4 +1042,80 @@ def distinctHandles : Bool :=
 #guard HandleError.handleSpaceExhausted.toTargetFailure == .handleSpaceExhausted
 #guard (HandleError.unknownHandle 7).toTargetFailure == .invalidHandle 7
 
+def floatMachineValue : FVarId := ⟨`floatMachineValue⟩
+def floatMachineWord : FVarId := ⟨`floatMachineWord⟩
+def floatMachineFlag : FVarId := ⟨`floatMachineFlag⟩
+
+/-- One symbolic function exercises the complete resident timestamp-machine
+instruction cone without assigning Lean extern semantics to the instructions. -/
+def floatMachineFunction : Function := {
+  name := `floatMachine
+  params := #[]
+  results := #[.uint64]
+  locals := #[(floatMachineValue, .float), (floatMachineWord, .uint64),
+    (floatMachineFlag, .uint32)]
+  body := [
+    .f64Const 0x3ff8000000000000,
+    .f64Const 0x3fe0000000000000,
+    .f64Add,
+    .localSet floatMachineValue,
+    .localGet floatMachineValue,
+    .f64Const 0x3fe0000000000000,
+    .f64Sub,
+    .f64Const 0x4000000000000000,
+    .f64Mul,
+    .f64Const 0x4000000000000000,
+    .f64Div,
+    .localSet floatMachineValue,
+    .localGet floatMachineValue,
+    .f64Floor,
+    .f64Ceil,
+    .localSet floatMachineValue,
+    .localGet floatMachineValue,
+    .f64Const 0x3ff0000000000000,
+    .f64Eq,
+    .localSet floatMachineFlag,
+    .localGet floatMachineValue,
+    .f64Const 0x4000000000000000,
+    .f64Lt,
+    .localSet floatMachineFlag,
+    .localGet floatMachineValue,
+    .f64Const 0x3ff0000000000000,
+    .f64Le,
+    .localSet floatMachineFlag,
+    .i64Const .uint64 1,
+    .i64Const .uint64 4,
+    .i64Shl,
+    .i64Const .uint64 3,
+    .i64Or,
+    .i64Const .uint64 1,
+    .i64ShrU,
+    .localSet floatMachineWord,
+    .localGet floatMachineWord,
+    .i64Const .uint64 16,
+    .i64LtU,
+    .localSet floatMachineFlag,
+    .i32Const .uint32 42,
+    .i64ExtendI32U .uint64,
+    .f64ConvertI64U,
+    .i64TruncSatF64U .uint64,
+    .ret] }
+
+def floatMachineModule : Module := {
+  imports := #[]
+  functions := #[floatMachineFunction]
+  exports := #[`floatMachine]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+#guard match validateModule floatMachineModule with
+  | .ok () => true
+  | .error _ => false
+
+#guard match validateModule (fixtureModule <| fixtureFunction [
+    .i32Const .uint32 0,
+    .f64Floor]) with
+  | .error (.stackMismatch `fixture [.float] [.uint32]) => true
+  | _ => false
+
 end Fir.Wasm
