@@ -29,6 +29,7 @@ inductive Instruction where
   /-- Physical wasm32 arithmetic/comparison used by resident allocation helpers. -/
   | i32Add
   | i32Sub
+  | i32RemU
   | i32LtU
   /-- Physical wasm64 integer operations used by numeric conversion helpers. -/
   | i64Or

@@ -148,6 +148,7 @@ private partial def encodeInstruction (context : Context) : Instruction → Exce
   | .i32ShrU => return #[0x76]
   | .i32Add => return #[0x6a]
   | .i32Sub => return #[0x6b]
+  | .i32RemU => return #[0x70]
   | .i32LtU => return #[0x49]
   | .i64Or => return #[0x84]
   | .i64Shl => return #[0x86]

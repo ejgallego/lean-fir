@@ -325,6 +325,8 @@ def residentArithmeticFunction : Function := {
     .i32Add,
     .i32Const .uint32 3,
     .i32Sub,
+    .i32Const .uint32 4,
+    .i32RemU,
     .i32Const .uint32 10,
     .i32LtU,
     .ret] }

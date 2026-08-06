@@ -309,7 +309,7 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
           throw (.stackMismatch context.function.name [right, right] operands)
         return remaining ++ [.uint32]
       return { fallthrough := stack? }
-  | .i32And | .i32ShrU | .i32Add | .i32Sub | .i32LtU => do
+  | .i32And | .i32ShrU | .i32Add | .i32Sub | .i32RemU | .i32LtU => do
       let stack? ← stack?.mapM fun stack => do
         if stack.length < 2 then
           throw (.stackUnderflow context.function.name [.uint32, .uint32])
