@@ -1121,6 +1121,50 @@ def internalize (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/--
+Install the resident numeric helper family while replacing only recognized
+Nat/Int imports that are present in the source module. This keeps the strict
+`prettyM` inventory gate above unchanged and gives larger source closures a
+fail-closed, signature-checked incremental linker.
+-/
+def internalizeAvailable (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+    throw .missingAllocator
+  unless module.memory == some ResidentRuntime.residentMemory do
+    throw .incompatibleMemory
+  for name in helperNames do
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) ||
+        module.exports.contains name then
+      throw (.reservedDeclaration name)
+  let present := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  for declaration in present do
+    let imports := module.imports.filter (·.declaration? == some declaration)
+    unless imports.size == 1 do
+      throw (.incompatibleExternal declaration)
+    let some signature := expectedSignature? declaration |
+      throw (.incompatibleExternal declaration)
+    unless imports[0]!.signature == signature do
+      throw (.incompatibleExternal declaration)
+  let functions :=
+    module.functions.map rewriteFunction ++ internalFunctions ++ externalFunctions
+  let imports := module.imports.filter fun import_ =>
+    match import_.declaration? with
+    | some declaration => !present.contains declaration
+    | none => true
+  let result : Module := {
+    module with
+    imports
+    functions
+    exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
 private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let nat := LCNF.ImpureType.tobject
   let int := LCNF.ImpureType.tobject
