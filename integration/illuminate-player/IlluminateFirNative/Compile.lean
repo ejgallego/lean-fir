@@ -2,6 +2,8 @@ import Fir.Wasm.Emit.ResidentPrettyFormat
 import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentDeadCode
 import Fir.Wasm.Emit.ResidentArray
+import Fir.Wasm.Emit.ResidentNatMod
+import Fir.Wasm.Emit.ResidentIlluminatePlayer
 import IlluminateFirNative.Facade
 
 namespace IlluminateFirNative.Compile
@@ -297,10 +299,34 @@ private def internalizeFloat
 private def internalizeArrays
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentArray.internalize artifact.module with
+  let module ← match Fir.Wasm.Emit.ResidentArray.internalizeAvailable artifact.module with
     | .ok module => pure module
     | .error error =>
         throw (.manifest s!"failed to internalize Illuminate Array operations: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def internalizeNatMod
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentNatMod.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to internalize Illuminate Nat.mod: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def internalizeIlluminateSpecializations
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentIlluminatePlayer.internalize artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to internalize Illuminate specializations: {repr error}")
   let bytes ← match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => throw (.encoding error)
@@ -339,6 +365,8 @@ def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) 
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeBigNumeric artifact
   let artifact ← internalizeFloat artifact
   let artifact ← internalizeArrays artifact
+  let artifact ← internalizeNatMod artifact
+  let artifact ← internalizeIlluminateSpecializations artifact
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
   pruneLinkedModule artifact
 

@@ -358,15 +358,16 @@ def functions : Array Function := #[
   pushFunction,
   getBangOwnedFunction]
 
-private partial def rewriteInstruction : Instruction → Instruction
+private partial def rewriteInstruction (declarations : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
-      if externalDeclarations.contains declaration then
+      if declarations.contains declaration then
         .call (.declaration (externalName declaration))
       else .call (.declaration declaration)
-  | .block label body => .block label (body.map rewriteInstruction)
-  | .loop label body => .loop label (body.map rewriteInstruction)
+  | .block label body => .block label (body.map (rewriteInstruction declarations))
+  | .loop label body => .loop label (body.map (rewriteInstruction declarations))
   | .ifElse thenBody elseBody =>
-      .ifElse (thenBody.map rewriteInstruction) (elseBody.map rewriteInstruction)
+      .ifElse (thenBody.map (rewriteInstruction declarations))
+        (elseBody.map (rewriteInstruction declarations))
   | instruction => instruction
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
@@ -388,7 +389,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.erased, .object, .tobject], results := #[.object] }
   else none
 
-def internalize (module : Module) : Except LinkError Module := do
+private def internalizeSelected (module : Module) (declarations : Array Name) :
+    Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
@@ -400,11 +402,17 @@ def internalize (module : Module) : Except LinkError Module := do
       ResidentNumeric.naturalLowName, ResidentNumeric.naturalHighName] do
     unless module.functions.any (·.name == name) do
       throw (.missingNumericHelper name)
-  for name in helperNames do
+  let needsEmptyAllocator := declarations.contains `Array.emptyWithCapacity ||
+    declarations.contains `Array.mkEmpty
+  let selectedHelperNames := declarations.map externalName
+  let selectedHelperNames := if needsEmptyAllocator then
+    #[allocateEmptyName] ++ selectedHelperNames
+  else selectedHelperNames
+  for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) || module.exports.contains name then
       throw (.reservedDeclaration name)
-  for declaration in externalDeclarations do
+  for declaration in declarations do
     let imports := module.imports.filter (·.declaration? == some declaration)
     unless imports.size == 1 do
       throw (.missingExternal declaration)
@@ -413,20 +421,36 @@ def internalize (module : Module) : Except LinkError Module := do
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
   let linkedFunctions := module.functions.map fun function =>
-    { function with body := function.body.map rewriteInstruction }
-  let linkedFunctions := linkedFunctions ++ functions
+    { function with body := function.body.map (rewriteInstruction declarations) }
+  let selectedFunctions := functions.filter fun function =>
+    selectedHelperNames.contains function.name
+  let linkedFunctions := linkedFunctions ++ selectedFunctions
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
-    | some declaration => !externalDeclarations.contains declaration
+    | some declaration => !declarations.contains declaration
     | none => true
   let result : Module := {
     module with
     functions := linkedFunctions
     imports
-    exports := helperNames.foldl Fir.Wasm.addUnique module.exports
+    exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
     runtimeOperations := Fir.Wasm.collectRuntimeOps linkedFunctions }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
+
+/-- Internalize the complete historical array frontier, rejecting omissions. -/
+def internalize (module : Module) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations
+
+/--
+Internalize exactly the array operations imported by a source closure.  This
+keeps narrowly linked resident packages independent of unrelated array APIs
+while preserving the same fail-closed signature checks as `internalize`.
+-/
+def internalizeAvailable (module : Module) : Except LinkError Module :=
+  let declarations := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  internalizeSelected module declarations
 
 end Fir.Wasm.Emit.ResidentArray
