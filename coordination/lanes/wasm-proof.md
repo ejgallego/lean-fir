@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: aecae9a404cab3e90cdbd6cfb02d23732bfe785d on main
-functional-head: 7916298de190d9ed561ac850448352667596f986
-contract-base: aecae9a4 on main; consumes the accepted generated-declaration parameter row, validator ABI refinement, adapter, concrete-runtime, and declaration-correctness contracts
+base: 7665c10135808a2fce3ca6a362e7982ef803ab67 on main
+functional-head: f259f7f787273a6d237fbed0c5ff00c98327e39c
+contract-base: 7665c101 on main; consumes the accepted generated-callee local relation plus the existing adapter, concrete-runtime, cache, closure-table, and declaration-correctness contracts
 clean-at-update: true
-slice: Prove that production front-insertion plus emission reversal yields the exact source-order parameter ABI row, then compose bindParams and the related physical argument row into EnvLocalsRelated for the generated callee's toLocals frame
+slice: Construct the complete ConcreteReuseCapacityCacheFrame at a production-generated direct callee entry from the valid caller frame, the admitted call/declaration rows, and related physical arguments
 files: integration/talos/FirTalos/ConcreteCompilerCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteCompilerCorrectnessContract.lean; integration/talos/PLAN.md; this mailbox
-contracts: no semantic Wasm ABI, lowering, validator, adapter, or concrete-runtime contract changed; sourceParameterBindings, parameterKindsSize, sourceParameterNamesNodup, ConstructorArgumentsRelated.resolveAt, and entryEnvLocalsRelatedOfArguments are proof-only consequences of the existing production equations
-checks: PASS Lean Beam update/sync/save FirTalos/ConcreteCompilerCorrectness.lean and FirTalos/ConcreteReuseCapacityCacheCorrectness.lean plus refresh/save FirTalos/ConcreteCompilerCorrectnessContract.lean (zero errors; existing warnings only); PASS lake build FirTalos.ConcreteCompilerCorrectness FirTalos.ConcreteReuseCapacityCacheCorrectness FirTalos.ConcreteCompilerCorrectnessContract (3104 jobs); PASS make talos-setup (Talos a01d01c778b794dd00956748a067b6793c2c9f9b); PASS git diff --check; PASS make check (122 interpreter-validator tests plus repository validation plans); PASS make talos-check (3125 jobs)
+contracts: no semantic Wasm ABI, lowering, validator, adapter, concrete-runtime, cache, or closure-table contract changed; ConstructorArgumentsRelated.physicalLength and ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntry are proof-only consequences of the accepted production equations and invariant definitions
+checks: PASS Lean Beam update/sync/save FirTalos/ConcreteCompilerCorrectness.lean and FirTalos/ConcreteReuseCapacityCacheCorrectness.lean plus update/refresh/sync/save FirTalos/ConcreteCompilerCorrectnessContract.lean (zero errors; existing warnings only); PASS lake build FirTalos.ConcreteCompilerCorrectness FirTalos.ConcreteReuseCapacityCacheCorrectness FirTalos.ConcreteCompilerCorrectnessContract (3104 jobs); PASS make talos-setup (Talos a01d01c778b794dd00956748a067b6793c2c9f9b); PASS git diff --check before and after rebase; PASS make check after rebase (122 interpreter-validator tests; 642 unique validation cases; 1844/1844 comparisons equal; zero findings; bug cards and trusted assumptions valid); PASS make talos-check after rebase (3125 jobs)
 bug-cards: none
 blockers: none
-handoff: 7916298de190d9ed561ac850448352667596f986 is the clean green W6 functional head based directly on main at aecae9a4; recursive calls can now construct the exact generated callee environment/local relation from the production call site and related argument operands, without hygiene, execution-certificate, or translation-certificate premises
-next: integration owner lands this ready slice; W6 then lifts the caller's unchanged concrete runtime, failure, cache, and closure-table fields into an empty-reuse-facts callee-entry ConcreteReuseCapacityCacheFrame and starts the finite-execution hereditary induction
+handoff: f259f7f787273a6d237fbed0c5ff00c98327e39c is the clean green W6 functional head based directly on main at 7665c101; every admitted generated direct call now receives the complete callee-entry invariant, inheriting runtime/failure/budget/external/cache/closure state and proving the new local layout plus vacuous entry reuse obligations without a separately supplied translation certificate or callee invariant
+next: integration owner lands this ready slice; W6 then performs the finite-execution hereditary induction, using generatedDirectCalleeEntry at recursive calls and the existing expression/runtime refinement theorems for each source evaluation constructor
 ```
