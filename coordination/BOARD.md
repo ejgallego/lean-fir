@@ -17,6 +17,27 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 - No cross-lane integration lease is currently active.
 
+## Latest completed integration lease
+
+- Milestone: `W6-CALLEE-ARGUMENT-REFINEMENT`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this certificate-free compiler-proof slice.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: W6 functional head `73492cd9` and ready mailbox
+  `837dcf05`, based directly on `main` at `298682a7`.
+- Lease boundary: satisfied. An existing physical/source argument relation
+  now transports across the production validator's complete pointwise ABI
+  refinement decision. Every selected generated internal declaration also
+  retains the parameter-identifier uniqueness fact derived from its actual
+  successful `lowerSupported` validation. These proof-only facts change no
+  lowering, validator, semantic Wasm ABI, or concrete-runtime contract and
+  require neither target execution nor translation certificates.
+- Validation: Lean Beam update/sync/save (with the prescribed importer refresh
+  after rebase), focused compiler-proof dependency cones,
+  `git diff --check`, `make talos-setup`, complete `make check`, and all 3,125
+  Talos jobs.
+
 ## Completed integration lease
 
 - Milestone: `WASM-DECLARATION-PARAMETER-UNIQUENESS`.
@@ -188,6 +209,19 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-CALLEE-ARGUMENT-REFINEMENT` is linked/accepted through W6 functional
+  head `73492cd9` and ready mailbox `837dcf05`, based directly on `298682a7`.
+  `ConstructorArgumentsRelated.ofKindsRefine` reinterprets the unchanged
+  physical/source argument row at the generated callee's exact parameter ABI
+  using the validator's pointwise refinement fact. The generated internal row
+  also carries the declaration-parameter uniqueness fact proved from the
+  production `lowerSupported` traversal, closing the malformed duplicate-
+  binding case at the recursive proof boundary. No execution certificate or
+  semantic/runtime contract changed. The complete root and Talos gates pass.
+  W6 next proves exact source-order parameter/local identity, constructs the
+  empty-facts callee-entry frame, and begins the finite-execution hereditary
+  induction.
 
 - `ILLUMINATE-TALOS-ADAPTER` is linked/accepted through W6 functional head
   `d31fad3e` and ready mailbox `c28955a5`, based directly on released numeric
