@@ -184,6 +184,39 @@ run_cmd do
     throwError "Float module descriptor lost its exact-bit facade: {text}"
 
 run_cmd do
+  let entries := #[``idFloat32Fixture, ``idFloatFixture]
+  let source ← liftCoreM <|
+    compileEntriesFinalCapturedInternalized entries
+  unless source.entry == ``idFloat32Fixture do
+    throwError "multi-entry capture changed its canonical entry: {source.entry}"
+  for entry in entries do
+    unless ((source.program.findDecl? entry).isSome &&
+        !source.externalNames.contains entry) do
+      throwError "multi-entry capture did not retain local root {entry}"
+  let result ← liftCoreM <|
+    compileModuleArtifactWithExports source entries .ok
+  let artifact ← match result with
+    | .ok artifact => pure artifact
+    | .error error => throwError "multi-entry Float source did not compile: {repr error}"
+  let facade32 := Fir.Wasm.Emit.BitExactFloat.facadeName ``idFloat32Fixture
+  let facade64 := Fir.Wasm.Emit.BitExactFloat.facadeName ``idFloatFixture
+  unless artifact.module.exports ==
+      #[``idFloat32Fixture, ``idFloatFixture, facade32, facade64] do
+    throwError "multi-entry Float export mismatch: {repr artifact.module.exports}"
+  let unavailable := ``Fir.Validation.Corpus.Source.litNat
+  let unavailableResult ← liftCoreM <|
+    compileModuleArtifactWithExports source
+      #[``idFloat32Fixture, unavailable] .ok
+  match unavailableResult with
+  | .error (.manifest message) =>
+      unless message.contains "not a lowered source function" do
+        throwError "unavailable multi-entry export reported the wrong error: {message}"
+  | .error error =>
+      throwError "unavailable multi-entry export reported the wrong error kind: {repr error}"
+  | .ok _ =>
+      throwError "unavailable multi-entry export did not fail closed"
+
+run_cmd do
   let result ← liftCoreM <|
     compileModule ``idFloat32Fixture
   let artifact ← match result with

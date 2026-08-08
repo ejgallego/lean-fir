@@ -55,63 +55,6 @@ private def expectedArrayGetCaller (target caller : Name) : Bool :=
 
 mutual
 
-private partial def collectNamedCalls (names : Array Name) :
-    LCNF.Code .impure → Array Name
-  | .let decl continuation =>
-      let names := match decl.value with
-        | .fap name _ | .pap name _ =>
-            if names.contains name then names else names.push name
-        | _ => names
-      collectNamedCalls names continuation
-  | .jp decl continuation =>
-      collectNamedCalls (collectNamedCalls names decl.value) continuation
-  | .cases cases => cases.alts.foldl collectNamedCallsAlt names
-  | .oset (k := continuation) .. | .uset (k := continuation) .. |
-      .sset (k := continuation) .. | .setTag (k := continuation) .. |
-      .inc (k := continuation) .. | .dec (k := continuation) .. |
-      .del (k := continuation) .. => collectNamedCalls names continuation
-  | .jmp .. | .return .. | .unreach .. => names
-  | .fun _ _ h => nomatch h
-
-private partial def collectNamedCallsAlt (names : Array Name) :
-    LCNF.Alt .impure → Array Name
-  | .ctorAlt _ code | .default code => collectNamedCalls names code
-  | .alt _ _ _ h => nomatch h
-
-end
-
-private partial def reachableDeclarations (program : Fir.LeanIR.ImpureProgram)
-    (pending : List Name) (seen : Array Name := #[]) : Except String (Array Name) := do
-  match pending with
-  | [] => return seen
-  | name :: pending =>
-      if seen.contains name then
-        reachableDeclarations program pending seen
-      else
-        let some decl := program.findDecl? name |
-          throw s!"reachable declaration {name} is absent from the captured program"
-        let calls := match decl.value with
-          | .code code => collectNamedCalls #[] code
-          | .extern _ => #[]
-        reachableDeclarations program (calls.toList ++ pending) (seen.push name)
-
-/-- Remove compiler-captured source ancestors that have no named edge from the entry closure. -/
-def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact)
-    (retainedRoots : Array Name := #[]) :
-    Except String Fir.Validation.Lcnf.Artifact := do
-  let reachable ← reachableDeclarations artifact.program
-    ([artifact.entry] ++ retainedRoots.toList)
-  let program : Fir.LeanIR.ImpureProgram := {
-    decls := artifact.program.decls.filter (fun decl => reachable.contains decl.name) }
-  unless program.findDecl? artifact.entry |>.isSome do
-    throw s!"entry {artifact.entry} disappeared during declaration pruning"
-  return { artifact with
-    program
-    externalNames := artifact.externalNames.filter reachable.contains
-    forms := Fir.Validation.Lcnf.collectForms program }
-
-mutual
-
 private partial def refineArrayGetCalls (caller : Name) :
     LCNF.Code .impure → Except String (LCNF.Code .impure × Array (Name × Name))
   | .let decl continuation => do
@@ -256,13 +199,9 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
 /-- Capture both real persistent-player entries and apply only checked ABI recovery. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Validation.Lcnf.Artifact) := do
-  let source ← Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized
-    ``Illuminate.AnimationPlayer.initialLive
-    #[``Illuminate.AnimationPlayer.transitionLive]
-  let source ← match pruneUnreachableDeclarations source
-      #[``Illuminate.AnimationPlayer.transitionLive] with
-    | .ok source => pure source
-    | .error message => return .error (.manifest message)
+  let source ← Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized #[
+    ``Illuminate.AnimationPlayer.initialLive,
+    ``Illuminate.AnimationPlayer.transitionLive]
   match refineMonomorphicArrayGets source with
   | .ok source => return .ok source
   | .error message => return .error (.manifest message)
@@ -358,7 +297,9 @@ def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
   match source with
   | .error error => return .error error
   | .ok source => do
-      let result ← Fir.Wasm.Emit.Source.compileModuleArtifact source
+      let result ← Fir.Wasm.Emit.Source.compileModuleArtifactWithExports source #[
+        ``Illuminate.AnimationPlayer.initialLive,
+        ``Illuminate.AnimationPlayer.transitionLive] .ok
       return result.bind configureLiveModule
 
 private def internalizeAvailableNumeric

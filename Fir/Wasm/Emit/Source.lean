@@ -102,6 +102,41 @@ private partial def collectAltReferences (names : Array Name) :
 
 end
 
+private partial def reachableDeclarations (program : Fir.LeanIR.ImpureProgram)
+    (pending : List Name) (seen : Array Name := #[]) : Except String (Array Name) := do
+  match pending with
+  | [] => return seen
+  | name :: pending =>
+      if seen.contains name then
+        reachableDeclarations program pending seen
+      else
+        let some decl := program.findDecl? name |
+          throw s!"reachable declaration {name} is absent from the captured program"
+        let references := match decl.value with
+          | .code code => collectCodeReferences #[] code
+          | .extern _ => #[]
+        reachableDeclarations program (references.toList ++ pending) (seen.push name)
+
+/--
+Retain precisely the declarations named by the entry and the additional roots,
+plus their transitive named-call closure. This removes source ancestors pulled
+in while internalizing final LCNF when no generated declaration actually
+references them.
+-/
+def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedRoots : Array Name := #[]) :
+    Except String Fir.Validation.Lcnf.Artifact := do
+  let reachable ← reachableDeclarations artifact.program
+    ([artifact.entry] ++ retainedRoots.toList)
+  let program : Fir.LeanIR.ImpureProgram := {
+    decls := artifact.program.decls.filter (fun decl => reachable.contains decl.name) }
+  unless program.findDecl? artifact.entry |>.isSome do
+    throw s!"entry {artifact.entry} disappeared during declaration pruning"
+  return { artifact with
+    program
+    externalNames := artifact.externalNames.filter reachable.contains
+    forms := Fir.Validation.Lcnf.collectForms program }
+
 private def capturedExternDecl (sig : LCNF.Signature .impure)
     (data : ExternAttrData) : LCNF.Decl .impure :=
   { name := sig.name
@@ -308,6 +343,30 @@ def compileEntryFinalCapturedInternalized (entry : Name)
   compileEntryFinalCapturedInternalizedAux entry dependencies retainedExternalNames
 
 /--
+Compile several public source entries in one exact final-LCNF unit, internalize
+their recursively discovered source dependencies, and discard declarations
+that are not reachable from one of the requested entries. The first entry is
+the artifact's canonical entry; all entries remain ordinary local declarations.
+-/
+def compileEntriesFinalCapturedInternalized (entries : Array Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let some entry := entries[0]? |
+    throwError "final-LCNF multi-entry capture requires at least one entry"
+  unless (entries.foldl (init := #[]) addUniqueName).size == entries.size do
+    throwError "final-LCNF multi-entry capture received duplicate entries: {entries}"
+  let artifact ← compileEntryFinalCapturedInternalized entry
+    (entries.extract 1 entries.size) retainedExternalNames
+  for root in entries do
+    let some decl := artifact.program.findDecl? root |
+      throwError "final-LCNF multi-entry capture did not contain root `{root}`"
+    if artifact.externalNames.contains decl.name then
+      throwError "final-LCNF multi-entry root `{root}` remained external"
+  match pruneUnreachableDeclarations artifact (entries.extract 1 entries.size) with
+  | .ok artifact => return artifact
+  | .error message => throwError message
+
+/--
 Recursively ask Lean to compile imported source helpers whose declarations are
 available in the environment. Generated helper suffixes are rooted at their
 nearest source declaration; retaining a name leaves that helper as an explicit
@@ -335,20 +394,36 @@ partial def compileEntryInternalized (entry : Name) (dependencies : Array Name :
 Lower an already captured compiler artifact, apply one symbolic-module
 pipeline, and encode only its result.
 -/
-def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
+private def installBitExactFloatExports (module : Fir.Wasm.Module) :
+    List Name → Except String Fir.Wasm.Module
+  | [] => return module
+  | entry :: entries => do
+      let module ← Fir.Wasm.Emit.BitExactFloat.install module entry
+      installBitExactFloatExports module entries
+
+def compileModuleArtifactWithExports (source : Fir.Validation.Lcnf.Artifact)
+    (exports : Array Name)
     (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) := do
+  if exports.isEmpty then
+    return .error (.manifest "Wasm source lowering requires at least one export")
+  unless (exports.foldl (init := #[]) addUniqueName).size == exports.size do
+    return .error (.manifest s!"Wasm source lowering received duplicate exports: {exports}")
+  unless exports.contains source.entry do
+    return .error (.manifest s!"Wasm exports do not contain source entry {source.entry}")
   let module ←
     match Fir.Wasm.lowerSupported source.program with
     | .ok module => pure module
     | .error error => return .error (.lowering error)
-  let module := { module with exports := #[source.entry] }
-  let module ←
-    match Fir.Wasm.Emit.BitExactFloat.install module source.entry with
+  for exportedName in exports do
+    unless module.functions.any (fun function => function.name == exportedName) do
+      return .error (.manifest s!"Wasm export {exportedName} is not a lowered source function")
+  let module := { module with exports }
+  let module ← match installBitExactFloatExports module exports.toList with
     | .ok module => pure module
     | .error message => return .error (.manifest message)
   let module ← match transform module with
-    | .ok module => pure module
+    | .ok transformed => pure transformed
     | .error error => return .error error
   let bytes ←
     match Fir.Wasm.Emit.encode module with
@@ -356,6 +431,16 @@ def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
     | .error error => return .error (.encoding error)
   let formattedLcnf ← source.format
   return .ok { source, module, bytes, formattedLcnf }
+
+/--
+Lower an already captured compiler artifact with its canonical entry as the
+only public source export, apply one symbolic-module pipeline, and encode the
+result.
+-/
+def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
+    (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWithExports source #[source.entry] transform
 
 /-- Lower and encode an already captured compiler artifact. -/
 def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
