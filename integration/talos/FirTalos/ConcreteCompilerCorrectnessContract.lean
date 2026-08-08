@@ -41,6 +41,47 @@ example
     Fir.Wasm.declarationParameterIdsUnique declaration = true :=
   row.parameterIdsUnique
 
+/-- The real lowerer's front-insert/reverse implementation is exposed as the
+source-order declaration parameter row at the proof boundary. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {parameterKinds : Array AbiKind}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    (known :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds) :
+    sourceFunction.params.toList =
+      (declaration.params.toList.zip parameterKinds.toList).map
+        (fun pair => (pair.fst.fvarId, pair.snd)) :=
+  row.sourceParameterBindings known
+
+/-- A caller-side related argument row and the admitted direct-call site are
+sufficient to construct the generated callee's exact entry local relation. -/
+example
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure} {callerEnv : Env}
+    {sourceModule : Fir.Wasm.Module}
+    {calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    EnvLocalsRelated witness (functionBindings calleeFunction) site.calleeEnv
+      (row.targetFunction.toLocals physicalArgs) :=
+  row.entryEnvLocalsRelatedOfArguments site argumentsRelated
+
 /--
 Compile-time harness for the public partial-correctness boundary.
 

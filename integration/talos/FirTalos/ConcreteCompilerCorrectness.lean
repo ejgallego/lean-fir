@@ -1144,6 +1144,38 @@ theorem ConstructorArgumentsRelated.semanticLength
   | nil => rfl
   | cons _ _ ih => simp [ih]
 
+/-- Resolve one semantic argument position to the ABI kind and physical lane
+related at the same position. -/
+theorem ConstructorArgumentsRelated.resolveAt
+    {witness : RefinementWitness}
+    {kinds : List AbiKind} {physicals : List Wasm.Value}
+    {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness kinds physicals semanticValues)
+    {index : Nat} {semantic : Value}
+    (semanticFound : semanticValues[index]? = some semantic) :
+    ∃ kind physical,
+      kinds[index]? = some kind ∧
+        physicals[index]? = some physical ∧
+          PhysicalValueRel witness kind physical semantic := by
+  induction related generalizing index with
+  | nil => simp at semanticFound
+  | @cons kind physical headSemantic kinds physicals semanticValues
+      head rest ih =>
+      cases index with
+      | zero =>
+          simp only [List.getElem?_cons_zero] at semanticFound
+          have semanticEq : semantic = headSemantic :=
+            (Option.some.inj semanticFound).symm
+          subst semantic
+          exact ⟨kind, physical, rfl, rfl, head⟩
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at semanticFound
+          obtain ⟨resolvedKind, resolvedPhysical, kindFound, physicalFound,
+              valueRelated⟩ := ih semanticFound
+          exact ⟨resolvedKind, resolvedPhysical, by simpa using kindFound,
+            by simpa using physicalFound, valueRelated⟩
+
 /-- Pointwise ABI refinement transports an already-related physical argument
 row to the declaration's expected parameter kinds without changing either the
 physical operands or their semantic values. -/

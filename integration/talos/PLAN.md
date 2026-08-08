@@ -5609,6 +5609,25 @@ parameter-kind row, uses it to establish `EnvLocalsRelated` for
 `targetFunction.toLocals`, and lifts the caller's heap/cache/runtime fields to
 the empty-facts callee-entry frame.
 
+W6.6hm closes the parameter/local part of that callee-entry frame.
+`ConcreteGeneratedInternalDeclaration.sourceParameterBindings` proves from
+the real `declarationParameterKinds?`, `addDeclarationParams`, and emitted
+function equations that front insertion plus emission reversal produces
+exactly the source-order `(FVarId, AbiKind)` row. The proof derives `Nodup`
+parameter names from the production validator's count decision; it neither
+assumes a hygiene certificate nor defines a second lowering relation.
+
+`entryEnvLocalsRelatedOfArguments` then composes that row theorem with the
+actual `bindParams` result, the caller's `ConstructorArgumentsRelated` row,
+and the validator's ABI-refinement decision. Its conclusion is the exact
+`EnvLocalsRelated` required by `StateRelated` for
+`targetFunction.toLocals physicalArgs`, matching the double reversal in the
+Talos direct-call convention. The next slice reuses the caller's unchanged
+store/runtime/witness/cache/closure-table fields, supplies empty reuse facts,
+and packages this local theorem as a complete
+`ConcreteReuseCapacityCacheFrame` at generated callee entry. That frame is
+the final setup lemma before the finite-execution hereditary induction.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

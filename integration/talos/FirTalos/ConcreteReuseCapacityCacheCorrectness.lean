@@ -7514,6 +7514,484 @@ structure ConcreteGeneratedInternalDeclaration
   sourceParameters :
     sourceFunction.params = parameterLocals.reverse.toArray
 
+/-- The validator's count-based parameter check gives the proof-facing
+`Nodup` fact for the source parameter names. -/
+private theorem declarationParameterNamesNodup
+    {declaration : LCNF.Decl .impure}
+    (unique : Fir.Wasm.declarationParameterIdsUnique declaration = true) :
+    (declaration.params.toList.map (·.fvarId.name)).Nodup := by
+  unfold Fir.Wasm.declarationParameterIdsUnique at unique
+  rw [List.nodup_iff_count_eq_one]
+  intro name nameMem
+  obtain ⟨param, paramMem, rfl⟩ := List.mem_map.mp nameMem
+  have idMem : param.fvarId ∈
+      declaration.params.toList.map (·.fvarId) :=
+    List.mem_map.mpr ⟨param, paramMem, rfl⟩
+  have one := (List.all_eq_true.mp unique) param.fvarId idMem
+  have oneEq :
+      (declaration.params.toList.map (·.fvarId) |>.filter
+        (Fir.Wasm.sameFVar param.fvarId)).length = 1 :=
+    beq_iff_eq.mp one
+  rw [List.count_eq_length_filter]
+  rw [List.filter_map] at oneEq
+  rw [List.filter_map]
+  simpa [Fir.Wasm.sameFVar, Function.comp_def, BEq.comm] using oneEq
+
+/-- One proof-transparent step of production declaration-parameter lowering. -/
+private def declarationParamStep
+    (program : Fir.LeanIR.ImpureProgram) (declaration : LCNF.Decl .impure)
+    (locals : Fir.Wasm.LocalKinds) (param : LCNF.Param .impure) :
+    Except Fir.Wasm.CompileError Fir.Wasm.LocalKinds := do
+  match ← Fir.Wasm.checkedAbiKind? param.type with
+  | none => return locals
+  | some kind =>
+      let kind :=
+        if kind == .tobject &&
+            Fir.Wasm.erasedOnlyParameter program declaration param then
+          .erased
+        else
+          kind
+      return Fir.Wasm.insertLocal locals param.fvarId kind
+
+/-- The pure parameter-kind classifier and the executable lowerer select the
+same effective lane for one admitted declaration parameter. -/
+private theorem declarationParamStep_eq
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {locals : Fir.Wasm.LocalKinds} {param : LCNF.Param .impure}
+    {kind : AbiKind}
+    (known :
+      Fir.Wasm.declarationParamKind? program declaration param = some kind) :
+    declarationParamStep program declaration locals param =
+      .ok (Fir.Wasm.insertLocal locals param.fvarId kind) := by
+  unfold declarationParamStep
+  unfold Fir.Wasm.checkedAbiKind?
+  unfold Fir.Wasm.declarationParamKind? at known
+  cases kindResult : Fir.Wasm.abiKind? param.type with
+  | error error => simp_all
+  | ok kindOption =>
+      cases kindOption with
+      | none => simp_all
+      | some declaredKind =>
+          rw [kindResult] at known
+          simp only at known
+          simp only [pure, Except.pure, Bind.bind, Except.bind]
+          by_cases erased :
+              (declaredKind == .tobject &&
+                Fir.Wasm.erasedOnlyParameter program declaration param) = true
+          · simp [erased] at known ⊢
+            exact congrArg (Fir.Wasm.insertLocal locals param.fvarId) known
+          · simp [erased] at known ⊢
+            exact congrArg (Fir.Wasm.insertLocal locals param.fvarId) known
+
+/-- With fresh source parameter names, front-insertion followed by reversal is
+exactly the source-order `(identifier, effective ABI kind)` row. -/
+private theorem declarationParamFold_exact
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {params : List (LCNF.Param .impure)} {kinds : List AbiKind}
+    {locals : Fir.Wasm.LocalKinds}
+    (namesNodup : (params.map (·.fvarId.name)).Nodup)
+    (fresh : ∀ param ∈ params, ∀ entry ∈ locals,
+      entry.fst.name ≠ param.fvarId.name)
+    (known :
+      params.mapM (Fir.Wasm.declarationParamKind? program declaration) =
+        some kinds) :
+    params.foldlM (declarationParamStep program declaration) locals =
+      .ok (((params.zip kinds).map
+        (fun pair => (pair.fst.fvarId, pair.snd))).reverse ++ locals) := by
+  induction params generalizing kinds locals with
+  | nil =>
+      have kindsEq : kinds = [] := by simpa using known.symm
+      subst kinds
+      simp [pure, Except.pure]
+  | cons head tail ih =>
+      simp only [List.map_cons, List.nodup_cons] at namesNodup
+      rcases namesNodup with ⟨headFresh, tailNodup⟩
+      cases headKnown :
+          Fir.Wasm.declarationParamKind? program declaration head with
+      | none => simp [List.mapM_cons, headKnown] at known
+      | some headKind =>
+          cases tailKnown :
+              tail.mapM
+                (Fir.Wasm.declarationParamKind? program declaration) with
+          | none =>
+              simp [List.mapM_cons, headKnown, tailKnown] at known
+          | some tailKinds =>
+              have kindsEq : kinds = headKind :: tailKinds := by
+                simpa [List.mapM_cons, headKnown, tailKnown] using known.symm
+              subst kinds
+              have filterEq :
+                  locals.filter
+                      (fun entry => entry.fst.name != head.fvarId.name) =
+                    locals := by
+                apply List.filter_eq_self.mpr
+                intro entry entryMem
+                exact bne_iff_ne.mpr
+                  (fresh head (by simp) entry entryMem)
+              have insertEq :
+                  Fir.Wasm.insertLocal locals head.fvarId headKind =
+                    (head.fvarId, headKind) :: locals := by
+                simp [Fir.Wasm.insertLocal, filterEq]
+              have tailFresh : ∀ param ∈ tail,
+                  ∀ entry ∈ (head.fvarId, headKind) :: locals,
+                    entry.fst.name ≠ param.fvarId.name := by
+                intro param paramMem entry entryMem
+                rcases List.mem_cons.mp entryMem with entryEq | entryMem
+                · subst entry
+                  intro namesEq
+                  apply headFresh
+                  exact List.mem_map.mpr ⟨param, paramMem, namesEq.symm⟩
+                · exact fresh param (by simp [paramMem]) entry entryMem
+              have tailRun :=
+                ih tailNodup tailFresh tailKnown
+              rw [List.foldlM_cons, declarationParamStep_eq headKnown]
+              simp only [Bind.bind, Except.bind]
+              rw [insertEq, tailRun]
+              simp [List.reverse_cons, List.append_assoc]
+
+/-- Successful `Option` traversal preserves list length. -/
+private theorem optionListMapM_length
+    {α β : Type} {f : α → Option β} {xs : List α} {ys : List β}
+    (mapped : xs.mapM f = some ys) : ys.length = xs.length := by
+  induction xs generalizing ys with
+  | nil =>
+      have ysEq : ys = [] := by simpa using mapped.symm
+      subst ys
+      rfl
+  | cons head tail ih =>
+      cases headResult : f head with
+      | none => simp [List.mapM_cons, headResult] at mapped
+      | some value =>
+          cases tailResult : tail.mapM f with
+          | none => simp [List.mapM_cons, headResult, tailResult] at mapped
+          | some values =>
+              have ysEq : ys = value :: values := by
+                simpa [List.mapM_cons, headResult, tailResult] using mapped.symm
+              subst ys
+              simp [ih tailResult]
+
+/-- The emitted symbolic parameter row is exactly the source declaration row
+paired, in source order, with the validator's effective ABI kinds. -/
+theorem ConcreteGeneratedInternalDeclaration.sourceParameterBindings
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {parameterKinds : Array AbiKind}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    (known :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds) :
+    sourceFunction.params.toList =
+      (declaration.params.toList.zip parameterKinds.toList).map
+        (fun pair => (pair.fst.fvarId, pair.snd)) := by
+  have namesNodup := declarationParameterNamesNodup row.parameterIdsUnique
+  unfold Fir.Wasm.declarationParameterKinds? at known
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases listKnown :
+      declaration.params.toList.mapM
+        (Fir.Wasm.declarationParamKind? program declaration) with
+  | none => simp [listKnown] at known
+  | some listKinds =>
+      have parameterKindsEq : parameterKinds = listKinds.toArray := by
+        simpa [listKnown] using known.symm
+      subst parameterKinds
+      have folded := declarationParamFold_exact
+        (program := program) (declaration := declaration)
+        (params := declaration.params.toList) (kinds := listKinds)
+        (locals := []) namesNodup (by simp) listKnown
+      have parametersAdded := row.parametersAdded
+      unfold Fir.Wasm.addDeclarationParams at parametersAdded
+      change declaration.params.foldlM
+          (declarationParamStep program declaration) [] =
+        .ok row.parameterLocals at parametersAdded
+      rw [← Array.foldlM_toList] at parametersAdded
+      rw [folded] at parametersAdded
+      have localsEq :
+          row.parameterLocals =
+            ((declaration.params.toList.zip listKinds).map
+              (fun pair => (pair.fst.fvarId, pair.snd))).reverse := by
+        simpa using (Except.ok.inj parametersAdded).symm
+      have sourceParameters := congrArg Array.toList row.sourceParameters
+      simpa [localsEq] using sourceParameters
+
+/-- Successful production parameter classification preserves declaration
+arity. -/
+theorem ConcreteGeneratedInternalDeclaration.parameterKindsSize
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {parameterKinds : Array AbiKind}
+    (_row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    (known :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds) :
+    parameterKinds.size = declaration.params.size := by
+  unfold Fir.Wasm.declarationParameterKinds? at known
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases listKnown :
+      declaration.params.toList.mapM
+        (Fir.Wasm.declarationParamKind? program declaration) with
+  | none => simp [listKnown] at known
+  | some listKinds =>
+      have parameterKindsEq : parameterKinds = listKinds.toArray := by
+        simpa [listKnown] using known.symm
+      subst parameterKinds
+      simpa using optionListMapM_length listKnown
+
+/-- Generated symbolic parameter bindings inherit the source declaration's
+name uniqueness. -/
+theorem ConcreteGeneratedInternalDeclaration.sourceParameterNamesNodup
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {parameterKinds : Array AbiKind}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    (known :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds) :
+    (sourceFunction.params.toList.map (·.fst.name)).Nodup := by
+  rw [row.sourceParameterBindings known]
+  have sizes := row.parameterKindsSize known
+  have lengthLe : declaration.params.toList.length ≤
+      parameterKinds.toList.length := by
+    simpa using sizes.symm.le
+  have parameterNames :
+      ((declaration.params.toList.zip parameterKinds.toList).map
+          (fun pair => (pair.fst.fvarId, pair.snd))).map (·.fst.name) =
+        declaration.params.toList.map (·.fvarId.name) := by
+    simpa [List.map_map, Function.comp_def] using congrArg
+      (List.map (fun param : LCNF.Param .impure => param.fvarId.name))
+      (List.map_fst_zip lengthLe)
+  rw [parameterNames]
+  exact declarationParameterNamesNodup row.parameterIdsUnique
+
+/-- A successful semantic lookup names a binding present in the environment,
+with the same free-variable name. -/
+private theorem lookup_eq_some_mem
+    {sourceEnv : Env} {fvar : FVarId} {value : Value}
+    (found : lookup sourceEnv fvar = some value) :
+    ∃ bound,
+      (bound, value) ∈ sourceEnv ∧ bound.name = fvar.name := by
+  induction sourceEnv with
+  | nil => simp [lookup] at found
+  | cons binding rest ih =>
+      obtain ⟨candidate, current⟩ := binding
+      by_cases sameName : candidate.name == fvar.name
+      · rw [lookup, if_pos sameName] at found
+        have currentEq : current = value := Option.some.inj found
+        subst current
+        exact ⟨candidate, by simp, LawfulBEq.eq_of_beq sameName⟩
+      · rw [lookup, if_neg sameName] at found
+        obtain ⟨bound, member, names⟩ := ih found
+        exact ⟨bound, by simp [member], names⟩
+
+/-- Folding semantic parameter binding is just the reverse source-order row
+prepended to the initial environment. -/
+private theorem bindParamPairsFold_eq
+    (pairs : List (LCNF.Param .impure × Value)) (initial : Env) :
+    pairs.foldl
+        (fun env pair => bind env pair.fst.fvarId pair.snd) initial =
+      (pairs.map (fun pair => (pair.fst.fvarId, pair.snd))).reverse ++
+        initial := by
+  induction pairs generalizing initial with
+  | nil => simp
+  | cons pair rest ih =>
+      simp [List.foldl_cons, ih, Fir.LeanIR.Impure.bind, List.reverse_cons,
+        List.append_assoc]
+
+/-- In a unique-name prefix, a binding found at an exact list position is the
+one selected by name-directed symbolic lookup, even after body locals are
+appended. -/
+private theorem findFVar?_append_eq_some_of_getElem?
+    {α : Type} {bindings suffix : List (FVarId × α)}
+    {fvar candidate : FVarId} {kind : α} {index : Nat}
+    (namesNodup : (bindings.map (·.fst.name)).Nodup)
+    (bindingFound : bindings[index]? = some (candidate, kind))
+    (names : candidate.name = fvar.name) :
+    findFVar? (bindings ++ suffix) fvar = some index := by
+  induction bindings generalizing index with
+  | nil => simp at bindingFound
+  | cons head tail ih =>
+      simp only [List.map_cons, List.nodup_cons] at namesNodup
+      rcases namesNodup with ⟨headFresh, tailNodup⟩
+      cases index with
+      | zero =>
+          simp only [List.getElem?_cons_zero, Option.some.injEq] at bindingFound
+          have headNames : head.fst.name = fvar.name := by
+            rw [bindingFound]
+            exact names
+          have sameName : (head.fst.name == fvar.name) = true :=
+            beq_iff_eq.mpr headNames
+          simp [findFVar?, sameName]
+      | succ index =>
+          simp only [List.getElem?_cons_succ] at bindingFound
+          have candidateMem : candidate.name ∈ tail.map (·.fst.name) := by
+            have bindingMem : (candidate, kind) ∈ tail :=
+              List.mem_iff_getElem?.mpr ⟨index, bindingFound⟩
+            exact List.mem_map.mpr ⟨(candidate, kind), bindingMem, rfl⟩
+          have headNames : head.fst.name ≠ fvar.name := by
+            intro sameName
+            apply headFresh
+            rw [sameName, ← names]
+            exact candidateMem
+          have different : (head.fst.name == fvar.name) = false :=
+            beq_eq_false_iff_ne.mpr headNames
+          have tailFound := ih tailNodup bindingFound
+          simp [findFVar?, different, tailFound]
+
+/-- Exact generated callee-entry local relation for a saturated direct call.
+The theorem composes production parameter classification/lowering, semantic
+`bindParams`, and the already-related physical argument row. -/
+theorem ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelated
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure} {callerEnv : Env}
+    {sourceModule : Fir.Wasm.Module}
+    {calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.parameterKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    EnvLocalsRelated witness (functionBindings calleeFunction) site.calleeEnv
+      (row.targetFunction.toLocals physicalArgs) := by
+  have arityEq :
+      site.sourceDeclaration.params.size = site.semanticArgs.size := by
+    by_contra different
+    have sizeTest :
+        (site.sourceDeclaration.params.size == site.semanticArgs.size) =
+          false := beq_eq_false_iff_ne.mpr different
+    have parametersBound := site.parametersBound
+    unfold bindParams at parametersBound
+    simp [sizeTest] at parametersBound
+  have parameterBindings := row.sourceParameterBindings site.parametersKnown
+  have parameterNamesNodup :=
+    row.sourceParameterNamesNodup site.parametersKnown
+  have calleeEnvEq :
+      site.calleeEnv =
+        ((site.sourceDeclaration.params.toList.zip
+          site.semanticArgs.toList).map
+            (fun pair => (pair.fst.fvarId, pair.snd))).reverse := by
+    have parametersBound := site.parametersBound
+    unfold bindParams at parametersBound
+    have sizeTest :
+        (site.sourceDeclaration.params.size == site.semanticArgs.size) =
+          true := beq_iff_eq.mpr arityEq
+    simp only [sizeTest, ↓reduceIte] at parametersBound
+    rw [bindParamPairsFold_eq] at parametersBound
+    simpa using (Except.ok.inj parametersBound).symm
+  intro fvar value sourceLookup
+  rw [calleeEnvEq] at sourceLookup
+  obtain ⟨candidate, candidateMember, candidateNames⟩ :=
+    lookup_eq_some_mem sourceLookup
+  have sourceRowMember :
+      (candidate, value) ∈
+        (site.sourceDeclaration.params.toList.zip
+          site.semanticArgs.toList).map
+            (fun pair => (pair.fst.fvarId, pair.snd)) := by
+    simpa using candidateMember
+  obtain ⟨index, rowBound, sourceRowAt⟩ :=
+    List.mem_iff_getElem.mp sourceRowMember
+  have zippedBound : index <
+      (site.sourceDeclaration.params.toList.zip
+        site.semanticArgs.toList).length := by
+    simpa using rowBound
+  have parameterBound : index < site.sourceDeclaration.params.toList.length := by
+    simp only [List.length_zip] at zippedBound
+    omega
+  have semanticBound : index < site.semanticArgs.toList.length := by
+    simp only [List.length_zip] at zippedBound
+    omega
+  rw [List.getElem_map, List.getElem_zip] at sourceRowAt
+  have candidateAt :
+      site.sourceDeclaration.params.toList[index].fvarId = candidate :=
+    congrArg Prod.fst sourceRowAt
+  have semanticAt : site.semanticArgs.toList[index] = value :=
+    congrArg Prod.snd sourceRowAt
+  have semanticFound : site.semanticArgs.toList[index]? = some value := by
+    rw [List.getElem?_eq_getElem semanticBound, semanticAt]
+  obtain ⟨kind, physical, kindFound, physicalFound, valueRelated⟩ :=
+    argumentsRelated.resolveAt semanticFound
+  obtain ⟨kindBound, kindAt⟩ := List.getElem?_eq_some_iff.mp kindFound
+  have parameterRowBound : index < calleeFunction.params.toList.length := by
+    rw [parameterBindings]
+    simp only [List.length_map, List.length_zip]
+    omega
+  have expectedParameterRowAt :
+      ((site.sourceDeclaration.params.toList.zip
+        site.parameterKinds.toList).map
+          (fun pair => (pair.fst.fvarId, pair.snd)))[index]? =
+        some (candidate, kind) := by
+    apply List.getElem?_eq_some_iff.mpr
+    refine ⟨?_, ?_⟩
+    · simp only [List.length_map, List.length_zip]
+      omega
+    · rw [List.getElem_map, List.getElem_zip, candidateAt, kindAt]
+  have parameterRowAt :
+      calleeFunction.params.toList[index]? = some (candidate, kind) := by
+    rw [parameterBindings]
+    exact expectedParameterRowAt
+  have localFound :
+      findFVar? (functionBindings calleeFunction) fvar = some index := by
+    unfold functionBindings
+    exact findFVar?_append_eq_some_of_getElem? parameterNamesNodup
+      parameterRowAt candidateNames
+  have kindAtBinding :
+      (functionBindings calleeFunction)[index]?.map Prod.snd = some kind := by
+    unfold functionBindings
+    rw [List.getElem?_append_left parameterRowBound, parameterRowAt]
+    rfl
+  obtain ⟨physicalBound, _physicalAt⟩ :=
+    List.getElem?_eq_some_iff.mp physicalFound
+  have physicalAt :
+      (row.targetFunction.toLocals physicalArgs).get index = some physical := by
+    simp only [Wasm.Function.toLocals, Wasm.Locals.get]
+    rw [if_pos physicalBound]
+    exact physicalFound
+  exact ⟨index, kind, physical, localFound, kindAtBinding, physicalAt,
+    valueRelated⟩
+
+/-- Direct-call corollary: the caller's actual argument ABI is first
+transported through the validator's refinement decision, then used to build
+the exact generated callee-entry local relation. -/
+theorem ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelatedOfArguments
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure} {callerEnv : Env}
+    {sourceModule : Fir.Wasm.Module}
+    {calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    EnvLocalsRelated witness (functionBindings calleeFunction) site.calleeEnv
+      (row.targetFunction.toLocals physicalArgs) :=
+  row.entryEnvLocalsRelated site
+    (argumentsRelated.ofKindsRefine site.argumentsRefine)
+
 /-- Pointwise inversion of a successful `Except`-valued array traversal. -/
 private theorem exceptArrayForM_ok_of_mem
     {α ε : Type} {f : α → Except ε Unit} {xs : Array α} {x : α}
