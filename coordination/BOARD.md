@@ -15,19 +15,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
+- No cross-lane integration lease is currently active.
+
+## Completed integration lease
+
 - Milestone: `WASM-DECLARATION-PARAMETER-UNIQUENESS`.
-- Integration owner: `wasm-proof`; the W6 owner retains the integration lease
+- Integration owner: `wasm-proof`; the W6 owner retained the integration lease
   because the callee-entry proof exposed this shared support-domain bug.
 - Integration branch/worktree: `integration/closure-ownership` in
   `.worktrees/integration-closure-ownership`.
-- Queue boundary: `WasmSupported` currently admits duplicate same-scope
-  declaration parameter identifiers while lowering collapses them to one
-  symbolic Wasm parameter. The isolated repair rejects such declarations and
-  preserves the raw invalid lowering as a regression oracle. W6 and W7 must
-  rebase after landing; valid generated programs and runtime contracts are
-  unchanged.
+- Published stack: queue/card head `03547684` followed by isolated contract
+  repair `dfa8153e`, based directly on `main` at `b2ecf2a4`.
+- Lease boundary: satisfied. `supportedDecl` rejects duplicate same-scope
+  declaration parameter identifiers before lowering. The regression preserves
+  the previous raw invalid module as an oracle while proving
+  `lowerSupported` rejects it. Existing valid programs, the semantic Wasm ABI,
+  and concrete-runtime contracts are unchanged; W6 and W7 rebase before
+  dependent work.
+- Validation: Lean Beam update/sync/save for `Fir.Wasm.WellFormed` and
+  `Fir.Wasm.Examples`, focused builds and bug-card validation,
+  `git diff --check`, complete `make check` with 1,844/1,844 comparisons equal
+  and zero findings, and all 3,125 Talos jobs.
 
-## Completed integration lease
+## Previous completed integration lease
 
 - Milestone: `W6-CALLEE-PARAMETER-ROWS`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -47,7 +57,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check` with 1,844/1,844 comparisons equal and zero findings, and all
   3,125 Talos jobs.
 
-## Previous completed integration lease
+## Earlier completed integration lease
 
 - Milestone: `W6-GENERATED-DECLARATION-FAMILY`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -67,7 +77,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check` with 1,844/1,844 comparisons equal and zero findings, and all
   3,125 Talos jobs.
 
-## Earlier completed integration lease
+## Older completed integration lease
 
 - Milestone: `W6-GENERATED-LOCAL-LAYOUT`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -86,7 +96,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   onto the final base. W7 must rebase and run its artifact-specific gate
   because production lowering changed.
 
-## Older completed integration lease
+## Still older completed integration lease
 
 - Milestone: `ILLUMINATE-TALOS-ADAPTER`.
 - Integration owner: `wasm-proof`; the user reassigned the integration lease
@@ -109,7 +119,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with 1,844/1,844 comparisons equal and zero findings; and all 3,125 Talos
   jobs. W7 may now rebase and finish its own artifact/Illuminate acceptance.
 
-## Still older completed integration lease
+## Much older completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
 - Integration owner: `wasm-gen`; the user assigned this short integration
@@ -223,6 +233,17 @@ identities.
   1,844 repository comparisons and all 3,125 Talos jobs pass. W6 next derives
   the entry value relation and starts the well-founded dynamic hereditary
   proof.
+
+- `WASM-DECLARATION-PARAMETER-UNIQUENESS` is linked/accepted through isolated
+  contract head `dfa8153e`, after queue/card head `03547684`, based directly
+  on `b2ecf2a4`. `supportedDecl` now rejects duplicate same-scope declaration
+  parameter identifiers. The regression demonstrates that the previous raw
+  lowerer collapsed two source parameters to one symbolic Wasm parameter and
+  produced an invalid call stack, while `lowerSupported` now rejects that
+  malformed program. Bug card
+  `FIR-BUG-wasm-none-duplicate-declaration-parameters` is fixed. All 1,844
+  repository comparisons and all 3,125 Talos jobs pass. W6 and W7 rebase on
+  the released support-domain contract before continuing.
 
 - `SCALAR-CLOSURE-ABI-ADMISSION` is linked/accepted through W6 functional head
   `cf1ed73f` and ready mailbox head `4013a6ba`. The lowering decision is
@@ -561,7 +582,7 @@ moving global snapshot hash.
 
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/closure-ownership` | active | Queue `WASM-DECLARATION-PARAMETER-UNIQUENESS`: reject duplicate same-scope declaration parameter identifiers before lowering, with the invalid raw module retained as a regression oracle. | Narrows `WasmSupported` only for malformed duplicate binders; W6 and W7 rebase after landing. Semantic ABI and runtime contracts are unchanged. |
+| Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready head `4013a6ba`, functional head `cf1ed73f`, on base `fb43f4dd` structurally admits erased generic facade captures and proves precise UInt8 tagged boxing through the general concrete compiler simulation. | Changes no shared semantic contract and adds no certificate premise. Lean Beam, the 32-case unfenced probe, the complete root gate, and all 3,125 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | ready | Ready mailbox `6f5b5b5c`, with existing W7 functional head `4404aba0`, consumes accepted contract base `b1713877`. The public compiler emits and V8 executes all 32 scalar-closure cases with 96/96 comparisons equal and zero findings. | No W7 implementation, artifact, ABI, or helper contract changed; this is an acceptance-only consumption slice. |
@@ -594,7 +615,7 @@ moving global snapshot hash.
 | `CLOSURE-APPLICATION-OWNERSHIP` | integration/validation | pass proof, W6, W7, validation | released | landed proof/runtime stack `229640de`; corrected contract `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; ownership `528fdd1a`; W7 adapter `fd6a51e3` and ready head `fdaa8bd1` | Matches Lean's `lean_apply_*` boundary: an exclusive closure transfers fixed arguments and is freed non-recursively; a shared closure drops one reference and retains each fixed heap argument. Pass, concrete-runtime, and executable-adapter layers are green and linked/accepted. |
 | `EXTERNAL-WAITING-RUNTIME` | integration/validation | pass proof, W6, validation | released | landed stack `229640de`; standalone repair `89fda41a`; proof `1640c7d4`; W6 `b28feab9`; historical validation provenance `2f301de5` | `Step.external`, `executeStep`, soundness, and the Talos frame refinement use the post-core-step `waiting.runtime`, so external responses cannot resurrect a consumed closure or discard shared closure decrements and retained captures. `FIR-BUG-impure-none-closure-application-external-runtime` is fixed with executable and proof regressions. |
 | `SCALAR-CLOSURE-ABI-ADMISSION` | W6/shared lowering | W7, validation, integration | released | functional head `cf1ed73f`; ready head `4013a6ba`; bug card `FIR-BUG-wasm-none-generic-scalar-closure-admission` | A raw `tobject` parameter is refined to erased only after structural final-LCNF use analysis proves exact forwarding to a statically known erased parameter. UInt8 boxes use the precise tagged kind, justified by the concrete scalar-boxing theorem. Production lowering, supported lowering, closure dispatch, and the general compiler proof share this row. All 32 formerly fenced cases pass the three-edge probe; W7 and validation consume the landed boundary unchanged. |
-| `WASM-DECLARATION-PARAMETER-UNIQUENESS` | integration/W6 proof | W6, W7, validation | candidate | pending isolated contract commit; bug card `FIR-BUG-wasm-none-duplicate-declaration-parameters` | Adds duplicate-free same-scope declaration parameters to `supportedDecl`. This aligns validator parameter kinds with the deduplicating symbolic-local row and prevents an accepted program from lowering to an invalid call signature. Existing well-formed generated programs are unaffected; consumers rebase after landing. |
+| `WASM-DECLARATION-PARAMETER-UNIQUENESS` | integration/W6 proof | W6, W7, validation | released | queue/card `03547684`; isolated contract `dfa8153e`; bug card `FIR-BUG-wasm-none-duplicate-declaration-parameters` | Adds duplicate-free same-scope declaration parameters to `supportedDecl`. This aligns validator parameter kinds with the deduplicating symbolic-local row and prevents an accepted program from lowering to an invalid call signature. Existing well-formed generated programs are unaffected; consumers rebase after landing. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |
