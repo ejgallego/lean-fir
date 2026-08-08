@@ -23,6 +23,9 @@ inductive LinkError where
   | unsupportedOperation
   | descriptorOverflow (count : Nat)
   | incompatibleMemory
+  | malformedLazyCache (name : Name)
+  | retainedCacheGlobal (index : Nat)
+  | retainedCacheSet
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
@@ -329,6 +332,108 @@ def internalizeCacheSets (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/-!
+Rewindable consumers cannot retain a lazy singleton allocated above their
+scratch checkpoint. Before resident linking, the compiler's exact cache
+sequence can instead be reduced to a direct call: each use receives a fresh
+closed value in the current arena, so no private global publishes a scratch
+address across calls.
+
+This transform is deliberately fail-closed. It recognizes only the sequence
+fixed by `Fir.Wasm.compileLetValue_fap_cached`, rejects every residual cache
+global or `cacheSet`, and shifts pre-existing resident globals down after the
+cache prefix is removed.
+-/
+
+mutual
+
+private partial def eliminateLazyCacheInstructions
+    (initializers : Array Name) (cacheGlobalCount : Nat) :
+    List Instruction → Except LinkError (List Instruction)
+  | .globalGet flagIndex .uint32 :: .ifElse [] miss ::
+      .globalGet valueIndex resultKind :: rest => do
+      if flagIndex < cacheGlobalCount then
+        match miss with
+        | [.call (.declaration target),
+            .call (.runtime (.cacheSet cacheTarget cacheKind)),
+            .globalSet storedValueIndex storedKind,
+            .i32Const .uint32 initialized,
+            .globalSet storedFlagIndex .uint32] =>
+            let some initializer := initializers[flagIndex / 2]? |
+              throw (.malformedLazyCache target)
+            unless flagIndex % 2 == 0 && valueIndex == flagIndex + 1 &&
+                valueIndex < cacheGlobalCount && initializer == target &&
+                target == cacheTarget && resultKind == cacheKind &&
+                valueIndex == storedValueIndex && resultKind == storedKind &&
+                flagIndex == storedFlagIndex && initialized == 1 do
+              throw (.malformedLazyCache target)
+            return .call (.declaration target) ::
+              (← eliminateLazyCacheInstructions initializers cacheGlobalCount rest)
+        | _ => throw (.retainedCacheGlobal flagIndex)
+      else
+        return .globalGet (flagIndex - cacheGlobalCount) .uint32 ::
+          (← eliminateLazyCacheInstructions initializers cacheGlobalCount
+            (.ifElse [] miss :: .globalGet valueIndex resultKind :: rest))
+  | instruction :: rest =>
+      return (← eliminateLazyCacheInstruction initializers cacheGlobalCount instruction) ::
+        (← eliminateLazyCacheInstructions initializers cacheGlobalCount rest)
+  | [] => return []
+
+private partial def eliminateLazyCacheInstruction
+    (initializers : Array Name) (cacheGlobalCount : Nat) :
+    Instruction → Except LinkError Instruction
+  | .globalGet index kind =>
+      if index < cacheGlobalCount then
+        throw (.retainedCacheGlobal index)
+      else
+        return .globalGet (index - cacheGlobalCount) kind
+  | .globalSet index kind =>
+      if index < cacheGlobalCount then
+        throw (.retainedCacheGlobal index)
+      else
+        return .globalSet (index - cacheGlobalCount) kind
+  | .block label body =>
+      return .block label
+        (← eliminateLazyCacheInstructions initializers cacheGlobalCount body)
+  | .loop label body =>
+      return .loop label
+        (← eliminateLazyCacheInstructions initializers cacheGlobalCount body)
+  | .ifElse thenBody elseBody =>
+      return .ifElse
+        (← eliminateLazyCacheInstructions initializers cacheGlobalCount thenBody)
+        (← eliminateLazyCacheInstructions initializers cacheGlobalCount elseBody)
+  | instruction => return instruction
+
+end
+
+/--
+Remove compiler-generated lazy singleton state so a consumer may rewind its
+allocation arena after every public call. Run this before cache-set
+internalization; no initializer, cache global, or cache-set operation remains.
+-/
+def eliminateLazyInitializers (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  let cacheGlobalCount := module.cacheGlobalKinds.size
+  let functions ← module.functions.mapM fun function => do
+    let body ← eliminateLazyCacheInstructions module.initializers
+      cacheGlobalCount function.body
+    return { function with body }
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  if runtimeOperations.any isCacheSet then
+    throw .retainedCacheSet
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result := {
+    module with
+    functions
+    initializers := #[]
+    runtimeOperations
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports }
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
 def exampleDescriptors : Array (Array AbiKind) :=
   #[#[.tobject, .uint8, .tobject]]
 
@@ -358,6 +463,82 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"allocator: {repr error}"
   internalizeCacheSets allocated
     |>.mapError fun error => s!"cache: {repr error}"
+
+private def lazyInitializerName : Name := `residentLazyInitializer
+private def lazyCallerName : Name := `residentLazyCaller
+private def lazyValueLocal : FVarId := ⟨`lazyValue⟩
+
+private def lazyInitializer : Function := {
+  name := lazyInitializerName
+  params := #[]
+  results := #[.uint32]
+  locals := #[]
+  body := [.i32Const .uint32 37, .ret] }
+
+private def lazyCaller : Function := {
+  name := lazyCallerName
+  params := #[]
+  results := #[.uint32]
+  locals := #[(lazyValueLocal, .uint32)]
+  body := [
+    .globalGet 0 .uint32,
+    .ifElse [] [
+      .call (.declaration lazyInitializerName),
+      .call (.runtime (.cacheSet lazyInitializerName .uint32)),
+      .globalSet 1 .uint32,
+      .i32Const .uint32 1,
+      .globalSet 0 .uint32],
+    .globalGet 1 .uint32,
+    .localSet lazyValueLocal,
+    .globalGet 2 .uint32,
+    .ret] }
+
+private def lazyModule : Module := {
+  imports := #[Fir.Wasm.runtimeImport 0
+    (.cacheSet lazyInitializerName .uint32)]
+  functions := #[lazyInitializer, lazyCaller]
+  exports := #[lazyCallerName]
+  initializers := #[lazyInitializerName]
+  runtimeOperations := #[.cacheSet lazyInitializerName .uint32]
+  globals := #[{ kind := .uint32, init := .i32 91 }] }
+
+private def eliminatedLazyCallerBody : List Instruction := [
+  .call (.declaration lazyInitializerName),
+  .localSet lazyValueLocal,
+  .globalGet 0 .uint32,
+  .ret]
+
+#guard match eliminateLazyInitializers lazyModule with
+  | .ok module =>
+      module.initializers.isEmpty && module.runtimeOperations.isEmpty &&
+      module.imports.isEmpty && module.globals == lazyModule.globals &&
+      (module.functions[1]?.map (·.body) == some eliminatedLazyCallerBody) &&
+      (Fir.Wasm.validateModule module).isOk
+  | .error _ => false
+
+private def malformedLazyCaller : Function := {
+  lazyCaller with
+  body := [
+    .globalGet 0 .uint32,
+    .ifElse [] [
+      .call (.declaration lazyInitializerName),
+      .call (.runtime (.cacheSet lazyInitializerName .uint32)),
+      .globalSet 1 .uint32,
+      .i32Const .uint32 0,
+      .globalSet 0 .uint32],
+    .globalGet 1 .uint32,
+    .localSet lazyValueLocal,
+    .globalGet 2 .uint32,
+    .ret] }
+
+#guard match eliminateLazyInitializers {
+    lazyModule with
+    functions := lazyModule.functions.map fun function =>
+      if function.name == lazyCallerName then
+        malformedLazyCaller
+      else function } with
+  | .error (.malformedLazyCache name) => name == lazyInitializerName
+  | _ => false
 
 def manifest : Json :=
   Json.mkObj [

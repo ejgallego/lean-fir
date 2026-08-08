@@ -206,85 +206,15 @@ def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
   | .ok source => return .ok source
   | .error message => return .error (.manifest message)
 
-/-
-Replace Lean's private lazy-cache globals by direct calls in this package.
-
-The live adapter rewinds every per-event allocation to a persistent checkpoint.
-A cache miss above that checkpoint would otherwise publish an object through a
-private Wasm global. Closed zero-argument declarations are pure, so allocating
-their values afresh in the scratch arena preserves the result while leaving the
-allocator frontier as the module's only mutable heap root.
--/
-mutual
-
-private partial def removeLazyCacheInstructions :
-    List Fir.Wasm.Instruction → Except String (List Fir.Wasm.Instruction)
-  | .globalGet flagIndex .uint32 :: .ifElse [] miss ::
-      .globalGet valueIndex resultKind :: rest => do
-      match miss with
-      | [.call (.declaration target),
-          .call (.runtime (.cacheSet cacheTarget cacheKind)),
-          .globalSet storedValueIndex storedKind,
-          .i32Const .uint32 initialized,
-          .globalSet storedFlagIndex .uint32] =>
-          unless target == cacheTarget && resultKind == cacheKind &&
-              valueIndex == storedValueIndex && resultKind == storedKind &&
-              flagIndex == storedFlagIndex && initialized == 1 do
-            throw s!"malformed lazy-cache sequence for {target}"
-          return .call (.declaration target) ::
-            (← removeLazyCacheInstructions rest)
-      | _ =>
-          let head ← removeLazyCacheInstruction (.globalGet flagIndex .uint32)
-          return head :: (← removeLazyCacheInstructions
-            (.ifElse [] miss :: .globalGet valueIndex resultKind :: rest))
-  | instruction :: rest =>
-      return (← removeLazyCacheInstruction instruction) ::
-        (← removeLazyCacheInstructions rest)
-  | [] => return []
-
-private partial def removeLazyCacheInstruction :
-    Fir.Wasm.Instruction → Except String Fir.Wasm.Instruction
-  | .block label body =>
-      return .block label (← removeLazyCacheInstructions body)
-  | .loop label body =>
-      return .loop label (← removeLazyCacheInstructions body)
-  | .ifElse thenBody elseBody =>
-      return .ifElse (← removeLazyCacheInstructions thenBody)
-        (← removeLazyCacheInstructions elseBody)
-  | instruction => return instruction
-
-end
-
-private partial def instructionUsesGlobal : Fir.Wasm.Instruction → Bool
-  | .globalGet .. | .globalSet .. => true
-  | .block _ body | .loop _ body => body.any instructionUsesGlobal
-  | .ifElse thenBody elseBody =>
-      thenBody.any instructionUsesGlobal || elseBody.any instructionUsesGlobal
-  | _ => false
-
 private def configureLiveModule
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let functions ← artifact.module.functions.mapM fun function => do
-    let body ← removeLazyCacheInstructions function.body |>.mapError
-      Fir.Wasm.Emit.Source.CompileError.manifest
-    return { function with body }
-  unless functions.all (fun function => !function.body.any instructionUsesGlobal) do
-    throw (.manifest "live module retained a private cache-global access")
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  unless runtimeOperations.all (fun operation => !Fir.Wasm.Emit.ResidentCache.isCacheSet operation) do
-    throw (.manifest "live module retained a cache-set operation")
-  let externalImports := artifact.module.imports.filter (·.operation?.isNone)
-  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
-  let module := {
-    artifact.module with
-    functions
-    exports := #[
-      ``Illuminate.AnimationPlayer.initialLive,
-      ``Illuminate.AnimationPlayer.transitionLive]
-    initializers := #[]
-    runtimeOperations
-    imports }
+  let module ← Fir.Wasm.Emit.ResidentCache.eliminateLazyInitializers
+      artifact.module |>.mapError fun error =>
+        Fir.Wasm.Emit.Source.CompileError.manifest
+          s!"failed to make the live module rewind-safe: {repr error}"
+  unless module.globals.isEmpty do
+    throw (.manifest "live source module unexpectedly retained resident globals")
   let bytes ← match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => throw (.encoding error)
