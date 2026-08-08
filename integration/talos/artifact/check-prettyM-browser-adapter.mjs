@@ -133,6 +133,20 @@ function checkColdBalancedResult(result) {
   checkTimings(result);
 }
 
+function checkUtf8ReplacementResult(result, previous) {
+  const expected = "A😀�B�";
+  requireCondition(result.trace.text === expected,
+    "UTF-8 replacement text changed");
+  requireCondition(equalEvents(result.trace.events, [
+    event(0, expected),
+    event(3),
+  ]), "UTF-8 replacement event stream changed");
+  checkTimings(result);
+  requireCondition(result.memory.frontierBefore >=
+      previous.memory.frontierAfterDecode,
+    "UTF-8 replacement render did not synchronize the resident frontier");
+}
+
 function checkTimings(result) {
   for (const [name, value] of Object.entries(result.timings)) {
     requireCondition(Number.isFinite(value) && value >= 0,
@@ -233,6 +247,11 @@ export async function checkPrettyMBrowserAdapter({
   const input = coverageFormat();
   const first = adapter.render({ format: input, width: 80 });
   checkResult(first, coldBalanced);
+  const utf8Replacement = adapter.render({
+    format: F.text("A😀\ud800B\udc00"),
+    width: 80,
+  });
+  checkUtf8ReplacementResult(utf8Replacement, first);
   const prepared = adapter.prepare({
     format: input,
     width: (1n << 130n) + 17n,
@@ -241,7 +260,7 @@ export async function checkPrettyMBrowserAdapter({
   });
   const executed = adapter.execute(prepared);
   const second = adapter.decode(executed);
-  checkResult(second, first);
+  checkResult(second, utf8Replacement);
   const numeric = adapter.render({
     format: numericCoverageFormat(),
     width: 80,
@@ -272,12 +291,17 @@ export async function checkFetchedPrettyMBrowserAdapter(artifactUrl) {
   checkColdBalancedResult(coldBalanced);
   const first = adapter.render({ format: coverageFormat(), width: 80 });
   checkResult(first, coldBalanced);
+  const utf8Replacement = adapter.render({
+    format: F.text("A😀\ud800B\udc00"),
+    width: 80,
+  });
+  checkUtf8ReplacementResult(utf8Replacement, first);
   const prepared = adapter.prepare({
     format: coverageFormat(),
     width: "1361129467683753853853498429727072845841",
   });
   const second = adapter.decode(adapter.execute(prepared));
-  checkResult(second, first);
+  checkResult(second, utf8Replacement);
   const numeric = adapter.render({
     format: numericCoverageFormat(),
     width: 80,

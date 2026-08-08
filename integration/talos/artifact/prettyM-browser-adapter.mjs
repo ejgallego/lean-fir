@@ -71,16 +71,68 @@ function elapsed(now, started) {
   return Number.isFinite(result) && result >= 0 ? result : 0;
 }
 
-function ownKeys(value, required, optional = []) {
-  const allowed = new Set([...required, ...optional]);
-  for (const key of required) {
+const FORMAT_KEYS = Object.freeze({
+  nil: { required: ["kind"], allowed: new Set(["kind"]) },
+  line: { required: ["kind"], allowed: new Set(["kind"]) },
+  align: {
+    required: ["kind", "force"],
+    allowed: new Set(["kind", "force"]),
+  },
+  text: {
+    required: ["kind", "text"],
+    allowed: new Set(["kind", "text"]),
+  },
+  nest: {
+    required: ["kind", "indent", "body"],
+    allowed: new Set(["kind", "indent", "body"]),
+  },
+  append: {
+    required: ["kind", "left", "right"],
+    allowed: new Set(["kind", "left", "right"]),
+  },
+  group: {
+    required: ["kind", "body"],
+    allowed: new Set(["kind", "body", "behavior"]),
+  },
+  tag: {
+    required: ["kind", "tag", "body"],
+    allowed: new Set(["kind", "tag", "body"]),
+  },
+});
+
+function ownKeys(value, spec) {
+  for (const key of spec.required) {
     requireCondition(Object.hasOwn(value, key),
       `Format.${value.kind ?? "?"} is missing property ${key}`);
   }
   for (const key of Object.keys(value)) {
-    requireCondition(allowed.has(key),
+    requireCondition(spec.allowed.has(key),
       `Format.${value.kind ?? "?"} has unknown property ${key}`);
   }
+}
+
+function utf8Length(value) {
+  let bytes = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const code = value.charCodeAt(index);
+    if (code <= 0x7f) {
+      bytes += 1;
+    } else if (code <= 0x7ff) {
+      bytes += 2;
+    } else if (code >= 0xd800 && code <= 0xdbff &&
+        index + 1 < value.length) {
+      const next = value.charCodeAt(index + 1);
+      if (next >= 0xdc00 && next <= 0xdfff) {
+        bytes += 4;
+        index += 1;
+      } else {
+        bytes += 3;
+      }
+    } else {
+      bytes += 3;
+    }
+  }
+  return bytes;
 }
 
 function natural(value, label) {
@@ -185,7 +237,7 @@ function normalizeBehavior(value) {
   fail("Format.group behavior must be allOrNone, fill, 0, or 1");
 }
 
-function normalizeFormat(root, encoder, maximumNodes) {
+function normalizeFormat(root, maximumNodes) {
   const holder = {};
   const active = new WeakSet();
   const nodes = [];
@@ -214,29 +266,35 @@ function normalizeFormat(root, encoder, maximumNodes) {
     switch (value.kind) {
       case "nil":
       case "line":
-        ownKeys(value, ["kind"]);
+        ownKeys(value, FORMAT_KEYS[value.kind]);
         node = { kind: value.kind, bytes: 0 };
         break;
       case "align":
-        ownKeys(value, ["kind", "force"]);
+        ownKeys(value, FORMAT_KEYS.align);
         requireCondition(typeof value.force === "boolean",
           "Format.align force must be boolean");
         node = { kind: "align", force: value.force, bytes: 40 };
         totalBytes = checkedTotal(totalBytes, node.bytes, "Format input");
         break;
       case "text": {
-        ownKeys(value, ["kind", "text"]);
+        ownKeys(value, FORMAT_KEYS.text);
         requireCondition(typeof value.text === "string",
           "Format.text text must be a string");
-        const encoded = encoder.encode(value.text);
-        const stringBytes = align8(HEADER_BYTES + encoded.length);
-        node = { kind: "text", encoded, bytes: 40, stringBytes };
+        const textBytes = utf8Length(value.text);
+        const stringBytes = align8(HEADER_BYTES + textBytes);
+        node = {
+          kind: "text",
+          text: value.text,
+          textBytes,
+          bytes: 40,
+          stringBytes,
+        };
         totalBytes = checkedTotal(totalBytes,
           node.bytes + stringBytes, "Format input");
         break;
       }
       case "nest": {
-        ownKeys(value, ["kind", "indent", "body"]);
+        ownKeys(value, FORMAT_KEYS.nest);
         const indentPlan = integerPlan(integer(value.indent,
           "Format.nest indent"));
         node = {
@@ -250,7 +308,7 @@ function normalizeFormat(root, encoder, maximumNodes) {
         break;
       }
       case "append":
-        ownKeys(value, ["kind", "left", "right"]);
+        ownKeys(value, FORMAT_KEYS.append);
         node = {
           kind: "append",
           left: undefined,
@@ -260,7 +318,7 @@ function normalizeFormat(root, encoder, maximumNodes) {
         totalBytes = checkedTotal(totalBytes, node.bytes, "Format input");
         break;
       case "group":
-        ownKeys(value, ["kind", "body"], ["behavior"]);
+        ownKeys(value, FORMAT_KEYS.group);
         node = {
           kind: "group",
           behavior: normalizeBehavior(value.behavior),
@@ -270,7 +328,7 @@ function normalizeFormat(root, encoder, maximumNodes) {
         totalBytes = checkedTotal(totalBytes, node.bytes, "Format input");
         break;
       case "tag": {
-        ownKeys(value, ["kind", "tag", "body"]);
+        ownKeys(value, FORMAT_KEYS.tag);
         const tagPlan = naturalPlan(natural(value.tag, "Format.tag tag"));
         node = {
           kind: "tag",
@@ -345,9 +403,14 @@ function writeHeader(view, address, {
   aux2 = 0,
   aux3 = 0,
 }) {
-  const words = [kind, flags, rc, bytes, aux0, aux1, aux2, aux3];
-  words.forEach((word, index) =>
-    view.setUint32(address + 4 * index, u32(word), true));
+  view.setUint32(address, u32(kind), true);
+  view.setUint32(address + 4, u32(flags), true);
+  view.setUint32(address + 8, u32(rc), true);
+  view.setUint32(address + 12, u32(bytes), true);
+  view.setUint32(address + 16, u32(aux0), true);
+  view.setUint32(address + 20, u32(aux1), true);
+  view.setUint32(address + 24, u32(aux2), true);
+  view.setUint32(address + 28, u32(aux3), true);
 }
 
 function writeWord(view, address, word) {
@@ -488,9 +551,10 @@ function encodeNumberPlan(plan, allocate, view) {
   } else {
     fail(`unknown numeric representation ${plan.representation}`);
   }
-  plan.limbs.forEach((limb, index) =>
+  for (let index = 0; index < plan.limbs.length; index += 1) {
     view.setBigUint64(address + HEADER_BYTES + SLOT_BYTES * index,
-      limb, true));
+      plan.limbs[index], true);
+  }
   return address;
 }
 
@@ -583,8 +647,7 @@ export class PrettyMAdapter {
   }) {
     const prepareStarted = this.now();
     const normalizeStarted = this.now();
-    const normalized = normalizeFormat(
-      format, this.encoder, this.maximumNodes);
+    const normalized = normalizeFormat(format, this.maximumNodes);
     const widthPlan = naturalPlan(natural(width, "width"));
     const indentPlan = naturalPlan(natural(indent, "indent"));
     const columnPlan = naturalPlan(natural(column, "column"));
@@ -608,9 +671,6 @@ export class PrettyMAdapter {
 
     const encodeStarted = this.now();
     const view = new DataView(this.memory.buffer);
-    if (totalBytes !== 0) {
-      new Uint8Array(this.memory.buffer, block, totalBytes).fill(0);
-    }
     let cursor = block;
     let rawObjects = 0;
     const take = (bytes) => {
@@ -637,10 +697,18 @@ export class PrettyMAdapter {
             kind: KIND.string,
             bytes: node.stringBytes,
             aux0: STRING_UTF8_MARKER,
-            aux1: node.encoded.length,
+            aux1: node.textBytes,
           });
-          new Uint8Array(this.memory.buffer,
-            node.textWord + HEADER_BYTES, node.encoded.length).set(node.encoded);
+          const payload = new Uint8Array(
+            this.memory.buffer,
+            node.textWord + HEADER_BYTES,
+            node.stringBytes - HEADER_BYTES,
+          );
+          const encoded = this.encoder.encodeInto(node.text, payload);
+          requireCondition(encoded.read === node.text.length &&
+            encoded.written === node.textBytes,
+          "TextEncoder did not encode the complete Format.text payload");
+          payload.fill(0, encoded.written);
         } else if (node.kind === "nest") {
           node.indentWord = encodeNumberPlan(node.indent, take, view);
         } else if (node.kind === "tag") {
@@ -661,7 +729,9 @@ export class PrettyMAdapter {
             aux0: 2,
             aux3: 1,
           });
-          view.setUint8(node.word + HEADER_BYTES, node.force ? 1 : 0);
+          view.setUint32(
+            node.word + HEADER_BYTES, node.force ? 1 : 0, true);
+          view.setUint32(node.word + HEADER_BYTES + 4, 0, true);
           break;
         case "text":
           writeHeader(view, node.word, {
@@ -701,7 +771,10 @@ export class PrettyMAdapter {
             aux3: 1,
           });
           writeWord(view, node.word + HEADER_BYTES, node.body.word);
-          view.setUint8(node.word + HEADER_BYTES + SLOT_BYTES, node.behavior);
+          view.setUint32(
+            node.word + HEADER_BYTES + SLOT_BYTES, node.behavior, true);
+          view.setUint32(
+            node.word + HEADER_BYTES + SLOT_BYTES + 4, 0, true);
           break;
         case "tag":
           writeHeader(view, node.word, {
