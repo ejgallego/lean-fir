@@ -146,4 +146,13 @@ def internalize (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/-- Internalizes `Nat.mod` when the source closure imports it. -/
+def internalizeAvailable (module : Module) : Except LinkError Module := do
+  if module.imports.any (·.declaration? == some declaration) then
+    internalize module
+  else
+    match Fir.Wasm.validateModule module with
+    | .ok () => return module
+    | .error error => throw (.invalidInput error)
+
 end Fir.Wasm.Emit.ResidentNatMod

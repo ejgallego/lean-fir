@@ -434,6 +434,24 @@ private def rewriteSourceFloatFunctions (module : Module) : Except LinkError Mod
     (replaceFloatConstant 0)
   return { module with functions }
 
+private def replaceFunctionIfPresent (functions : Array Function) (name : Name)
+    (replace : Function → Except LinkError Function) :
+    Except LinkError (Array Function) := do
+  if functions.any (·.name == name) then
+    replaceFunction functions name replace
+  else
+    pure functions
+
+private def rewriteAvailableSourceFloatFunctions (module : Module) :
+    Except LinkError Module := do
+  let functions ← replaceFunctionIfPresent module.functions sourceFloatOfNatName
+    replaceFloatOfNat
+  let functions ← replaceFunctionIfPresent functions millisecondsConstantName
+    (replaceFloatConstant 0x408f400000000000)
+  let functions ← replaceFunctionIfPresent functions zeroConstantName
+    (replaceFloatConstant 0)
+  return { module with functions }
+
 /-- Internalize the exact Float/runtime frontier and replace the two decimal
 constants plus `Float.ofNat` before later dead-declaration pruning. -/
 def internalize (module : Module) : Except LinkError Module := do
@@ -468,6 +486,57 @@ def internalize (module : Module) : Except LinkError Module := do
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
     | some declaration => !externalDeclarations.contains declaration
+    | none => true
+  let result : Module := {
+    module with
+    functions
+    imports
+    exports := externalHelperNames.foldl Fir.Wasm.addUnique module.exports
+    runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
+  match Fir.Wasm.validateModule result with
+  | .ok () => return result
+  | .error error => throw (.invalidOutput error)
+
+/--
+Internalizes the Float/runtime operations present in a source closure while
+retaining the strict historical `internalize` inventory above. Source helpers
+such as `Float.ofNat` and the elapsed-time constants are rewritten only when
+the compiler retained them.
+-/
+def internalizeAvailable (module : Module) : Except LinkError Module := do
+  match Fir.Wasm.validateModule module with
+  | .ok () => pure ()
+  | .error error => throw (.invalidInput error)
+  unless module.functions.any (·.name == ResidentAllocator.allocateName) do
+    throw .missingAllocator
+  unless module.memory == some ResidentRuntime.residentMemory do
+    throw .incompatibleMemory
+  for name in #[ResidentNumeric.makeNaturalName, ResidentNumeric.naturalLowName,
+      ResidentNumeric.naturalHighName] do
+    unless module.functions.any (·.name == name) do
+      throw (.missingNumericHelper name)
+  let present := externalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  for declaration in present do
+    let imports := module.imports.filter (·.declaration? == some declaration)
+    unless imports.size == 1 do
+      throw (.incompatibleExternal declaration)
+    let some signature := expectedExternalSignature? declaration |
+      throw (.incompatibleExternal declaration)
+    unless imports[0]!.signature == signature do
+      throw (.incompatibleExternal declaration)
+  let module ← internalizeRuntime module
+  let module ← rewriteAvailableSourceFloatFunctions module
+  for name in externalHelperNames do
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) || module.exports.contains name then
+      throw (.reservedDeclaration name)
+  let functions := module.functions.map fun function =>
+    { function with body := function.body.map rewriteExternalInstruction }
+  let functions := functions ++ externalFunctions
+  let imports := module.imports.filter fun import_ =>
+    match import_.declaration? with
+    | some declaration => !present.contains declaration
     | none => true
   let result : Module := {
     module with

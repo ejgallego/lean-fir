@@ -43,10 +43,19 @@ def externalDeclarations : Array Name := #[
   `Array.push,
   `Array.get!Internal]
 
+/--
+Additional array operations linked only when the captured source closure needs
+them.  They are deliberately not part of `externalDeclarations`, so the
+historical strict `internalize` frontier remains source-compatible.
+-/
+def availableExternalDeclarations : Array Name :=
+  externalDeclarations ++ #[`Array.usize]
+
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
 
-def externalHelperNames : Array Name := externalDeclarations.map externalName
+def externalHelperNames : Array Name :=
+  availableExternalDeclarations.map externalName
 def helperNames : Array Name := #[allocateEmptyName] ++ externalHelperNames
 
 private def erasedParam : FVarId := ⟨`erased⟩
@@ -197,6 +206,16 @@ def sizeFunction : Function := {
     .i32Const .uint32 1,
     .i32Add,
     .localSet rawLocal] ++ retypeTagged }
+
+def usizeFunction : Function := {
+  name := externalName `Array.usize
+  params := #[(erasedParam, .erased), (arrayParam, .object)]
+  results := #[.usize]
+  locals := #[(sizeLocal, .uint32)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet sizeLocal,
+    .i64ExtendI32U .usize,
+    .ret] }
 
 private def elementAddress : List Instruction := [
   .localGet arrayParam,
@@ -351,6 +370,7 @@ def pushFunction : Function := {
 def functions : Array Function := #[
   allocateEmptyFunction,
   sizeFunction,
+  usizeFunction,
   getBangBorrowedFunction,
   emptyWithCapacityFunction,
   mkEmptyFunction,
@@ -373,6 +393,8 @@ private partial def rewriteInstruction (declarations : Array Name) : Instruction
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if declaration == `Array.size then
     some { params := #[.erased, .object], results := #[.tagged] }
+  else if declaration == `Array.usize then
+    some { params := #[.erased, .object], results := #[.usize] }
   else if declaration == `Array.get!InternalBorrowed ||
       declaration == `Array.get!Internal then
     some {
@@ -449,7 +471,7 @@ keeps narrowly linked resident packages independent of unrelated array APIs
 while preserving the same fail-closed signature checks as `internalize`.
 -/
 def internalizeAvailable (module : Module) : Except LinkError Module :=
-  let declarations := externalDeclarations.filter fun declaration =>
+  let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
   internalizeSelected module declarations
 

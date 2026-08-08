@@ -60,11 +60,11 @@ private def isArrayGetName (name : Name) : Bool :=
 private def expectedArrayGetCaller (target caller : Name) : Bool :=
   let suffix := caller.toString
   if target == arrayGetBangName then
-    suffix.endsWith "Illuminate.AnimationPlayer.findCurrentStep.loop" ||
-      suffix.endsWith "Illuminate.AnimationPlayer.actionAt" ||
+    suffix.endsWith "Illuminate.AnimationPlayer.actionAt" ||
       suffix.endsWith "Illuminate.AnimationPlayer.tick"
   else if target == arrayGetName then
-    suffix.endsWith "Illuminate.AnimationPlayer.parameterUpdates" ||
+    suffix.endsWith "Illuminate.AnimationPlayer.selectPlayerSegment" ||
+      suffix.endsWith "Illuminate.AnimationPlayer.parameterUpdates" ||
       suffix.endsWith "Illuminate.AnimationPlayer.advance" ||
       suffix.endsWith "Illuminate.AnimationPlayer.statusForPlaying" ||
       suffix.endsWith "Illuminate.AnimationPlayer.loopAt" ||
@@ -118,9 +118,11 @@ private partial def reachableDeclarations (program : Fir.LeanIR.ImpureProgram)
         reachableDeclarations program (calls.toList ++ pending) (seen.push name)
 
 /-- Remove compiler-captured source ancestors that have no named edge from the entry closure. -/
-def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact) :
+def pruneUnreachableDeclarations (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedRoots : Array Name := #[]) :
     Except String Fir.Validation.Lcnf.Artifact := do
-  let reachable ← reachableDeclarations artifact.program [artifact.entry]
+  let reachable ← reachableDeclarations artifact.program
+    ([artifact.entry] ++ retainedRoots.toList)
   let program : Fir.LeanIR.ImpureProgram := {
     decls := artifact.program.decls.filter (fun decl => reachable.contains decl.name) }
   unless program.findDecl? artifact.entry |>.isSome do
@@ -197,23 +199,23 @@ private def arrayGetSiteCount (sites : Array (Name × Name))
     if site.1 == target && site.2.toString.endsWith callerSuffix then count + 1 else count
 
 /--
-Recover the three monomorphic heap-object results erased by Lean 4.32's
-generic array-read declarations. The transform is deliberately tied to the
-exact `StepInfo`, `Segment`, and `Array String` call sites reachable from the
-real Illuminate player and rejects closure drift.
+Recovers the monomorphic heap-object results erased by Lean 4.32's generic
+array-read declarations. The transform is deliberately tied to the exact
+prepared-player call sites and rejects closure drift.
 -/
 def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
     Except String Fir.Validation.Lcnf.Artifact := do
   for targetName in #[arrayGetBangName, arrayGetName, arrayGetBangOwnedName] do
     let targets := artifact.program.decls.filter (fun decl => decl.name == targetName)
-    unless targets.size == 1 do
-      throw s!"expected one {targetName} declaration, found {targets.size}"
-    let target := targets[0]!
-    unless target.type == LCNF.ImpureType.tobject do
-      throw s!"{targetName} no longer returns tobject"
-    match target.value with
-    | .extern _ => pure ()
-    | .code _ => throw s!"{targetName} unexpectedly became local code"
+    let expectedCount := 1
+    unless targets.size == expectedCount do
+      throw s!"expected {expectedCount} {targetName} declaration(s), found {targets.size}"
+    if let some target := targets[0]? then
+      unless target.type == LCNF.ImpureType.tobject do
+        throw s!"{targetName} no longer returns tobject"
+      match target.value with
+      | .extern _ => pure ()
+      | .code _ => throw s!"{targetName} unexpectedly became local code"
   let results ← artifact.program.decls.mapM fun decl => do
     let decl := if isArrayGetName decl.name then
       { decl with type := LCNF.ImpureType.object }
@@ -227,9 +229,11 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
   let sites := results.foldl (init := #[]) fun sites result => sites ++ result.2
   unless sites.size == 11 &&
       arrayGetSiteCount sites arrayGetBangName
-        "Illuminate.AnimationPlayer.findCurrentStep.loop" == 1 &&
-      arrayGetSiteCount sites arrayGetBangName
         "Illuminate.AnimationPlayer.actionAt" == 1 &&
+      arrayGetSiteCount sites arrayGetBangName
+        "Illuminate.AnimationPlayer.tick" == 2 &&
+      arrayGetSiteCount sites arrayGetName
+        "Illuminate.AnimationPlayer.selectPlayerSegment" == 1 &&
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.parameterUpdates" == 1 &&
       arrayGetSiteCount sites arrayGetName
@@ -238,8 +242,6 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
         "Illuminate.AnimationPlayer.statusForPlaying" == 1 &&
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.loopAt" == 1 &&
-      arrayGetSiteCount sites arrayGetBangName
-        "Illuminate.AnimationPlayer.tick" == 2 &&
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.tick" == 1 &&
       arrayGetSiteCount sites arrayGetName
@@ -252,12 +254,14 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
     program
     forms := Fir.Validation.Lcnf.collectForms program }
 
-/-- Capture the real Illuminate trace entry and apply only checked ABI recovery. -/
+/-- Capture the real prepared Illuminate trace entry and apply only checked ABI recovery. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Validation.Lcnf.Artifact) := do
   let source ← withoutModifyingEnv <| compileEntryInternalizedLive
-    ``Illuminate.Animation.Native.replayTraceNative
-  let source ← match pruneUnreachableDeclarations source with
+    ``Illuminate.AnimationPlayer.replayTrace
+    #[``Illuminate.AnimationPlayer.transitionPrepared]
+  let source ← match pruneUnreachableDeclarations source
+      #[``Illuminate.AnimationPlayer.transitionPrepared] with
     | .ok source => pure source
     | .error message => return .error (.manifest message)
   match refineMonomorphicArrayGets source with
@@ -287,7 +291,7 @@ private def internalizeAvailableNumeric
 private def internalizeFloat
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentFloat.internalize artifact.module with
+  let module ← match Fir.Wasm.Emit.ResidentFloat.internalizeAvailable artifact.module with
     | .ok module => pure module
     | .error error =>
         throw (.manifest s!"failed to internalize Illuminate Float operations: {repr error}")
@@ -311,7 +315,7 @@ private def internalizeArrays
 private def internalizeNatMod
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentNatMod.internalize artifact.module with
+  let module ← match Fir.Wasm.Emit.ResidentNatMod.internalizeAvailable artifact.module with
     | .ok module => pure module
     | .error error =>
         throw (.manifest s!"failed to internalize Illuminate Nat.mod: {repr error}")

@@ -5,16 +5,15 @@ namespace IlluminateFirNative.Examples
 open Illuminate
 open Illuminate.AnimationPlayer
 
-def animation : CompiledAnimation := {
+def animation : PlayerAnimation := {
   fps := 10
   totalFrames := 3
   segments := #[{
     startFrame := 0
     frameCount := 3
-    syncFrame := "<svg>λ</svg>"
     paramMap := #[
-      { elemIdx := 0, attr := "textContent" },
-      { elemIdx := 1, attr := "fill" }]
+      { element := 0, target := .textContent },
+      { element := 1, target := .attribute "fill" }]
     params := #[#["α", "red"], #["β", "blue"], #["γ", "green"]]
   }]
   steps := #[{ frame := 0, pause := false, loop := false }]
@@ -44,11 +43,11 @@ def expectedSeek : Array FrameAction := #[
     playback := .finished
   }]
 
-#guard match Illuminate.Animation.Native.replayTraceNative animation [.seek 2] with
+#guard match Illuminate.AnimationPlayer.replayTrace animation [.seek 2] with
   | .ok actions => actions == expectedSeek
   | .error _ => false
 
-#guard match Illuminate.Animation.Native.replayTraceNative
+#guard match Illuminate.AnimationPlayer.replayTrace
     { animation with totalFrames := 0 } [] with
   | .error _ => true
   | .ok _ => false
