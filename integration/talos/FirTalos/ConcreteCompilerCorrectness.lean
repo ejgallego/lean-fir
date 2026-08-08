@@ -1144,6 +1144,71 @@ theorem ConstructorArgumentsRelated.semanticLength
   | nil => rfl
   | cons _ _ ih => simp [ih]
 
+/-- Pointwise ABI refinement transports an already-related physical argument
+row to the declaration's expected parameter kinds without changing either the
+physical operands or their semantic values. -/
+private theorem ConstructorArgumentsRelated.ofListRefines
+    {witness : RefinementWitness}
+    {actual expected : List AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness actual physicals semanticValues)
+    (sizes : actual.length = expected.length)
+    (pointwise :
+      (actual.zip expected).all
+          (fun pair => pair.fst.refines pair.snd) = true) :
+    ConstructorArgumentsRelated witness expected physicals semanticValues := by
+  induction related generalizing expected with
+  | nil =>
+      cases expected with
+      | nil => exact .nil
+      | cons expectedKind expectedKinds => simp at sizes
+  | @cons actualKind physical semantic actualKinds physicals semanticValues
+      head rest ih =>
+      cases expectedList : expected with
+      | nil => simp [expectedList] at sizes
+      | cons expectedKind expectedKinds =>
+          have splitPointwise :
+              actualKind.refines expectedKind = true ∧
+                (actualKinds.zip expectedKinds).all
+                    (fun pair => pair.fst.refines pair.snd) = true := by
+            simpa [expectedList] using pointwise
+          have headRefines : actualKind.refines expectedKind = true := by
+            exact splitPointwise.1
+          have tailRefines :
+              (actualKinds.zip expectedKinds).all
+                  (fun pair => pair.fst.refines pair.snd) = true := by
+            exact splitPointwise.2
+          have tailSizes : actualKinds.length = expectedKinds.length := by
+            simpa [expectedList] using sizes
+          have tail := ih (expected := expectedKinds) tailSizes tailRefines
+          exact .cons (head.ofRefines headRefines) tail
+
+/-- Pointwise ABI refinement transports an already-related physical argument
+row to the declaration's expected parameter kinds without changing either the
+physical operands or their semantic values. -/
+theorem ConstructorArgumentsRelated.ofKindsRefine
+    {witness : RefinementWitness}
+    {actual expected : Array AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness actual.toList physicals
+        semanticValues)
+    (refines : Fir.Wasm.kindsRefine actual expected = true) :
+    ConstructorArgumentsRelated witness expected.toList physicals
+      semanticValues := by
+  simp only [Fir.Wasm.kindsRefine, Bool.and_eq_true] at refines
+  have sizes : actual.toList.length = expected.toList.length := by
+    have sizeEq : actual.size = expected.size := beq_iff_eq.mp refines.1
+    simpa using sizeEq
+  have pointwise :
+      (actual.toList.zip expected.toList).all
+          (fun pair => pair.fst.refines pair.snd) = true := by
+    have allRefines := refines.2
+    rw [← Array.all_toList] at allRefines
+    simpa only [Array.toList_zip] using allRefines
+  exact related.ofListRefines sizes pointwise
+
 /--
 An object-field ABI kind rules out every non-i32 physical lane. The remaining
 word is exactly the one related to the source field.

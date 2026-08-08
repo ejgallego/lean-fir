@@ -5592,6 +5592,23 @@ empty-entry reuse-fact/cache frame for each callee, and then performs the
 well-founded semantic induction over finite source executions. No semantic
 Wasm ABI or concrete-runtime contract changes.
 
+W6.6hl connects that retained static row to the dynamic argument relation.
+`ConstructorArgumentsRelated.ofKindsRefine` lifts an exact physical/source
+argument relation across the validator's complete pointwise ABI-refinement
+decision, reusing `PhysicalValueRel.ofRefines` and changing neither bits nor
+semantic values. The generated declaration selector also inverts the actual
+successful `lowerSupported` traversal and retains the shared declaration-
+parameter uniqueness fact on the selected row. Thus the duplicate-identifier
+case fixed by `WASM-DECLARATION-PARAMETER-UNIQUENESS` is unavailable in the
+callee-frame proof itself rather than being assumed by its caller.
+
+This remains compiler verification: both facts are derived from production
+validation/lowering equations and contain no target execution. The next slice
+proves that the unique `addDeclarationParams` row is exactly the source-order
+parameter-kind row, uses it to establish `EnvLocalsRelated` for
+`targetFunction.toLocals`, and lifts the caller's heap/cache/runtime fields to
+the empty-facts callee-entry frame.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

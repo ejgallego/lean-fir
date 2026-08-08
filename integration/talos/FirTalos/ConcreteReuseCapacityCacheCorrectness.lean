@@ -7507,10 +7507,86 @@ structure ConcreteGeneratedInternalDeclaration
     extends ConcreteGeneratedDeclaration context sourceCode sourceModule
       sourceFunction target where
   parameterLocals : Fir.Wasm.LocalKinds
+  parameterIdsUnique :
+    Fir.Wasm.declarationParameterIdsUnique declaration = true
   parametersAdded :
     Fir.Wasm.addDeclarationParams program declaration = .ok parameterLocals
   sourceParameters :
     sourceFunction.params = parameterLocals.reverse.toArray
+
+/-- Pointwise inversion of a successful `Except`-valued array traversal. -/
+private theorem exceptArrayForM_ok_of_mem
+    {α ε : Type} {f : α → Except ε Unit} {xs : Array α} {x : α}
+    (run : xs.forM f = .ok ()) (member : x ∈ xs) :
+    f x = .ok () := by
+  have listRun :
+      xs.toList.foldlM (fun _ item => f item) () = .ok () := by
+    simpa [Array.forM] using run
+  have listMember : x ∈ xs.toList := by simpa using member
+  have go : ∀ (list : List α),
+      list.foldlM (fun _ item => f item) () = .ok () →
+        x ∈ list → f x = .ok () := by
+    intro list
+    induction list with
+    | nil => simp
+    | cons head tail ih =>
+        intro tailRun itemMember
+        simp only [List.mem_cons] at itemMember
+        simp only [List.foldlM_cons] at tailRun
+        cases headRun : f head with
+        | error error =>
+            simp only [headRun, Bind.bind, Except.bind] at tailRun
+            contradiction
+        | ok unit =>
+            have unitEq : unit = () := Subsingleton.elim _ _
+            subst unit
+            simp only [headRun, Bind.bind, Except.bind] at tailRun
+            rcases itemMember with rfl | itemMember
+            · exact headRun
+            · exact ih tailRun itemMember
+  exact go xs.toList listRun listMember
+
+/-- Supported lowering validates the exact declaration selected from the
+program, so its parameter identifiers satisfy the shared single-scope
+uniqueness contract. -/
+private theorem declarationParameterIdsUnique_of_lowerSupported
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    (lowered : Fir.Wasm.lowerSupported program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration) :
+    Fir.Wasm.declarationParameterIdsUnique declaration = true := by
+  have validated : Fir.Wasm.validateSupported program = .ok () := by
+    unfold Fir.Wasm.lowerSupported at lowered
+    cases validationEq : Fir.Wasm.validateSupported program with
+    | error error =>
+        simp only [validationEq, Bind.bind, Except.bind] at lowered
+        contradiction
+    | ok unit =>
+        have unitEq : unit = () := Subsingleton.elim _ _
+        simpa [validationEq, unitEq]
+  have declarationMember : declaration ∈ program.decls := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    rw [← selected]
+    exact Array.getElem_mem inBounds
+  have declarationValidated :
+      Fir.Wasm.validateSupportedDecl program declaration = .ok () := by
+    unfold Fir.Wasm.validateSupported at validated
+    exact exceptArrayForM_ok_of_mem validated declarationMember
+  have supported : Fir.Wasm.supportedDecl program declaration = true := by
+    by_contra notSupported
+    have supportedFalse :
+        Fir.Wasm.supportedDecl program declaration = false :=
+      Bool.eq_false_iff.mpr notSupported
+    cases valueEq : declaration.value <;>
+      simp [Fir.Wasm.validateSupportedDecl, valueEq, supportedFalse]
+        at declarationValidated
+  unfold Fir.Wasm.supportedDecl at supported
+  simp only [Bool.and_eq_true] at supported
+  exact supported.1.1
 
 /-- Pointwise inversion of successful `Except`-valued list traversal. -/
 private theorem exceptListMapM_getElem?_eq_some
@@ -7910,9 +7986,12 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
   have sourceParameters :
       sourceFunction.params = row.paramLocals.reverse.toArray := by
     simpa using congrArg Fir.Wasm.Function.params row.sourceFunctionEq
+  have parameterIdsUnique :=
+    declarationParameterIdsUnique_of_lowerSupported lowered declarationFound
   exact ⟨row.context, sourceFunction, contexts, ⟨{
     toConcreteGeneratedDeclaration := generated
     parameterLocals := row.paramLocals
+    parameterIdsUnique
     parametersAdded := row.paramsAdded
     sourceParameters }⟩⟩
 

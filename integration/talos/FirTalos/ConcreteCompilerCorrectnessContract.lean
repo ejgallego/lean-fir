@@ -9,6 +9,38 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/-- The validator's ABI subtyping decision is sufficient to reinterpret an
+already-related concrete argument row at the generated callee's exact
+parameter kinds; no target execution or translation certificate is needed. -/
+example
+    {witness : RefinementWitness}
+    {actual expected : Array AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness actual.toList physicals
+        semanticValues)
+    (refines : Fir.Wasm.kindsRefine actual expected = true) :
+    ConstructorArgumentsRelated witness expected.toList physicals
+      semanticValues :=
+  related.ofKindsRefine refines
+
+/-- Every selected production-generated internal row carries the parameter
+identifier uniqueness validated by `lowerSupported`, alongside its exact
+lowerer parameter-local row. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row :
+      ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target) :
+    Fir.Wasm.declarationParameterIdsUnique declaration = true :=
+  row.parameterIdsUnique
+
 /--
 Compile-time harness for the public partial-correctness boundary.
 
