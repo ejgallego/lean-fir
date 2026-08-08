@@ -16,12 +16,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - No cross-lane integration lease is currently active. The user-reassigned
-  `W6-GENERATED-DECLARATION-FAMILY` lease is complete at ready W6 head
-  `331c7ca0`. W7 owns its independent artifact work; W6 next closes the
-  dynamic hereditary theorem by induction over admitted finite source
-  executions.
+  `W6-CALLEE-PARAMETER-ROWS` lease is complete at ready W6 head `a0374752`.
+  W7 owns its independent artifact work; W6 next derives the callee-entry
+  value relation and begins the dynamic hereditary proof by induction over
+  admitted finite source executions.
 
 ## Completed integration lease
+
+- Milestone: `W6-CALLEE-PARAMETER-ROWS`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this short certificate-free compiler-proof slice.
+- Integration branch/worktree: `main` in the root worktree.
+- Published stack: W6 functional head `a83651c4` and ready mailbox `a0374752`,
+  based directly on `main` at `d69e0252`.
+- Lease boundary: satisfied. Each production-generated internal declaration
+  now retains the exact `addDeclarationParams` row and its identity with the
+  emitted symbolic parameters. Direct-call evidence retains the validator's
+  effective parameter/result kinds and refinement equations. These are static
+  production facts needed to initialize recursive callee frames; they contain
+  no target execution or translation certificate and change no semantic Wasm
+  ABI or concrete-runtime contract.
+- Validation: Lean Beam update/sync/save for both edited proof modules,
+  focused compiler-proof dependency cones, `git diff --check`, complete
+  `make check` with 1,844/1,844 comparisons equal and zero findings, and all
+  3,125 Talos jobs.
+
+## Previous completed integration lease
 
 - Milestone: `W6-GENERATED-DECLARATION-FAMILY`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -41,7 +61,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check` with 1,844/1,844 comparisons equal and zero findings, and all
   3,125 Talos jobs.
 
-## Previous completed integration lease
+## Earlier completed integration lease
 
 - Milestone: `W6-GENERATED-LOCAL-LAYOUT`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -60,7 +80,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   onto the final base. W7 must rebase and run its artifact-specific gate
   because production lowering changed.
 
-## Earlier completed integration lease
+## Older completed integration lease
 
 - Milestone: `ILLUMINATE-TALOS-ADAPTER`.
 - Integration owner: `wasm-proof`; the user reassigned the integration lease
@@ -83,7 +103,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with 1,844/1,844 comparisons equal and zero findings; and all 3,125 Talos
   jobs. W7 may now rebase and finish its own artifact/Illuminate acceptance.
 
-## Older completed integration lease
+## Still older completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
 - Integration owner: `wasm-gen`; the user assigned this short integration
@@ -107,7 +127,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with digest
   `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
 
-## Oldest completed integration lease
+## Oldest retained completed integration lease
 
 - Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
 - Integration owner: `wasm-gen`; the temporary lease is complete and the
@@ -185,6 +205,18 @@ identities.
   well-founded induction over admitted finite source executions, supplies it
   to named calls, saturated closures, and lazy misses, then exposes the clean
   whole-export partial-correctness theorem.
+
+- `W6-CALLEE-PARAMETER-ROWS` is linked/accepted through W6 functional head
+  `a83651c4` and ready mailbox `a0374752`, based directly on `d69e0252`.
+  `ConcreteGeneratedInternalDeclaration` retains the exact production
+  parameter-local row and proves that it is the emitted function parameter
+  row. `DirectInternalCallSite` retains the validator's argument/parameter
+  and callee/result refinement facts. This closes the static compiler-data
+  boundary needed to construct recursive callee-entry frames, without adding
+  execution certificates or changing semantic ABI/runtime contracts. All
+  1,844 repository comparisons and all 3,125 Talos jobs pass. W6 next derives
+  the entry value relation and starts the well-founded dynamic hereditary
+  proof.
 
 - `SCALAR-CLOSURE-ABI-ADMISSION` is linked/accepted through W6 functional head
   `cf1ed73f` and ready mailbox head `4013a6ba`. The lowering decision is
