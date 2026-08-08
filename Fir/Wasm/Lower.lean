@@ -656,30 +656,97 @@ def addJoinParams (locals : LocalKinds) (decl : LCNF.FunDecl .impure) :
     let kind ← checkedJoinParamKind decl param
     return insertLocal locals param.fvarId kind
 
-partial def collectLocals (locals : LocalKinds) :
-    LCNF.Code .impure → Except CompileError LocalKinds
+/-- Proof-transparent partiality for declaration-local collection. -/
+abbrev CollectLocalsM (α : Type) := ExceptT CompileError Option α
+
+def liftCollectLocalsResult {α : Type}
+    (result : Except CompileError α) : CollectLocalsM α :=
+  some result
+
+def collectLocalsAltsWithM [Monad m]
+    (collect : LocalKinds → LCNF.Code .impure → m LocalKinds)
+    (locals : LocalKinds) : List (LCNF.Alt .impure) → m LocalKinds
+  | [] => pure locals
+  | alt :: alts => do
+      let locals ← match alt with
+        | .ctorAlt _ code => collect locals code
+        | .default code => collect locals code
+        | .alt _ _ _ h => nomatch h
+      collectLocalsAltsWithM collect locals alts
+
+open Lean.Order in
+@[partial_fixpoint_monotone]
+theorem monotone_collectLocalsAltsWithM
+    {γ : Type} [PartialOrder γ]
+    (collect : γ → LocalKinds → LCNF.Code .impure → CollectLocalsM LocalKinds)
+    (locals : LocalKinds) (alts : List (LCNF.Alt .impure))
+    (hmono : monotone collect) :
+    monotone (fun x => collectLocalsAltsWithM (collect x) locals alts) := by
+  induction alts generalizing locals with
+  | nil =>
+      simp only [collectLocalsAltsWithM]
+      apply monotone_const
+  | cons alt alts ih =>
+      cases alt with
+      | alt _ _ _ impossible => nomatch impossible
+      | ctorAlt info code =>
+          simp only [collectLocalsAltsWithM]
+          apply monotone_bind
+          · apply monotone_apply
+            apply monotone_apply
+            exact hmono
+          · apply monotone_of_monotone_apply
+            intro nextLocals
+            exact ih nextLocals
+      | default code =>
+          simp only [collectLocalsAltsWithM]
+          apply monotone_bind
+          · apply monotone_apply
+            apply monotone_apply
+            exact hmono
+          · apply monotone_of_monotone_apply
+            intro nextLocals
+            exact ih nextLocals
+
+def collectLocalsCore (locals : LocalKinds) :
+    LCNF.Code .impure → CollectLocalsM LocalKinds
   | .let decl continuation => do
-      let kind ← letValueKind decl
-      collectLocals (insertLocal locals decl.fvarId kind) continuation
+      let kind ← liftCollectLocalsResult (letValueKind decl)
+      collectLocalsCore (insertLocal locals decl.fvarId kind) continuation
   | .fun _ _ h => nomatch h
   | .jp decl continuation => do
-      let locals ← addJoinParams locals decl
-      let locals ← collectLocals locals decl.value
-      collectLocals locals continuation
+      let locals ← liftCollectLocalsResult (addJoinParams locals decl)
+      let locals ← collectLocalsCore locals decl.value
+      collectLocalsCore locals continuation
   | .jmp .. | .return .. | .unreach .. => pure locals
-  | .cases cases => do
-      cases.alts.foldlM (init := locals) fun locals alt =>
-        match alt with
-        | .ctorAlt _ code => collectLocals locals code
-        | .default code => collectLocals locals code
-        | .alt _ _ _ h => nomatch h
+  | .cases cases =>
+      collectLocalsAltsWithM collectLocalsCore locals cases.alts.toList
   | .oset _ _ _ continuation
   | .uset _ _ _ continuation
   | .sset _ _ _ _ _ continuation
   | .setTag _ _ continuation
   | .inc _ _ _ _ continuation
   | .dec _ _ _ _ _ continuation
-  | .del _ continuation => collectLocals locals continuation
+  | .del _ continuation => collectLocalsCore locals continuation
+partial_fixpoint
+
+def finishCollectLocalsResult {α : Type}
+    (result : CollectLocalsM α) : Except CompileError α :=
+  result.getD (.error (.malformed "declaration-local collection produced no result"))
+
+def collectLocals (locals : LocalKinds) (code : LCNF.Code .impure) :
+    Except CompileError LocalKinds :=
+  finishCollectLocalsResult (collectLocalsCore locals code)
+
+theorem finishCollectLocalsResult_eq_ok_iff
+    {α : Type} {result : CollectLocalsM α} {value : α} :
+    finishCollectLocalsResult result = .ok value ↔
+      result = some (.ok value) := by
+  cases result with
+  | none => simp [finishCollectLocalsResult]
+  | some result =>
+      change result = .ok value ↔ some result = some (.ok value)
+      exact ⟨congrArg some, Option.some.inj⟩
 
 def compileArg (context : Context) :
     LCNF.Arg .impure → Except CompileError (List Instruction × AbiKind)
@@ -1606,18 +1673,19 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
   | .extern _ => return none
   | .code code =>
       let paramLocals ← addDeclarationParams program decl
-      let allLocals ← collectLocals paramLocals code
-      let context : Context := { program, localKinds := allLocals, cachedDeclarations }
+      let bodyLocals ← collectLocals [] code
+      let params := paramLocals.reverse
+      let locals := bodyLocals.reverse
+      let localKinds := params ++ locals
+      let context : Context := { program, localKinds, cachedDeclarations }
       let body ← compileCode context code
-      let isParam (fvarId : FVarId) := decl.params.any (·.fvarId.name == fvarId.name)
-      let locals := allLocals.reverse.filter fun entry => !isParam entry.fst
       let results ←
         match resultKinds decl.type with
         | .ok results => pure results
         | .error error => throw (.abi error)
       return some {
         name := decl.name
-        params := paramLocals.reverse.toArray
+        params := params.toArray
         results
         locals := locals.toArray
         body }

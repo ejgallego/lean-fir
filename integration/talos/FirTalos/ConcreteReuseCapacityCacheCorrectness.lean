@@ -7159,18 +7159,18 @@ structure LoweredInternalDeclaration
     (sourceCode : LCNF.Code .impure)
     (sourceFunction : Fir.Wasm.Function) where
   paramLocals : Fir.Wasm.LocalKinds
-  localKinds : Fir.Wasm.LocalKinds
+  bodyLocals : Fir.Wasm.LocalKinds
   symbolicBody : List Fir.Wasm.Instruction
   abiResults : Array AbiKind
   bodyEq : declaration.value = .code sourceCode
   paramsAdded :
     Fir.Wasm.addDeclarationParams program declaration = .ok paramLocals
   localsCollected :
-    Fir.Wasm.collectLocals paramLocals sourceCode = .ok localKinds
+    Fir.Wasm.collectLocals [] sourceCode = .ok bodyLocals
   bodyCompiled :
     Fir.Wasm.compileCode {
         program
-        localKinds
+        localKinds := paramLocals.reverse ++ bodyLocals.reverse
         cachedDeclarations } sourceCode = .ok symbolicBody
   resultsCompiled :
     Fir.Wasm.resultKinds declaration.type = .ok abiResults
@@ -7179,10 +7179,20 @@ structure LoweredInternalDeclaration
       name := declaration.name
       params := paramLocals.reverse.toArray
       results := abiResults
-      locals := (localKinds.reverse.filter fun entry =>
-        !declaration.params.any fun param =>
-          param.fvarId.name == entry.fst.name).toArray
+      locals := bodyLocals.reverse.toArray
       body := symbolicBody }
+
+/-- The canonical binding row shared by symbolic compilation and adaptation. -/
+def LoweredInternalDeclaration.localKinds
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) : Fir.Wasm.LocalKinds :=
+  row.paramLocals.reverse ++ row.bodyLocals.reverse
 
 /-- The exact declaration-local context used by production lowering. -/
 def LoweredInternalDeclaration.context
@@ -7239,27 +7249,61 @@ theorem LoweredInternalDeclaration.contextsCoherent
   program := callerProgram
   cachedDeclarations := callerCaches }
 
-/--
-Uniform compiler theorem still required for production declaration selection:
-every hygienic `lowerDecl` row gives the adapter the same local number and ABI
-kind that the lowering context assigns to a source variable.
+/-- Name-directed lookup and numeric lookup select the same typed entry when
+they traverse the same canonical binding row. -/
+private theorem findFVar?_kind_of_findLocalKind?
+    {locals : Fir.Wasm.LocalKinds} {fvarId : FVarId} {kind : AbiKind}
+    (found : Fir.Wasm.findLocalKind? locals fvarId = some kind) :
+    ∃ index,
+      findFVar? locals fvarId = some index ∧
+        locals[index]?.map Prod.snd = some kind := by
+  induction locals with
+  | nil => simp [Fir.Wasm.findLocalKind?] at found
+  | cons entry rest ih =>
+      obtain ⟨candidate, candidateKind⟩ := entry
+      by_cases sameName : candidate.name == fvarId.name
+      · rw [Fir.Wasm.findLocalKind?, if_pos sameName] at found
+        simp only [Option.some.injEq] at found
+        subst candidateKind
+        exact ⟨0, by simp [findFVar?, sameName], by simp⟩
+      · rw [Fir.Wasm.findLocalKind?, if_neg sameName] at found
+        obtain ⟨index, indexFound, kindFound⟩ := ih found
+        refine ⟨index + 1, ?_, ?_⟩
+        · simp [findFVar?, sameName, indexFound]
+        · simpa [Nat.add_comm] using kindFound
 
-This is deliberately quantified over the executable `lowerDecl` view.  It is
-not a per-program or per-call translation certificate; proving this proposition
-once closes local layout selection for every generated declaration.
--/
-def LoweredDeclarationLocalLayoutSound : Prop :=
-  ∀ {program : Fir.LeanIR.ImpureProgram}
-      {cachedDeclarations : Array Name}
-      {declaration : LCNF.Decl .impure}
-      {sourceCode : LCNF.Code .impure}
-      {sourceFunction : Fir.Wasm.Function}
-      (hygienic :
-        Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
-      (row :
-        LoweredInternalDeclaration program cachedDeclarations declaration
-          sourceCode sourceFunction),
-    LocalLayoutAligned row.context sourceFunction
+/-- Every production declaration uses one canonical binding row for symbolic
+local lookup, emitted parameters/locals, and numeric adaptation. -/
+theorem LoweredInternalDeclaration.localsAligned
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+    LocalLayoutAligned row.context sourceFunction := by
+  have bindingsEq : functionBindings sourceFunction = row.localKinds := by
+    simpa [functionBindings, LoweredInternalDeclaration.localKinds] using
+      congrArg functionBindings row.sourceFunctionEq
+  unfold LocalLayoutAligned
+  intro fvarId kind found
+  have localFound :
+      Fir.Wasm.findLocalKind? row.localKinds fvarId = some kind := by
+    unfold Fir.Wasm.getLocal at found
+    change (match Fir.Wasm.findLocalKind? row.localKinds fvarId with
+      | some actual =>
+          Except.ok (Fir.Wasm.Instruction.localGet fvarId, actual)
+      | none =>
+          Except.error (Fir.Wasm.CompileError.unknownVariable fvarId)) =
+        Except.ok (Fir.Wasm.Instruction.localGet fvarId, kind) at found
+    split at found <;> rename_i selected
+    · simp only [Except.ok.injEq, Prod.mk.injEq, true_and] at found
+      simpa [selected, found]
+    · contradiction
+  rw [bindingsEq]
+  exact findFVar?_kind_of_findLocalKind? localFound
 
 /-- Successful production `lowerDecl` exposes its exact declaration-local
 context, symbolic body, ABI result row, and emitted source function. -/
@@ -7284,16 +7328,16 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
   | ok paramLocals =>
       simp only [paramsResult, Bind.bind, Except.bind] at lowered
       cases localsResult :
-          Fir.Wasm.collectLocals paramLocals sourceCode with
+          Fir.Wasm.collectLocals [] sourceCode with
       | error error =>
           simp only [localsResult] at lowered
           contradiction
-      | ok localKinds =>
+      | ok bodyLocals =>
           simp only [localsResult] at lowered
           cases bodyResult :
               Fir.Wasm.compileCode {
                 program
-                localKinds
+                localKinds := paramLocals.reverse ++ bodyLocals.reverse
                 cachedDeclarations } sourceCode with
           | error error =>
               simp only [bodyResult] at lowered
@@ -7310,7 +7354,7 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
                     Except.ok.injEq, Option.some.injEq] at lowered
                   exact ⟨{
                     paramLocals
-                    localKinds
+                    bodyLocals
                     symbolicBody
                     abiResults
                     bodyEq
@@ -7344,14 +7388,14 @@ theorem lowerDecl_some_of_code
       | ok paramLocals =>
           simp only [paramsResult, Bind.bind, Except.bind] at lowered
           cases localsResult :
-              Fir.Wasm.collectLocals paramLocals sourceCode with
+              Fir.Wasm.collectLocals [] sourceCode with
           | error error => simp [localsResult] at lowered
-          | ok localKinds =>
+          | ok bodyLocals =>
               simp only [localsResult] at lowered
               cases bodyResult :
                   Fir.Wasm.compileCode {
                     program
-                    localKinds
+                    localKinds := paramLocals.reverse ++ bodyLocals.reverse
                     cachedDeclarations } sourceCode with
               | error error => simp [bodyResult] at lowered
               | ok symbolicBody =>
@@ -7741,9 +7785,9 @@ Whole-pipeline internal-declaration selector.
 
 Supported lowering chooses the real symbolic function row, `adapt` chooses the
 corresponding concrete row, and the declaration-local context is constructed
-from the exact `lowerDecl` intermediates.  The only outstanding compiler lemma
-is the uniform hygiene-to-local-layout theorem named by
-`LoweredDeclarationLocalLayoutSound`.
+from the exact `lowerDecl` intermediates. Symbolic lookup and numeric adaptation
+share the canonical binding row by construction; no layout premise crosses the
+public selector.
 -/
 theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
     {program : Fir.LeanIR.ImpureProgram}
@@ -7754,9 +7798,6 @@ theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
     {declaration : LCNF.Decl .impure}
     {sourceCode : LCNF.Code .impure}
     {resultKind : AbiKind}
-    (layoutSound : LoweredDeclarationLocalLayoutSound)
-    (declarationHygienic :
-      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
@@ -7780,7 +7821,7 @@ theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
   have contexts : DeclarationContextsCoherent caller row.context :=
     row.contextsCoherent callerProgram callerCaches
   have localsAligned : LocalLayoutAligned row.context sourceFunction :=
-    layoutSound declarationHygienic row
+    row.localsAligned
   have sourceSingleResult : sourceFunction.results.size = 1 :=
     row.singleResult_of_abiKind resultClassified
   have generated :=

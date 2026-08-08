@@ -3820,10 +3820,9 @@ example
 
 /--
 The production declaration selector is driven by `lowerSupported` and
-`adapt`, not by caller-supplied symbolic/target rows.  Its sole remaining
-static premise is the uniform hygiene-to-local-layout theorem for
-`lowerDecl`; the result carries the exact callee context and pointwise adapted
-function row.
+`adapt`, not by caller-supplied symbolic/target rows. The canonical binding row
+constructed by `lowerDecl` supplies local-layout alignment internally; the
+result carries the exact callee context and pointwise adapted function row.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -3834,9 +3833,6 @@ example
     {declaration : LCNF.Decl .impure}
     {sourceCode : LCNF.Code .impure}
     {resultKind : AbiKind}
-    (layoutSound : LoweredDeclarationLocalLayoutSound)
-    (declarationHygienic :
-      Fir.LeanIR.ImpureHygiene.declHygienic declaration = true)
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
@@ -3851,8 +3847,8 @@ example
       DeclarationContextsCoherent caller calleeContext ∧
         Nonempty (ConcreteGeneratedDeclaration calleeContext sourceCode
           sourceModule sourceFunction target) :=
-  ConcreteGeneratedDeclaration.exists_ofSupportedPipeline layoutSound
-    declarationHygienic callerProgram callerCaches lowered adapted
+  ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
+    callerProgram callerCaches lowered adapted
     declarationFound bodyEq resultClassified
 
 /--

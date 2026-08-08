@@ -5537,9 +5537,26 @@ source machine states observe only `context.program`; the callee's target
 This fixes
 `FIR-BUG-wasm-none-recursive-callee-context-aliasing`. The next recursive slice
 must build each `ConcreteSupportedDeclaration` and its context from the actual
-`lowerDecl`/adapter function row, prove the coherence fields, and feed the
-result into the hereditary declaration package. It must not recover the old
-interface by equating declaration-local kinds or joins.
+`lowerDecl`/adapter function row and feed the result into the hereditary
+declaration package. It must not recover the old interface by equating
+declaration-local kinds or joins.
+
+W6.6hi closes the remaining local-layout premise in that production selector.
+`lowerDecl` now constructs one canonical parameter-plus-body-local binding row
+and uses it for both symbolic lookup and the emitted function. The adapter's
+name-directed numeric lookup therefore traverses exactly the compiler row, and
+`LoweredInternalDeclaration.localsAligned` proves the index and ABI-kind
+agreement directly. `collectLocals` retains its public result type and behavior
+while exposing a proof-transparent `partial_fixpoint` core, so later static
+compiler proofs need not duplicate its recursion.
+
+`ConcreteGeneratedDeclaration.exists_ofSupportedPipeline` now derives the
+callee context, function row, body adaptation, and local alignment from the
+actual `lowerSupported`/`adapt` equations without a caller-supplied layout law
+or declaration-hygiene premise. No semantic Wasm ABI or concrete-runtime
+contract changes. The next slice assembles these generated declaration rows
+into the module-wide hereditary declaration family and then exposes the clean
+whole-export partial-correctness theorem.
 
 ## Parallel agent packages
 
