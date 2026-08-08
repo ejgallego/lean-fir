@@ -4349,6 +4349,8 @@ structure DirectInternalCallSite
   calleeCode : LCNF.Code .impure
   calleeEnv : Env
   resultKind : AbiKind
+  parameterKinds : Array AbiKind
+  calleeResultKind : AbiKind
   args : Array (LCNF.Arg .impure)
   argumentCode : List Fir.Wasm.Instruction
   argumentKinds : Array AbiKind
@@ -4357,6 +4359,14 @@ structure DirectInternalCallSite
   kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind
   declarationFound :
     context.program.findDecl? declaration = some sourceDeclaration
+  parametersKnown :
+    Fir.Wasm.declarationParameterKinds? context.program sourceDeclaration =
+      some parameterKinds
+  argumentsRefine :
+    Fir.Wasm.kindsRefine argumentKinds parameterKinds = true
+  calleeResult :
+    Fir.Wasm.directAbiKind? sourceDeclaration.type = some calleeResultKind
+  calleeResultRefines : calleeResultKind.refines resultKind = true
   nonCached :
     (args.isEmpty && sourceDeclaration.params.isEmpty) = false
   bodyEq : sourceDeclaration.value = .code calleeCode
@@ -7476,6 +7486,32 @@ structure ConcreteGeneratedDeclaration
   functionAdapted :
     FirTalos.function sourceModule sourceFunction = .ok targetFunction
 
+/--
+Production-generated declaration evidence with its exact parameter row.
+
+`ConcreteGeneratedDeclaration` is sufficient for proving a body once its
+entry frame is related. Recursive calls additionally have to construct that
+entry frame from semantic arguments and physical Wasm operands. These fields
+retain the parameter row computed by the real `addDeclarationParams` call and
+identify it with the emitted symbolic function parameters; they contain no
+dynamic source or target execution.
+-/
+structure ConcreteGeneratedInternalDeclaration
+    (program : Fir.LeanIR.ImpureProgram)
+    (declaration : LCNF.Decl .impure)
+    (context : Fir.Wasm.Context)
+    (sourceCode : LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (target : AdaptedModule)
+    extends ConcreteGeneratedDeclaration context sourceCode sourceModule
+      sourceFunction target where
+  parameterLocals : Fir.Wasm.LocalKinds
+  parametersAdded :
+    Fir.Wasm.addDeclarationParams program declaration = .ok parameterLocals
+  sourceParameters :
+    sourceFunction.params = parameterLocals.reverse.toArray
+
 /-- Pointwise inversion of successful `Except`-valued list traversal. -/
 private theorem exceptListMapM_getElem?_eq_some
     {α β ε : Type} {f : α → Except ε β} {xs : List α} {ys : List β}
@@ -7831,6 +7867,56 @@ theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
   exact ⟨row.context, sourceFunction, contexts, generated⟩
 
 /--
+The production selector with the declaration parameter row retained for
+recursive callee-entry reconstruction.
+-/
+theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {resultKind : AbiKind}
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    ∃ calleeContext sourceFunction,
+      DeclarationContextsCoherent caller calleeContext ∧
+        Nonempty (ConcreteGeneratedInternalDeclaration program declaration
+          calleeContext sourceCode sourceModule sourceFunction target) := by
+  have ordinaryLowering : Fir.Wasm.lower program = .ok sourceModule :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  obtain ⟨sourceFunctionIndex, sourceFunction, sourceFunctionFound,
+      ⟨row⟩⟩ :=
+    LoweredInternalDeclaration.exists_of_lower ordinaryLowering
+      declarationFound bodyEq
+  have contexts : DeclarationContextsCoherent caller row.context :=
+    row.contextsCoherent callerProgram callerCaches
+  have sourceSingleResult : sourceFunction.results.size = 1 :=
+    row.singleResult_of_abiKind resultClassified
+  obtain ⟨generated⟩ :=
+    ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
+      sourceFunctionIndex sourceFunctionFound row.compileCode row.localsAligned
+      sourceSingleResult adapted
+  have sourceParameters :
+      sourceFunction.params = row.paramLocals.reverse.toArray := by
+    simpa using congrArg Fir.Wasm.Function.params row.sourceFunctionEq
+  exact ⟨row.context, sourceFunction, contexts, ⟨{
+    toConcreteGeneratedDeclaration := generated
+    parameterLocals := row.paramLocals
+    parametersAdded := row.paramsAdded
+    sourceParameters }⟩⟩
+
+/--
 Module-wide production declaration family.
 
 Every value-returning internal declaration selected from the source program is
@@ -7860,8 +7946,9 @@ def ConcreteGeneratedDeclarationFamily
             Fir.Wasm.abiKind? declaration.type = .ok (some resultKind) →
               ∃ calleeContext sourceFunction,
                 DeclarationContextsCoherent caller calleeContext ∧
-                  Nonempty (ConcreteGeneratedDeclaration calleeContext
-                    sourceCode sourceModule sourceFunction target)
+                  Nonempty (ConcreteGeneratedInternalDeclaration program
+                    declaration calleeContext sourceCode sourceModule
+                    sourceFunction target)
 
 /--
 One successful production lowering/adaptation pair constructs the complete
@@ -7877,8 +7964,10 @@ theorem ConcreteGeneratedDeclarationFamily.ofSupportedPipeline
     ConcreteGeneratedDeclarationFamily program sourceModule target := by
   intro caller declarationName declaration sourceCode resultKind callerProgram
     callerCaches declarationFound bodyEq resultClassified
-  exact ConcreteGeneratedDeclaration.exists_ofSupportedPipeline callerProgram
-    callerCaches lowered adapted declarationFound bodyEq resultClassified
+  exact
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
+      callerProgram callerCaches lowered adapted declarationFound bodyEq
+      resultClassified
 
 /-- Every supported export exposes its export-independent declaration body. -/
 def ConcreteSupportedExport.toSupportedDeclaration

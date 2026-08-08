@@ -5575,6 +5575,23 @@ that recursive knot is closed, the root row can expose the whole-export
 partial-correctness theorem without a simulation or translation-certificate
 premise. No semantic Wasm ABI or concrete-runtime contract changes.
 
+W6.6hk retains the missing callee-entry component of the production family.
+`ConcreteGeneratedInternalDeclaration` extends each selected generated body
+with the exact parameter row returned by `addDeclarationParams` and its
+identity with the emitted symbolic function parameters. This is necessary to
+construct a recursive callee's initial local frame from source arguments and
+physical Wasm operands; body-local alignment alone cannot establish that
+entry relation. The module-wide family now returns this stronger static row.
+`DirectInternalCallSite` retains the matching source-only validator facts:
+the declaration's effective parameter/result kinds and the argument/result
+refinement equations accepted by production support.
+
+No source or target execution is stored in the row. The next proof derives
+argument-to-parameter ABI refinement from production support, constructs the
+empty-entry reuse-fact/cache frame for each callee, and then performs the
+well-founded semantic induction over finite source executions. No semantic
+Wasm ABI or concrete-runtime contract changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

@@ -3855,6 +3855,8 @@ example
 The same two production equations assemble every internal value-returning
 declaration into one module-wide family. Recursive callers may have different
 local layouts; they supply only the shared program and cache-name equations.
+Each selected row also retains the exact production parameter layout needed
+to relate semantic arguments to the callee's initial Wasm locals.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
