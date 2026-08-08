@@ -68,6 +68,7 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
     (labels : List FVarId) : Fir.Wasm.Instruction → Except AdapterError Wasm.Instruction
   | .i32Const _ value => return .const value
   | .i64Const _ value => return .constI64 value
+  | .f64Const value => return .f64Const value
   | .localGet fvarId => do
       let locals := function.params.toList ++ function.locals.toList
       let some index := findFVar? locals fvarId | throw (.unknownLocal fvarId)
@@ -90,7 +91,21 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .i32ShrU => return .shrU
   | .i32Add => return .add
   | .i32Sub => return .sub
+  | .i32RemU => return .remU
   | .i32LtU => return .ltU
+  | .i64Or => return .orI64
+  | .i64Shl => return .shlI64
+  | .i64ShrU => return .shrUI64
+  | .i64LtU => return .ltUI64
+  | .f64Eq => return .f64Eq
+  | .f64Lt => return .f64Lt
+  | .f64Le => return .f64Le
+  | .f64Add => return .f64Add
+  | .f64Sub => return .f64Sub
+  | .f64Mul => return .f64Mul
+  | .f64Div => return .f64Div
+  | .f64Ceil => return .f64Ceil
+  | .f64Floor => return .f64Floor
   | .i32Load _ offset => return .load32 offset
   | .i32Load8U _ offset => return .load8U offset
   | .i32Load16U _ offset => return .load16U offset
@@ -102,6 +117,9 @@ def instruction (module : Fir.Wasm.Module) (function : Fir.Wasm.Function)
   | .memorySize => return .memorySize
   | .memoryGrow => return .memoryGrow
   | .i32WrapI64 _ => return .wrapI64
+  | .i64ExtendI32U _ => return .extendUI32
+  | .f64ConvertI64U => return .f64ConvertI64U
+  | .i64TruncSatF64U _ => return .i64TruncSatF64U
   | .i32ReinterpretF32 _ => return .i32ReinterpretF32
   | .i64ReinterpretF64 _ => return .i64ReinterpretF64
   | .f32ReinterpretI32 _ => return .f32ReinterpretI32

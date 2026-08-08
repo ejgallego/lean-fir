@@ -57,6 +57,14 @@ def floatIdModule : Wasm.Module :=
   let target := importDecl sourceImport
   target.params == [.f32] && target.results == [.f64]
 
+-- The Talos adapter and machine execute the complete resident timestamp
+-- instruction cone, including the unsigned integer/float conversion round trip.
+#guard match adapt Fir.Wasm.floatMachineModule with
+  | .ok adapted =>
+      Wasm.Examples.runValues 10 adapted.wasmModule 0
+        adapted.wasmModule.initialStore [] == [.i64 42]
+  | .error _ => false
+
 def adaptsProgram? (program : Fir.LeanIR.ImpureProgram) : Bool :=
   match Fir.Wasm.lower program with
   | .error _ => false
@@ -149,7 +157,8 @@ def residentLoad8Body? : List Wasm.Instruction → Bool
   | _ => false
 
 def residentArithmeticBody? : List Wasm.Instruction → Bool
-  | [.const 7, .const 5, .add, .const 3, .sub, .const 10, .ltU, .ret] => true
+  | [.const 7, .const 5, .add, .const 3, .sub, .const 4, .remU,
+      .const 10, .ltU, .ret] => true
   | _ => false
 
 def residentStore8Body? : List Wasm.Instruction → Bool
