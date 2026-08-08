@@ -15,22 +15,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `ILLUMINATE-NAT-MOD-MACHINE`.
-- Integration owner: `wasm-gen`; this short lease isolates the shared symbolic
-  Wasm vocabulary required by the W7 Illuminate timestamp runtime.
-- Integration branch/worktree: `integration/closure-ownership` in
-  `.worktrees/integration-closure-ownership`.
-- Published stack: Float vocabulary `e39d0bbb` is released on `main`; W7 has
-  rebased and consumed it in its resident Float implementation.
-- Current boundary: add the single unsigned i32 remainder instruction needed
-  by W7's resident `Nat.mod`. This avoids a linear subtraction loop for large
-  Illuminate timestamp overshoots. The instruction assigns only Wasm stack
-  semantics; W7 separately enforces Lean Natural representation invariants.
-- Scope: validate and land this shared instruction contract, rebase W7, and
-  return to the generation lane. This lease grants no permission to edit
-  proof-, W6-, or validation-owned implementation files.
+- No cross-lane integration lease is currently active. The user-reassigned
+  `ILLUMINATE-TALOS-ADAPTER` lease is complete at ready W6 head `c28955a5`;
+  after it lands, W7 owns the independent rebase, artifact/Illuminate gates,
+  and package republication on `wasm/generation`.
 
 ## Completed integration lease
+
+- Milestone: `ILLUMINATE-TALOS-ADAPTER`.
+- Integration owner: `wasm-proof`; the user reassigned the integration lease
+  so the W6 owner could validate and land the exact cross-lane unblocker.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: shared Float vocabulary `e39d0bbb` and unsigned i32
+  remainder `78f3a9fc`, followed by W6 functional head `d31fad3e` and ready
+  mailbox `c28955a5`.
+- Lease boundary: satisfied. `FirTalos.Adapter` maps the complete released
+  resident timestamp instruction cone to the corresponding Talos machine
+  operations. The regression executes the adapted Float/i64 machine through
+  arithmetic, comparison, shifts/bitwise operations, and unsigned conversions
+  to the exact result `i64 42`; the resident arithmetic oracle also includes
+  the released `i32.rem_u` step. No shared semantic or concrete-runtime
+  contract changed, and later refinement theorems for W7's nine Illuminate
+  helpers remain separate work.
+- Validation: Lean Beam sync/save with zero diagnostics; focused adapter,
+  example, and correctness builds; `git diff --check`; complete `make check`
+  with 1,844/1,844 comparisons equal and zero findings; and all 3,125 Talos
+  jobs. W7 may now rebase and finish its own artifact/Illuminate acceptance.
+
+## Previous completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
 - Integration owner: `wasm-gen`; the user assigned this short integration
@@ -54,7 +67,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with digest
   `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
 
-## Previous completed integration lease
+## Earlier completed integration lease
 
 - Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
 - Integration owner: `wasm-gen`; the temporary lease is complete and the
@@ -99,6 +112,18 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `ILLUMINATE-TALOS-ADAPTER` is linked/accepted through W6 functional head
+  `d31fad3e` and ready mailbox `c28955a5`, based directly on released numeric
+  contract head `78f3a9fc`. The adapter now covers `f64.const`, unsigned
+  `i32.rem`, the resident i64 bit/shift/comparison operations, f64
+  arithmetic/comparisons/rounding, and the unsigned i32/i64/f64 conversion
+  chain. Its executable Talos regression returns exact `i64 42`, the complete
+  W6 proof cone builds, and integration revalidated all 1,844 repository
+  comparisons plus all 3,125 Talos jobs. This removes W7 mailbox `8a98a702`'s
+  sole blocker without claiming the separate refinement theorems for its nine
+  Illuminate helpers. W7 may rebase `wasm/generation`, run its artifact and
+  Illuminate acceptance gates, republish, and mark its mailbox ready.
 
 - `SCALAR-CLOSURE-ABI-ADMISSION` is linked/accepted through W6 functional head
   `cf1ed73f` and ready mailbox head `4013a6ba`. The lowering decision is
