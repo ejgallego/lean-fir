@@ -77,11 +77,13 @@ Illuminate state machine.
 
 ## Workaround
 
-`Fir.Wasm.Emit.ResidentIlluminatePlayer` recognizes the exact four imported
-names and signatures and links structured Wasm loops for their generated call
-shapes. It fails closed if the names, signatures, range conventions, or import
-inventory drift. The helpers allocate through the module-owned resident arena;
-they do not call a host runtime.
+The first accepted artifact used `Fir.Wasm.Emit.ResidentIlluminatePlayer` to
+replace the missing generated call shapes. That package-local workaround has
+now been removed. `Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized`
+clears Lean's imported specialization cache inside the isolated compiler
+transaction, installs an identity pass at the end of the final-impure LCNF
+pipeline, and retains the regenerated private bodies before Lean's unused IR
+handoff.
 
 ## Upstream tracking
 
@@ -89,7 +91,9 @@ none
 
 ## Resolution and regression
 
-The emitted module has zero function imports and zero memory imports. Native
-Lean guards cover the façade, the package smoke covers all event constructors
-and repeated calls, and 105 deterministic/randomized traces compare every
-decoded `FrameAction` with Illuminate's legacy JavaScript oracle.
+The emitted module has zero function imports and zero memory imports while its
+source inventory contains 25 real generated specialization declarations and
+no `fir_illuminate_*` replacements. Native Lean guards cover the façade, the
+package smoke covers all event constructors and repeated calls, and 105
+deterministic/randomized traces compare every decoded `FrameAction` with
+Illuminate's legacy JavaScript oracle.

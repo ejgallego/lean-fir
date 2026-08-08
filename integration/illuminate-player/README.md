@@ -7,6 +7,12 @@ JSON, DOM code, synchronization SVG, and a copied façade or state machine are
 not part of the artifact. The integration reads Illuminate source through the
 FIR toolchain and never consumes Illuminate's `.lake` products.
 
+The source compiler clears Lean's imported specialization-name cache inside
+an isolated environment and records the exact declaration groups at the end
+of the real final-impure LCNF pipeline. Consequently, private loop and matcher
+specializations are retained as ordinary source functions; the package does
+not replace them with Illuminate-specific resident Wasm implementations.
+
 ## Build the immutable package
 
 Point `ILLUMINATE_ROOT` at an Illuminate checkout whose player sources compile
@@ -86,7 +92,7 @@ The production module exports only the structured trace entry plus
 runtime helpers remain internal Wasm functions and are retained only when
 reachable from that four-function public surface. `BUILD.json` records the
 exact public, source, and resident-helper inventories plus the internal
-function count.
+function count, including the captured generated-specialization inventory.
 
 ## Compare the previous and regenerated packages
 

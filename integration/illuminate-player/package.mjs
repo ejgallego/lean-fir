@@ -34,17 +34,17 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/Player.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 96,
+  finalLcnfDeclarations: 115,
   finalLcnfDeclarationSha256:
-    "0c5852dc5f9fe97ec5ed27759d360a5aa48a015400df093230cfa451db412f5c",
-  retainedSourceFunctions: 47,
+    "3113b9072ef0af29b09e6a4ebb1eb90270f52ed68a6d43f3e75ef7d7fc01b53e",
+  retainedSourceFunctions: 73,
   retainedSourceFunctionSha256:
-    "c1b43eebff1440493154b569c0bdcfa1a63481217761ca74e048ad7228b200c9",
-  residentHelpers: 179,
+    "8674052933b8c801deff6a48b9a6de0488d81acad9305c7cb229277390611586",
+  residentHelpers: 184,
   residentHelperSha256:
-    "12c3bd922269e79956f86e20734ca1c50b24ff28a546fcf7e8cc0edd507ae2c2",
-  baseWasmBytes: 18005,
-  completeWasmBytes: 50194,
+    "8171feb2e3773e675bbe1c733193ac76fe6215780ef5756084b8f8e4a898b320",
+  baseWasmBytes: 21977,
+  completeWasmBytes: 53888,
 });
 const outputNames = [
   "BUILD.json",
@@ -275,13 +275,13 @@ const build = {
       "constructors, setters, increments, releases, and cache setters",
       "small and big Nat operations",
       "Float subtraction, division, multiplication, comparison, round, and toUInt64",
-      "Array allocation, size/usize, reads, and push",
-      "Nat.mod",
-      "Illuminate validation, trace traversal, and compiler specializations",
+      "Array allocation, size/usize, Nat/USize reads, and push",
+      "USize comparison and addition",
+      "Nat.mod and bounded Nat.shiftRight",
       "resident UTF-8 string literals",
     ],
-    illuminateSpecializations: inventory.residentHelpers.filter((name) =>
-      name.startsWith("fir_illuminate_")),
+    capturedSourceSpecializations: inventory.sourceFunctions.filter((name) =>
+      name.includes(".spec_")),
   },
 };
 

@@ -49,7 +49,7 @@ them.  They are deliberately not part of `externalDeclarations`, so the
 historical strict `internalize` frontier remains source-compatible.
 -/
 def availableExternalDeclarations : Array Name :=
-  externalDeclarations ++ #[`Array.usize]
+  externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -276,6 +276,26 @@ def getBorrowedFunction : Function := {
     (countLocal, .uint32), (sourceCursorLocal, .uint32)]
   body := getBody false }
 
+def ugetBorrowedFunction : Function := {
+  name := externalName `Array.ugetBorrowed
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .usize), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet indexParam,
+    .localGet sizeLocal,
+    .i64ExtendI32U .usize,
+    .i64LtU,
+    .ifElse [] [.unreachable],
+    .localGet indexParam,
+    .i32WrapI64 .uint32,
+    .localSet indexLocal] ++ elementAddress ++ [
+    .localGet sourceCursorLocal,
+    .i32Load .object 0,
+    .ret] }
+
 private def emptyWrapper (declaration : Name) : Function := {
   name := externalName declaration
   params := #[(erasedParam, .erased), (capacityParam, .tobject)]
@@ -375,6 +395,7 @@ def functions : Array Function := #[
   emptyWithCapacityFunction,
   mkEmptyFunction,
   getBorrowedFunction,
+  ugetBorrowedFunction,
   pushFunction,
   getBangOwnedFunction]
 
@@ -406,6 +427,10 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `Array.getInternalBorrowed then
     some {
       params := #[.erased, .object, .tobject, .erased]
+      results := #[.object] }
+  else if declaration == `Array.ugetBorrowed then
+    some {
+      params := #[.erased, .object, .usize, .erased]
       results := #[.object] }
   else if declaration == `Array.push then
     some { params := #[.erased, .object, .tobject], results := #[.object] }

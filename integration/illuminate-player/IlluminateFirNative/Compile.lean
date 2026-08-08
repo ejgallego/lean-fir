@@ -3,7 +3,8 @@ import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentDeadCode
 import Fir.Wasm.Emit.ResidentArray
 import Fir.Wasm.Emit.ResidentNatMod
-import Fir.Wasm.Emit.ResidentIlluminatePlayer
+import Fir.Wasm.Emit.ResidentNatShift
+import Fir.Wasm.Emit.ResidentUSize
 import IlluminateFirNative.Facade
 
 namespace IlluminateFirNative.Compile
@@ -11,57 +12,33 @@ namespace IlluminateFirNative.Compile
 open Lean
 open Lean.Compiler
 
-private partial def environmentDeclarationAncestor? (env : Environment) (name : Name) :
-    Option Name :=
-  if env.contains name then
-    some name
-  else if name.isAnonymous then
-    none
-  else
-    environmentDeclarationAncestor? env name.getPrefix
-
-private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
-  if names.contains name then names else names.push name
-
-/--
-Recursively internalize source and compiler-generated declarations inside one
-temporary compiler environment. Unlike the generic source helper, generated
-specialization names created by one capture remain available as roots for the
-next capture; the outer `withoutModifyingEnv` still restores the elaborating
-module afterward.
--/
-private partial def compileEntryInternalizedLive (entry : Name)
-    (dependencies : Array Name := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
-  let artifact ← Fir.Validation.Lcnf.compileEntry entry dependencies
-  let env ← getEnv
-  let additions := artifact.externalNames.foldl (init := #[]) fun additions name =>
-    let candidate := if env.contains name then
-      some name
-    else
-      environmentDeclarationAncestor? env name
-    match candidate with
-    | some candidate =>
-        if candidate == entry || dependencies.contains candidate then additions
-        else addUniqueName additions candidate
-    | none => additions
-  if additions.isEmpty then
-    return artifact
-  compileEntryInternalizedLive entry (dependencies ++ additions)
-
 private def arrayGetBangName : Name := ``Array.get!InternalBorrowed
 
 private def arrayGetName : Name := ``Array.getInternalBorrowed
 
 private def arrayGetBangOwnedName : Name := ``Array.get!Internal
 
+private def arrayUgetBorrowedName : Name := ``Array.ugetBorrowed
+
+private def replayStateProjectionSiteName : Name :=
+  `fir.illuminate.replayTrace.stateProjection
+
 private def isArrayGetName (name : Name) : Bool :=
-  name == arrayGetBangName || name == arrayGetName || name == arrayGetBangOwnedName
+  name == arrayGetBangName || name == arrayGetName || name == arrayGetBangOwnedName ||
+    name == arrayUgetBorrowedName
+
+private def generatedCallerFamily (caller family : String) (redArg := false) : Bool :=
+  caller.contains family && caller.contains ".spec_" &&
+    (!redArg || caller.endsWith "._redArg")
 
 private def expectedArrayGetCaller (target caller : Name) : Bool :=
   let suffix := caller.toString
   if target == arrayGetBangName then
     suffix.endsWith "Illuminate.AnimationPlayer.actionAt" ||
-      suffix.endsWith "Illuminate.AnimationPlayer.tick"
+      suffix.endsWith "Illuminate.AnimationPlayer.tick" ||
+      generatedCallerFamily suffix "Illuminate.AnimationPlayer.parameterUpdates" true ||
+      generatedCallerFamily suffix "Illuminate.AnimationPlayer.findCurrentStep" true ||
+      generatedCallerFamily suffix "Illuminate.AnimationPlayer.findCurrentStepFrom" true
   else if target == arrayGetName then
     suffix.endsWith "Illuminate.AnimationPlayer.selectPlayerSegment" ||
       suffix.endsWith "Illuminate.AnimationPlayer.parameterUpdates" ||
@@ -69,9 +46,13 @@ private def expectedArrayGetCaller (target caller : Name) : Bool :=
       suffix.endsWith "Illuminate.AnimationPlayer.statusForPlaying" ||
       suffix.endsWith "Illuminate.AnimationPlayer.loopAt" ||
       suffix.endsWith "Illuminate.AnimationPlayer.tick" ||
-      suffix.endsWith "Illuminate.AnimationPlayer.findStepEnd"
+      suffix.endsWith "Illuminate.AnimationPlayer.findStepEnd" ||
+      generatedCallerFamily suffix "Illuminate.AnimationPlayer.findPlayerSegment" ||
+      generatedCallerFamily suffix "Illuminate.AnimationPlayer.findCrossedPauseTo" true
   else if target == arrayGetBangOwnedName then
     suffix.endsWith "Illuminate.AnimationPlayer.tick"
+  else if target == arrayUgetBorrowedName then
+    generatedCallerFamily suffix "Illuminate.AnimationPlayer.validatePrepared"
   else
     false
 
@@ -138,6 +119,17 @@ private partial def refineArrayGetCalls (caller : Name) :
     LCNF.Code .impure → Except String (LCNF.Code .impure × Array (Name × Name))
   | .let decl continuation => do
       let (continuation, sites) ← refineArrayGetCalls caller continuation
+      let mut decl := decl
+      let mut sites := sites
+      if generatedCallerFamily caller.toString "Illuminate.AnimationPlayer.replayTrace" true then
+        let isHeapProjection := match decl.binderName, decl.value with
+          | `fst, .oproj 0 _ | `snd, .oproj 1 _ => true
+          | _, _ => false
+        if isHeapProjection then
+          unless decl.type == LCNF.ImpureType.tobject do
+            throw s!"replayTrace accumulator projection in {caller} no longer binds a tobject"
+          decl := { decl with type := LCNF.ImpureType.object }
+          sites := sites.push (replayStateProjectionSiteName, caller)
       if let .fap name _ := decl.value then
         if isArrayGetName name then
           unless expectedArrayGetCaller name caller do
@@ -198,6 +190,12 @@ private def arrayGetSiteCount (sites : Array (Name × Name))
   sites.foldl (init := 0) fun count site =>
     if site.1 == target && site.2.toString.endsWith callerSuffix then count + 1 else count
 
+private def arrayGetFamilySiteCount (sites : Array (Name × Name))
+    (target : Name) (family : String) : Nat :=
+  sites.foldl (init := 0) fun count site =>
+    if site.1 == target && site.2.toString.contains family &&
+        site.2.toString.contains ".spec_" then count + 1 else count
+
 /--
 Recovers the monomorphic heap-object results erased by Lean 4.32's generic
 array-read declarations. The transform is deliberately tied to the exact
@@ -205,7 +203,8 @@ prepared-player call sites and rejects closure drift.
 -/
 def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
     Except String Fir.Validation.Lcnf.Artifact := do
-  for targetName in #[arrayGetBangName, arrayGetName, arrayGetBangOwnedName] do
+  for targetName in #[arrayGetBangName, arrayGetName, arrayGetBangOwnedName,
+      arrayUgetBorrowedName] do
     let targets := artifact.program.decls.filter (fun decl => decl.name == targetName)
     let expectedCount := 1
     unless targets.size == expectedCount do
@@ -227,11 +226,17 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
         let (code, sites) ← refineArrayGetCalls decl.name code
         return ({ decl with value := .code code }, sites)
   let sites := results.foldl (init := #[]) fun sites result => sites ++ result.2
-  unless sites.size == 11 &&
+  unless sites.size == 23 &&
       arrayGetSiteCount sites arrayGetBangName
         "Illuminate.AnimationPlayer.actionAt" == 1 &&
       arrayGetSiteCount sites arrayGetBangName
         "Illuminate.AnimationPlayer.tick" == 2 &&
+      arrayGetFamilySiteCount sites arrayGetBangName
+        "Illuminate.AnimationPlayer.parameterUpdates" == 2 &&
+      arrayGetFamilySiteCount sites arrayGetBangName
+        "Illuminate.AnimationPlayer.findCurrentStep.spec_" == 1 &&
+      arrayGetFamilySiteCount sites arrayGetBangName
+        "Illuminate.AnimationPlayer.findCurrentStepFrom" == 2 &&
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.selectPlayerSegment" == 1 &&
       arrayGetSiteCount sites arrayGetName
@@ -246,8 +251,16 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
         "Illuminate.AnimationPlayer.tick" == 1 &&
       arrayGetSiteCount sites arrayGetName
         "Illuminate.AnimationPlayer.findStepEnd" == 1 &&
+      arrayGetFamilySiteCount sites arrayGetName
+        "Illuminate.AnimationPlayer.findPlayerSegment" == 1 &&
+      arrayGetFamilySiteCount sites arrayGetName
+        "Illuminate.AnimationPlayer.findCrossedPauseTo" == 1 &&
       arrayGetSiteCount sites arrayGetBangOwnedName
-        "Illuminate.AnimationPlayer.tick" == 1 do
+        "Illuminate.AnimationPlayer.tick" == 1 &&
+      arrayGetFamilySiteCount sites arrayUgetBorrowedName
+        "Illuminate.AnimationPlayer.validatePrepared" == 3 &&
+      arrayGetFamilySiteCount sites replayStateProjectionSiteName
+        "Illuminate.AnimationPlayer.replayTrace" == 2 do
     throw s!"Illuminate array-read call-site inventory changed: {sites.map (fun site => (site.1.toString, site.2.toString))}"
   let program : Fir.LeanIR.ImpureProgram := { decls := results.map (fun result => result.1) }
   return { artifact with
@@ -257,7 +270,7 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
 /-- Capture the real prepared Illuminate trace entry and apply only checked ABI recovery. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Validation.Lcnf.Artifact) := do
-  let source ← withoutModifyingEnv <| compileEntryInternalizedLive
+  let source ← Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized
     ``Illuminate.AnimationPlayer.replayTrace
     #[``Illuminate.AnimationPlayer.transitionPrepared]
   let source ← match pruneUnreachableDeclarations source
@@ -324,13 +337,25 @@ private def internalizeNatMod
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
 
-private def internalizeIlluminateSpecializations
+private def internalizeNatShift
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentIlluminatePlayer.internalize artifact.module with
+  let module ← match Fir.Wasm.Emit.ResidentNatShift.internalizeAvailable artifact.module with
     | .ok module => pure module
     | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate specializations: {repr error}")
+        throw (.manifest s!"failed to internalize Illuminate Nat.shiftRight: {repr error}")
+  let bytes ← match Fir.Wasm.Emit.encode module with
+    | .ok bytes => pure bytes
+    | .error error => throw (.encoding error)
+  return { artifact with module, bytes }
+
+private def internalizeUSize
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
+  let module ← match Fir.Wasm.Emit.ResidentUSize.internalizeAvailable artifact.module with
+    | .ok module => pure module
+    | .error error =>
+        throw (.manifest s!"failed to internalize Illuminate USize operations: {repr error}")
   let bytes ← match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => throw (.encoding error)
@@ -376,7 +401,8 @@ def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) 
   let artifact ← internalizeFloat artifact
   let artifact ← internalizeArrays artifact
   let artifact ← internalizeNatMod artifact
-  let artifact ← internalizeIlluminateSpecializations artifact
+  let artifact ← internalizeNatShift artifact
+  let artifact ← internalizeUSize artifact
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
   pruneLinkedModule artifact
 

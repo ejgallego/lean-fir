@@ -43,10 +43,13 @@ be implemented and tested independently.
 
 ## Actual behavior
 
-Lean 4.32 erases the monomorphic result of eleven reachable `Array.get!` and
-`Array.get?` calls to `tobject`. Their actual `StepInfo`, `Segment`, and
-`String` element values are heap-only objects, but later `oproj` lowering
-correctly requires `object`. The first mismatch appeared in `actionAt`.
+Lean 4.32 erases the monomorphic result of reachable Nat- and USize-indexed
+Array reads to `tobject`. Their actual `StepInfo`, `Segment`, nested `Array`,
+and `String` element values are heap-only objects, but later calls and `oproj`
+lowering correctly require `object`. The first mismatch appeared in
+`actionAt`; capturing the real generated loop bodies exposed the complete
+23-site recovery inventory, including two heap-only loop-accumulator
+projections.
 
 ## Proof or differential evidence
 
@@ -71,9 +74,9 @@ same fail-closed inventory.
 ## Workaround
 
 The Illuminate capture applies a fail-closed monomorphic ABI recovery. It
-checks the exact three target declarations, all eleven expected caller sites, and
-the original `tobject` signatures before changing the target and call results
-to `object`.
+checks the exact four Array target declarations, all 23 expected sites, and
+the original `tobject` signatures before changing target, call, and two
+accumulator-projection results to `object`.
 
 ## Upstream tracking
 
@@ -81,6 +84,6 @@ none
 
 ## Resolution and regression
 
-The checked recovery admits the full 84-declaration final-LCNF closure. The
+The checked recovery admits the full 115-declaration final-LCNF closure. The
 lowered base module is emitted successfully; resident-runtime closure is
 tracked separately from this lowering bug.
