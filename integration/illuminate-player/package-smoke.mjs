@@ -17,13 +17,11 @@ const animation = {
   segments: [{
     sf: 0,
     fc: 3,
-    sync: "<svg>λ</svg>",
     pmap: [{ e: 0, a: "textContent" }, { e: 1, a: "fill" }],
     params: [["α", "red"], ["β", "blue"], ["γ", "green"]],
   }, {
     sf: 3,
     fc: 3,
-    sync: "<svg>δ</svg>",
     pmap: [{ e: 7, a: "opacity" }],
     params: [["0.25"], ["0.5"], ["1"]],
   }],
@@ -34,7 +32,7 @@ const animation = {
   ],
 };
 
-const allEvents = adapter.replayTrace(animation, [
+const allEvents = [
   { kind: "pause" },
   { kind: "playTo", frame: 3, loopAfter: true },
   { kind: "tick", timestamp: 0.125 },
@@ -42,99 +40,85 @@ const allEvents = adapter.replayTrace(animation, [
   { kind: "loopAt", frame: 3 },
   { kind: "advance" },
   { kind: "seek", frame: 5 },
-]);
-assert.equal(allEvents.ok, true);
-assert.equal(allEvents.actions.length, 8);
-assert.equal(allEvents.actions.at(-1).frame, 5);
-assert.equal(allEvents.actions.at(-1).playback, "finished");
-assert.equal(allEvents.actions[0].updates[0].v, "α");
-assert.equal(allEvents.actions[0].updates[0].a, "textContent");
-assert.deepEqual(allEvents.actions[0].updates[1],
+];
+const trace = adapter.replayTrace(animation, allEvents);
+assert.equal(trace.ok, true);
+assert.equal(trace.actions.length, allEvents.length + 1);
+assert.equal(trace.actions[0].updates[0].a, "textContent");
+assert.deepEqual(trace.actions[0].updates[1],
   { e: 1, a: "fill", v: "red" });
+assert.equal(trace.actions.at(-1).frame, 5);
 
-const roundingBoundary = adapter.replayTrace(animation, [
-  { kind: "advance" },
-  { kind: "tick", timestamp: 0 },
-  { kind: "tick", timestamp: 49.999 },
-  { kind: "tick", timestamp: 50.001 },
-]);
-assert.equal(roundingBoundary.ok, true);
-assert.deepEqual(roundingBoundary.actions.slice(-2).map(({ frame }) => frame),
-  [0, 1]);
+const live = adapter.createPlayer(animation);
+assert.equal(live.ok, true);
+assert.equal(JSON.stringify(live.player), "{}");
+for (const event of allEvents) {
+  const result = adapter.dispatch(live.player, event);
+  assert.equal(result.ok, true, result.error);
+  assert.equal(result.memory.frontierBefore,
+    live.memory.persistentCheckpoint);
+  assert.equal(result.memory.postRewindFrontier,
+    live.memory.persistentCheckpoint);
+}
+adapter.disposePlayer(live.player);
+adapter.disposePlayer(live.player);
+assert.throws(() => adapter.dispatch(live.player, { kind: "advance" }),
+  /player is disposed/);
 
-const repeated = adapter.replayTrace(animation, [{ kind: "seek", frame: 3 }]);
-assert.equal(repeated.ok, true);
-assert.equal(repeated.actions.at(-1).segment, 1);
-assert.ok(repeated.memory.frontierBefore >=
-  roundingBoundary.memory.frontierAfterDecode);
+const steadyAnimation = {
+  fps: 60,
+  totalFrames: 2,
+  segments: [{ sf: 0, fc: 2, pmap: [], params: [[], []] }],
+  steps: [{ frame: 0, pause: false, loop: false }],
+};
+const steady = adapter.createPlayer(steadyAnimation);
+assert.equal(steady.ok, true);
+assert.equal(adapter.dispatch(steady.player, { kind: "advance" }).ok, true);
+let peakFrontier = steady.memory.persistentCheckpoint;
+for (let index = 0; index < 10_000; ++index) {
+  const tick = adapter.dispatch(steady.player,
+    { kind: "tick", timestamp: index / 7 });
+  assert.equal(tick.ok, true, tick.error);
+  assert.equal(tick.memory.postRewindFrontier,
+    steady.memory.persistentCheckpoint);
+  peakFrontier = Math.max(peakFrontier, tick.memory.peakFrontier);
+}
+assert.equal(peakFrontier - steady.memory.persistentCheckpoint, 704);
+adapter.disposePlayer(steady.player);
 
-const emptyEvents = adapter.replayTrace(animation, []);
-assert.equal(emptyEvents.ok, true);
-assert.equal(emptyEvents.actions.length, 1);
+const first = adapter.createPlayer(animation);
+const second = adapter.createPlayer(animation);
+assert.equal(first.ok && second.ok, true);
+assert.equal(adapter.dispatch(first.player, { kind: "seek", frame: 5 })
+  .action.frame, 5);
+assert.equal(adapter.dispatch(second.player, { kind: "seek", frame: 1 })
+  .action.frame, 1);
+adapter.disposePlayer(first.player);
+adapter.disposePlayer(second.player);
 
-const unreadSync = { ...animation.segments[0] };
-Object.defineProperty(unreadSync, "sync", {
-  enumerable: true,
-  get() { throw new Error("sync SVG must remain browser-owned"); },
-});
-const svgFree = adapter.replayTrace({
-  ...animation,
-  segments: [unreadSync, animation.segments[1]],
-}, []);
-assert.equal(svgFree.ok, true);
-assert.equal(svgFree.memory.inputBytes, emptyEvents.memory.inputBytes);
-
-const prepared = adapter.prepare(animation, [{ kind: "tick", timestamp: 0.125 }]);
-assert.equal("args" in prepared, false);
-const executed = adapter.execute(prepared);
-assert.equal("physicalResult" in executed, false);
-assert.throws(() => adapter.execute(prepared), /fresh prepared handle/);
-assert.equal(adapter.decode(executed).ok, true);
-assert.throws(() => adapter.decode(executed), /fresh execution handle/);
-
-const invalid = adapter.replayTrace({ ...animation, totalFrames: 0 }, []);
+const invalid = adapter.createPlayer({ ...animation, totalFrames: 0 });
 assert.deepEqual({ ok: invalid.ok, error: invalid.error }, {
   ok: false,
   error: "animation must contain at least one frame",
 });
-const emptySegments = adapter.replayTrace({ ...animation, segments: [] }, []);
-assert.equal(emptySegments.ok, false);
-
-const frontierBeforeMalformed = adapter.synchronizeFrontier();
-assert.throws(() => adapter.replayTrace({ ...animation, fps: 1.5 }, []),
-  /animation\.fps must be a uint32 safe integer/);
-assert.equal(adapter.synchronizeFrontier(), frontierBeforeMalformed);
-
-let clockValue = 0;
-const timedAdapter = await createIlluminatePlayerAdapter({
-  bytes,
-  manifest,
-  build,
-  now: () => clockValue++,
-});
-assert.deepEqual(timedAdapter.replayTrace(animation, []).timings, {
-  projectMs: 1,
-  encodeMs: 1,
-  prepareMs: 5,
-  executeMs: 1,
-  decodeMs: 1,
-  totalMs: 11,
-  overheadMs: 7,
-});
 
 assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);
 assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(bytes)), [
-  { name: manifest.entry, kind: "function" },
+  { name: "Illuminate.AnimationPlayer.initialLive", kind: "function" },
+  { name: "Illuminate.AnimationPlayer.transitionLive", kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
+  { name: "fir_heap_rewind", kind: "function" },
   { name: "fir_heap_alloc", kind: "function" },
   { name: "memory", kind: "memory" },
 ]);
+
 console.log(JSON.stringify({
   ok: true,
-  calls: 11,
-  events: 11,
+  events: allEvents.length,
+  steadyTicks: 10_000,
+  checkpoint: steady.memory.persistentCheckpoint,
+  peakFrontier,
   functionImports: 0,
   memoryImports: 0,
-  frontier: emptySegments.memory.frontierAfterDecode,
 }));

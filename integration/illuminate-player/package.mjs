@@ -32,19 +32,20 @@ const generatedStem = join(buildDirectory, "illuminate-player-resident.wasm");
 const illuminateSourceFiles = [
   "src/Illuminate/Animation/Types.lean",
   "src/Illuminate/Animation/Player.lean",
+  "src/Illuminate/Animation/FirLive.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 115,
+  finalLcnfDeclarations: 114,
   finalLcnfDeclarationSha256:
-    "3113b9072ef0af29b09e6a4ebb1eb90270f52ed68a6d43f3e75ef7d7fc01b53e",
-  retainedSourceFunctions: 73,
+    "57919367c84f2902a08bf57dfb3d3fc7f8077ff75c048fc2092893fab0ef38c4",
+  retainedSourceFunctions: 72,
   retainedSourceFunctionSha256:
-    "8674052933b8c801deff6a48b9a6de0488d81acad9305c7cb229277390611586",
-  residentHelpers: 184,
+    "43631415b2a08bc907b2849240ce9bb73ddd3ac54c5a8d15ef3bb8815c3f55b8",
+  residentHelpers: 151,
   residentHelperSha256:
-    "8171feb2e3773e675bbe1c733193ac76fe6215780ef5756084b8f8e4a898b320",
-  baseWasmBytes: 21977,
-  completeWasmBytes: 53888,
+    "9404e1b086528ad0bfc4b9887dc3fe2e356407d8bcbf2438266da90960124e1e",
+  baseWasmBytes: 18904,
+  completeWasmBytes: 50203,
 });
 const outputNames = [
   "BUILD.json",
@@ -154,9 +155,11 @@ assert.deepEqual(descriptor.imports, []);
 assert.equal(memoryExports.includes("memory"), true);
 assert.equal(functionExports.includes(descriptor.entry), true);
 assert.deepEqual(functionExports, [
-  descriptor.entry,
+  "Illuminate.AnimationPlayer.initialLive",
+  "Illuminate.AnimationPlayer.transitionLive",
   "fir_heap_frontier",
   "fir_heap_set_frontier",
+  "fir_heap_rewind",
   "fir_heap_alloc",
 ]);
 assert.deepEqual(inventory.publicFunctions, functionExports);
@@ -165,9 +168,24 @@ assert.equal(inventory.functions.length,
 assert.equal(inventory.internalFunctions.length,
   inventory.functions.length - functionExports.length);
 assert.equal(descriptor.sourceEntry,
-  "Illuminate.AnimationPlayer.replayTrace");
-assert.deepEqual(descriptor.params, ["object", "tobject"]);
+  "Illuminate.AnimationPlayer.initialLive");
+assert.deepEqual(descriptor.params, ["object"]);
 assert.equal(descriptor.result, "object");
+assert.deepEqual(inventory.publicSignatures.find((entry) =>
+  entry.name === "Illuminate.AnimationPlayer.initialLive"), {
+  name: "Illuminate.AnimationPlayer.initialLive",
+  params: ["object"],
+  results: ["object"],
+});
+assert.deepEqual(inventory.publicSignatures.find((entry) =>
+  entry.name === "Illuminate.AnimationPlayer.transitionLive"), {
+  name: "Illuminate.AnimationPlayer.transitionLive",
+  params: ["object", "object", "tobject"],
+  results: ["object"],
+});
+assert.equal(inventory.lazyCacheInitializers, 0);
+assert.equal(inventory.residentGlobals, 1);
+assert.equal(inventory.runtimeOperations, 0);
 assert.equal(declarations.length, expectedClosure.finalLcnfDeclarations,
   "Illuminate final-LCNF source declaration inventory changed");
 assert.equal(sha256(JSON.stringify(declarations)),
@@ -191,18 +209,26 @@ const build = {
   schemaVersion: "fir.illuminate-player.build/v1",
   sources: { fir, illuminate },
   toolchain: { leanToolchain, leanVersion },
-  entry: {
-    sourceName: descriptor.sourceEntry,
-    exportName: descriptor.entry,
-    parameters: [
-      { name: "animation", lean: "Illuminate.PlayerAnimation", fir: "object" },
-      { name: "events", lean: "List PlayerEvent", fir: "tobject" },
-    ],
-    result: {
-      lean: "Except String (Array FrameAction)",
-      fir: "object",
+  entries: [
+    {
+      sourceName: "Illuminate.AnimationPlayer.initialLive",
+      exportName: "Illuminate.AnimationPlayer.initialLive",
+      parameters: [
+        { name: "animation", lean: "PlayerAnimation", fir: "object" },
+      ],
+      result: { lean: "Except String LiveTransition", fir: "object" },
     },
-  },
+    {
+      sourceName: "Illuminate.AnimationPlayer.transitionLive",
+      exportName: "Illuminate.AnimationPlayer.transitionLive",
+      parameters: [
+        { name: "animation", lean: "PlayerAnimation", fir: "object" },
+        { name: "state", lean: "PlayerState", fir: "object" },
+        { name: "event", lean: "PlayerEvent", fir: "tobject" },
+      ],
+      result: { lean: "LiveTransition", fir: "object" },
+    },
+  ],
   wasm: {
     file: "illuminate-player.wasm",
     byteLength: wasm.byteLength,
@@ -225,22 +251,21 @@ const build = {
     },
     browserAdapter: {
       apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION,
-      phases: ["prepare", "execute", "decode", "replayTrace"],
+      methods: ["createPlayer", "dispatch", "disposePlayer", "replayTrace"],
+      phases: ["project", "animationEncode", "eventEncode", "execute",
+        "decode", "rewind"],
       timing: {
-        projectMs: "browser animation to SVG-free PlayerAnimation object",
-        encodeMs: "PlayerAnimation and event graph encoding into Wasm memory",
-        prepareMs: "frontier sync, projection, encoding, and argument preparation",
-        executeMs: "only the exported Wasm replayTrace call",
-        decodeMs: "Except and FrameAction decoding into copied JavaScript values",
-        totalMs: "independent wall interval around replayTrace",
-        overheadMs: "total minus project, encode, execute, and decode intervals",
+        creation: ["instantiateMs", "projectMs", "animationEncodeMs",
+          "stateSlotMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
+        dispatch: ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
+        intervals: "non-overlapping; totalMs is independently measured",
       },
-      result: "normalized FrameAction objects",
+      result: "copied normalized FrameAction plus Lean-computed scheduleNextFrame",
     },
     inputLayout: {
       version: ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION,
-      leanType: "Illuminate.PlayerAnimation",
-      projection: "compact browser animation projected exactly once",
+      leanType: "Illuminate.AnimationPlayer.PlayerAnimation",
+      projection: "compact browser animation projected once per player",
       svg: "segment sync SVG is omitted and never transferred",
       naturals: "validated once as uint32-safe JavaScript integers and retained as Lean Nat",
       floatBoundary: "IEEE-754 binary64, little-endian, bit-exact",
@@ -249,10 +274,15 @@ const build = {
     ownership: {
       version: ILLUMINATE_PLAYER_OWNERSHIP_VERSION,
       memoryOwner: "Wasm module",
-      input: "fresh persistent Lean graph transferred into module memory",
+      instance: "one Wasm instance per opaque player; one shared compiled WebAssembly.Module",
+      animation: "encoded once into a recursively persistent graph below the checkpoint",
+      state: "retained in a fixed persistent Wasm slot below the checkpoint; never exposed or re-encoded from application JavaScript",
+      scratch: "event and transition graphs are cleared and rewound after every dispatch",
+      roots: "lazy-cache globals disabled; allocator frontier is the only mutable heap root",
       output: "decoded JavaScript copy; no raw address escapes the adapter",
-      reclamation: "instance-lifetime monotonic arena; discard instance to reclaim",
-      repeatedCalls: "frontier synchronized monotonically before and after every phase",
+      failure: "execution/decoding/rewind failure poisons and drops the player instance",
+      reclamation: "disposePlayer invalidates the handle and drops its Wasm instance",
+      repeatedCalls: "every successful dispatch restores the exact persistent checkpoint",
     },
   },
   runtime: {
@@ -269,6 +299,9 @@ const build = {
     residentHelperCount: inventory.residentHelpers.length,
     residentHelpers: inventory.residentHelpers,
     residentHelperSha256: sha256(JSON.stringify(inventory.residentHelpers)),
+    lazyCacheInitializerCount: inventory.lazyCacheInitializers,
+    residentGlobalCount: inventory.residentGlobals,
+    unresolvedRuntimeOperationCount: inventory.runtimeOperations,
     helperFamilies: [
       "object projections and scalar projections",
       "module-owned allocation and scalar stores",

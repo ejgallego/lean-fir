@@ -1,11 +1,11 @@
 /** Browser/Node adapter for the FIR-native Illuminate trace player. */
 
 export const ILLUMINATE_PLAYER_ADAPTER_API_VERSION =
-  "fir.illuminate-player.browser/v2";
+  "fir.illuminate-player.browser/v3";
 export const ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.Animation.PlayerAnimation/v2";
+  "lean-4.32-Illuminate.Animation.PlayerAnimation-live/v3";
 export const ILLUMINATE_PLAYER_OWNERSHIP_VERSION =
-  "fir.illuminate-player.module-owned-arena/v1";
+  "fir.illuminate-player.persistent-checkpoint/v2";
 
 const PAGE_BYTES = 65536;
 const HEAP_BASE = 1024;
@@ -15,6 +15,7 @@ const MAX_UINT32 = 0xffffffff;
 const MAX_IMMEDIATE = 0x7fffffffn;
 const ARRAY_MARKER = 0x41525259;
 const STRING_MARKER = 1;
+const FLOAT_BOX_MARKER = 6;
 const PERSISTENT_LIVE_FLAGS = 3;
 
 const KIND = Object.freeze({
@@ -25,11 +26,9 @@ const KIND = Object.freeze({
   opaque: 8,
 });
 
-const PREPARED = Symbol("fir.illuminate-player.prepared");
-const EXECUTED = Symbol("fir.illuminate-player.executed");
+const PLAYER = Symbol("fir.illuminate-player.live-player");
 const ADAPTER_STATE = new WeakMap();
-const PREPARED_STATE = new WeakMap();
-const EXECUTED_STATE = new WeakMap();
+const PLAYER_STATE = new WeakMap();
 
 function fail(message) {
   throw new Error(`FIR Illuminate player adapter: ${message}`);
@@ -138,12 +137,14 @@ function projectAnimation(animation) {
 function writeHeader(view, address, {
   kind,
   bytes,
+  flags = PERSISTENT_LIVE_FLAGS,
+  refCount = 0,
   aux0 = 0,
   aux1 = 0,
   aux2 = 0,
   aux3 = 0,
 }) {
-  const words = [kind, PERSISTENT_LIVE_FLAGS, 0, bytes,
+  const words = [kind, flags, refCount, bytes,
     aux0, aux1, aux2, aux3];
   words.forEach((word, index) =>
     view.setUint32(address + 4 * index, u32(word), true));
@@ -161,10 +162,12 @@ function immediate(tag) {
 }
 
 class Encoder {
-  constructor(exports, memory, encoder) {
+  constructor(exports, memory, encoder, { persistent = false } = {}) {
     this.exports = exports;
     this.memory = memory;
     this.encoder = encoder;
+    this.flags = persistent ? PERSISTENT_LIVE_FLAGS : 2;
+    this.refCount = persistent ? 0 : 1;
     this.allocations = 0;
     this.bytes = 0;
   }
@@ -199,6 +202,8 @@ class Encoder {
     writeHeader(view, address, {
       kind: KIND.natural,
       bytes: 40,
+      flags: this.flags,
+      refCount: this.refCount,
       aux0: 1,
       aux1: 1,
     });
@@ -214,6 +219,8 @@ class Encoder {
     writeHeader(view, address, {
       kind: KIND.string,
       bytes: allocationBytes,
+      flags: this.flags,
+      refCount: this.refCount,
       aux0: STRING_MARKER,
       aux1: bytes.length,
     });
@@ -234,6 +241,8 @@ class Encoder {
     writeHeader(view, address, {
       kind: KIND.constructor,
       bytes,
+      flags: this.flags,
+      refCount: this.refCount,
       aux0: tag,
       aux1: fields.length,
       aux3: scalarBytes.length,
@@ -254,6 +263,8 @@ class Encoder {
     writeHeader(view, address, {
       kind: KIND.opaque,
       bytes,
+      flags: this.flags,
+      refCount: this.refCount,
       aux0: ARRAY_MARKER,
       aux1: values.length,
       aux2: values.length,
@@ -389,8 +400,9 @@ function readHeader(view, word, label) {
 
 function readWord(view, address, label) {
   const result = readU32(view, address, label);
-  requireCondition(readU32(view, address + 4, label) === 0,
-    `${label} has nonzero slot padding`);
+  const padding = readU32(view, address + 4, label);
+  requireCondition(padding === 0,
+    `${label} has nonzero slot padding ${padding} at ${address} (word ${result})`);
   return result;
 }
 
@@ -453,6 +465,163 @@ function readArray(view, word, label, maximumNodes) {
       `${label}[${index}]`));
 }
 
+function allocatePersistentStateSlot(writer) {
+  const naturalAddresses = Array.from({ length: 5 }, (_, index) => {
+    const address = writer.allocate(40, `persistent state Nat ${index}`);
+    const view = new DataView(writer.memory.buffer);
+    writeHeader(view, address, {
+      kind: KIND.natural,
+      bytes: 40,
+      aux0: 1,
+      aux1: 1,
+    });
+    view.setBigUint64(address + HEADER_BYTES, 0n, true);
+    return address;
+  });
+  const floatBoxAddress = writer.allocate(40, "persistent state boxed Float");
+  let view = new DataView(writer.memory.buffer);
+  writeHeader(view, floatBoxAddress, {
+    kind: KIND.boxed,
+    bytes: 40,
+    aux0: FLOAT_BOX_MARKER,
+    aux1: 8,
+  });
+  const floatSomeAddress = writer.allocate(40, "persistent state Option Float");
+  view = new DataView(writer.memory.buffer);
+  writeHeader(view, floatSomeAddress, {
+    kind: KIND.constructor,
+    bytes: 40,
+    aux0: 1,
+    aux1: 1,
+  });
+  writeWord(view, floatSomeAddress + HEADER_BYTES, floatBoxAddress);
+  const naturalSomeAddresses = Array.from({ length: 2 }, (_, index) => {
+    const address = writer.allocate(40, `persistent state Option Nat ${index}`);
+    view = new DataView(writer.memory.buffer);
+    writeHeader(view, address, {
+      kind: KIND.constructor,
+      bytes: 40,
+      aux0: 1,
+      aux1: 1,
+    });
+    writeWord(view, address + HEADER_BYTES, naturalAddresses[3 + index]);
+    return address;
+  });
+  const stateAddress = writer.allocate(88, "persistent PlayerState");
+  view = new DataView(writer.memory.buffer);
+  writeHeader(view, stateAddress, {
+    kind: KIND.constructor,
+    bytes: 88,
+    aux0: 0,
+    aux1: 6,
+    aux3: 3,
+  });
+  writeWord(view, stateAddress + HEADER_BYTES, naturalAddresses[0]);
+  writeWord(view, stateAddress + HEADER_BYTES + SLOT_BYTES, naturalAddresses[1]);
+  writeWord(view, stateAddress + HEADER_BYTES + 2 * SLOT_BYTES, immediate(0));
+  writeWord(view, stateAddress + HEADER_BYTES + 3 * SLOT_BYTES,
+    naturalAddresses[2]);
+  writeWord(view, stateAddress + HEADER_BYTES + 4 * SLOT_BYTES, immediate(0));
+  writeWord(view, stateAddress + HEADER_BYTES + 5 * SLOT_BYTES, immediate(0));
+  return Object.freeze({
+    stateAddress,
+    naturalAddresses,
+    floatBoxAddress,
+    floatSomeAddress,
+    naturalSomeAddresses,
+  });
+}
+
+function readOptionFloatBits(view, word, label) {
+  if (classify(word) === "immediate") {
+    requireCondition((u32(word) >>> 1) === 0, `${label} has invalid None tag`);
+    return null;
+  }
+  const { fields } = readConstructor(view, word, 1, 1, 0, label);
+  const boxed = readHeader(view, fields[0], `${label}.value`);
+  requireCondition(boxed.kind === KIND.boxed && boxed.bytes === 40 &&
+    boxed.aux0 === FLOAT_BOX_MARKER && boxed.aux1 === 8 &&
+    boxed.aux2 === 0 && boxed.aux3 === 0,
+  `${label}.value is not a canonical boxed Float`);
+  return view.getBigUint64(boxed.address + HEADER_BYTES, true);
+}
+
+function readOptionNatural(view, word, label) {
+  if (classify(word) === "immediate") {
+    requireCondition((u32(word) >>> 1) === 0, `${label} has invalid None tag`);
+    return null;
+  }
+  const { fields } = readConstructor(view, word, 1, 1, 0, label);
+  return readNatural(view, fields[0], `${label}.value`);
+}
+
+function writePersistentNatural(view, address, value, label) {
+  requireCondition(value >= 0n && value <= BigInt(MAX_UINT32),
+    `${label} is outside the persistent uint32 state domain`);
+  requireCondition(value > MAX_IMMEDIATE,
+    `${label} should use the immediate Natural representation`);
+  view.setBigUint64(address + HEADER_BYTES, value, true);
+}
+
+function persistentNaturalWord(view, address, value, label) {
+  requireCondition(value >= 0n && value <= BigInt(MAX_UINT32),
+    `${label} is outside the persistent uint32 state domain`);
+  if (value <= MAX_IMMEDIATE) return Number(value * 2n + 1n) >>> 0;
+  writePersistentNatural(view, address, value, label);
+  return address;
+}
+
+function copyPlayerStateToSlot(view, word, slot, label) {
+  const { fields, scalarAddress } = readConstructor(view, word, 0, 6, 3, label);
+  const naturals = [
+    readNatural(view, fields[0], `${label}.frame`),
+    readNatural(view, fields[1], `${label}.step`),
+    readNatural(view, fields[3], `${label}.pauseFrame`),
+    readOptionNatural(view, fields[4], `${label}.targetFrame`),
+    readOptionNatural(view, fields[5], `${label}.renderedSegment`),
+  ];
+  const startTimeBits = readOptionFloatBits(view, fields[2],
+    `${label}.startTime`);
+  const playback = view.getUint8(scalarAddress);
+  const loopExitPending = view.getUint8(scalarAddress + 1);
+  const loopAfterTarget = view.getUint8(scalarAddress + 2);
+  requireCondition(playback < 6 && loopExitPending < 2 && loopAfterTarget < 2,
+    `${label} has invalid scalar state`);
+
+  const naturalWords = naturals.map((value, index) => value === null
+    ? null
+    : persistentNaturalWord(view, slot.naturalAddresses[index], value,
+      `${label} Nat ${index}`));
+  if (startTimeBits !== null) {
+    view.setBigUint64(slot.floatBoxAddress + HEADER_BYTES,
+      startTimeBits, true);
+  }
+  writeWord(view, slot.stateAddress + HEADER_BYTES,
+    naturalWords[0]);
+  writeWord(view, slot.stateAddress + HEADER_BYTES + SLOT_BYTES,
+    naturalWords[1]);
+  writeWord(view, slot.stateAddress + HEADER_BYTES + 2 * SLOT_BYTES,
+    startTimeBits === null ? immediate(0) : slot.floatSomeAddress);
+  writeWord(view, slot.stateAddress + HEADER_BYTES + 3 * SLOT_BYTES,
+    naturalWords[2]);
+  if (naturalWords[3] !== null) {
+    writeWord(view, slot.naturalSomeAddresses[0] + HEADER_BYTES,
+      naturalWords[3]);
+  }
+  if (naturalWords[4] !== null) {
+    writeWord(view, slot.naturalSomeAddresses[1] + HEADER_BYTES,
+      naturalWords[4]);
+  }
+  writeWord(view, slot.stateAddress + HEADER_BYTES + 4 * SLOT_BYTES,
+    naturals[3] === null ? immediate(0) : slot.naturalSomeAddresses[0]);
+  writeWord(view, slot.stateAddress + HEADER_BYTES + 5 * SLOT_BYTES,
+    naturals[4] === null ? immediate(0) : slot.naturalSomeAddresses[1]);
+  const stateScalars = slot.stateAddress + HEADER_BYTES + 6 * SLOT_BYTES;
+  view.setUint8(stateScalars, playback);
+  view.setUint8(stateScalars + 1, loopExitPending);
+  view.setUint8(stateScalars + 2, loopAfterTarget);
+}
+
 const PLAYBACK = ["paused", "playing", "waiting", "looping",
   "finishingLoop", "finished"];
 
@@ -494,13 +663,50 @@ function decodeAction(view, word, decoder, maximumNodes, label) {
   };
 }
 
+function decodeLiveTransition(view, word, stateSlot, decoder,
+  maximumNodes, label) {
+  const { fields, scalarAddress } =
+    readConstructor(view, word, 0, 2, 1, label);
+  const scheduleNextFrame = view.getUint8(scalarAddress);
+  requireCondition(scheduleNextFrame < 2,
+    `${label}.scheduleNextFrame is not a Bool`);
+  const action = decodeAction(view, fields[1], decoder, maximumNodes,
+    `${label}.action`);
+  copyPlayerStateToSlot(view, fields[0], stateSlot, `${label}.state`);
+  return {
+    action,
+    scheduleNextFrame: scheduleNextFrame !== 0,
+  };
+}
+
+function decodeInitialResult(view, word, stateSlot, decoder, maximumNodes) {
+  const header = readHeader(view, word, "initialLive Except result");
+  requireCondition(header.kind === KIND.constructor && header.aux1 === 1 &&
+    header.aux3 === 0, "initialLive did not return Except String LiveTransition");
+  const payload = readWord(view, header.address + HEADER_BYTES,
+    "initialLive Except payload");
+  if (header.aux0 === 0) {
+    return {
+      ok: false,
+      error: readString(view, payload, decoder, "initialLive error"),
+    };
+  }
+  requireCondition(header.aux0 === 1,
+    "initialLive Except result has an invalid tag");
+  return {
+    ok: true,
+    ...decodeLiveTransition(view, payload, stateSlot, decoder,
+      maximumNodes, "initialLive transition"),
+  };
+}
+
 function validateManifest(manifest) {
   requireObject(manifest, "module descriptor");
   requireCondition(manifest.entry ===
-    "Illuminate.AnimationPlayer.replayTrace",
+    "Illuminate.AnimationPlayer.initialLive",
   "module descriptor has the wrong entry");
   requireCondition(JSON.stringify(manifest.params) ===
-    JSON.stringify(["object", "tobject"]) && manifest.result === "object",
+    JSON.stringify(["object"]) && manifest.result === "object",
   "module descriptor has the wrong structured ABI");
   requireCondition(Array.isArray(manifest.imports) && manifest.imports.length === 0,
     "complete runtime package must have zero imports");
@@ -519,186 +725,361 @@ function validateBuild(build) {
   "BUILD.json has the wrong ownership version");
 }
 
+function errorMessage(error) {
+  return error instanceof Error ? error.message : String(error);
+}
+
+function instanceState(module, now, maximumNodes) {
+  const started = now();
+  const instance = new WebAssembly.Instance(module, {});
+  const instantiateMs = elapsed(now, started);
+  const memory = instance.exports.memory;
+  requireCondition(memory instanceof WebAssembly.Memory,
+    "module does not export its memory");
+  const required = [
+    "Illuminate.AnimationPlayer.initialLive",
+    "Illuminate.AnimationPlayer.transitionLive",
+    "fir_heap_frontier",
+    "fir_heap_set_frontier",
+    "fir_heap_rewind",
+    "fir_heap_alloc",
+  ];
+  for (const name of required) {
+    requireCondition(typeof instance.exports[name] === "function",
+      `module is missing export ${name}`);
+  }
+  const state = {
+    instance,
+    memory,
+    initialLive: instance.exports["Illuminate.AnimationPlayer.initialLive"],
+    transitionLive: instance.exports["Illuminate.AnimationPlayer.transitionLive"],
+    frontier: instance.exports.fir_heap_frontier,
+    setFrontier: instance.exports.fir_heap_set_frontier,
+    rewindFrontier: instance.exports.fir_heap_rewind,
+    allocate: instance.exports.fir_heap_alloc,
+    encoder: new TextEncoder(),
+    decoder: new TextDecoder("utf-8", { fatal: true }),
+    maximumNodes,
+    instantiateMs,
+  };
+  readFrontier(state);
+  return state;
+}
+
+function readFrontier(state) {
+  const value = u32(state.frontier());
+  requireCondition(value >= HEAP_BASE && value % 8 === 0,
+    `resident frontier ${value} is invalid`);
+  requireCondition(value <= state.memory.buffer.byteLength,
+    `resident frontier ${value} exceeds module memory`);
+  return value;
+}
+
+function rewind(state, checkpoint, now) {
+  const started = now();
+  const frontierBeforeRewind = readFrontier(state);
+  requireCondition(frontierBeforeRewind >= checkpoint,
+    `frontier ${frontierBeforeRewind} is below checkpoint ${checkpoint}`);
+  const clearedBytes = frontierBeforeRewind - checkpoint;
+  new Uint8Array(state.memory.buffer, checkpoint, clearedBytes).fill(0);
+  state.rewindFrontier(checkpoint);
+  const postRewindFrontier = readFrontier(state);
+  requireCondition(postRewindFrontier === checkpoint,
+    `frontier rewind stopped at ${postRewindFrontier}, expected ${checkpoint}`);
+  return {
+    rewindMs: elapsed(now, started),
+    frontierBeforeRewind,
+    clearedBytes,
+    postRewindFrontier,
+  };
+}
+
+function invalidatePlayer(state, status) {
+  state.status = status;
+  state.instance = undefined;
+  state.memory = undefined;
+  state.initialLive = undefined;
+  state.transitionLive = undefined;
+  state.frontier = undefined;
+  state.setFrontier = undefined;
+  state.rewindFrontier = undefined;
+  state.allocate = undefined;
+  state.animationAddress = 0;
+  state.checkpoint = 0;
+  state.stateSlot = undefined;
+}
+
 export class IlluminatePlayerAdapter {
-  constructor({ instance, manifest, build, now, startupTimings, maximumNodes }) {
+  constructor({ module, manifest, build, now, startupTimings, maximumNodes }) {
     this.manifest = manifest;
     this.build = build;
     this.startupTimings = Object.freeze({ ...startupTimings });
-    const memory = instance.exports.memory;
-    requireCondition(memory instanceof WebAssembly.Memory,
-      "module does not export its memory");
-    for (const name of ["fir_heap_frontier", "fir_heap_set_frontier",
-      "fir_heap_alloc", manifest.entry]) {
-      requireCondition(typeof instance.exports[name] === "function",
-        `module is missing export ${name}`);
-    }
     ADAPTER_STATE.set(this, {
+      module,
       now,
       maximumNodes,
-      encoder: new TextEncoder(),
-      decoder: new TextDecoder("utf-8", { fatal: true }),
-      memory,
-      frontier: instance.exports.fir_heap_frontier,
-      setFrontier: instance.exports.fir_heap_set_frontier,
-      allocate: instance.exports.fir_heap_alloc,
-      entry: instance.exports[manifest.entry],
-      lastFrontier: undefined,
     });
-    this.synchronizeFrontier();
   }
 
-  synchronizeFrontier() {
-    const state = ADAPTER_STATE.get(this);
-    requireCondition(state !== undefined, "invalid adapter receiver");
-    const value = u32(state.frontier());
-    requireCondition(value >= HEAP_BASE && value % 8 === 0,
-      `resident frontier ${value} is invalid`);
-    if (state.lastFrontier !== undefined) {
-      requireCondition(value >= state.lastFrontier,
-        `resident frontier moved backwards from ${state.lastFrontier}`);
-    }
-    state.setFrontier(value);
-    state.lastFrontier = value;
-    return value;
-  }
-
-  prepare(animation, events) {
-    const state = ADAPTER_STATE.get(this);
-    requireCondition(state !== undefined, "invalid adapter receiver");
-    const started = state.now();
-    const frontierBefore = this.synchronizeFrontier();
-    const pagesBefore = state.memory.buffer.byteLength / PAGE_BYTES;
-    const projectStarted = state.now();
-    const projectedAnimation = projectAnimation(animation);
-    const projectMs = elapsed(state.now, projectStarted);
-    const encodeStarted = state.now();
-    const writer = new Encoder({
-      fir_heap_alloc: state.allocate,
-    }, state.memory, state.encoder);
-    const animationWord = writer.animation(projectedAnimation);
-    const eventsWord = writer.eventList(events);
-    const encodeMs = elapsed(state.now, encodeStarted);
-    const frontierAfterPrepare = this.synchronizeFrontier();
-    const timings = Object.freeze({
-      projectMs,
-      encodeMs,
-      prepareMs: elapsed(state.now, started),
-    });
-    const memory = Object.freeze({
-      frontierBefore,
-      frontierAfterPrepare,
-      pagesBefore,
-      pagesAfterPrepare: state.memory.buffer.byteLength / PAGE_BYTES,
-      inputBytes: writer.bytes,
-      residentAllocationCalls: writer.allocations,
-      frontierGrowthPrepare: frontierAfterPrepare - frontierBefore,
-    });
-    const prepared = Object.freeze({
-      [PREPARED]: this,
-      state: "prepared",
-      timings,
-      memory,
-    });
-    PREPARED_STATE.set(prepared, {
-      owner: this,
-      args: [i32(animationWord), i32(eventsWord)],
-      timings,
-      memory,
-    });
-    return prepared;
-  }
-
-  execute(prepared) {
-    const state = ADAPTER_STATE.get(this);
-    const preparedState = PREPARED_STATE.get(prepared);
-    requireCondition(state !== undefined && prepared?.[PREPARED] === this &&
-      preparedState?.owner === this, "execute requires a fresh prepared handle");
-    PREPARED_STATE.delete(prepared);
-    const frontierBeforeExecute = this.synchronizeFrontier();
-    const started = state.now();
-    const physicalResult = u32(state.entry(...preparedState.args));
-    const executeMs = elapsed(state.now, started);
-    const frontierAfterExecute = this.synchronizeFrontier();
-    const timings = Object.freeze({ ...preparedState.timings, executeMs });
-    const memory = Object.freeze({
-      ...preparedState.memory,
-      frontierBeforeExecute,
-      frontierAfterExecute,
-      frontierGrowthExecute: frontierAfterExecute - frontierBeforeExecute,
-      pagesAfterExecute: state.memory.buffer.byteLength / PAGE_BYTES,
-    });
-    const executed = Object.freeze({
-      [EXECUTED]: this,
-      state: "executed",
-      timings,
-      memory,
-    });
-    EXECUTED_STATE.set(executed, {
-      owner: this,
-      physicalResult,
-      timings,
-      memory,
-    });
-    return executed;
-  }
-
-  decode(executed) {
-    const state = ADAPTER_STATE.get(this);
-    const executedState = EXECUTED_STATE.get(executed);
-    requireCondition(state !== undefined && executed?.[EXECUTED] === this &&
-      executedState?.owner === this, "decode requires a fresh execution handle");
-    EXECUTED_STATE.delete(executed);
-    const started = state.now();
-    const view = new DataView(state.memory.buffer);
-    const header = readHeader(view, executedState.physicalResult, "Except result");
-    requireCondition(header.kind === KIND.constructor && header.aux1 === 1,
-      "entry did not return Except String (Array FrameAction)");
-    const payload = readWord(view, header.address + HEADER_BYTES,
-      "Except payload");
+  createPlayer(animation) {
+    const adapter = ADAPTER_STATE.get(this);
+    requireCondition(adapter !== undefined, "invalid adapter receiver");
+    const totalStarted = adapter.now();
+    let state;
+    let checkpoint;
     let result;
-    if (header.aux0 === 0) {
-      result = { ok: false, error: readString(view, payload, state.decoder,
-        "Except.error") };
-    } else {
-      requireCondition(header.aux0 === 1, "Except result has an invalid tag");
-      result = {
-        ok: true,
-        actions: readArray(view, payload, "FrameAction array", state.maximumNodes)
-          .map((action, index) => decodeAction(view, action, state.decoder,
-            state.maximumNodes, `actions[${index}]`)),
-      };
-    }
-    const decodeMs = elapsed(state.now, started);
-    const timings = { ...executedState.timings, decodeMs };
-    const frontierAfterDecode = this.synchronizeFrontier();
-    return {
-      ...result,
-      timings,
-      memory: {
-        ...executedState.memory,
-        frontierAfterDecode,
-        frontierGrowthTotal:
-          frontierAfterDecode - executedState.memory.frontierBefore,
-        pagesAfterDecode: state.memory.buffer.byteLength / PAGE_BYTES,
-      },
+    let rewindResult = {
+      rewindMs: 0,
+      frontierBeforeRewind: undefined,
+      clearedBytes: 0,
+      postRewindFrontier: undefined,
     };
+    const timings = {
+      instantiateMs: 0,
+      projectMs: 0,
+      animationEncodeMs: 0,
+      stateSlotMs: 0,
+      executeMs: 0,
+      decodeMs: 0,
+      rewindMs: 0,
+    };
+    const memory = {
+      frontierBefore: undefined,
+      frontierAfterAnimation: undefined,
+      persistentCheckpoint: undefined,
+      peakFrontier: undefined,
+      frontierBeforeRewind: undefined,
+      clearedBytes: 0,
+      postRewindFrontier: undefined,
+      animationBytes: 0,
+      stateSlotBytes: 0,
+      persistentAllocationCalls: 0,
+      pagesBefore: undefined,
+      pagesAfter: undefined,
+    };
+    try {
+      state = instanceState(adapter.module, adapter.now, adapter.maximumNodes);
+      timings.instantiateMs = state.instantiateMs;
+      memory.frontierBefore = readFrontier(state);
+      memory.pagesBefore = state.memory.buffer.byteLength / PAGE_BYTES;
+
+      const projectStarted = adapter.now();
+      const projectedAnimation = projectAnimation(animation);
+      timings.projectMs = elapsed(adapter.now, projectStarted);
+
+      const writer = new Encoder({ fir_heap_alloc: state.allocate },
+        state.memory, state.encoder, { persistent: true });
+      const encodeStarted = adapter.now();
+      const animationAddress = writer.animation(projectedAnimation);
+      timings.animationEncodeMs = elapsed(adapter.now, encodeStarted);
+      memory.frontierAfterAnimation = readFrontier(state);
+      memory.animationBytes = writer.bytes;
+      const animationAllocations = writer.allocations;
+
+      const stateSlotStarted = adapter.now();
+      const stateSlot = allocatePersistentStateSlot(writer);
+      timings.stateSlotMs = elapsed(adapter.now, stateSlotStarted);
+      checkpoint = readFrontier(state);
+      memory.persistentCheckpoint = checkpoint;
+      memory.stateSlotBytes = writer.bytes - memory.animationBytes;
+      memory.persistentAllocationCalls = writer.allocations;
+
+      const executeStarted = adapter.now();
+      const physicalResult = u32(state.initialLive(i32(animationAddress)));
+      timings.executeMs = elapsed(adapter.now, executeStarted);
+      memory.peakFrontier = readFrontier(state);
+
+      const decodeStarted = adapter.now();
+      result = decodeInitialResult(new DataView(state.memory.buffer),
+        physicalResult, stateSlot, state.decoder, state.maximumNodes);
+      timings.decodeMs = elapsed(adapter.now, decodeStarted);
+
+      state.animationAddress = animationAddress;
+      state.stateSlot = stateSlot;
+      state.checkpoint = checkpoint;
+      state.status = result.ok ? "active" : "rejected";
+      state.animationAllocations = animationAllocations;
+    } catch (error) {
+      result = { ok: false, error: errorMessage(error) };
+      if (state !== undefined) state.status = "rejected";
+    } finally {
+      if (state !== undefined && checkpoint !== undefined) {
+        try {
+          rewindResult = rewind(state, checkpoint, adapter.now);
+        } catch (error) {
+          result = { ok: false, error: errorMessage(error) };
+          state.status = "poisoned";
+        }
+      }
+    }
+    timings.rewindMs = rewindResult.rewindMs;
+    memory.postRewindFrontier = rewindResult.postRewindFrontier;
+    memory.frontierBeforeRewind = rewindResult.frontierBeforeRewind;
+    memory.clearedBytes = rewindResult.clearedBytes;
+    memory.pagesAfter = state?.memory?.buffer.byteLength / PAGE_BYTES;
+    const totalMs = elapsed(adapter.now, totalStarted);
+    const measured = Object.values(timings).reduce((sum, value) => sum + value, 0);
+    const finalTimings = Object.freeze({
+      ...timings,
+      totalMs,
+      overheadMs: totalMs - measured,
+    });
+    const finalMemory = Object.freeze(memory);
+    if (!result?.ok) {
+      if (state !== undefined) invalidatePlayer(state, state.status ?? "rejected");
+      return { ...result, timings: finalTimings, memory: finalMemory };
+    }
+    const player = Object.freeze({ [PLAYER]: this });
+    state.owner = this;
+    PLAYER_STATE.set(player, state);
+    return {
+      ok: true,
+      player,
+      action: result.action,
+      scheduleNextFrame: result.scheduleNextFrame,
+      timings: finalTimings,
+      memory: finalMemory,
+    };
+  }
+
+  dispatch(player, event) {
+    const adapter = ADAPTER_STATE.get(this);
+    const state = PLAYER_STATE.get(player);
+    requireCondition(adapter !== undefined && player?.[PLAYER] === this &&
+      state?.owner === this, "dispatch requires this adapter's player handle");
+    requireCondition(state.status === "active",
+      `player is ${state.status ?? "invalid"}`);
+    const totalStarted = adapter.now();
+    const timings = { encodeMs: 0, executeMs: 0, decodeMs: 0, rewindMs: 0 };
+    const memory = {
+      persistentCheckpoint: state.checkpoint,
+      frontierBefore: undefined,
+      frontierAfterEncode: undefined,
+      frontierAfterExecute: undefined,
+      peakFrontier: undefined,
+      frontierBeforeRewind: undefined,
+      clearedBytes: 0,
+      postRewindFrontier: undefined,
+      scratchBytes: 0,
+      scratchAllocationCalls: 0,
+      pagesBefore: state.memory.buffer.byteLength / PAGE_BYTES,
+      pagesAfter: undefined,
+    };
+    let phase = "encode";
+    let decoded;
+    let failure;
+    try {
+      memory.frontierBefore = readFrontier(state);
+      requireCondition(memory.frontierBefore === state.checkpoint,
+        `dispatch began at ${memory.frontierBefore}, expected ${state.checkpoint}`);
+      const writer = new Encoder({ fir_heap_alloc: state.allocate },
+        state.memory, state.encoder, { persistent: false });
+      const encodeStarted = adapter.now();
+      const eventAddress = writer.event(event, "event");
+      timings.encodeMs = elapsed(adapter.now, encodeStarted);
+      memory.frontierAfterEncode = readFrontier(state);
+      memory.scratchBytes = writer.bytes;
+      memory.scratchAllocationCalls = writer.allocations;
+
+      phase = "execute";
+      const executeStarted = adapter.now();
+      const physicalResult = u32(state.transitionLive(
+        i32(state.animationAddress), i32(state.stateSlot.stateAddress),
+        i32(eventAddress)));
+      timings.executeMs = elapsed(adapter.now, executeStarted);
+      memory.frontierAfterExecute = readFrontier(state);
+      memory.peakFrontier = Math.max(memory.frontierAfterEncode,
+        memory.frontierAfterExecute);
+
+      phase = "decode";
+      const decodeStarted = adapter.now();
+      decoded = decodeLiveTransition(new DataView(state.memory.buffer),
+        physicalResult, state.stateSlot, state.decoder, state.maximumNodes,
+        "transitionLive result");
+      timings.decodeMs = elapsed(adapter.now, decodeStarted);
+      phase = "done";
+    } catch (error) {
+      failure = errorMessage(error);
+      if (phase === "execute" || phase === "decode") state.status = "poisoned";
+    } finally {
+      try {
+        const rewound = rewind(state, state.checkpoint, adapter.now);
+        timings.rewindMs = rewound.rewindMs;
+        memory.frontierBeforeRewind = rewound.frontierBeforeRewind;
+        memory.clearedBytes = rewound.clearedBytes;
+        memory.postRewindFrontier = rewound.postRewindFrontier;
+      } catch (error) {
+        failure = errorMessage(error);
+        state.status = "poisoned";
+      }
+    }
+    memory.pagesAfter = state.memory?.buffer.byteLength / PAGE_BYTES;
+    const totalMs = elapsed(adapter.now, totalStarted);
+    const measured = Object.values(timings).reduce((sum, value) => sum + value, 0);
+    const final = {
+      timings: Object.freeze({
+        ...timings,
+        totalMs,
+        overheadMs: totalMs - measured,
+      }),
+      memory: Object.freeze(memory),
+    };
+    if (failure !== undefined) {
+      if (state.status === "poisoned") invalidatePlayer(state, "poisoned");
+      return { ok: false, error: failure, ...final };
+    }
+    return { ok: true, ...decoded, ...final };
+  }
+
+  disposePlayer(player) {
+    const state = PLAYER_STATE.get(player);
+    requireCondition(player?.[PLAYER] === this && state?.owner === this,
+      "disposePlayer requires this adapter's player handle");
+    if (state.status === "disposed") return;
+    invalidatePlayer(state, "disposed");
   }
 
   replayTrace(animation, events) {
-    const state = ADAPTER_STATE.get(this);
-    requireCondition(state !== undefined, "invalid adapter receiver");
-    const started = state.now();
-    const decoded = this.decode(this.execute(this.prepare(animation, events)));
-    const totalMs = elapsed(state.now, started);
-    const { projectMs, encodeMs, executeMs, decodeMs } = decoded.timings;
-    return {
-      ...decoded,
-      timings: {
-        ...decoded.timings,
-        totalMs,
-        overheadMs: totalMs - projectMs - encodeMs - executeMs - decodeMs,
-      },
-    };
+    requireCondition(Array.isArray(events), "events must be an array");
+    const adapter = ADAPTER_STATE.get(this);
+    requireCondition(adapter !== undefined, "invalid adapter receiver");
+    const started = adapter.now();
+    const created = this.createPlayer(animation);
+    if (!created.ok) return created;
+    const actions = [created.action];
+    const dispatches = [];
+    let peakFrontier = created.memory.peakFrontier;
+    try {
+      for (const event of events) {
+        const dispatched = this.dispatch(created.player, event);
+        dispatches.push(dispatched);
+        if (!dispatched.ok) return dispatched;
+        actions.push(dispatched.action);
+        peakFrontier = Math.max(peakFrontier,
+          dispatched.memory.peakFrontier);
+      }
+      return {
+        ok: true,
+        actions,
+        timings: {
+          creation: created.timings,
+          dispatches: dispatches.map((dispatch) => dispatch.timings),
+          totalMs: elapsed(adapter.now, started),
+        },
+        memory: {
+          creation: created.memory,
+          dispatches: dispatches.map((dispatch) => dispatch.memory),
+          persistentCheckpoint: created.memory.persistentCheckpoint,
+          peakFrontier,
+          postRewindFrontier: dispatches.at(-1)?.memory.postRewindFrontier ??
+            created.memory.postRewindFrontier,
+          dispatchCount: dispatches.length,
+          reclamation: "player instance dropped by disposePlayer",
+        },
+      };
+    } finally {
+      this.disposePlayer(created.player);
+    }
   }
 }
 
@@ -722,11 +1103,8 @@ export async function createIlluminatePlayerAdapter({
   const compileMs = elapsed(now, compileStarted);
   requireCondition(WebAssembly.Module.imports(module).length === 0,
     "complete runtime module has imports");
-  const instantiateStarted = now();
-  const instance = await WebAssembly.instantiate(module, {});
-  const instantiateMs = elapsed(now, instantiateStarted);
   return new IlluminatePlayerAdapter({
-    instance,
+    module,
     manifest,
     build,
     now,
@@ -734,8 +1112,7 @@ export async function createIlluminatePlayerAdapter({
     startupTimings: {
       fetchMs: startupTimings.fetchMs ?? 0,
       compileMs,
-      instantiateMs,
-      totalMs: (startupTimings.fetchMs ?? 0) + compileMs + instantiateMs,
+      totalMs: (startupTimings.fetchMs ?? 0) + compileMs,
     },
   });
 }

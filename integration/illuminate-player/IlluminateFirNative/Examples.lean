@@ -1,4 +1,4 @@
-import IlluminateFirNative.Facade
+import Illuminate.Animation.FirLive
 
 namespace IlluminateFirNative.Examples
 
@@ -47,8 +47,16 @@ def expectedSeek : Array FrameAction := #[
   | .ok actions => actions == expectedSeek
   | .error _ => false
 
-#guard match Illuminate.AnimationPlayer.replayTrace
-    { animation with totalFrames := 0 } [] with
+#guard match Illuminate.AnimationPlayer.initialLive animation with
+  | .ok initial =>
+      initial.action == expectedSeek[0]! && !initial.scheduleNextFrame &&
+        let seek := Illuminate.AnimationPlayer.transitionLive animation
+          initial.state (.seek 2)
+        seek.action == expectedSeek[1]! && !seek.scheduleNextFrame
+  | .error _ => false
+
+#guard match Illuminate.AnimationPlayer.initialLive
+    { animation with totalFrames := 0 } with
   | .error _ => true
   | .ok _ => false
 

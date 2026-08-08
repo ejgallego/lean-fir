@@ -8,6 +8,7 @@ open Lean
 
 def frontierName : Name := `fir_heap_frontier
 def setFrontierName : Name := `fir_heap_set_frontier
+def rewindName : Name := `fir_heap_rewind
 def allocateName : Name := `fir_heap_alloc
 def store8Name : Name := `fir_heap_store8
 def store16Name : Name := `fir_heap_store16
@@ -17,6 +18,7 @@ def store64Name : Name := `fir_heap_store64
 def helperNames : Array Name := #[
   frontierName,
   setFrontierName,
+  rewindName,
   allocateName,
   store8Name,
   store16Name,
@@ -88,6 +90,32 @@ def setFrontierFunction (frontierIndex : Nat) : Function := {
       .localGet currentPages,
       .localGet requiredPages,
       .i32LtU] ++
+    [.localGet address,
+      .globalSet frontierIndex .uint32,
+      .ret] }
+
+/--
+Restores a previously observed aligned frontier without shrinking linear
+memory. This is deliberately separate from `fir_heap_set_frontier`, whose
+monotonic synchronization contract remains unchanged.
+-/
+def rewindFunction (frontierIndex : Nat) : Function := {
+  name := rewindName
+  params := #[(address, .uint32)]
+  results := #[]
+  locals := #[(current, .uint32)]
+  body :=
+    [.globalGet frontierIndex .uint32,
+      .localSet current] ++
+    trapWhenTrue [
+      .localGet current,
+      .localGet address,
+      .i32LtU] ++
+    trapWhenTrue [
+      .localGet address,
+      .i32Const .uint32 (u32 heapBase),
+      .i32LtU] ++
+    requireAligned address ++
     [.localGet address,
       .globalSet frontierIndex .uint32,
       .ret] }
@@ -192,6 +220,7 @@ def store64Function : Function := {
 def functions (frontierIndex : Nat) : Array Function := #[
   frontierFunction frontierIndex,
   setFrontierFunction frontierIndex,
+  rewindFunction frontierIndex,
   allocateFunction frontierIndex,
   store8Function,
   store16Function,

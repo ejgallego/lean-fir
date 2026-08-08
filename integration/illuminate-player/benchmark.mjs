@@ -68,7 +68,8 @@ async function loadPackage(root, label) {
     build,
     create: adapter.createIlluminatePlayerAdapter,
     artifact: {
-      sourceEntry: build.entry.sourceName,
+      sourceEntry: build.entries?.map(({ sourceName }) => sourceName) ??
+        build.entry.sourceName,
       completeWasmBytes: bytes.byteLength,
       completeWasmSha256: build.wasm.sha256,
       baseWasmBytes: build.wasm.base?.byteLength ?? null,
@@ -98,23 +99,40 @@ async function runOne(package_, example, events) {
   const result = adapter.replayTrace(example.data, events);
   assert.equal(result.ok, true, `${package_.label}/${example.title}: ${result.error}`);
   const memory = result.memory;
+  const creation = result.timings.creation;
+  const dispatches = result.timings.dispatches ?? [];
+  const sum = (field) => dispatches.reduce((total, timing) =>
+    total + (timing[field] ?? 0), 0);
   return {
     actions: result.actions,
     sample: {
-      projectMs: result.timings.projectMs ?? null,
-      encodeMs: result.timings.encodeMs ?? null,
-      prepareMs: result.timings.prepareMs,
-      executeMs: result.timings.executeMs,
-      decodeMs: result.timings.decodeMs,
+      projectMs: creation?.projectMs ?? result.timings.projectMs ?? null,
+      encodeMs: creation === undefined ? result.timings.encodeMs ?? null :
+        creation.animationEncodeMs + sum("encodeMs"),
+      prepareMs: result.timings.prepareMs ?? null,
+      executeMs: creation === undefined ? result.timings.executeMs :
+        creation.executeMs + sum("executeMs"),
+      decodeMs: creation === undefined ? result.timings.decodeMs :
+        creation.decodeMs + sum("decodeMs"),
+      rewindMs: creation === undefined ? null :
+        creation.rewindMs + sum("rewindMs"),
       totalMs: result.timings.totalMs,
       overheadMs: result.timings.overheadMs ?? null,
-      inputBytes: memory.inputBytes,
+      inputBytes: memory.creation?.animationBytes ?? memory.inputBytes,
+      persistentBytes: memory.creation === undefined ? null :
+        memory.persistentCheckpoint - memory.creation.frontierBefore,
+      scratchPeakBytes: memory.creation === undefined ? null :
+        memory.peakFrontier - memory.persistentCheckpoint,
+      postRewindFrontier: memory.postRewindFrontier ?? null,
       frontierGrowthPrepare: memory.frontierGrowthPrepare ??
-        memory.frontierAfterPrepare - memory.frontierBefore,
+        (memory.frontierAfterPrepare === undefined ? null :
+          memory.frontierAfterPrepare - memory.frontierBefore),
       frontierGrowthExecute: memory.frontierGrowthExecute ??
-        memory.frontierAfterExecute - memory.frontierBeforeExecute,
+        (memory.frontierAfterExecute === undefined ? null :
+          memory.frontierAfterExecute - memory.frontierBeforeExecute),
       frontierGrowthTotal: memory.frontierGrowthTotal ??
-        memory.frontierAfterDecode - memory.frontierBefore,
+        (memory.frontierAfterDecode === undefined ? null :
+          memory.frontierAfterDecode - memory.frontierBefore),
     },
   };
 }
@@ -140,7 +158,8 @@ function distribution(values) {
 }
 
 const metrics = ["projectMs", "encodeMs", "prepareMs", "executeMs",
-  "decodeMs", "totalMs", "overheadMs", "inputBytes",
+  "decodeMs", "rewindMs", "totalMs", "overheadMs", "inputBytes",
+  "persistentBytes", "scratchPeakBytes", "postRewindFrontier",
   "frontierGrowthPrepare", "frontierGrowthExecute", "frontierGrowthTotal"];
 
 function summarize(samples) {

@@ -23,7 +23,10 @@ belong to this integration project, never to Illuminate's 4.33 `.lake`.
 -/
 lean_lib «IlluminatePlayerSource» where
   srcDir := illuminateSrc
-  roots := #[`Illuminate.Animation.Types, `Illuminate.Animation.Player]
+  roots := #[
+    `Illuminate.Animation.Types,
+    `Illuminate.Animation.Player,
+    `Illuminate.Animation.FirLive]
 
 @[default_target]
 lean_lib «IlluminateFirNative»
