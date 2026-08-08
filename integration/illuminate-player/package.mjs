@@ -27,7 +27,25 @@ const firRoot = realpathSync(join(directory, "../.."));
 const illuminateRoot = realpathSync(process.env.ILLUMINATE_ROOT ??
   join(directory, ".illuminate"));
 const buildDirectory = join(directory, "_build");
+const baseStem = join(buildDirectory, "illuminate-player-base.wasm");
 const generatedStem = join(buildDirectory, "illuminate-player-resident.wasm");
+const illuminateSourceFiles = [
+  "src/Illuminate/Animation/Types.lean",
+  "src/Illuminate/Animation/Player.lean",
+];
+const expectedClosure = Object.freeze({
+  finalLcnfDeclarations: 96,
+  finalLcnfDeclarationSha256:
+    "0c5852dc5f9fe97ec5ed27759d360a5aa48a015400df093230cfa451db412f5c",
+  retainedSourceFunctions: 47,
+  retainedSourceFunctionSha256:
+    "c1b43eebff1440493154b569c0bdcfa1a63481217761ca74e048ad7228b200c9",
+  residentHelpers: 179,
+  residentHelperSha256:
+    "12c3bd922269e79956f86e20734ca1c50b24ff28a546fcf7e8cc0edd507ae2c2",
+  baseWasmBytes: 18005,
+  completeWasmBytes: 50194,
+});
 const outputNames = [
   "BUILD.json",
   "illuminate-player-browser-adapter.mjs",
@@ -52,10 +70,22 @@ function sha256(value) {
   return createHash("sha256").update(value).digest("hex");
 }
 
-function sourceState(root) {
+function sourceFileState(root, path) {
+  const tracked = capture("git", ["-C", root, "ls-files", "--", path]) === path;
+  return {
+    path,
+    tracked,
+    status: capture("git", ["-C", root, "status", "--porcelain", "--", path]) ||
+      "clean",
+    sha256: sha256(readFileSync(join(root, path))),
+  };
+}
+
+function sourceState(root, relevantFiles = []) {
   return {
     commit: capture("git", ["-C", root, "rev-parse", "HEAD"]),
     dirty: capture("git", ["-C", root, "status", "--porcelain"]) !== "",
+    relevantFiles: relevantFiles.map((path) => sourceFileState(root, path)),
   };
 }
 
@@ -92,6 +122,7 @@ run("lake", [
 ]);
 
 const wasm = readFileSync(generatedStem);
+const baseWasm = readFileSync(baseStem);
 const descriptorBytes = readFileSync(`${generatedStem}.json`);
 const descriptor = JSON.parse(descriptorBytes);
 const inventory = JSON.parse(readFileSync(`${generatedStem}.inventory.json`,
@@ -112,7 +143,7 @@ const adapterBytes = readFileSync(join(directory,
   "illuminate-player-browser-adapter.mjs"));
 const smokeBytes = readFileSync(join(directory, "package-smoke.mjs"));
 const fir = sourceState(firRoot);
-const illuminate = sourceState(illuminateRoot);
+const illuminate = sourceState(illuminateRoot, illuminateSourceFiles);
 const leanToolchain = readFileSync(join(directory, "lean-toolchain"), "utf8")
   .trim();
 const leanVersion = capture("lake", ["--keep-toolchain", "env", "lean",
@@ -133,8 +164,28 @@ assert.equal(inventory.functions.length,
   inventory.sourceFunctions.length + inventory.residentHelpers.length);
 assert.equal(inventory.internalFunctions.length,
   inventory.functions.length - functionExports.length);
-assert.equal(declarations.length, 84,
+assert.equal(descriptor.sourceEntry,
+  "Illuminate.AnimationPlayer.replayTrace");
+assert.deepEqual(descriptor.params, ["object", "tobject"]);
+assert.equal(descriptor.result, "object");
+assert.equal(declarations.length, expectedClosure.finalLcnfDeclarations,
   "Illuminate final-LCNF source declaration inventory changed");
+assert.equal(sha256(JSON.stringify(declarations)),
+  expectedClosure.finalLcnfDeclarationSha256,
+  "Illuminate final-LCNF declaration names changed");
+assert.equal(inventory.sourceFunctions.length,
+  expectedClosure.retainedSourceFunctions);
+assert.equal(sha256(JSON.stringify(inventory.sourceFunctions)),
+  expectedClosure.retainedSourceFunctionSha256,
+  "Illuminate retained source-function inventory changed");
+assert.equal(inventory.residentHelpers.length, expectedClosure.residentHelpers);
+assert.equal(sha256(JSON.stringify(inventory.residentHelpers)),
+  expectedClosure.residentHelperSha256,
+  "Illuminate resident-helper inventory changed");
+assert.equal(baseWasm.byteLength, expectedClosure.baseWasmBytes,
+  "Illuminate base Wasm size changed");
+assert.equal(wasm.byteLength, expectedClosure.completeWasmBytes,
+  "Illuminate complete-runtime Wasm size changed");
 
 const build = {
   schemaVersion: "fir.illuminate-player.build/v1",
@@ -144,7 +195,7 @@ const build = {
     sourceName: descriptor.sourceEntry,
     exportName: descriptor.entry,
     parameters: [
-      { name: "animation", lean: "Illuminate.CompiledAnimation", fir: "object" },
+      { name: "animation", lean: "Illuminate.PlayerAnimation", fir: "object" },
       { name: "events", lean: "List PlayerEvent", fir: "tobject" },
     ],
     result: {
@@ -156,6 +207,10 @@ const build = {
     file: "illuminate-player.wasm",
     byteLength: wasm.byteLength,
     sha256: wasmHash,
+    base: {
+      byteLength: baseWasm.byteLength,
+      sha256: sha256(baseWasm),
+    },
     functionImportCount: functionImports.length,
     memoryImportCount: memoryImports.length,
     memoryOwner: "module",
@@ -171,10 +226,23 @@ const build = {
     browserAdapter: {
       apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION,
       phases: ["prepare", "execute", "decode", "replayTrace"],
+      timing: {
+        projectMs: "browser animation to SVG-free PlayerAnimation object",
+        encodeMs: "PlayerAnimation and event graph encoding into Wasm memory",
+        prepareMs: "frontier sync, projection, encoding, and argument preparation",
+        executeMs: "only the exported Wasm replayTrace call",
+        decodeMs: "Except and FrameAction decoding into copied JavaScript values",
+        totalMs: "independent wall interval around replayTrace",
+        overheadMs: "total minus project, encode, execute, and decode intervals",
+      },
       result: "normalized FrameAction objects",
     },
     inputLayout: {
       version: ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION,
+      leanType: "Illuminate.PlayerAnimation",
+      projection: "compact browser animation projected exactly once",
+      svg: "segment sync SVG is omitted and never transferred",
+      naturals: "validated once as uint32-safe JavaScript integers and retained as Lean Nat",
       floatBoundary: "IEEE-754 binary64, little-endian, bit-exact",
       events: ["advance", "pause", "seek", "playTo", "loopAt", "tick"],
     },
@@ -190,22 +258,26 @@ const build = {
   runtime: {
     sourceDeclarationCount: declarations.length,
     sourceDeclarations: declarations,
+    sourceDeclarationSha256: sha256(JSON.stringify(declarations)),
     functionCount: inventory.functions.length,
     publicFunctions: functionExports,
     internalFunctionCount: inventory.internalFunctions.length,
     retainedSourceFunctionCount: inventory.sourceFunctions.length,
     retainedSourceFunctions: inventory.sourceFunctions,
+    retainedSourceFunctionSha256:
+      sha256(JSON.stringify(inventory.sourceFunctions)),
     residentHelperCount: inventory.residentHelpers.length,
     residentHelpers: inventory.residentHelpers,
+    residentHelperSha256: sha256(JSON.stringify(inventory.residentHelpers)),
     helperFamilies: [
       "object projections and scalar projections",
       "module-owned allocation and scalar stores",
       "constructors, setters, increments, releases, and cache setters",
-      "Nat and Int small/big numeric operations",
+      "small and big Nat operations",
       "Float subtraction, division, multiplication, comparison, round, and toUInt64",
-      "Array allocation, size, reads, and push",
+      "Array allocation, size/usize, reads, and push",
       "Nat.mod",
-      "Illuminate findSegment, parameterUpdates, option equality, and pause traversal",
+      "Illuminate validation, trace traversal, and compiler specializations",
       "resident UTF-8 string literals",
     ],
     illuminateSpecializations: inventory.residentHelpers.filter((name) =>

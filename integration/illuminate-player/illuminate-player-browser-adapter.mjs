@@ -1,9 +1,9 @@
 /** Browser/Node adapter for the FIR-native Illuminate trace player. */
 
 export const ILLUMINATE_PLAYER_ADAPTER_API_VERSION =
-  "fir.illuminate-player.browser/v1";
+  "fir.illuminate-player.browser/v2";
 export const ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.Animation.compact/v1";
+  "lean-4.32-Illuminate.Animation.PlayerAnimation/v2";
 export const ILLUMINATE_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.module-owned-arena/v1";
 
@@ -27,6 +27,9 @@ const KIND = Object.freeze({
 
 const PREPARED = Symbol("fir.illuminate-player.prepared");
 const EXECUTED = Symbol("fir.illuminate-player.executed");
+const ADAPTER_STATE = new WeakMap();
+const PREPARED_STATE = new WeakMap();
+const EXECUTED_STATE = new WeakMap();
 
 function fail(message) {
   throw new Error(`FIR Illuminate player adapter: ${message}`);
@@ -79,6 +82,59 @@ function string(value, label) {
   return value;
 }
 
+function projectNatural(value, label) {
+  natural(value, label);
+  return value;
+}
+
+function projectAnimation(animation) {
+  requireObject(animation, "animation");
+  requireCondition(Array.isArray(animation.segments),
+    "animation.segments must be an array");
+  requireCondition(Array.isArray(animation.steps),
+    "animation.steps must be an array");
+  return {
+    fps: projectNatural(animation.fps, "animation.fps"),
+    totalFrames: projectNatural(animation.totalFrames, "animation.totalFrames"),
+    segments: animation.segments.map((segment, segmentIndex) => {
+      const label = `animation.segments[${segmentIndex}]`;
+      requireObject(segment, label);
+      requireCondition(Array.isArray(segment.pmap), `${label}.pmap must be an array`);
+      requireCondition(Array.isArray(segment.params), `${label}.params must be an array`);
+      return {
+        startFrame: projectNatural(segment.sf, `${label}.sf`),
+        frameCount: projectNatural(segment.fc, `${label}.fc`),
+        paramMap: segment.pmap.map((binding, bindingIndex) => {
+          const bindingLabel = `${label}.pmap[${bindingIndex}]`;
+          requireObject(binding, bindingLabel);
+          const name = string(binding.a, `${bindingLabel}.a`);
+          return {
+            element: projectNatural(binding.e, `${bindingLabel}.e`),
+            target: name === "textContent"
+              ? { kind: "textContent" }
+              : { kind: "attribute", name },
+          };
+        }),
+        params: segment.params.map((row, rowIndex) => {
+          const rowLabel = `${label}.params[${rowIndex}]`;
+          requireCondition(Array.isArray(row), `${rowLabel} must be an array`);
+          return row.map((value, valueIndex) =>
+            string(value, `${rowLabel}[${valueIndex}]`));
+        }),
+      };
+    }),
+    steps: animation.steps.map((step, stepIndex) => {
+      const label = `animation.steps[${stepIndex}]`;
+      requireObject(step, label);
+      return {
+        frame: projectNatural(step.frame, `${label}.frame`),
+        pause: boolean(step.pause, `${label}.pause`),
+        loop: boolean(step.loop, `${label}.loop`),
+      };
+    }),
+  };
+}
+
 function writeHeader(view, address, {
   kind,
   bytes,
@@ -129,6 +185,14 @@ class Encoder {
 
   natural(value, label) {
     const n = natural(value, label);
+    return this.naturalValue(n, label);
+  }
+
+  naturalProjected(value, label) {
+    return this.naturalValue(BigInt(value), label);
+  }
+
+  naturalValue(n, label) {
     if (n <= MAX_IMMEDIATE) return Number(n * 2n + 1n) >>> 0;
     const address = this.allocate(40, label);
     const view = new DataView(this.memory.buffer);
@@ -200,59 +264,51 @@ class Encoder {
   }
 
   paramBinding(binding, label) {
-    requireObject(binding, label);
+    const target = binding.target.kind === "textContent"
+      ? immediate(0)
+      : this.ctor(1, [this.string(binding.target.name,
+        `${label}.target.name`)], new Uint8Array(0), `${label}.target`);
     return this.ctor(0, [
-      this.natural(binding.e, `${label}.e`),
-      this.string(binding.a, `${label}.a`),
+      this.naturalProjected(binding.element, `${label}.element`),
+      target,
     ], new Uint8Array(0), label);
   }
 
   segment(segment, label) {
-    requireObject(segment, label);
-    const map = segment.pmap;
+    const map = segment.paramMap;
     const params = segment.params;
-    requireCondition(Array.isArray(map), `${label}.pmap must be an array`);
-    requireCondition(Array.isArray(params), `${label}.params must be an array`);
     const mapWord = this.array(map.map((binding, index) =>
-      this.paramBinding(binding, `${label}.pmap[${index}]`)), `${label}.pmap`);
+      this.paramBinding(binding, `${label}.paramMap[${index}]`)),
+    `${label}.paramMap`);
     const paramsWord = this.array(params.map((row, rowIndex) => {
-      requireCondition(Array.isArray(row),
-        `${label}.params[${rowIndex}] must be an array`);
       return this.array(row.map((value, index) =>
         this.string(value, `${label}.params[${rowIndex}][${index}]`)),
       `${label}.params[${rowIndex}]`);
     }), `${label}.params`);
     return this.ctor(0, [
-      this.natural(segment.sf, `${label}.sf`),
-      this.natural(segment.fc, `${label}.fc`),
-      this.string(segment.sync, `${label}.sync`),
+      this.naturalProjected(segment.startFrame, `${label}.startFrame`),
+      this.naturalProjected(segment.frameCount, `${label}.frameCount`),
       mapWord,
       paramsWord,
     ], new Uint8Array(0), label);
   }
 
   step(step, label) {
-    requireObject(step, label);
-    return this.ctor(0, [this.natural(step.frame, `${label}.frame`)],
+    return this.ctor(0, [this.naturalProjected(step.frame, `${label}.frame`)],
       Uint8Array.of(
-        boolean(step.pause, `${label}.pause`) ? 1 : 0,
-        boolean(step.loop, `${label}.loop`) ? 1 : 0), label);
+        step.pause ? 1 : 0,
+        step.loop ? 1 : 0), label);
   }
 
   animation(animation) {
-    requireObject(animation, "animation");
-    requireCondition(Array.isArray(animation.segments),
-      "animation.segments must be an array");
-    requireCondition(Array.isArray(animation.steps),
-      "animation.steps must be an array");
     const segments = this.array(animation.segments.map((segment, index) =>
       this.segment(segment, `animation.segments[${index}]`)),
     "animation.segments");
     const steps = this.array(animation.steps.map((step, index) =>
       this.step(step, `animation.steps[${index}]`)), "animation.steps");
     return this.ctor(0, [
-      this.natural(animation.fps, "animation.fps"),
-      this.natural(animation.totalFrames, "animation.totalFrames"),
+      this.naturalProjected(animation.fps, "animation.fps"),
+      this.naturalProjected(animation.totalFrames, "animation.totalFrames"),
       segments,
       steps,
     ], new Uint8Array(0), "animation");
@@ -441,7 +497,7 @@ function decodeAction(view, word, decoder, maximumNodes, label) {
 function validateManifest(manifest) {
   requireObject(manifest, "module descriptor");
   requireCondition(manifest.entry ===
-    "Illuminate.Animation.Native.replayTraceNative",
+    "Illuminate.AnimationPlayer.replayTrace",
   "module descriptor has the wrong entry");
   requireCondition(JSON.stringify(manifest.params) ===
     JSON.stringify(["object", "tobject"]) && manifest.result === "object",
@@ -465,136 +521,184 @@ function validateBuild(build) {
 
 export class IlluminatePlayerAdapter {
   constructor({ instance, manifest, build, now, startupTimings, maximumNodes }) {
-    this.instance = instance;
     this.manifest = manifest;
     this.build = build;
-    this.now = now;
     this.startupTimings = Object.freeze({ ...startupTimings });
-    this.maximumNodes = maximumNodes;
-    this.encoder = new TextEncoder();
-    this.decoder = new TextDecoder("utf-8", { fatal: true });
-    this.memory = instance.exports.memory;
-    requireCondition(this.memory instanceof WebAssembly.Memory,
+    const memory = instance.exports.memory;
+    requireCondition(memory instanceof WebAssembly.Memory,
       "module does not export its memory");
     for (const name of ["fir_heap_frontier", "fir_heap_set_frontier",
       "fir_heap_alloc", manifest.entry]) {
       requireCondition(typeof instance.exports[name] === "function",
         `module is missing export ${name}`);
     }
-    this.frontier = instance.exports.fir_heap_frontier;
-    this.setFrontier = instance.exports.fir_heap_set_frontier;
-    this.allocate = instance.exports.fir_heap_alloc;
-    this.entry = instance.exports[manifest.entry];
-    this.lastFrontier = undefined;
+    ADAPTER_STATE.set(this, {
+      now,
+      maximumNodes,
+      encoder: new TextEncoder(),
+      decoder: new TextDecoder("utf-8", { fatal: true }),
+      memory,
+      frontier: instance.exports.fir_heap_frontier,
+      setFrontier: instance.exports.fir_heap_set_frontier,
+      allocate: instance.exports.fir_heap_alloc,
+      entry: instance.exports[manifest.entry],
+      lastFrontier: undefined,
+    });
     this.synchronizeFrontier();
   }
 
   synchronizeFrontier() {
-    const value = u32(this.frontier());
+    const state = ADAPTER_STATE.get(this);
+    requireCondition(state !== undefined, "invalid adapter receiver");
+    const value = u32(state.frontier());
     requireCondition(value >= HEAP_BASE && value % 8 === 0,
       `resident frontier ${value} is invalid`);
-    if (this.lastFrontier !== undefined) {
-      requireCondition(value >= this.lastFrontier,
-        `resident frontier moved backwards from ${this.lastFrontier}`);
+    if (state.lastFrontier !== undefined) {
+      requireCondition(value >= state.lastFrontier,
+        `resident frontier moved backwards from ${state.lastFrontier}`);
     }
-    this.setFrontier(value);
-    this.lastFrontier = value;
+    state.setFrontier(value);
+    state.lastFrontier = value;
     return value;
   }
 
   prepare(animation, events) {
-    const started = this.now();
+    const state = ADAPTER_STATE.get(this);
+    requireCondition(state !== undefined, "invalid adapter receiver");
+    const started = state.now();
     const frontierBefore = this.synchronizeFrontier();
-    const pagesBefore = this.memory.buffer.byteLength / PAGE_BYTES;
-    const encodeStarted = this.now();
+    const pagesBefore = state.memory.buffer.byteLength / PAGE_BYTES;
+    const projectStarted = state.now();
+    const projectedAnimation = projectAnimation(animation);
+    const projectMs = elapsed(state.now, projectStarted);
+    const encodeStarted = state.now();
     const writer = new Encoder({
-      fir_heap_alloc: this.allocate,
-    }, this.memory, this.encoder);
-    const animationWord = writer.animation(animation);
+      fir_heap_alloc: state.allocate,
+    }, state.memory, state.encoder);
+    const animationWord = writer.animation(projectedAnimation);
     const eventsWord = writer.eventList(events);
-    const encodeMs = elapsed(this.now, encodeStarted);
+    const encodeMs = elapsed(state.now, encodeStarted);
     const frontierAfterPrepare = this.synchronizeFrontier();
-    return {
+    const timings = Object.freeze({
+      projectMs,
+      encodeMs,
+      prepareMs: elapsed(state.now, started),
+    });
+    const memory = Object.freeze({
+      frontierBefore,
+      frontierAfterPrepare,
+      pagesBefore,
+      pagesAfterPrepare: state.memory.buffer.byteLength / PAGE_BYTES,
+      inputBytes: writer.bytes,
+      residentAllocationCalls: writer.allocations,
+      frontierGrowthPrepare: frontierAfterPrepare - frontierBefore,
+    });
+    const prepared = Object.freeze({
       [PREPARED]: this,
       state: "prepared",
+      timings,
+      memory,
+    });
+    PREPARED_STATE.set(prepared, {
+      owner: this,
       args: [i32(animationWord), i32(eventsWord)],
-      timings: {
-        encodeMs,
-        prepareMs: elapsed(this.now, started),
-      },
-      memory: {
-        frontierBefore,
-        frontierAfterPrepare,
-        pagesBefore,
-        pagesAfterPrepare: this.memory.buffer.byteLength / PAGE_BYTES,
-        inputBytes: writer.bytes,
-        residentAllocationCalls: writer.allocations,
-      },
-    };
+      timings,
+      memory,
+    });
+    return prepared;
   }
 
   execute(prepared) {
-    requireCondition(prepared?.[PREPARED] === this &&
-      prepared.state === "prepared", "execute requires a fresh prepared handle");
+    const state = ADAPTER_STATE.get(this);
+    const preparedState = PREPARED_STATE.get(prepared);
+    requireCondition(state !== undefined && prepared?.[PREPARED] === this &&
+      preparedState?.owner === this, "execute requires a fresh prepared handle");
+    PREPARED_STATE.delete(prepared);
     const frontierBeforeExecute = this.synchronizeFrontier();
-    const started = this.now();
-    const physicalResult = u32(this.entry(...prepared.args));
-    const executeMs = elapsed(this.now, started);
-    prepared.state = "executed";
-    return {
+    const started = state.now();
+    const physicalResult = u32(state.entry(...preparedState.args));
+    const executeMs = elapsed(state.now, started);
+    const frontierAfterExecute = this.synchronizeFrontier();
+    const timings = Object.freeze({ ...preparedState.timings, executeMs });
+    const memory = Object.freeze({
+      ...preparedState.memory,
+      frontierBeforeExecute,
+      frontierAfterExecute,
+      frontierGrowthExecute: frontierAfterExecute - frontierBeforeExecute,
+      pagesAfterExecute: state.memory.buffer.byteLength / PAGE_BYTES,
+    });
+    const executed = Object.freeze({
       [EXECUTED]: this,
       state: "executed",
+      timings,
+      memory,
+    });
+    EXECUTED_STATE.set(executed, {
+      owner: this,
       physicalResult,
-      timings: { ...prepared.timings, executeMs },
-      memory: {
-        ...prepared.memory,
-        frontierBeforeExecute,
-        frontierAfterExecute: this.synchronizeFrontier(),
-        pagesAfterExecute: this.memory.buffer.byteLength / PAGE_BYTES,
-      },
-    };
+      timings,
+      memory,
+    });
+    return executed;
   }
 
   decode(executed) {
-    requireCondition(executed?.[EXECUTED] === this &&
-      executed.state === "executed", "decode requires a fresh execution handle");
-    const started = this.now();
-    const view = new DataView(this.memory.buffer);
-    const header = readHeader(view, executed.physicalResult, "Except result");
+    const state = ADAPTER_STATE.get(this);
+    const executedState = EXECUTED_STATE.get(executed);
+    requireCondition(state !== undefined && executed?.[EXECUTED] === this &&
+      executedState?.owner === this, "decode requires a fresh execution handle");
+    EXECUTED_STATE.delete(executed);
+    const started = state.now();
+    const view = new DataView(state.memory.buffer);
+    const header = readHeader(view, executedState.physicalResult, "Except result");
     requireCondition(header.kind === KIND.constructor && header.aux1 === 1,
       "entry did not return Except String (Array FrameAction)");
     const payload = readWord(view, header.address + HEADER_BYTES,
       "Except payload");
     let result;
     if (header.aux0 === 0) {
-      result = { ok: false, error: readString(view, payload, this.decoder,
+      result = { ok: false, error: readString(view, payload, state.decoder,
         "Except.error") };
     } else {
       requireCondition(header.aux0 === 1, "Except result has an invalid tag");
       result = {
         ok: true,
-        actions: readArray(view, payload, "FrameAction array", this.maximumNodes)
-          .map((action, index) => decodeAction(view, action, this.decoder,
-            this.maximumNodes, `actions[${index}]`)),
+        actions: readArray(view, payload, "FrameAction array", state.maximumNodes)
+          .map((action, index) => decodeAction(view, action, state.decoder,
+            state.maximumNodes, `actions[${index}]`)),
       };
     }
-    const decodeMs = elapsed(this.now, started);
-    executed.state = "decoded";
-    const timings = { ...executed.timings, decodeMs };
-    timings.totalMs = timings.prepareMs + timings.executeMs + timings.decodeMs;
+    const decodeMs = elapsed(state.now, started);
+    const timings = { ...executedState.timings, decodeMs };
+    const frontierAfterDecode = this.synchronizeFrontier();
     return {
       ...result,
       timings,
       memory: {
-        ...executed.memory,
-        frontierAfterDecode: this.synchronizeFrontier(),
-        pagesAfterDecode: this.memory.buffer.byteLength / PAGE_BYTES,
+        ...executedState.memory,
+        frontierAfterDecode,
+        frontierGrowthTotal:
+          frontierAfterDecode - executedState.memory.frontierBefore,
+        pagesAfterDecode: state.memory.buffer.byteLength / PAGE_BYTES,
       },
     };
   }
 
   replayTrace(animation, events) {
-    return this.decode(this.execute(this.prepare(animation, events)));
+    const state = ADAPTER_STATE.get(this);
+    requireCondition(state !== undefined, "invalid adapter receiver");
+    const started = state.now();
+    const decoded = this.decode(this.execute(this.prepare(animation, events)));
+    const totalMs = elapsed(state.now, started);
+    const { projectMs, encodeMs, executeMs, decodeMs } = decoded.timings;
+    return {
+      ...decoded,
+      timings: {
+        ...decoded.timings,
+        totalMs,
+        overheadMs: totalMs - projectMs - encodeMs - executeMs - decodeMs,
+      },
+    };
   }
 }
 

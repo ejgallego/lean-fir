@@ -68,6 +68,30 @@ assert.equal(repeated.actions.at(-1).segment, 1);
 assert.ok(repeated.memory.frontierBefore >=
   roundingBoundary.memory.frontierAfterDecode);
 
+const emptyEvents = adapter.replayTrace(animation, []);
+assert.equal(emptyEvents.ok, true);
+assert.equal(emptyEvents.actions.length, 1);
+
+const unreadSync = { ...animation.segments[0] };
+Object.defineProperty(unreadSync, "sync", {
+  enumerable: true,
+  get() { throw new Error("sync SVG must remain browser-owned"); },
+});
+const svgFree = adapter.replayTrace({
+  ...animation,
+  segments: [unreadSync, animation.segments[1]],
+}, []);
+assert.equal(svgFree.ok, true);
+assert.equal(svgFree.memory.inputBytes, emptyEvents.memory.inputBytes);
+
+const prepared = adapter.prepare(animation, [{ kind: "tick", timestamp: 0.125 }]);
+assert.equal("args" in prepared, false);
+const executed = adapter.execute(prepared);
+assert.equal("physicalResult" in executed, false);
+assert.throws(() => adapter.execute(prepared), /fresh prepared handle/);
+assert.equal(adapter.decode(executed).ok, true);
+assert.throws(() => adapter.decode(executed), /fresh execution handle/);
+
 const invalid = adapter.replayTrace({ ...animation, totalFrames: 0 }, []);
 assert.deepEqual({ ok: invalid.ok, error: invalid.error }, {
   ok: false,
@@ -75,6 +99,28 @@ assert.deepEqual({ ok: invalid.ok, error: invalid.error }, {
 });
 const emptySegments = adapter.replayTrace({ ...animation, segments: [] }, []);
 assert.equal(emptySegments.ok, false);
+
+const frontierBeforeMalformed = adapter.synchronizeFrontier();
+assert.throws(() => adapter.replayTrace({ ...animation, fps: 1.5 }, []),
+  /animation\.fps must be a uint32 safe integer/);
+assert.equal(adapter.synchronizeFrontier(), frontierBeforeMalformed);
+
+let clockValue = 0;
+const timedAdapter = await createIlluminatePlayerAdapter({
+  bytes,
+  manifest,
+  build,
+  now: () => clockValue++,
+});
+assert.deepEqual(timedAdapter.replayTrace(animation, []).timings, {
+  projectMs: 1,
+  encodeMs: 1,
+  prepareMs: 5,
+  executeMs: 1,
+  decodeMs: 1,
+  totalMs: 11,
+  overheadMs: 7,
+});
 
 assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);
 assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(bytes)), [
@@ -86,7 +132,7 @@ assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(bytes)), [
 ]);
 console.log(JSON.stringify({
   ok: true,
-  calls: 5,
+  calls: 11,
   events: 11,
   functionImports: 0,
   memoryImports: 0,
