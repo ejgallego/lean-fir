@@ -4,19 +4,152 @@ set -euo pipefail
 here="$(cd "$(dirname "$0")" && pwd)"
 root="$(cd "$here/../../.." && pwd)"
 build=true
-if [[ "${1:-}" == "--no-build" ]]; then
-  build=false
+rebuild=false
+while [[ "${1:-}" == --* ]]; do
+  case "$1" in
+    --no-build)
+      build=false
+      ;;
+    --rebuild)
+      rebuild=true
+      ;;
+    --help)
+      cat <<'EOF'
+usage: package-pretty-format.sh [--no-build | --rebuild] [output-directory]
+
+  --no-build  Package the existing generated source artifact.
+  --rebuild   Regenerate the source artifact even if its cache is valid.
+EOF
+      exit 0
+      ;;
+    *)
+      echo "unsupported option: $1" >&2
+      exit 1
+      ;;
+  esac
   shift
+done
+if [[ "$build" == false && "$rebuild" == true ]]; then
+  echo "--no-build and --rebuild cannot be combined" >&2
+  exit 1
 fi
 out="${1:-$here/_build/prettyM-current}"
+if (($# > 1)); then
+  echo "only one output directory may be specified" >&2
+  exit 1
+fi
 source_artifact="$here/_build/source-pretty-format-trace-resident-closed.wasm"
+
+file_digest() {
+  local line
+  line="$(sha256sum "$1")"
+  printf '%s\n' "${line%% *}"
+}
+
+hash_key() {
+  local line
+  line="$(sha256sum)"
+  printf '%s\n' "${line%% *}"
+}
+
+key_field() {
+  printf '%s\0%s\0' "$1" "$2"
+}
+
+generator_cache_hit() {
+  local expected_key="$1"
+  local stored_key
+  local index
+  local actual_digest
+  local -a outputs=(
+    "$source_artifact"
+    "$source_artifact.json"
+    "$source_artifact.lcnf"
+  )
+  local -a stored_digests=()
+
+  [[ "$rebuild" == false ]] || return 1
+  [[ -f "$generator_cache_key" && -f "$generator_cache_digests" ]] || return 1
+  IFS= read -r stored_key < "$generator_cache_key" || return 1
+  [[ "$stored_key" == "$expected_key" ]] || return 1
+  mapfile -t stored_digests < "$generator_cache_digests"
+  ((${#stored_digests[@]} == ${#outputs[@]})) || return 1
+  for index in "${!outputs[@]}"; do
+    [[ "${stored_digests[index]}" =~ ^[0-9a-f]{64}$ ]] || return 1
+    [[ -s "${outputs[index]}" ]] || return 1
+    actual_digest="$(file_digest "${outputs[index]}")"
+    [[ "$actual_digest" == "${stored_digests[index]}" ]] || return 1
+  done
+}
+
+record_generator_cache() {
+  local key="$1"
+  local key_tmp
+  local digests_tmp
+  key_tmp="$(mktemp "$generator_cache_dir/.key.XXXXXX")"
+  digests_tmp="$(mktemp "$generator_cache_dir/.digests.XXXXXX")"
+  printf '%s\n' "$key" > "$key_tmp"
+  file_digest "$source_artifact" > "$digests_tmp"
+  file_digest "$source_artifact.json" >> "$digests_tmp"
+  file_digest "$source_artifact.lcnf" >> "$digests_tmp"
+  mv -f "$digests_tmp" "$generator_cache_digests"
+  mv -f "$key_tmp" "$generator_cache_key"
+}
 
 if [[ "$build" == true ]]; then
   lake -d "$root" build Fir.Wasm.Emit.ResidentPrettyFormat
-  (
-    cd "$here"
-    lake -d "$root" env lean FirWasmPrettyTraceExample.lean
-  )
+  generator_cache_dir="$here/_build/.fir-prettyM-cache"
+  generator_cache_key="$generator_cache_dir/generator.key"
+  generator_cache_digests="$generator_cache_dir/generator.digests"
+  mkdir -p "$generator_cache_dir"
+  generator_source="$here/FirWasmPrettyTraceExample.lean"
+  lean_version="$(lake -d "$root" env lean --version)"
+  lean_prefix="$(lake -d "$root" env lean --print-prefix)"
+  lean_tool="$lean_prefix/bin/lean"
+  lake_version="$(lake --version)"
+  generator_dependency_list="$(
+    lake -d "$root" env lean --deps "$generator_source"
+  )"
+  mapfile -t generator_dependencies <<< "$generator_dependency_list"
+  generator_key="$({
+    key_field cache-format fir-prettyM-source-v1
+    key_field root "$root"
+    key_field source "$generator_source"
+    key_field source-sha256 "$(file_digest "$generator_source")"
+    key_field lean "$lean_tool"
+    key_field lean-sha256 "$(file_digest "$lean_tool")"
+    key_field lean-version "$lean_version"
+    key_field lake-version "$lake_version"
+    key_field command "lake -d <root> env lean FirWasmPrettyTraceExample.lean"
+    dependency_index=0
+    for dependency in "${generator_dependencies[@]}"; do
+      [[ -f "$dependency" ]] || {
+        echo "Lean dependency does not exist: $dependency" >&2
+        exit 1
+      }
+      key_field "dependency.$dependency_index.path" "$dependency"
+      key_field "dependency.$dependency_index.sha256" "$(file_digest "$dependency")"
+      trace="${dependency%.olean}.trace"
+      if [[ -f "$trace" ]]; then
+        key_field "dependency.$dependency_index.trace" "$trace"
+        key_field "dependency.$dependency_index.trace-sha256" "$(file_digest "$trace")"
+      fi
+      dependency_index=$((dependency_index + 1))
+    done
+  } | hash_key)"
+  if generator_cache_hit "$generator_key"; then
+    printf 'HIT prettyM source artifact\n'
+  else
+    printf 'BUILD prettyM source artifact\n'
+    (
+      cd "$here"
+      lake -d "$root" env lean FirWasmPrettyTraceExample.lean
+    )
+    test -s "$source_artifact"
+    test -s "$source_artifact.json"
+    test -s "$source_artifact.lcnf"
+    record_generator_cache "$generator_key"
+  fi
 fi
 
 test -s "$source_artifact"

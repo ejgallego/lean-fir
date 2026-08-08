@@ -106,6 +106,12 @@ From the repository root:
 integration/talos/artifact/package-pretty-format.sh
 ```
 
+The default command reuses a previously generated source artifact only when
+the generator, imported Lean artifacts and transitive Lake trace, toolchain,
+and all three stored output digests still match. Pass `--rebuild` to force the
+expensive source-generation step. The complete artifact gate independently
+regenerates twice and compares every checkpoint byte-for-byte.
+
 The canonical package path is:
 
 ```text
