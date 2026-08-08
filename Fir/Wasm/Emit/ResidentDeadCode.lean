@@ -7,6 +7,7 @@ open Lean
 
 inductive PruneError where
   | invalidInput (error : SymbolicError)
+  | unavailableExport (name : Name)
   | missingRoot (name : Name)
   | missingDeclaration (name : Name)
   | invalidCacheIndex (index : Nat)
@@ -118,5 +119,52 @@ def prune (module : Module) : Except PruneError Module := do
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
+
+/--
+Restrict a linked module to an explicit public function surface and remove
+everything unreachable from that surface. Requested names must already be
+exports: this operation can hide linker exports, but cannot accidentally make
+an internal helper public.
+-/
+def pruneToExports (module : Module) (exports : Array Name) :
+    Except PruneError Module := do
+  for name in exports do
+    unless module.exports.contains name do
+      throw (.unavailableExport name)
+  prune { module with exports }
+
+private def publicRootName : Name := `residentDeadCodePublicRoot
+private def retainedHelperName : Name := `residentDeadCodeRetainedHelper
+private def unusedHelperName : Name := `residentDeadCodeUnusedHelper
+
+private def emptyFunction (name : Name) (body : List Instruction := [.ret]) :
+    Function := {
+  name
+  params := #[]
+  results := #[]
+  locals := #[]
+  body }
+
+private def exportRestrictionExample : Module := {
+  imports := #[]
+  functions := #[
+    emptyFunction publicRootName
+      [.call (.declaration retainedHelperName), .ret],
+    emptyFunction retainedHelperName,
+    emptyFunction unusedHelperName]
+  exports := #[publicRootName, retainedHelperName, unusedHelperName]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+#guard match pruneToExports exportRestrictionExample #[publicRootName] with
+  | .ok module =>
+      module.exports == #[publicRootName] &&
+      module.functions.map (fun function => function.name) ==
+        #[publicRootName, retainedHelperName]
+  | .error _ => false
+
+#guard match pruneToExports exportRestrictionExample #[`notPreviouslyExported] with
+  | .error (.unavailableExport name) => name == `notPreviouslyExported
+  | _ => false
 
 end Fir.Wasm.Emit.ResidentDeadCode
