@@ -16,11 +16,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - No cross-lane integration lease is currently active. The user-reassigned
-  `ILLUMINATE-TALOS-ADAPTER` lease is complete at ready W6 head `c28955a5`;
-  after it lands, W7 owns the independent rebase, artifact/Illuminate gates,
-  and package republication on `wasm/generation`.
+  `W6-GENERATED-LOCAL-LAYOUT` lease is complete at ready W6 head `151c582c`.
+  W7 owns the independent rebase and artifact gate on `wasm/generation`; W6's
+  next proof slice assembles the production-generated declaration family.
 
 ## Completed integration lease
+
+- Milestone: `W6-GENERATED-LOCAL-LAYOUT`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this short certificate-free compiler-proof slice.
+- Integration branch/worktree: `main` in the root worktree.
+- Published stack: W6 functional head `bf4eabdb` and ready mailbox `151c582c`,
+  based directly on `main` at `c2ea914a`.
+- Lease boundary: satisfied. `lowerDecl` constructs one canonical emitted
+  parameter-plus-body-local row and uses it for symbolic lookup. The generated
+  declaration selector proves local-number and ABI-kind alignment from that
+  row, with no caller-supplied layout certificate or hygiene premise. No
+  semantic Wasm ABI or concrete-runtime contract changed.
+- Validation: Lean Beam sync/save, focused compiler/proof dependency cones,
+  `git diff --check`, complete `make check` with 1,844/1,844 comparisons equal
+  and zero findings, and all 3,125 Talos jobs, both before and after rebasing
+  onto the final base. W7 must rebase and run its artifact-specific gate
+  because production lowering changed.
+
+## Previous completed integration lease
 
 - Milestone: `ILLUMINATE-TALOS-ADAPTER`.
 - Integration owner: `wasm-proof`; the user reassigned the integration lease
@@ -43,7 +62,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with 1,844/1,844 comparisons equal and zero findings; and all 3,125 Talos
   jobs. W7 may now rebase and finish its own artifact/Illuminate acceptance.
 
-## Previous completed integration lease
+## Earlier completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
 - Integration owner: `wasm-gen`; the user assigned this short integration
@@ -67,7 +86,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with digest
   `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
 
-## Earlier completed integration lease
+## Older completed integration lease
 
 - Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
 - Integration owner: `wasm-gen`; the temporary lease is complete and the
@@ -124,6 +143,16 @@ identities.
   sole blocker without claiming the separate refinement theorems for its nine
   Illuminate helpers. W7 may rebase `wasm/generation`, run its artifact and
   Illuminate acceptance gates, republish, and mark its mailbox ready.
+
+- `W6-GENERATED-LOCAL-LAYOUT` is linked/accepted through W6 functional head
+  `bf4eabdb` and ready mailbox `151c582c`, based directly on `c2ea914a`.
+  Production lowering, symbolic lookup, emitted parameters/locals, and numeric
+  adaptation now share one canonical binding row. Consequently
+  `ConcreteGeneratedDeclaration.exists_ofSupportedPipeline` derives
+  `LocalLayoutAligned` internally and no longer accepts a layout certificate
+  or declaration-hygiene premise. All 1,844 repository comparisons and all
+  3,125 Talos jobs pass. W7 must rebase and confirm its deterministic artifact;
+  W6 next builds the hereditary family of these generated declaration rows.
 
 - `SCALAR-CLOSURE-ABI-ADMISSION` is linked/accepted through W6 functional head
   `cf1ed73f` and ready mailbox head `4013a6ba`. The lowering decision is
