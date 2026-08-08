@@ -5670,6 +5670,30 @@ recursively, rather than accepting a module-wide callee theorem as an opaque
 premise. Saturated closure dispatch and lazy misses then join the same source
 derivation with their existing production selection laws.
 
+W6.6hp introduces that source-recursive boundary.
+`ReuseCapacityDirectHereditaryCodeEvaluates` follows the existing facts-indexed
+finite source relation, but its direct-call constructor contains both the
+finite callee-body derivation (at empty declaration-entry facts) and the finite
+caller-continuation derivation. `DirectInternalCallSite.sourceCallLetResult`
+reconstructs the executable interpreter call prefix from the call equations:
+it stages and enters the declaration, lifts the isolated callee execution
+beneath the protected caller binding frame, and resumes the continuation.
+
+The hereditary relation erases to `ReuseCapacityBudgetedCodeEvaluates` and
+therefore to the exact terminal `SourceCodeResult`. Its call-support payload
+contains the nested source derivation needed by recursive compiler
+correctness, but no target program, store, witness, execution, or translation
+certificate. Compiler contexts are retained only to select each declaration's
+real local/static compilation environment; coherent contexts have the same
+source program, so this does not alter source execution.
+
+The next slice makes the production direct-call runtime law consume this
+hereditary support payload. The declaration-family selector supplies the
+generated callee row and the induction hypothesis supplies its exact
+cache-aware execution package. That removes the current opaque
+`DirectInternalCallDeclarationInduction` premise for direct named calls.
+Saturated closure dispatch and lazy misses remain subsequent constructors.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

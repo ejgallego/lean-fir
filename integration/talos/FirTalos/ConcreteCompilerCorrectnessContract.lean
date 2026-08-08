@@ -143,6 +143,41 @@ example
     stepFits
 
 /--
+The recursive finite-evaluation boundary is source-only: a direct-call node
+contains its callee and continuation derivations, erases to the ordinary mixed
+source judgment, and fixes the exact terminal source state. No target program,
+store, witness, execution, or translation certificate is an input.
+-/
+example
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+        DirectSupported ExternalSupported LazySupported CaseSupported
+        EffectSupported letCost context facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes) :
+    SourceCodeResult context sourceExternals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue :=
+  evaluation.sourceResult
+
+/--
 Compile-time harness for the public partial-correctness boundary.
 
 This application intentionally has no `ConcreteCodeSimulation`,

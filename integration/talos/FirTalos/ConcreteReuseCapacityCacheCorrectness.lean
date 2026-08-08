@@ -4382,6 +4382,468 @@ structure DirectInternalCallSite
     Fir.Wasm.getLocal context decl.fvarId =
       .ok (.localGet decl.fvarId, resultKind)
 
+private theorem listMapM_length_of_ok_for_directCall
+    {α β ε : Type} (items : List α) (action : α → Except ε β)
+    (results : List β) (found : items.mapM action = .ok results) :
+    results.length = items.length := by
+  induction items generalizing results with
+  | nil =>
+      change Except.ok [] = Except.ok results at found
+      have resultsEq : ([] : List β) = results := Except.ok.inj found
+      subst results
+      rfl
+  | cons item items ih =>
+      rw [List.mapM_cons] at found
+      cases itemResult : action item with
+      | error fault =>
+          rw [itemResult] at found
+          contradiction
+      | ok value =>
+          rw [itemResult] at found
+          cases restResult : items.mapM action with
+          | error fault =>
+              rw [restResult] at found
+              contradiction
+          | ok rest =>
+              rw [restResult] at found
+              have resultsEq : value :: rest = results := Except.ok.inj found
+              subst results
+              simp [ih rest restResult]
+
+/--
+A finite execution of the admitted direct callee reconstructs the ordinary
+source call prefix seen by the caller.
+
+The call-site equations supply the two staging steps. The isolated callee
+execution is lifted beneath the caller's binding frame, and the final yielded
+value resumes the continuation. Thus a hereditary source derivation need not
+store a second opaque `SourceCallLetResult` witness beside the callee body.
+-/
+theorem DirectInternalCallSite.sourceCallLetResult
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (site : DirectInternalCallSite callerContext decl sourceEnv)
+    (contexts : DeclarationContextsCoherent callerContext calleeContext)
+    (calleeResult :
+      SourceCodeResult calleeContext sourceExternals sourceRuntime
+        site.calleeEnv site.calleeCode nextRuntime sourceValue) :
+    SourceCallLetResult callerContext sourceExternals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue := by
+  have argumentSize : site.semanticArgs.size = site.args.size := by
+    have evaluated := site.argumentsEvaluated
+    unfold evalArgs at evaluated
+    rw [Array.mapM_eq_mapM_toList] at evaluated
+    cases listResult : site.args.toList.mapM (evalArg sourceEnv) with
+    | error fault =>
+        rw [listResult] at evaluated
+        contradiction
+    | ok results =>
+        rw [listResult] at evaluated
+        have valuesEq : results.toArray = site.semanticArgs :=
+          Except.ok.inj evaluated
+        rw [← valuesEq]
+        simpa using
+          listMapM_length_of_ok_for_directCall site.args.toList
+            (evalArg sourceEnv) results listResult
+  have parameterSize :
+      site.semanticArgs.size = site.sourceDeclaration.params.size := by
+    by_contra different
+    have sizeTest :
+        (site.sourceDeclaration.params.size == site.semanticArgs.size) =
+          false := beq_eq_false_iff_ne.mpr (Ne.symm different)
+    have bound := site.parametersBound
+    unfold bindParams at bound
+    simp [sizeTest] at bound
+  have callArgs :
+      site.semanticArgs.extract 0 site.sourceDeclaration.params.size =
+        site.semanticArgs := by
+    simp [← parameterSize]
+  have extraArgs :
+      site.semanticArgs.extract site.sourceDeclaration.params.size
+          site.semanticArgs.size =
+        #[] := by
+    simp [← parameterSize]
+  have argumentsNonempty : site.semanticArgs.isEmpty = false := by
+    simpa [Array.isEmpty, ← argumentSize, ← parameterSize] using site.nonCached
+  have staged :
+      executeStep sourceExternals {
+          program := callerContext.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } =
+        .next {
+          program := callerContext.program
+          control := .invokeName site.declaration site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } := by
+    simp [executeStep, coreStep, evalLetValue, site.valueEq,
+      site.argumentsEvaluated, pushBindFrame]
+  have entered :
+      executeStep sourceExternals {
+          program := callerContext.program
+          control := .invokeName site.declaration site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } =
+        .next {
+          program := callerContext.program
+          control := .code site.calleeCode
+          env := site.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } := by
+    simp [executeStep, coreStep, invokeDecl, site.declarationFound,
+      argumentsNonempty, parameterSize, callArgs, extraArgs,
+      site.parametersBound, site.bodyEq]
+  have callerResult :=
+    DeclarationContextsCoherent.sourceCodeResult contexts calleeResult
+  rcases callerResult with ⟨calleeCount, resultEnv, calleeSteps⟩
+  have protectedSteps :
+      ExecSteps sourceExternals calleeCount {
+          program := callerContext.program
+          control := .code site.calleeCode
+          env := site.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } {
+          program := callerContext.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } := by
+    simpa [sourceCodeState, sourceYieldState, withFrameSuffix] using
+      (FirTalos.Correctness.ExecSteps.withFrameSuffix calleeSteps
+        (suffix := [.bind decl.fvarId continuation sourceEnv []]))
+  have resumed :
+      executeStep sourceExternals {
+          program := callerContext.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } =
+        .next {
+          program := callerContext.program
+          control := .code continuation
+          env := bind sourceEnv decl.fvarId sourceValue
+          runtime := nextRuntime } := by
+    simp [executeStep, coreStep]
+  have callPrefix :
+      ExecSteps sourceExternals 2 {
+          program := callerContext.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } {
+          program := callerContext.program
+          control := .code site.calleeCode
+          env := site.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } :=
+    .step staged (.step entered (.refl _))
+  obtain ⟨withCalleeCount, withCallee⟩ :=
+    FirTalos.Correctness.ExecSteps.trans callPrefix protectedSteps
+  obtain ⟨count, steps⟩ :=
+    FirTalos.Correctness.ExecSteps.trans withCallee
+      (.step resumed (.refl _))
+  exact ⟨count, steps⟩
+
+/--
+Source-only finite evaluation with hereditary direct calls.
+
+Unlike `ReuseCapacityBudgetedCodeEvaluates.callLet`, the direct-call
+constructor does not hide the callee behind an arbitrary support predicate.
+It contains the admitted source/static call site, a finite derivation of the
+callee body at empty entry facts, and a finite derivation of the caller
+continuation. Recursive calls may use their independently computed coherent
+compiler context, but the derivation contains no target program, store,
+witness, execution, or translation certificate.
+
+External calls and lazy paths remain explicit source steps for now. Saturated
+closure dispatch and hereditary lazy misses will receive analogous nested
+constructors after the direct-call induction is closed.
+-/
+inductive ReuseCapacityDirectHereditaryCodeEvaluates
+    (externals : ExternalImpl)
+    (DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
+    (EffectSupported : EffectSupportedPredicate)
+    (letCost : LCNF.LetDecl .impure → Nat) :
+    Fir.Wasm.Context → ReuseCapacityFacts → RuntimeState → Env →
+      LCNF.Code .impure → ReuseCapacityFacts → RuntimeState → Env → Value →
+        Nat → Prop where
+  | ret
+      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.return result) facts
+        sourceRuntime sourceEnv sourceValue 0
+  | letValue
+      (supported : DirectSupported facts decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (letCost decl + continuationCost)
+  | externalLet
+      (supported :
+        ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost)
+      (sourceStep :
+        SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | directCallLet
+      (site : DirectInternalCallSite context decl sourceEnv)
+      (contexts : DeclarationContextsCoherent context calleeContext)
+      (callee :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost calleeContext [] sourceRuntime site.calleeEnv site.calleeCode
+          calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | lazyLet
+      (path : LazyCachePath)
+      (supported :
+        LazySupported path sourceRuntime sourceEnv decl continuation nextRuntime
+          sourceValue stepCost)
+      (sourceStep :
+        SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | caseOf
+      (supported : CaseSupported sourceRuntime sourceEnv cases selected)
+      (sourceStep : SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context facts sourceRuntime sourceEnv selected resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
+  | effect
+      (supported :
+        EffectSupported sourceRuntime sourceEnv code continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost context facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv code resultFacts resultRuntime
+        resultEnv resultValue requiredBytes
+
+/-- The support payload exposed to the generic structural call theorem. -/
+inductive ReuseCapacityDirectHereditaryCallSupported
+    (externals : ExternalImpl)
+    (DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
+    (EffectSupported : EffectSupportedPredicate)
+    (letCost : LCNF.LetDecl .impure → Nat)
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure) (_continuation : LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat) : Prop where
+  | intro
+      {calleeContext : Fir.Wasm.Context}
+      {calleeResultFacts : ReuseCapacityFacts}
+      {calleeResultEnv : Env}
+      (site : DirectInternalCallSite context decl sourceEnv)
+      (contexts : DeclarationContextsCoherent context calleeContext)
+      (callee :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost calleeContext [] sourceRuntime site.calleeEnv site.calleeCode
+          calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost) :
+      ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context sourceRuntime sourceEnv decl _continuation nextRuntime
+        sourceValue stepCost
+
+/-- Forget nested derivations to the existing mixed finite-evaluation form. -/
+theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
+      ExternalSupported
+      (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context)
+      LazySupported CaseSupported EffectSupported letCost facts sourceRuntime
+      sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
+      requiredBytes := by
+  induction evaluation with
+  | ret sourceLookup => exact .ret sourceLookup
+  | letValue supported sourceStep transfer _ ih =>
+      exact .letValue supported sourceStep transfer ih
+  | externalLet supported sourceStep transfer _ ih =>
+      exact .externalLet supported sourceStep transfer ih
+  | @directCallLet context decl sourceEnv calleeContext sourceRuntime
+      calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost facts
+      nextFacts continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost site contexts callee transfer continued calleeIH
+      continuedIH =>
+      exact .callLet
+        (.intro site contexts callee)
+        (site.sourceCallLetResult contexts calleeIH.sourceResult)
+        transfer continuedIH
+  | lazyLet path supported sourceStep transfer _ ih =>
+      exact .lazyLet path supported sourceStep transfer ih
+  | caseOf supported sourceStep _ ih =>
+      exact .caseOf supported sourceStep ih
+  | effect supported sourceStep _ ih =>
+      exact .effect supported sourceStep ih
+
+/-- The hereditary relation remains an exact finite source execution. -/
+theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    SourceCodeResult context externals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue :=
+  evaluation.toBudgeted.sourceResult
+
+/-- The nested body determines the ordinary source call prefix. -/
+theorem ReuseCapacityDirectHereditaryCallSupported.sourceStep
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env} {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value} {stepCost : Nat}
+    (supported :
+      ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost) :
+    SourceCallLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue := by
+  cases supported with
+  | intro site contexts callee =>
+      exact site.sourceCallLetResult contexts callee.sourceResult
+
 /--
 Source-facing family of saturated internal named calls.
 
