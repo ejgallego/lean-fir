@@ -240,6 +240,35 @@ def abiDirectCallProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl r LCNF.ImpureType.tobject (.fap `abiDirectId #[.fvar x])) <|
       .return r)] }
 
+/-- Regression for duplicate same-scope declaration parameters. Source
+binding accepts both arguments, but symbolic lowering cannot assign two Wasm
+locals the same `FVarId`; the supported boundary rejects the declaration. -/
+def duplicateParameterDecl : LCNF.Decl .impure :=
+  decl `duplicateParameter #[param x LCNF.ImpureType.tobject,
+    param x LCNF.ImpureType.tobject]
+    LCNF.ImpureType.tobject (.code (.return x))
+
+def duplicateParameterProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[duplicateParameterDecl,
+      decl `main #[] LCNF.ImpureType.tobject (.code <|
+        .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 11))) <|
+        .let (letDecl y LCNF.ImpureType.tobject (.lit (.nat 12))) <|
+        .let (letDecl r LCNF.ImpureType.tobject
+          (.fap `duplicateParameter #[.fvar x, .fvar y])) <|
+        .return r)] }
+
+#guard !declarationParameterIdsUnique duplicateParameterDecl
+#guard !supportedProgram duplicateParameterProgram
+#guard match lowerSupported duplicateParameterProgram with
+  | .error (.validation (.unsupportedCode `duplicateParameter)) => true
+  | _ => false
+#guard match lower duplicateParameterProgram with
+  | .ok module =>
+      match validateModule module with
+      | .error (.stackMismatch `main [.tobject] [.tobject, .tobject]) => true
+      | _ => false
+  | .error _ => false
+
 def abiClosureFirstDecl : LCNF.Decl .impure :=
   decl `abiClosureFirst #[param x LCNF.ImpureType.tobject,
     param y LCNF.ImpureType.tobject] LCNF.ImpureType.tobject (.code (.return x))

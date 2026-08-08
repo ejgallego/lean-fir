@@ -32,6 +32,13 @@ def abiValueKind? (type : Expr) : Option AbiKind :=
   | .ok kind? => kind?
   | .error _ => none
 
+/-- Declaration parameters occupy one source scope and therefore must have
+distinct free-variable identities. The symbolic Wasm local namespace has the
+same requirement. -/
+def declarationParameterIdsUnique (decl : LCNF.Decl .impure) : Bool :=
+  let ids := decl.params.toList.map (·.fvarId)
+  ids.all fun id => (ids.filter (sameFVar id)).length == 1
+
 /-- Scalar field values represented by the shared impure runtime.
 `USize` uses the distinct `uproj` instruction. -/
 def supportedScalarProjectionKind : AbiKind → Bool
@@ -757,7 +764,7 @@ theorem reuseCapacitySafeProgram_code
 
 def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     (decl : LCNF.Decl .impure) : Bool :=
-  abiTypeKnown decl.type &&
+  declarationParameterIdsUnique decl && abiTypeKnown decl.type &&
     match addSupportedDeclarationParams? program decl, decl.value with
     | some _, .extern _ => true
     | some locals, .code code =>

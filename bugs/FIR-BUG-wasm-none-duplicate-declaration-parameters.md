@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-duplicate-declaration-parameters
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -75,7 +75,8 @@ is to reject duplicate declaration parameter identifiers before lowering.
 
 ## Workaround
 
-none
+Duplicate declaration parameters are rejected at the Wasm support boundary.
+Upstream producers should maintain unique same-scope `FVarId`s.
 
 ## Upstream tracking
 
@@ -83,5 +84,7 @@ none
 
 ## Resolution and regression
 
-Unresolved. The planned repair adds declaration-parameter uniqueness to
-`supportedDecl` and a positive/negative regression in `Fir/Wasm/Examples.lean`.
+Resolved by adding `declarationParameterIdsUnique` to `supportedDecl`.
+`Fir/Wasm/Examples.lean` preserves the original raw-lowering failure as an
+oracle, checks rejection by both `supportedProgram` and `lowerSupported`, and
+retains the adjacent valid direct-call program as a positive regression.
