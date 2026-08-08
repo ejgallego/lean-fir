@@ -57,3 +57,10 @@ fresh Lean graph into module-owned memory, preserves timestamp `Float` values
 as binary64, and returns copied normalized actions. No raw Wasm address escapes
 the adapter. Allocations use an instance-lifetime monotonic arena, so discard
 the adapter instance to reclaim a completed differential-testing batch.
+
+The production module exports only the structured trace entry plus
+`fir_heap_frontier`, `fir_heap_set_frontier`, and `fir_heap_alloc`. Resident
+runtime helpers remain internal Wasm functions and are retained only when
+reachable from that four-function public surface. `BUILD.json` records the
+exact public, source, and resident-helper inventories plus the internal
+function count.

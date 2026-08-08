@@ -94,6 +94,8 @@ run("lake", [
 const wasm = readFileSync(generatedStem);
 const descriptorBytes = readFileSync(`${generatedStem}.json`);
 const descriptor = JSON.parse(descriptorBytes);
+const inventory = JSON.parse(readFileSync(`${generatedStem}.inventory.json`,
+  "utf8"));
 const lcnf = readFileSync(`${generatedStem}.lcnf`, "utf8");
 const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
@@ -120,6 +122,17 @@ assert.deepEqual(imports, []);
 assert.deepEqual(descriptor.imports, []);
 assert.equal(memoryExports.includes("memory"), true);
 assert.equal(functionExports.includes(descriptor.entry), true);
+assert.deepEqual(functionExports, [
+  descriptor.entry,
+  "fir_heap_frontier",
+  "fir_heap_set_frontier",
+  "fir_heap_alloc",
+]);
+assert.deepEqual(inventory.publicFunctions, functionExports);
+assert.equal(inventory.functions.length,
+  inventory.sourceFunctions.length + inventory.residentHelpers.length);
+assert.equal(inventory.internalFunctions.length,
+  inventory.functions.length - functionExports.length);
 assert.equal(declarations.length, 84,
   "Illuminate final-LCNF source declaration inventory changed");
 
@@ -177,8 +190,13 @@ const build = {
   runtime: {
     sourceDeclarationCount: declarations.length,
     sourceDeclarations: declarations,
-    residentHelperCount: functionExports.length - 1,
-    residentHelpers: functionExports.filter((name) => name !== descriptor.entry),
+    functionCount: inventory.functions.length,
+    publicFunctions: functionExports,
+    internalFunctionCount: inventory.internalFunctions.length,
+    retainedSourceFunctionCount: inventory.sourceFunctions.length,
+    retainedSourceFunctions: inventory.sourceFunctions,
+    residentHelperCount: inventory.residentHelpers.length,
+    residentHelpers: inventory.residentHelpers,
     helperFamilies: [
       "object projections and scalar projections",
       "module-owned allocation and scalar stores",
@@ -190,7 +208,7 @@ const build = {
       "Illuminate findSegment, parameterUpdates, option equality, and pause traversal",
       "resident UTF-8 string literals",
     ],
-    illuminateSpecializations: functionExports.filter((name) =>
+    illuminateSpecializations: inventory.residentHelpers.filter((name) =>
       name.startsWith("fir_illuminate_")),
   },
 };
@@ -238,5 +256,7 @@ console.log(JSON.stringify({
   functionImports: functionImports.length,
   memoryImports: memoryImports.length,
   sourceDeclarations: declarations.length,
-  residentHelpers: functionExports.length - 1,
+  publicFunctions: functionExports.length,
+  internalFunctions: inventory.internalFunctions.length,
+  residentHelpers: inventory.residentHelpers.length,
 }));

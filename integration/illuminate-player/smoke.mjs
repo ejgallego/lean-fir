@@ -65,6 +65,13 @@ assert.deepEqual(result.actions, [
 ]);
 assert.deepEqual(WebAssembly.Module.imports(
   new WebAssembly.Module(bytes)), []);
+assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(bytes)), [
+  { name: manifest.entry, kind: "function" },
+  { name: "fir_heap_frontier", kind: "function" },
+  { name: "fir_heap_set_frontier", kind: "function" },
+  { name: "fir_heap_alloc", kind: "function" },
+  { name: "memory", kind: "memory" },
+]);
 console.log(JSON.stringify({
   ok: true,
   actions: result.actions.length,

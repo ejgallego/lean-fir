@@ -335,7 +335,13 @@ private def internalizeIlluminateSpecializations
 private def pruneLinkedModule
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentDeadCode.prune artifact.module with
+  let publicExports := #[
+    artifact.source.entry,
+    Fir.Wasm.Emit.ResidentAllocator.frontierName,
+    Fir.Wasm.Emit.ResidentAllocator.setFrontierName,
+    Fir.Wasm.Emit.ResidentAllocator.allocateName]
+  let module ← match Fir.Wasm.Emit.ResidentDeadCode.pruneToExports
+      artifact.module publicExports with
     | .ok module => pure module
     | .error error =>
         throw (.manifest s!"failed to prune the linked Illuminate module: {repr error}")
