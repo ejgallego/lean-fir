@@ -84,6 +84,12 @@ path; it records relative sources, pinned toolchains, normalized compile/link
 flags, runtime requirements, the admitted ABI, byte lengths, and SHA-256
 digests.
 
+The build directory also retains content-addressed stage records for Lean-to-C,
+each C object, and the final Emscripten link. A record is reused only when its
+complete source/dependency/toolchain/flag key matches and the current output
+still has its recorded digest; the manifest is regenerated on every invocation.
+Pass `--rebuild` to bypass every stage record for an acceptance rebuild.
+
 `emscripten-loader.mjs` consumes that manifest in Node or a browser. It
 validates the schema and ABI, verifies both artifact lengths and digests before
 loading code, supplies the verified Wasm bytes to Emscripten, initializes the
@@ -218,6 +224,10 @@ The C/Emscripten route has its own packaged `Std.Format.prettyM` facade:
 ```sh
 integration/lcnf-c-wasm/package-prettyM-emscripten.sh
 ```
+
+Unchanged package builds reuse the same verified stage records. Pass
+`--rebuild` before an optional output directory to force Lean-to-C, every
+object, and the full-LTO link.
 
 This does not merge the two Wasm packages. The C package keeps its verified
 Emscripten ES module, threaded full Lean runtime, manifest, and loader. The

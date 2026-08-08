@@ -3,12 +3,22 @@ set -euo pipefail
 
 lane_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 repo_root="$(git -C "$lane_dir" rev-parse --show-toplevel)"
+declare -a build_options=()
+if [[ "${1:-}" == "--rebuild" ]]; then
+  build_options+=(--rebuild)
+  shift
+fi
 out_dir="${1:-$lane_dir/_build/prettyM-emscripten-current}"
+if (($# > 1)); then
+  echo "usage: package-prettyM-emscripten.sh [--rebuild] [output-directory]" >&2
+  exit 1
+fi
 fir_package="${FIR_PRETTY_M_NATIVE_PACKAGE:-$repo_root/integration/talos/artifact/_build/prettyM-current}"
 
 mkdir -p "$out_dir"
 
 "$lane_dir/build-emscripten.sh" \
+  "${build_options[@]}" \
   --root "$lane_dir" \
   --out-dir "$out_dir" \
   --name prettyM \
