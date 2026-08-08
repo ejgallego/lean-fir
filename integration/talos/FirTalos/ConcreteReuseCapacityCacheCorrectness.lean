@@ -4235,6 +4235,7 @@ def DirectDeclarationCallImplementationWithCache
       {initialWitness : RefinementWitness},
     CallSupported sourceRuntime sourceEnv decl continuation nextRuntime
         sourceValue stepCost →
+      stepCost ≤ remainingBytes →
       SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
         continuation nextRuntime sourceValue →
       ConcreteReuseCapacityCacheFrame sourceModule callerFunction
@@ -4305,7 +4306,7 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
       functionIndex, argumentTarget, afterCall, updated, resultWitness,
       physicalArgs, resultKind, physical, _contexts, targetEq, resultKindAt,
       assembled, callee, targetSet, transfer⟩ :=
-    implementation supported sourceStep cacheInvariant valueCompiled
+    implementation supported stepFits sourceStep cacheInvariant valueCompiled
       valueAdapted resultFound
   subst targetValue
   obtain ⟨step, externalsPreserved, hostDescriptorsPreserved,
@@ -4434,7 +4435,8 @@ def DirectInternalCallDeclarationInduction
       {physicalArgs : List Wasm.Value},
     SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
           continuation nextRuntime sourceValue →
-        ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        stepCost ≤ remainingBytes →
+          ConcreteReuseCapacityCacheFrame sourceModule callerFunction
             sourceExternals facts remainingBytes sourceRuntime sourceEnv
             initial locals initialWitness →
           callIndex? sourceModule (.declaration site.declaration) =
@@ -4484,8 +4486,8 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
       (DirectInternalCallSupported context) := by
   intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
     valueCode targetValue initial locals resultIndex remainingBytes stepCost
-    initialWitness supported sourceStep invariant valueCompiled valueAdapted
-    resultFound
+    initialWitness supported stepFits sourceStep invariant valueCompiled
+    valueAdapted resultFound
   cases supported with
   | intro site =>
       have expectedCompiled :
@@ -4520,7 +4522,8 @@ theorem DirectDeclarationCallImplementationWithCache.ofInternalCompiler
       subst alignedResultIndex
       obtain ⟨calleeContext, calleeFunction, targetFunction, afterCall,
           resultWitness, physical, contexts, callee⟩ :=
-        declarations site sourceStep invariant callFound argumentsRelated
+        declarations site sourceStep stepFits invariant callFound
+          argumentsRelated
       obtain ⟨updated, targetSet, _⟩ :=
         invariant.1.1.1.2.2.1.set?
           (nextRuntime := nextRuntime)
@@ -8078,6 +8081,70 @@ theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntry
       integerImplementation, naturalImplementation, scalarImplementation⟩,
       descriptorAgreement⟩, cacheTable, closureTables⟩
 
+/-- Re-index the generated callee entry at its exact source-selected cost.
+The required weakening is justified by the budget-fit premise already checked
+by the enclosing structural call theorem. -/
+theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntryAtCost
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes stepCost : Nat}
+    {sourceRuntime : RuntimeState} {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness)
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      stepCost sourceRuntime site.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness :=
+  (callerFrame.generatedDirectCalleeEntry site row argumentsRelated).withBudget
+    (callerFrame.budget.weaken stepFits)
+
+/-- The physical argument row selected by production compilation has exactly
+the adapted callee arity, in the stack order expected by Wasm function calls. -/
+theorem ConcreteGeneratedInternalDeclaration.targetParameterCount
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure} {callerEnv : Env}
+    {sourceModule : Fir.Wasm.Module}
+    {calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    physicalArgs.reverse.length = row.targetFunction.numParams := by
+  have parameterBindings := row.sourceParameterBindings site.parametersKnown
+  have classifiedSize := row.parameterKindsSize site.parametersKnown
+  have sourceParameterSize :
+      calleeFunction.params.size = site.parameterKinds.size := by
+    have lengths := congrArg List.length parameterBindings
+    simp only [Array.length_toList, List.length_map, List.length_zip] at lengths
+    rw [← classifiedSize] at lengths
+    simpa using lengths
+  have physicalSize : physicalArgs.length = site.parameterKinds.size := by
+    simpa using
+      (argumentsRelated.ofKindsRefine site.argumentsRefine).physicalLength
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  simp [Wasm.Function.numParams, signature.1, physicalSize,
+    sourceParameterSize]
+
 /-- Pointwise inversion of a successful `Except`-valued array traversal. -/
 private theorem exceptArrayForM_ok_of_mem
     {α ε : Type} {f : α → Except ε Unit} {xs : Array α} {x : α}
@@ -8821,5 +8888,128 @@ theorem
       externalsPreserved := entryTransports.externals
       residualBudget }
     cacheTable := resultInvariant.2.1 }⟩
+
+/--
+The production direct-callee induction step.
+
+The caller frame, admitted call site, generated declaration row, related
+physical arguments, and the enclosing call's budget-fit check construct the
+exact callee entry. A finite source-body evaluation and the uniform operation
+laws then yield the cache-aware hereditary declaration package consumed by
+the caller. No target execution or translation certificate is supplied at the
+call site.
+-/
+theorem
+    ConcreteGeneratedInternalDeclaration.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes stepCost : Nat}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {resultFacts : ReuseCapacityFacts} {resultEnv : Env}
+    {resultValue : Value}
+    {initial : Wasm.Store Host} {callerLocals : Wasm.Locals}
+    {initialWitness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime callerEnv initial
+        callerLocals initialWitness)
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated initialWitness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList)
+    (stepFits : stepCost ≤ remainingBytes)
+    {DirectSupported :
+      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {CaseSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    {EffectSupported : EffectSupportedPredicate}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates calleeContext sourceExternals
+        DirectSupported ExternalSupported CallSupported LazySupported
+        CaseSupported EffectSupported directLetAllocationCost [] sourceRuntime
+        site.calleeEnv site.calleeCode resultFacts resultRuntime resultEnv
+        resultValue stepCost)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost calleeContext sourceModule
+        calleeFunction [] target.wasmModule hosts.env DirectSupported
+        directLetAllocationCost
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost calleeContext sourceModule
+        calleeFunction [] target.wasmModule hosts.env sourceExternals
+        ExternalSupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost calleeContext sourceModule
+        calleeFunction [] target.wasmModule hosts.env sourceExternals
+        CallSupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost calleeContext sourceModule
+        calleeFunction [] target.wasmModule hosts.env sourceExternals
+        LazySupported
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness))
+    (caseRuntimeRefines :
+      CaseRuntimeRefines calleeContext sourceModule calleeFunction []
+        target.wasmModule hosts.env CaseSupported)
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines calleeContext sourceModule calleeFunction []
+          target.wasmModule hosts.env EffectSupported
+          (ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial initialWitness facts)) :
+    ∃ resultStore resultWitness resultKind physical,
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache calleeContext
+        sourceModule calleeFunction target.wasmModule hosts.env
+        sourceExternals sourceRuntime resultRuntime site.calleeEnv
+        site.calleeCode row.targetFunction row.targetFunctionIndex initial
+        resultStore initialWitness resultWitness physicalArgs.reverse
+        resultKind resultValue physical stepCost := by
+  have calleeFrame :=
+    callerFrame.generatedDirectCalleeEntryAtCost site row argumentsRelated
+      stepFits
+  have calleeFrameForCall :
+      ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+        sourceExternals [] stepCost sourceRuntime site.calleeEnv initial
+        (row.targetFunction.toLocals physicalArgs.reverse.reverse)
+        initialWitness := by
+    simpa using calleeFrame
+  exact
+    row.toConcreteGeneratedDeclaration.toConcreteSupportedDeclaration
+      |>.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
+        evaluation calleeFrameForCall directRuntimeRefines externalRuntimeRefines
+        callRuntimeRefines lazyRuntimeRefines caseRuntimeRefines
+        effectRuntimeRefines (row.targetParameterCount site argumentsRelated)
 
 end FirTalos.Concrete

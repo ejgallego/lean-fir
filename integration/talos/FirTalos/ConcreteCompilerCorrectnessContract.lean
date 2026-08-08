@@ -111,6 +111,37 @@ example
       (row.targetFunction.toLocals physicalArgs) witness :=
   callerFrame.generatedDirectCalleeEntry site row argumentsRelated
 
+/-- The structural call's existing budget-fit check is retained through the
+implementation boundary and weakens the generated callee frame to the exact
+source-selected body cost. -/
+example
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes stepCost : Nat}
+    {sourceRuntime : RuntimeState} {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness)
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      stepCost sourceRuntime site.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness :=
+  callerFrame.generatedDirectCalleeEntryAtCost site row argumentsRelated
+    stepFits
+
 /--
 Compile-time harness for the public partial-correctness boundary.
 

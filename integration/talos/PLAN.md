@@ -5645,6 +5645,31 @@ finite-execution induction: use this entry frame at every generated internal
 call, apply the already proved expression/runtime cases to each finite source
 evaluation constructor, and return the resulting observation refinement.
 
+W6.6ho closes the exact-budget production induction step and fixes
+`FIR-BUG-wasm-none-direct-callee-budget-premise`. The enclosing structural
+call law already checks `stepCost ≤ remainingBytes`, but the direct-call
+implementation and module-induction interfaces previously discarded that
+fact before asking the callee theorem for an executable exact-cost package.
+Both interfaces now retain it.
+
+`generatedDirectCalleeEntryAtCost` weakens the caller-owned concrete budget to
+the finite source body's exact allocation cost, while
+`targetParameterCount` proves that the production physical argument row has
+the adapted callee arity. The generated-declaration
+`budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates` theorem
+then combines that entry, one finite source-body evaluation, and the uniform
+operation-family laws into the complete cache-aware hereditary declaration
+package used by the caller. This is the first executable recursive induction
+step: its source evaluation is the partial-correctness premise, and no target
+execution or translation certificate is supplied.
+
+The next slice defines the source-only hereditary finite-evaluation relation
+whose direct-call constructor contains the callee body and continuation
+derivations. Induction over that derivation will instantiate the theorem above
+recursively, rather than accepting a module-wide callee theorem as an opaque
+premise. Saturated closure dispatch and lazy misses then join the same source
+derivation with their existing production selection laws.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
