@@ -19,26 +19,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
-- Milestone: `W6-GENERATED-CALLEE-ENTRY-FRAME`.
+- Milestone: `W6-DIRECT-CALLEE-EXACT-BUDGET-INDUCTION`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for this certificate-free compiler-proof slice.
 - Integration branch/worktree: `integration/closure-ownership` in
   `.worktrees/integration-closure-ownership`.
-- Published stack: W6 functional head `f259f7f7` and ready mailbox
-  `d1905f6f`, based directly on `main` at `7665c101`.
-- Lease boundary: satisfied. A valid caller frame plus the production-admitted
-  direct call now constructs the complete generated callee-entry
-  `ConcreteReuseCapacityCacheFrame`. The proof derives the exact parameter and
-  local layout, initializes empty reuse facts and ordinary-token obligations,
-  and inherits the unchanged runtime, failure, allocation budget, external
-  implementations, descriptor agreement, lazy caches, and closure tables. It
-  requires no separately supplied translation certificate or callee invariant
-  and changes no shared semantic or concrete-runtime contract.
-- Validation: Lean Beam update/sync/save for the proof modules and refreshed
-  contract importer, focused compiler-proof dependency cones,
-  `git diff --check`, `make talos-setup`, complete `make check` (642 unique
-  cases and 1,844/1,844 equal comparisons with zero findings), and all 3,125
-  Talos jobs.
+- Published stack: W6 functional head `e05c9110` and ready mailbox
+  `178f67a7`, based directly on `main` at `dcb7d6b3`.
+- Lease boundary: satisfied. The structural call's already established
+  `stepCost <= remainingBytes` fact now survives the direct-call proof
+  interface. It weakens the generated callee entry to the finite source
+  body's exact cost; the production argument relation proves the adapted
+  callee arity; and finite callee evaluation plus the uniform operation laws
+  yields the cache-aware successful-declaration package used by the caller.
+  This is the first production recursive induction step. Its execution input
+  is a source-semantic partial-correctness premise, not target execution or a
+  translation certificate. No shared semantic, ABI, lowering, or concrete-
+  runtime contract changed. Bug card
+  `FIR-BUG-wasm-none-direct-callee-budget-premise` is fixed.
+- Validation: Lean Beam update/sync/save for the proof module and refreshed
+  contract importer, focused compiler-proof dependency cones, bug-card
+  validation, `git diff --check`, `make talos-setup`, complete `make check`
+  (642 unique cases and 1,844/1,844 equal comparisons with zero findings), and
+  all 3,125 Talos jobs.
 
 ## Previous completed integration lease
 
@@ -252,18 +255,17 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
-- `W6-GENERATED-CALLEE-LOCALS` is linked/accepted through W6 functional head
-  `7916298d` and ready mailbox `9a2b3f0e`, based directly on `aecae9a4`.
-  `sourceParameterBindings` verifies the real lowerer's front-insert/reverse
-  implementation as the exact source-order `(FVarId, AbiKind)` row, deriving
-  name uniqueness from the production validator. The direct-call corollary
-  composes that row with `bindParams`, pointwise ABI refinement, and related
-  physical operands to establish the exact `EnvLocalsRelated` needed at
-  `targetFunction.toLocals physicalArgs`. This is static compiler verification
-  plus a relational entry theorem, not an execution certificate. The complete
-  root and Talos gates pass. W6 next packages unchanged runtime/cache/closure
-  fields with empty reuse facts, then starts finite-execution hereditary
-  induction.
+- `W6-DIRECT-CALLEE-EXACT-BUDGET-INDUCTION` is linked/accepted through W6
+  functional head `e05c9110` and ready mailbox `178f67a7`, based directly on
+  `dcb7d6b3`. The production direct-call theorem retains the enclosing call's
+  budget-fit fact, constructs the generated callee frame at the finite source
+  body's exact cost, proves the adapted physical arity, and derives the full
+  cache-aware successful-declaration package from finite source evaluation and
+  uniform operation laws. No target execution, translation certificate, or
+  semantic/runtime contract was added. The complete root and Talos gates pass.
+  W6 next defines a source-only hereditary finite-evaluation relation carrying
+  nested callee and continuation derivations, then recurses over it before
+  adding saturated-closure and lazy-miss constructors.
 
 - `W6-CALLEE-ARGUMENT-REFINEMENT` is linked/accepted through W6 functional
   head `73492cd9` and ready mailbox `837dcf05`, based directly on `298682a7`.
