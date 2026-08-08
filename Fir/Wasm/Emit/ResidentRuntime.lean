@@ -307,11 +307,18 @@ module. Runtime imports are rebuilt from the rewritten function bodies
 because their presentation names contain ordinals; external declaration
 imports retain their original stable names and order.
 -/
-private def internalizeOperation (operation : RuntimeOp) (name : Name)
-    (function : Function) (module : Module) : Except LinkError Module := do
+private def validateInput (module : Module) : Except LinkError Unit :=
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
+
+private def validateOutput (module : Module) : Except LinkError Module :=
+  match Fir.Wasm.validateModule module with
+  | .ok () => return module
+  | .error error => throw (.invalidOutput error)
+
+private def internalizeOperationUnchecked (operation : RuntimeOp) (name : Name)
+    (function : Function) (module : Module) : Except LinkError Module := do
   unless module.runtimeOperations.contains operation do
     throw (.missingOperation name)
   if module.imports.any (·.declaration? == some name) then
@@ -341,9 +348,12 @@ private def internalizeOperation (operation : RuntimeOp) (name : Name)
     exports := Fir.Wasm.addUnique module.exports name
     runtimeOperations
     memory := some memory }
-  match Fir.Wasm.validateModule result with
-  | .ok () => return result
-  | .error error => throw (.invalidOutput error)
+  return result
+
+private def internalizeOperation (operation : RuntimeOp) (name : Name)
+    (function : Function) (module : Module) : Except LinkError Module := do
+  validateInput module
+  validateOutput (← internalizeOperationUnchecked operation name function module)
 
 def internalizeGetTag (module : Module) : Except LinkError Module :=
   internalizeOperation .getTag getTagName getTagFunction module
@@ -362,12 +372,14 @@ descriptor bounds and packed-coordinate validity; proving that implication is
 separate proof-lane work.
 -/
 def internalizeReadProjections (module : Module) : Except LinkError Module := do
+  validateInput module
   let operations := module.runtimeOperations.filter supportsReadProjection
-  operations.foldlM (init := module) fun result operation => do
+  let result ← operations.foldlM (init := module) fun result operation => do
     let some name := readProjectionName? operation |
       throw (.unsupportedProjection 0 0 .erased)
     let function ← readProjectionFunction operation
-    internalizeOperation operation name function result
+    internalizeOperationUnchecked operation name function result
+  validateOutput result
 
 /-- The exact projection family exercised by compiler-produced Lean 4.32 `prettyM`. -/
 def prettyFormatReadProjections : Array RuntimeOp := #[
@@ -463,14 +475,16 @@ private def closureProjectionFunction (index : Nat) (result : AbiKind) :
       [.localGet resultLocal, .ret] }
 
 def internalizeClosureProjections (module : Module) : Except LinkError Module := do
+  validateInput module
   let operations := module.runtimeOperations.filter supportsClosureProjection
-  operations.foldlM (init := module) fun result operation => do
+  let result ← operations.foldlM (init := module) fun result operation => do
     let some name := closureProjectionName? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let some (index, kind) := closureProjectionCoordinate? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let function ← closureProjectionFunction index kind
-    internalizeOperation operation name function result
+    internalizeOperationUnchecked operation name function result
+  validateOutput result
 
 /-- The twelve distinct physical closure-capture reads reachable from `prettyM`. -/
 def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
@@ -561,14 +575,16 @@ capture-descriptor validity. The separate proof theorem must establish that
 these physical header comparisons implement semantic `closureMatches`.
 -/
 def internalizeClosureMatches (module : Module) : Except LinkError Module := do
+  validateInput module
   let operations := module.runtimeOperations.filter isClosureMatch
-  operations.foldlM (init := module) fun result operation => do
+  let result ← operations.foldlM (init := module) fun result operation => do
     let some name := closureMatchName? result.closureDispatch operation |
       match operation.closureTarget? with
       | some function => throw (.missingClosureTarget function)
       | none => throw .unsupportedClosureMatch
     let function ← closureMatchFunction result.closureDispatch operation
-    internalizeOperation operation name function result
+    internalizeOperationUnchecked operation name function result
+  validateOutput result
 
 def closureMatchExampleDispatch : Array Name := #[`callee, `other]
 

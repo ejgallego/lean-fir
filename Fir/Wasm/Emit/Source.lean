@@ -35,6 +35,88 @@ private partial def environmentDeclarationAncestor? (env : Environment) (name : 
 private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
 
+private def mergeSeparatelyCompiledArtifacts (entry : Name)
+    (artifacts : Array Fir.Validation.Lcnf.Artifact) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let localNames : NameSet := artifacts.foldl (init := {}) fun names artifact =>
+    artifact.program.decls.foldl (init := names) fun names decl =>
+      if artifact.externalNames.contains decl.name then names else names.insert decl.name
+  let mut decls : Array (Lean.Compiler.LCNF.Decl .impure) := #[]
+  -- Preserve the ordinary compiler layout: declarations supplied by the
+  -- compilation units precede the unresolved imports that remain after
+  -- linking. In particular, an entry-unit import must not jump ahead of the
+  -- declarations supplied by a later dependency unit.
+  for artifact in artifacts do
+    for decl in artifact.program.decls do
+      if artifact.externalNames.contains decl.name then continue
+      match decls.find? (fun existing => existing.name == decl.name) with
+      | some existing =>
+          unless existing == decl do
+            throwError "separately compiled LCNF declaration `{decl.name}` is inconsistent"
+      | none =>
+          decls := decls.push decl
+  for artifact in artifacts do
+    for decl in artifact.program.decls do
+      unless artifact.externalNames.contains decl.name do continue
+      if localNames.contains decl.name then continue
+      match decls.find? (fun existing => existing.name == decl.name) with
+      | some existing =>
+          unless existing == decl do
+            throwError "separately compiled LCNF declaration `{decl.name}` is inconsistent"
+      | none =>
+          decls := decls.push decl
+  let externalNames := decls.filterMap fun decl =>
+    if localNames.contains decl.name then none else some decl.name
+  let program : Fir.LeanIR.ImpureProgram := { decls }
+  return {
+    entry
+    program
+    externalNames
+    forms := Fir.Validation.Lcnf.collectForms program }
+
+private def discoveredSourceRoots (artifact : Fir.Validation.Lcnf.Artifact)
+    (retainedExternalNames : Array String) (excluded : Array Name) : CoreM (Array Name) := do
+  let env ← getEnv
+  return artifact.externalNames.foldl (init := #[]) fun additions name =>
+    if retainedExternalNames.contains name.toString then
+      additions
+    else
+      match environmentDeclarationAncestor? env name with
+      | some ancestor =>
+          if excluded.contains ancestor then additions
+          else addUniqueName additions ancestor
+      | none => additions
+
+private partial def compileEntrySeparatelyInternalizedAux (entry : Name)
+    (retainedExternalNames : Array String)
+    (entryArtifact : Fir.Validation.Lcnf.Artifact) (dependencies : Array Name) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  if dependencies.isEmpty then
+    return entryArtifact
+  let dependencyArtifact ← withoutModifyingEnv <|
+    Fir.Validation.Lcnf.compileEntry dependencies[0]!
+      (dependencies.extract 1 dependencies.size)
+  let additions ← discoveredSourceRoots dependencyArtifact retainedExternalNames
+    (#[entry] ++ dependencies)
+  if additions.isEmpty then
+    mergeSeparatelyCompiledArtifacts entry #[entryArtifact, dependencyArtifact]
+  else
+    compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact
+      (dependencies ++ additions)
+
+/--
+Compile an entry and its discovered source dependencies as two independent
+LCNF units, then link their final impure declarations. Keeping the imported
+roots together preserves their shared specialization and closed-value unit,
+while the entry boundary mirrors Lean's ordinary cross-module compilation and
+prevents imported helpers from joining its specialization/SCC unit.
+-/
+def compileEntrySeparatelyInternalized (entry : Name)
+    (retainedExternalNames : Array String := #[]) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let entryArtifact ← withoutModifyingEnv <|
+    Fir.Validation.Lcnf.compileEntry entry
+  let dependencies ← discoveredSourceRoots entryArtifact retainedExternalNames #[entry]
+  compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact dependencies
+
 /--
 Recursively ask Lean to compile imported source helpers whose declarations are
 available in the environment. Generated helper suffixes are rooted at their
@@ -59,8 +141,12 @@ partial def compileEntryInternalized (entry : Name) (dependencies : Array Name :
     return artifact
   compileEntryInternalized entry (dependencies ++ additions) retainedExternalNames
 
-/-- Lower and encode an already captured compiler artifact. -/
-def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
+/--
+Lower an already captured compiler artifact, apply one symbolic-module
+pipeline, and encode only its result.
+-/
+def compileModuleArtifactWith (source : Fir.Validation.Lcnf.Artifact)
+    (transform : Fir.Wasm.Module → Except CompileError Fir.Wasm.Module) :
     CoreM (Except CompileError ModuleArtifact) := do
   let module ←
     match Fir.Wasm.lowerSupported source.program with
@@ -71,12 +157,20 @@ def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
     match Fir.Wasm.Emit.BitExactFloat.install module source.entry with
     | .ok module => pure module
     | .error message => return .error (.manifest message)
+  let module ← match transform module with
+    | .ok module => pure module
+    | .error error => return .error error
   let bytes ←
     match Fir.Wasm.Emit.encode module with
     | .ok bytes => pure bytes
     | .error error => return .error (.encoding error)
   let formattedLcnf ← source.format
   return .ok { source, module, bytes, formattedLcnf }
+
+/-- Lower and encode an already captured compiler artifact. -/
+def compileModuleArtifact (source : Fir.Validation.Lcnf.Artifact) :
+    CoreM (Except CompileError ModuleArtifact) :=
+  compileModuleArtifactWith source .ok
 
 /--
 Compile one Lean declaration through final impure LCNF into a reusable Wasm

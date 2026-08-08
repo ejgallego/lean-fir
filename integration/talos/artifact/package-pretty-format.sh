@@ -97,30 +97,35 @@ record_generator_cache() {
 }
 
 if [[ "$build" == true ]]; then
-  lake -d "$root" build Fir.Wasm.Emit.ResidentPrettyFormat
+  lake -d "$root" build fir-prettyM-artifact
   generator_cache_dir="$here/_build/.fir-prettyM-cache"
   generator_cache_key="$generator_cache_dir/generator.key"
   generator_cache_digests="$generator_cache_dir/generator.digests"
   mkdir -p "$generator_cache_dir"
   generator_source="$here/FirWasmPrettyTraceExample.lean"
+  generator_executable="$root/.lake/build/bin/fir-prettyM-artifact"
+  test -x "$generator_executable"
   lean_version="$(lake -d "$root" env lean --version)"
   lean_prefix="$(lake -d "$root" env lean --print-prefix)"
   lean_tool="$lean_prefix/bin/lean"
   lake_version="$(lake --version)"
   generator_dependency_list="$(
-    lake -d "$root" env lean --deps "$generator_source"
+    env -u FIR_PRETTYM_CHECKPOINTS \
+      lake -d "$root" env lean --deps "$generator_source"
   )"
   mapfile -t generator_dependencies <<< "$generator_dependency_list"
   generator_key="$({
-    key_field cache-format fir-prettyM-source-v1
+    key_field cache-format fir-prettyM-source-v2
     key_field root "$root"
     key_field source "$generator_source"
     key_field source-sha256 "$(file_digest "$generator_source")"
+    key_field executable "$generator_executable"
+    key_field executable-sha256 "$(file_digest "$generator_executable")"
     key_field lean "$lean_tool"
     key_field lean-sha256 "$(file_digest "$lean_tool")"
     key_field lean-version "$lean_version"
     key_field lake-version "$lake_version"
-    key_field command "lake -d <root> env lean FirWasmPrettyTraceExample.lean"
+    key_field command "lake -d <root> env fir-prettyM-artifact FirWasmPrettyTraceExample.lean <output.wasm>"
     dependency_index=0
     for dependency in "${generator_dependencies[@]}"; do
       [[ -f "$dependency" ]] || {
@@ -141,10 +146,9 @@ if [[ "$build" == true ]]; then
     printf 'HIT prettyM source artifact\n'
   else
     printf 'BUILD prettyM source artifact\n'
-    (
-      cd "$here"
-      lake -d "$root" env lean FirWasmPrettyTraceExample.lean
-    )
+    env -u FIR_PRETTYM_CHECKPOINTS \
+      lake -d "$root" env "$generator_executable" \
+      "$generator_source" "$source_artifact"
     test -s "$source_artifact"
     test -s "$source_artifact.json"
     test -s "$source_artifact.lcnf"

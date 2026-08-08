@@ -109,13 +109,21 @@ def refineWeakMonadInhabited (artifact : Fir.Validation.Lcnf.Artifact) :
     program
     forms := Fir.Validation.Lcnf.collectForms program }
 
-/-- Capture, internalize, normalize, lower, and encode a locally expanded Format facade. -/
-def compileModule (entry : Name) :
-    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
-  let source ← compileEntryInternalized entry #[] #[weakMonadInhabitedName]
+/-- Capture, internalize, and normalize a locally expanded Format facade. -/
+def compileSource (entry : Name) :
+    CoreM (Except Source.CompileError Fir.Validation.Lcnf.Artifact) := do
+  let source ← compileEntrySeparatelyInternalized entry #[weakMonadInhabitedName]
   let source ← match refineWeakMonadInhabited source with
     | .ok source => pure source
     | .error message => return .error (.manifest message)
-  compileModuleArtifact source
+  return .ok source
+
+/-- Capture, internalize, normalize, lower, and encode a locally expanded Format facade. -/
+def compileModule (entry : Name) :
+    CoreM (Except Source.CompileError Source.ModuleArtifact) := do
+  let source ← compileSource entry
+  match source with
+  | .ok source => compileModuleArtifact source
+  | .error error => return .error error
 
 end Fir.Wasm.Emit.PrettyFormat

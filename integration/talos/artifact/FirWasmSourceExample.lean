@@ -215,6 +215,25 @@ run_cmd do
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"
+  unless (← IO.getEnv "FIR_PRETTYM_CHECKPOINTS") == some "1" do
+    let artifact ← match moduleArtifact.withRuntimeInvocation "source-pretty-format"
+        ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+        ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw runtime args with
+      | .ok artifact => pure artifact
+      | .error error => throwError "failed to attach Format invocation: {repr error}"
+    artifact.write "_build/source-pretty-format.wasm"
+    let (coverageRuntime, coverageArgs) ←
+      match Fir.Wasm.Emit.SourceFixture.prettyFormatCoverageInvocation with
+      | .ok invocation => pure invocation
+      | .error error => throwError "failed to construct Format coverage runtime: {repr error}"
+    let coverageArtifact ← match moduleArtifact.withRuntimeInvocation
+        "source-pretty-format-coverage"
+        ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw
+        ``Fir.Wasm.Emit.SourceFixture.prettyFormatRaw coverageRuntime coverageArgs with
+      | .ok artifact => pure artifact
+      | .error error => throwError "failed to attach Format coverage invocation: {repr error}"
+    coverageArtifact.write "_build/source-pretty-format-coverage.wasm"
+    return
   let residentArtifact ← match
       Fir.Wasm.Emit.ResidentPrettyFormat.internalizeGetTag moduleArtifact with
     | .ok artifact => pure artifact

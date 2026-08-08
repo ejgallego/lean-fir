@@ -16,3 +16,8 @@ root = "FirValidationDirectNative"
 [[lean_exe]]
 name = "fir-direct-lcnf"
 root = "FirValidationDirectLCNF"
+
+[[lean_exe]]
+name = "fir-prettyM-artifact"
+root = "FirPrettyMArtifactMain"
+supportInterpreter = true

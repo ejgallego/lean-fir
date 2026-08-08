@@ -45,6 +45,8 @@ def prettyFormatTraceEventsExpected :
   { kind := 3, text := "", value := 0 }]
 
 run_cmd do
+  unless (← IO.getEnv "FIR_PRETTYM_CHECKPOINTS") == some "1" do
+    return
   unless Fir.Wasm.Emit.SourceFixture.prettyFormatTraceTextExpected ==
       "α β\n. γ\n  δ\n  ε" do
     throwError "native styled prettyM text oracle changed: {repr Fir.Wasm.Emit.SourceFixture.prettyFormatTraceTextExpected}"
