@@ -16,11 +16,32 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 ## Active integration lease
 
 - No cross-lane integration lease is currently active. The user-reassigned
-  `W6-GENERATED-LOCAL-LAYOUT` lease is complete at ready W6 head `151c582c`.
-  W7 owns the independent rebase and artifact gate on `wasm/generation`; W6's
-  next proof slice assembles the production-generated declaration family.
+  `W6-GENERATED-DECLARATION-FAMILY` lease is complete at ready W6 head
+  `331c7ca0`. W7 owns its independent artifact work; W6 next closes the
+  dynamic hereditary theorem by induction over admitted finite source
+  executions.
 
 ## Completed integration lease
+
+- Milestone: `W6-GENERATED-DECLARATION-FAMILY`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this short certificate-free compiler-proof slice.
+- Integration branch/worktree: `main` in the root worktree.
+- Published stack: W6 functional head `e7993ecf` and ready mailbox `331c7ca0`,
+  based directly on `main` at `09689696`.
+- Lease boundary: satisfied. One successful production `lowerSupported` and
+  `adapt` pair constructs `ConcreteGeneratedDeclarationFamily`, which
+  universally selects every value-returning internal declaration with its
+  independently computed compiler context and exact symbolic/concrete row.
+  The family contains static compiler evidence only—no target execution or
+  translation certificate—and changes no semantic Wasm ABI or concrete-runtime
+  contract.
+- Validation: Lean Beam update/sync/save for both edited proof modules,
+  focused compiler-proof dependency cones, `git diff --check`, complete
+  `make check` with 1,844/1,844 comparisons equal and zero findings, and all
+  3,125 Talos jobs.
+
+## Previous completed integration lease
 
 - Milestone: `W6-GENERATED-LOCAL-LAYOUT`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
@@ -39,7 +60,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   onto the final base. W7 must rebase and run its artifact-specific gate
   because production lowering changed.
 
-## Previous completed integration lease
+## Earlier completed integration lease
 
 - Milestone: `ILLUMINATE-TALOS-ADAPTER`.
 - Integration owner: `wasm-proof`; the user reassigned the integration lease
@@ -62,7 +83,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with 1,844/1,844 comparisons equal and zero findings; and all 3,125 Talos
   jobs. W7 may now rebase and finish its own artifact/Illuminate acceptance.
 
-## Earlier completed integration lease
+## Older completed integration lease
 
 - Milestone: `W7-PRETTYM-COLD-ENTRY-STACK-SAFETY`.
 - Integration owner: `wasm-gen`; the user assigned this short integration
@@ -86,7 +107,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   with digest
   `bb9ebbfe6e19dba3221a5a8bb16becbedd3014cc5f4a5f112927a94b35341792`.
 
-## Older completed integration lease
+## Oldest completed integration lease
 
 - Milestone: `CLOSURE-APPLICATION-OWNERSHIP`.
 - Integration owner: `wasm-gen`; the temporary lease is complete and the
@@ -151,8 +172,19 @@ identities.
   `ConcreteGeneratedDeclaration.exists_ofSupportedPipeline` derives
   `LocalLayoutAligned` internally and no longer accepts a layout certificate
   or declaration-hygiene premise. All 1,844 repository comparisons and all
-  3,125 Talos jobs pass. W7 must rebase and confirm its deterministic artifact;
-  W6 next builds the hereditary family of these generated declaration rows.
+  3,125 Talos jobs pass. W7 must rebase and confirm its deterministic artifact.
+
+- `W6-GENERATED-DECLARATION-FAMILY` is linked/accepted through W6 functional
+  head `e7993ecf` and ready mailbox `331c7ca0`, based directly on `09689696`.
+  `ConcreteGeneratedDeclarationFamily.ofSupportedPipeline` assembles all
+  value-returning internal declarations from the production lowering and
+  adapter equations while preserving each declaration's local compiler
+  context. It introduces no target-execution certificate and changes no
+  semantic ABI/runtime contract. All 1,844 repository comparisons and all
+  3,125 Talos jobs pass. W6 next proves the dynamic hereditary family by
+  well-founded induction over admitted finite source executions, supplies it
+  to named calls, saturated closures, and lazy misses, then exposes the clean
+  whole-export partial-correctness theorem.
 
 - `SCALAR-CLOSURE-ABI-ADMISSION` is linked/accepted through W6 functional head
   `cf1ed73f` and ready mailbox head `4013a6ba`. The lowering decision is
