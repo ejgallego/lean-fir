@@ -19,6 +19,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `ILLUMINATE-LIVE-PLAYER`.
+- Integration owner: `wasm-gen`; the user authorized the generation owner to
+  follow the short landing sequence after the prior W6 lease completed.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: W7 functional head `b72f2bfa` and ready mailbox `e5d9cd65`,
+  rebased directly on `main` at `a07defe0`.
+- Lease boundary: satisfied. The final-LCNF package compiles the real
+  `Illuminate.AnimationPlayer.initialLive` and `transitionLive` entries into a
+  self-contained, module-owned Wasm module. The v3 browser adapter shares one
+  compiled `WebAssembly.Module`, owns one instance per opaque player, retains
+  the animation and state below a persistent checkpoint, and clears and
+  rewinds per-dispatch scratch without exposing raw addresses. The new
+  generation-ready `fir_heap_rewind [uint32] -> []` helper leaves the existing
+  monotonic `fir_heap_set_frontier` contract unchanged; its W6 refinement proof
+  remains a separate non-blocking follow-up.
+- Artifact: immutable package
+  `integration/illuminate-player/_build/illuminate-player-packages/b72f2bfa9e7d-006dc1d1db18-8103ef218b8dc6ff4f00`,
+  50,203 bytes, SHA-256
+  `b36cfaf21175a40bfb5156e527057700eed56609bd8f2b8f91e68914c254158e`,
+  with zero function imports, zero memory imports, and six public functions.
+  The 10,000-tick stress holds the exact 1,872-byte checkpoint with a constant
+  704-byte scratch high-water and 2,576-byte peak frontier.
+- Validation: Lean Beam zero-diagnostic checkpoints; focused deterministic
+  package publication twice with identical bytes and complete checksums;
+  105/105 local legacy/FIR trace matches; `git diff --check`; complete
+  `make check` with 642 unique cases and 1,844/1,844 equal comparisons; Talos
+  setup at `a01d01c`; all 3,125 `make talos-check` jobs; and the complete W7
+  artifact, engine, determinism, and concrete-readiness gate.
+
+## Previous completed integration lease
+
 - Milestone: `W6-DIRECT-CALLEE-EXACT-BUDGET-INDUCTION`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for this certificate-free compiler-proof slice.
@@ -254,6 +286,15 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `ILLUMINATE-LIVE-PLAYER` is linked/accepted through W7 functional head
+  `b72f2bfa` and ready mailbox `e5d9cd65`, based directly on `a07defe0`. The
+  immutable v3 package has zero imports, module-owned memory, independent
+  per-player instances, persistent animation/state storage, exact scratch
+  rewind, and bounded 10,000-tick memory. Illuminate may now stage the package
+  for its authoritative 106-trace and live-dashboard acceptance gates. W6 may
+  independently prove `fir_heap_rewind`; that proof is not claimed by W7 and
+  does not block generation acceptance.
 
 - `W6-DIRECT-CALLEE-EXACT-BUDGET-INDUCTION` is linked/accepted through W6
   functional head `e05c9110` and ready mailbox `178f67a7`, based directly on
