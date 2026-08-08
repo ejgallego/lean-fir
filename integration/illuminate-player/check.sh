@@ -5,7 +5,7 @@ here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
 illuminate_root=${ILLUMINATE_ROOT:-$(realpath .illuminate)}
 
-lake --keep-toolchain -KilluminateRoot="$illuminate_root" \
+lake --keep-toolchain --reconfigure -KilluminateRoot="$illuminate_root" \
   build IlluminateFirNative.Examples
 ILLUMINATE_ROOT="$illuminate_root" node package.mjs
 package=$(realpath _build/illuminate-player-current)
