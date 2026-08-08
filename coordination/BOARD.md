@@ -19,6 +19,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-DIRECT-HEREDITARY-SOURCE-EVALUATION`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this certificate-free compiler-proof slice.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: W6 functional head `cbb0f0d1` and ready mailbox
+  `6fe75308`, based directly on `main` at `c882cdc8`.
+- Lease boundary: satisfied. `ReuseCapacityDirectHereditaryCodeEvaluates`
+  is the source-recursive finite-evaluation object for direct named calls. Its
+  direct-call constructor carries finite evaluation of both the callee body
+  and caller continuation; the proof reconstructs the real interpreter call
+  prefix and erases the richer derivation to the existing exact
+  `SourceCodeResult`. The derivation contains no target program, store,
+  witness, execution, or translation certificate. No semantic Wasm ABI,
+  lowering, validator, interpreter, adapter, or concrete-runtime contract
+  changed.
+- Validation: Lean Beam update/refresh/sync/save for the proof and contract
+  modules; focused compiler-proof dependency cones; `git diff --check`;
+  `make talos-setup`; complete `make check` with 642 unique cases and
+  1,844/1,844 equal comparisons, zero findings, and 108 valid bug cards; and
+  all 3,125 Talos jobs.
+
+## Previous completed integration lease
+
 - Milestone: `ILLUMINATE-LIVE-PLAYER`.
 - Integration owner: `wasm-gen`; the user authorized the generation owner to
   follow the short landing sequence after the prior W6 lease completed.
@@ -286,6 +310,18 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-DIRECT-HEREDITARY-SOURCE-EVALUATION` is linked/accepted through W6
+  functional head `cbb0f0d1` and ready mailbox `6fe75308`, based directly on
+  `c882cdc8`. Direct named calls now have a genuine source-recursive finite
+  evaluation derivation carrying nested callee-body and caller-continuation
+  executions. It reconstructs the actual interpreter call prefix and yields
+  the exact source result without target execution, witnesses, or translation
+  certificates. The complete root and Talos gates pass. W6 next makes the
+  production direct-call runtime law consume this hereditary payload, selects
+  the generated callee row, and applies its induction hypothesis to eliminate
+  the opaque `DirectInternalCallDeclarationInduction` premise before adding
+  saturated-closure and lazy-miss constructors.
 
 - `ILLUMINATE-LIVE-PLAYER` is linked/accepted through W7 functional head
   `b72f2bfa` and ready mailbox `e5d9cd65`, based directly on `a07defe0`. The
