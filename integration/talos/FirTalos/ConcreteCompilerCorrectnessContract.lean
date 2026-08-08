@@ -3852,6 +3852,20 @@ example
     declarationFound bodyEq resultClassified
 
 /--
+The same two production equations assemble every internal value-returning
+declaration into one module-wide family. Recursive callers may have different
+local layouts; they supply only the shared program and cache-name equations.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target) :
+    ConcreteGeneratedDeclarationFamily program sourceModule target :=
+  ConcreteGeneratedDeclarationFamily.ofSupportedPipeline lowered adapted
+
+/--
 A cache-aware direct-declaration implementation supplies the interprocedural
 call premise over the same fixed-entry cache frame. Its recursive callee
 returns the evolved cache table; no unchanged-global adapter is involved.

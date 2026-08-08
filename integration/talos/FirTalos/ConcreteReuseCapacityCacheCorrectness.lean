@@ -7830,6 +7830,56 @@ theorem ConcreteGeneratedDeclaration.exists_ofSupportedPipeline
       sourceSingleResult adapted
   exact ⟨row.context, sourceFunction, contexts, generated⟩
 
+/--
+Module-wide production declaration family.
+
+Every value-returning internal declaration selected from the source program is
+paired with the exact symbolic and concrete function row produced by the
+successful `lowerSupported`/`adapt` pipeline. The caller context is universally
+quantified: recursive callers need only share the source program and generated
+lazy-cache name table, while each callee retains its independently computed
+local layout.
+
+This is static compiler evidence, not a target execution certificate. Dynamic
+hereditary correctness is built from the returned
+`ConcreteGeneratedDeclaration` and the source execution of that body.
+-/
+def ConcreteGeneratedDeclarationFamily
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule) : Prop :=
+  ∀ {caller : Fir.Wasm.Context}
+      {declarationName : Name}
+      {declaration : LCNF.Decl .impure}
+      {sourceCode : LCNF.Code .impure}
+      {resultKind : AbiKind},
+    caller.program = program →
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program →
+        program.findDecl? declarationName = some declaration →
+          declaration.value = .code sourceCode →
+            Fir.Wasm.abiKind? declaration.type = .ok (some resultKind) →
+              ∃ calleeContext sourceFunction,
+                DeclarationContextsCoherent caller calleeContext ∧
+                  Nonempty (ConcreteGeneratedDeclaration calleeContext
+                    sourceCode sourceModule sourceFunction target)
+
+/--
+One successful production lowering/adaptation pair constructs the complete
+static declaration family. No per-declaration compiler premise remains at
+recursive call sites.
+-/
+theorem ConcreteGeneratedDeclarationFamily.ofSupportedPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target) :
+    ConcreteGeneratedDeclarationFamily program sourceModule target := by
+  intro caller declarationName declaration sourceCode resultKind callerProgram
+    callerCaches declarationFound bodyEq resultClassified
+  exact ConcreteGeneratedDeclaration.exists_ofSupportedPipeline callerProgram
+    callerCaches lowered adapted declarationFound bodyEq resultClassified
+
 /-- Every supported export exposes its export-independent declaration body. -/
 def ConcreteSupportedExport.toSupportedDeclaration
     {program : Fir.LeanIR.ImpureProgram}

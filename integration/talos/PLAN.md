@@ -5558,6 +5558,23 @@ contract changes. The next slice assembles these generated declaration rows
 into the module-wide hereditary declaration family and then exposes the clean
 whole-export partial-correctness theorem.
 
+W6.6hj assembles the static half of that family.
+`ConcreteGeneratedDeclarationFamily` universally selects every internal
+value-returning declaration from any coherent caller context and returns its
+exact declaration-local compiler context plus the matching symbolic/concrete
+function row. `ofSupportedPipeline` constructs the entire family once from
+the two production `lowerSupported` and `adapt` equations; named calls,
+saturated closure dispatch, and lazy misses no longer need separate static
+compiler selectors.
+
+The family deliberately contains no dynamic target execution. The remaining
+hereditary step is semantic: recurse over admitted finite source executions,
+apply the selected row's structural body theorem, and feed the resulting
+cache-aware declaration package to named, saturated, and lazy call laws. Once
+that recursive knot is closed, the root row can expose the whole-export
+partial-correctness theorem without a simulation or translation-certificate
+premise. No semantic Wasm ABI or concrete-runtime contract changes.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
