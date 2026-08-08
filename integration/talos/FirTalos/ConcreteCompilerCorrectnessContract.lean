@@ -82,6 +82,35 @@ example
       (row.targetFunction.toLocals physicalArgs) :=
   row.entryEnvLocalsRelatedOfArguments site argumentsRelated
 
+/-- A valid caller frame and a production-admitted direct call determine the
+complete generated callee-entry frame. No separately supplied translation
+certificate or callee invariant is required. -/
+example
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState} {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness)
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      remainingBytes sourceRuntime site.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness :=
+  callerFrame.generatedDirectCalleeEntry site row argumentsRelated
+
 /--
 Compile-time harness for the public partial-correctness boundary.
 

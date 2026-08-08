@@ -7992,6 +7992,92 @@ theorem ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelatedOfArguments
   row.entryEnvLocalsRelated site
     (argumentsRelated.ofKindsRefine site.argumentsRefine)
 
+/-- Re-index an unchanged valid caller store as the generated direct callee's
+canonical entry frame. Reuse facts and their ordinary-token obligations start
+empty; runtime, failure, budget, external-handler, cache, and closure-table
+invariants are inherited unchanged. -/
+theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntry
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState} {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness)
+    (site : DirectInternalCallSite callerContext callerDecl callerEnv)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness site.argumentKinds.toList
+        physicalArgs site.semanticArgs.toList) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      remainingBytes sourceRuntime site.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness := by
+  rcases callerFrame with
+    ⟨⟨⟨⟨callerRelated, _callerOrdinary, _callerAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, cacheTable, closureTables⟩
+  have entryLocals :
+      EnvLocalsRelated witness (functionBindings calleeFunction)
+        site.calleeEnv (row.targetFunction.toLocals physicalArgs) :=
+    row.entryEnvLocalsRelatedOfArguments site argumentsRelated
+  have entryState :
+      StateRelated calleeFunction sourceRuntime site.calleeEnv targetStore
+        (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨callerRelated.1.1, callerRelated.1.2.1, entryLocals⟩
+  have emptyFacts :
+      ReuseCapacityFactsRel [] (functionBindings calleeFunction)
+        site.calleeEnv (row.targetFunction.toLocals physicalArgs)
+        targetStore.host.runtime.heap witness := by
+    intro fvarId evidence found
+    simp [findReuseCapacityEvidence?] at found
+  have entryRelated :
+      ReuseCapacityStateRelated [] calleeFunction sourceRuntime site.calleeEnv
+        targetStore (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨entryState, emptyFacts⟩
+  have emptyOrdinary :
+      ReuseTokenOrdinaryRel [] sourceRuntime site.calleeEnv := by
+    intro fvarId available location cell found
+    simp [findReuseCapacityEvidence?] at found
+  have classifiedSize := row.parameterKindsSize site.parametersKnown
+  have parameterBindings := row.sourceParameterBindings site.parametersKnown
+  have sourceParameterSize :
+      calleeFunction.params.size = site.parameterKinds.size := by
+    have lengths := congrArg List.length parameterBindings
+    simp only [Array.length_toList, List.length_map, List.length_zip] at lengths
+    rw [← classifiedSize] at lengths
+    simpa using lengths
+  have parameterRelated :=
+    argumentsRelated.ofKindsRefine site.argumentsRefine
+  have physicalSize : physicalArgs.length = site.parameterKinds.size := by
+    simpa using parameterRelated.physicalLength
+  have parameterFrameSize :
+      (row.targetFunction.toLocals physicalArgs).params.length =
+        calleeFunction.params.size := by
+    simpa [Wasm.Function.toLocals] using
+      physicalSize.trans sourceParameterSize.symm
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  have localFrameSize :
+      (row.targetFunction.toLocals physicalArgs).locals.length =
+        calleeFunction.locals.size := by
+    simp [Wasm.Function.toLocals, signature.2.1]
+  have entryAligned :
+      ConcreteLocalFrameAligned calleeFunction sourceRuntime site.calleeEnv
+        targetStore (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨parameterFrameSize, localFrameSize⟩
+  exact
+    ⟨⟨⟨⟨entryRelated, emptyOrdinary, entryAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, cacheTable, closureTables⟩
+
 /-- Pointwise inversion of a successful `Except`-valued array traversal. -/
 private theorem exceptArrayForM_ok_of_mem
     {α ε : Type} {f : α → Except ε Unit} {xs : Array α} {x : α}

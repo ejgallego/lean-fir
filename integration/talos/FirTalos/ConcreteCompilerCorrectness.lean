@@ -1144,6 +1144,17 @@ theorem ConstructorArgumentsRelated.semanticLength
   | nil => rfl
   | cons _ _ ih => simp [ih]
 
+/-- Compiled argument refinement preserves physical/ABI arity. -/
+theorem ConstructorArgumentsRelated.physicalLength
+    {witness : RefinementWitness} {kinds : List AbiKind}
+    {physicals : List Wasm.Value} {semanticValues : List Value}
+    (related :
+      ConstructorArgumentsRelated witness kinds physicals semanticValues) :
+    physicals.length = kinds.length := by
+  induction related with
+  | nil => rfl
+  | cons _ _ ih => simp [ih]
+
 /-- Resolve one semantic argument position to the ABI kind and physical lane
 related at the same position. -/
 theorem ConstructorArgumentsRelated.resolveAt

@@ -5628,6 +5628,23 @@ and packages this local theorem as a complete
 `ConcreteReuseCapacityCacheFrame` at generated callee entry. That frame is
 the final setup lemma before the finite-execution hereditary induction.
 
+W6.6hn packages the complete generated direct-callee entry invariant.
+`ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntry` starts from a
+valid caller frame and the production-selected call/declaration rows, then
+re-indexes the unchanged concrete store at the callee. The argument theorem
+supplies the callee locals; reuse facts and ordinary-token obligations are
+empty at function entry; parameter and local frame sizes follow from the
+actual emitted signature; runtime, failure, allocation budget, external
+implementations, descriptor agreement, lazy caches, and closure tables are
+inherited unchanged.
+
+The public contract regression requires only the caller frame plus the
+production-admitted direct call. It has no separately supplied translation
+certificate or callee invariant. The remaining W6.6 proof is the hereditary
+finite-execution induction: use this entry frame at every generated internal
+call, apply the already proved expression/runtime cases to each finite source
+evaluation constructor, and return the resulting observation refinement.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
