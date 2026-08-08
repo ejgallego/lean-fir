@@ -19,6 +19,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-GENERATED-CALLEE-LOCALS`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this certificate-free compiler-proof slice.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: W6 functional head `7916298d` and ready mailbox
+  `9a2b3f0e`, based directly on `main` at `aecae9a4`.
+- Lease boundary: satisfied. Production `declarationParameterKinds?`,
+  `addDeclarationParams`, and emitted-function equations prove the exact
+  source-order parameter binding row. The actual `bindParams` result and
+  caller argument relation then construct `EnvLocalsRelated` for the generated
+  callee's `toLocals` frame. No hygiene premise, target execution, translation
+  certificate, or semantic/runtime contract is added.
+- Validation: Lean Beam update/sync/save for the two proof modules and contract
+  importer, focused compiler-proof dependency cones, `git diff --check`,
+  `make talos-setup`, complete `make check`, and all 3,125 Talos jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W6-CALLEE-ARGUMENT-REFINEMENT`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for this certificate-free compiler-proof slice.
@@ -209,6 +228,19 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-GENERATED-CALLEE-LOCALS` is linked/accepted through W6 functional head
+  `7916298d` and ready mailbox `9a2b3f0e`, based directly on `aecae9a4`.
+  `sourceParameterBindings` verifies the real lowerer's front-insert/reverse
+  implementation as the exact source-order `(FVarId, AbiKind)` row, deriving
+  name uniqueness from the production validator. The direct-call corollary
+  composes that row with `bindParams`, pointwise ABI refinement, and related
+  physical operands to establish the exact `EnvLocalsRelated` needed at
+  `targetFunction.toLocals physicalArgs`. This is static compiler verification
+  plus a relational entry theorem, not an execution certificate. The complete
+  root and Talos gates pass. W6 next packages unchanged runtime/cache/closure
+  fields with empty reuse facts, then starts finite-execution hereditary
+  induction.
 
 - `W6-CALLEE-ARGUMENT-REFINEMENT` is linked/accepted through W6 functional
   head `73492cd9` and ready mailbox `837dcf05`, based directly on `298682a7`.
