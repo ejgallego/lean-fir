@@ -109,8 +109,12 @@ integration/talos/artifact/package-pretty-format.sh
 The default command reuses a previously generated source artifact only when
 the generator, imported Lean artifacts and transitive Lake trace, toolchain,
 and all three stored output digests still match. Pass `--rebuild` to force the
-expensive source-generation step. The complete artifact gate independently
-regenerates twice and compares every checkpoint byte-for-byte.
+native final-only source-generation step. The normal artifact gate independently
+generates the plain and styled final artifacts twice and compares them
+byte-for-byte. Set `FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1` when running
+`integration/talos/artifact/check.sh` to additionally generate and compare every
+intermediate checkpoint; that slow mode is intended for explicit acceptance
+runs, not the development loop.
 
 The canonical package path is:
 

@@ -719,8 +719,9 @@ advance from 2 to 0 function imports. The complete text audit is
 `351 → 350 → 349 → 341 → 254 → 177 → 177 → 154 → 152 → 65 → 54 → 50 → 44 → 24 → 14 → 2 → 0`.
 
 For a reproducible handoff to another agent, `package-pretty-format.sh`
-builds the styled facade in `FirWasmPrettyTraceExample.lean` and prepares a
-self-contained copy of the Wasm-resident runtime, production browser adapter,
+uses the native `fir-prettyM-artifact` generator to elaborate the styled facade
+in `FirWasmPrettyTraceExample.lean`, compile only the final resident module,
+and prepare a self-contained copy of the Wasm-resident runtime, production browser adapter,
 raw-layout smoke client, descriptor, final LCNF, checksums, and capability
 metadata. The
 canonical `_build/prettyM-current` symlink is moved only after its immutable
@@ -731,6 +732,11 @@ release has passed the checksum and smoke gates:
 cd _build/prettyM-current
 node smoke.mjs
 ```
+
+The default artifact check uses the same final-only native path for both plain
+and styled facades. The historical checkpoint-by-checkpoint generation remains
+available as the explicit slow acceptance mode
+`FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS=1 bash integration/talos/artifact/check.sh`.
 
 The raw Wasm ABI remains explicitly experimental and unversioned. Its module
 owns its memory and allocator and has zero imports while preserving the exact

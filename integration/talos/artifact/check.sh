@@ -2,6 +2,12 @@
 set -euo pipefail
 
 here="$(cd "$(dirname "$0")" && pwd)"
+root="$(cd "$here/../../.." && pwd)"
+exhaustive_pretty="${FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS:-0}"
+if [[ "$exhaustive_pretty" != 0 && "$exhaustive_pretty" != 1 ]]; then
+  echo "FIR_PRETTYM_EXHAUSTIVE_CHECKPOINTS must be 0 or 1" >&2
+  exit 1
+fi
 first="$(mktemp -d)"
 second="$(mktemp -d)"
 trap 'rm -rf "$first" "$second"' EXIT
@@ -70,9 +76,25 @@ node run-resident-closure-matches.mjs \
   _build/resident-closure-matches.wasm
 lake -d .. build FirTalos.Differential
 lake -d ../../.. build Fir.Wasm.Emit.SourceExamples Fir.Wasm.Emit.Command \
-  Fir.Wasm.Emit.ResidentPrettyFormat
-lake -d ../../.. env lean FirWasmSourceExample.lean
-lake -d ../../.. env lean FirWasmPrettyTraceExample.lean
+  Fir.Wasm.Emit.ResidentPrettyFormat fir-prettyM-artifact
+pretty_generator="$root/.lake/build/bin/fir-prettyM-artifact"
+generate_source_artifacts() {
+  if [[ "$exhaustive_pretty" == 1 ]]; then
+    FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+      "$here/FirWasmSourceExample.lean"
+    FIR_PRETTYM_CHECKPOINTS=1 lake -d "$root" env lean \
+      "$here/FirWasmPrettyTraceExample.lean"
+  else
+    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+      "$here/FirWasmSourceExample.lean" FirWasmSourceExample \
+      Fir.Wasm.Emit.SourceFixture.prettyFormatRaw \
+      "$here/_build/source-pretty-format-resident-closed.wasm"
+    env -u FIR_PRETTYM_CHECKPOINTS lake -d "$root" env "$pretty_generator" \
+      "$here/FirWasmPrettyTraceExample.lean" \
+      "$here/_build/source-pretty-format-trace-resident-closed.wasm"
+  fi
+}
+generate_source_artifacts
 mapfile -t source_artifacts < <(
   node --input-type=module -e '
     import { CONCRETE_SOURCE_PROBES } from "./concrete-corpus.mjs";
@@ -87,45 +109,51 @@ for source in "${source_artifacts[@]}"; do
   cp "_build/$source.wasm.json" "_build/$source-first.wasm.json"
   cp "_build/$source.wasm.lcnf" "_build/$source-first.wasm.lcnf"
 done
-resident_pretties=(
-  "source-pretty-format-resident-get-tag"
-  "source-pretty-format-resident-runtime"
-  "source-pretty-format-resident-projections"
-  "source-pretty-format-resident-closure-projections"
-  "source-pretty-format-resident-closure-matches"
-  "source-pretty-format-resident-allocator"
-  "source-pretty-format-resident-constructors"
-  "source-pretty-format-resident-naturals"
-  "source-pretty-format-resident-partial-applications"
-  "source-pretty-format-resident-setters"
-  "source-pretty-format-resident-increments"
-  "source-pretty-format-resident-releases"
-  "source-pretty-format-resident-cache"
-  "source-pretty-format-resident-numeric"
-  "source-pretty-format-resident-big-numeric"
-  "source-pretty-format-resident-string"
-  "source-pretty-format-resident-closed"
-  "source-pretty-format-trace-resident-constructors"
-  "source-pretty-format-trace-resident-naturals"
-  "source-pretty-format-trace-resident-partial-applications"
-  "source-pretty-format-trace-resident-setters"
-  "source-pretty-format-trace-resident-increments"
-  "source-pretty-format-trace-resident-releases"
-  "source-pretty-format-trace-resident-tag-setters"
-  "source-pretty-format-trace-resident-cache"
-  "source-pretty-format-trace-resident-numeric"
-  "source-pretty-format-trace-resident-big-numeric"
-  "source-pretty-format-trace-resident-string"
-  "source-pretty-format-trace-resident-closed"
-)
+if [[ "$exhaustive_pretty" == 1 ]]; then
+  resident_pretties=(
+    "source-pretty-format-resident-get-tag"
+    "source-pretty-format-resident-runtime"
+    "source-pretty-format-resident-projections"
+    "source-pretty-format-resident-closure-projections"
+    "source-pretty-format-resident-closure-matches"
+    "source-pretty-format-resident-allocator"
+    "source-pretty-format-resident-constructors"
+    "source-pretty-format-resident-naturals"
+    "source-pretty-format-resident-partial-applications"
+    "source-pretty-format-resident-setters"
+    "source-pretty-format-resident-increments"
+    "source-pretty-format-resident-releases"
+    "source-pretty-format-resident-cache"
+    "source-pretty-format-resident-numeric"
+    "source-pretty-format-resident-big-numeric"
+    "source-pretty-format-resident-string"
+    "source-pretty-format-resident-closed"
+    "source-pretty-format-trace-resident-constructors"
+    "source-pretty-format-trace-resident-naturals"
+    "source-pretty-format-trace-resident-partial-applications"
+    "source-pretty-format-trace-resident-setters"
+    "source-pretty-format-trace-resident-increments"
+    "source-pretty-format-trace-resident-releases"
+    "source-pretty-format-trace-resident-tag-setters"
+    "source-pretty-format-trace-resident-cache"
+    "source-pretty-format-trace-resident-numeric"
+    "source-pretty-format-trace-resident-big-numeric"
+    "source-pretty-format-trace-resident-string"
+    "source-pretty-format-trace-resident-closed"
+  )
+else
+  resident_pretties=(
+    "source-pretty-format-resident-closed"
+    "source-pretty-format-trace-resident-closed"
+  )
+fi
 for resident_pretty in "${resident_pretties[@]}"; do
   for suffix in wasm wasm.json wasm.lcnf; do
     test -s "_build/$resident_pretty.$suffix"
     cp "_build/$resident_pretty.$suffix" "_build/$resident_pretty-first.$suffix"
   done
 done
-lake -d ../../.. env lean FirWasmSourceExample.lean
-lake -d ../../.. env lean FirWasmPrettyTraceExample.lean
+generate_source_artifacts
 for source in "${source_artifacts[@]}"; do
   cmp "_build/$source-first.wasm" "_build/$source.wasm"
   cmp "_build/$source-first.wasm.json" "_build/$source.wasm.json"
@@ -144,6 +172,9 @@ cmp _build/source-float64-id-module.wasm _build/source-float64-id.wasm
 cmp _build/source-float64-id-module.wasm.lcnf _build/source-float64-id.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm _build/source-pretty-format.wasm
 cmp _build/source-pretty-format-module.wasm.lcnf _build/source-pretty-format.wasm.lcnf
+cmp _build/source-pretty-format-module.wasm.lcnf \
+  _build/source-pretty-format-resident-closed.wasm.lcnf
+if [[ "$exhaustive_pretty" == 1 ]]; then
 cmp _build/source-pretty-format-module.wasm.lcnf \
   _build/source-pretty-format-resident-get-tag.wasm.lcnf
 cmp _build/source-pretty-format-module.wasm.lcnf \
@@ -240,6 +271,7 @@ node run-resident-string.mjs \
   _build/source-pretty-format-resident-string.wasm
 node run-resident-string.mjs \
   _build/source-pretty-format-trace-resident-string.wasm
+fi
 node run-resident-string.mjs \
   _build/source-pretty-format-resident-closed.wasm
 node run-resident-string.mjs \
@@ -352,6 +384,7 @@ node --input-type=module -e '
   _build/source-pretty-format-coverage.wasm
 node call-pretty-format.mjs _build/source-pretty-format-module.wasm
 node call-concrete-pretty-format.mjs _build/source-pretty-format-module.wasm
+if [[ "$exhaustive_pretty" == 1 ]]; then
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-get-tag.wasm
 node call-concrete-pretty-format.mjs \
@@ -380,6 +413,7 @@ node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-cache.wasm
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-numeric.wasm
+fi
 node call-concrete-pretty-format.mjs \
   _build/source-pretty-format-resident-closed.wasm
 ./package-pretty-format.sh --no-build
