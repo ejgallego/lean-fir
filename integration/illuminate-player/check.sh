@@ -4,6 +4,20 @@ set -euo pipefail
 here=$(cd "$(dirname "$0")" && pwd)
 cd "$here"
 illuminate_root=${ILLUMINATE_ROOT:-$(realpath .illuminate)}
+illuminate_revision=$(node -e '
+  const fs = require("node:fs");
+  const contract = JSON.parse(fs.readFileSync(process.argv[1], "utf8"));
+  process.stdout.write(contract.revision);
+' "$here/illuminate-source.json")
+actual_illuminate_revision=$(git -C "$illuminate_root" rev-parse HEAD)
+if test "$actual_illuminate_revision" != "$illuminate_revision"; then
+  echo "Illuminate revision mismatch: expected $illuminate_revision, found $actual_illuminate_revision" >&2
+  exit 1
+fi
+if test -n "$(git -C "$illuminate_root" status --porcelain)"; then
+  echo "Illuminate checkout must be clean: $illuminate_root" >&2
+  exit 1
+fi
 
 lake --keep-toolchain --reconfigure -KilluminateRoot="$illuminate_root" \
   build IlluminateFirNative.Examples IlluminateFirNative.SelectionExamples

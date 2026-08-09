@@ -1,9 +1,10 @@
 # FIR-native Illuminate player packages
 
 This integration publishes the accepted full-action v3 live player and a
-separately versioned selection-only v4 player. The v3 artifact is unchanged;
+separately versioned selection-only v4 player. The v3 API remains unchanged;
 v4 retains only timing and selection state in Wasm while JavaScript owns SVG,
-parameter bindings, and per-frame parameter strings.
+parameter bindings, and per-frame parameter strings. Both package fingerprints
+are tied to the source revision in `illuminate-source.json`.
 
 This integration compiles the real Lean 4.32 entries from
 `Illuminate.Animation.FirLive`:
@@ -26,10 +27,28 @@ implementation.
 
 ## Build and verify
 
+The required Illuminate source is pinned to repository
+`https://github.com/ejgallego/illuminate.git` at revision
+`6f16cdc3d4320c093b53a9d381b92bfbb689b2ce`. To prepare the default local
+checkout:
+
+```sh
+cd integration/illuminate-player
+git clone https://github.com/ejgallego/illuminate.git .illuminate
+git -C .illuminate checkout --detach 6f16cdc3d4320c093b53a9d381b92bfbb689b2ce
+./check.sh
+```
+
+Alternatively, point the gate at an existing clean checkout of that exact
+revision:
+
 ```sh
 cd integration/illuminate-player
 ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 ```
+
+`check.sh`, `package.mjs`, and `selection-package.mjs` reject a dirty checkout
+or any revision other than the pinned contract before publishing a package.
 
 The gate builds both focused Lean dependency cones, publishes both packages
 twice, checks deterministic bytes and checksums, runs the source-tree and

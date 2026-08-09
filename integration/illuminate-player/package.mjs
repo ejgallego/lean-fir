@@ -29,6 +29,8 @@ const illuminateRoot = realpathSync(process.env.ILLUMINATE_ROOT ??
 const buildDirectory = join(directory, "_build");
 const baseStem = join(buildDirectory, "illuminate-player-base.wasm");
 const generatedStem = join(buildDirectory, "illuminate-player-resident.wasm");
+const expectedIlluminateSource = Object.freeze(JSON.parse(readFileSync(
+  join(directory, "illuminate-source.json"), "utf8")));
 const illuminateSourceFiles = [
   "src/Illuminate/Animation/Types.lean",
   "src/Illuminate/Animation/Player.lean",
@@ -65,6 +67,14 @@ function run(command, args, options = {}) {
 
 function capture(command, args) {
   return run(command, args, { capture: true }).trim();
+}
+
+function assertExpectedIlluminateSource() {
+  assert.equal(capture("git", ["-C", illuminateRoot, "rev-parse", "HEAD"]),
+    expectedIlluminateSource.revision,
+    "Illuminate source revision does not match illuminate-source.json");
+  assert.equal(capture("git", ["-C", illuminateRoot, "status", "--porcelain"]),
+    "", "Illuminate source checkout must be clean");
 }
 
 function sha256(value) {
@@ -107,6 +117,7 @@ function replaceCurrentLink(targetDirectory) {
   assert.equal(realpathSync(current), realpathSync(targetDirectory));
 }
 
+assertExpectedIlluminateSource();
 mkdirSync(buildDirectory, { recursive: true });
 run("lake", [
   "--keep-toolchain",
