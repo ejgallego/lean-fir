@@ -7655,6 +7655,82 @@ inductive LazyCacheInternalSupported (context : Fir.Wasm.Context) :
         continuation nextRuntime sourceValue stepCost
 
 /--
+Source-only hereditary admission for compiler-generated internal lazy calls.
+
+A hit retains the ordinary static nullary-call facts. A miss additionally
+retains the exact declaration-local row selected by production lowering and a
+finite source derivation of the initializer body from the empty environment.
+The initializer derivation may use a separately chosen recursive fragment;
+this makes one lazy layer compositional without placing a target execution or
+a recursive target-correctness theorem in the source premise.
+-/
+inductive LazyCacheInternalHereditarySupported
+    (externals : ExternalImpl)
+    (DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (InitializerLazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop)
+    (CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate)
+    (context : Fir.Wasm.Context) :
+    LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      LCNF.Code .impure → RuntimeState → Value → Nat → Prop where
+  | hit
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      (call :
+        LazyCacheCallSupported context decl declaration sourceDeclaration
+          resultKind) :
+      LazyCacheInternalHereditarySupported externals DirectSupported
+        ExternalSupported InitializerLazySupported CaseSupported
+        EffectSupported context .hit sourceRuntime sourceEnv decl continuation
+        nextRuntime sourceValue 0
+  | miss
+      {sourceRuntime nextRuntime callRuntime : RuntimeState}
+      {sourceEnv calleeResultEnv : Env}
+      {decl : LCNF.LetDecl .impure}
+      {continuation : LCNF.Code .impure}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      {declaration : Name}
+      {sourceDeclaration : LCNF.Decl .impure}
+      {resultKind : AbiKind}
+      {calleeCode : LCNF.Code .impure}
+      {calleeFunction : Fir.Wasm.Function}
+      {calleeResultFacts : ReuseCapacityFacts}
+      (call :
+        LazyCacheInternalMissSupported context decl declaration
+          sourceDeclaration resultKind calleeCode)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          sourceDeclaration calleeCode calleeFunction)
+      (resultClassified :
+        Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+      (callee :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported InitializerLazySupported CaseSupported
+          EffectSupported directLetAllocationCost row.context resultKind []
+          sourceRuntime [] calleeCode calleeResultFacts callRuntime
+          calleeResultEnv sourceValue stepCost) :
+      LazyCacheInternalHereditarySupported externals DirectSupported
+        ExternalSupported InitializerLazySupported CaseSupported
+        EffectSupported context .miss sourceRuntime sourceEnv decl continuation
+        nextRuntime sourceValue stepCost
+
+/--
 Source-only result-kind policy for the internal lazy fragment whose
 publication safety is representation-derived.
 
@@ -9164,6 +9240,104 @@ theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntryAtCost
       (row.targetFunction.toLocals physicalArgs) witness :=
   (callerFrame.generatedDirectCalleeEntry site row argumentsRelated).withBudget
     (callerFrame.budget.weaken stepFits)
+
+/-- Re-index an unchanged caller store as the entry frame of a generated
+nullary initializer. The empty source environment makes the local-value
+relation vacuous, while the production parameter row and adapted signature
+show that `toLocals []` has the exact symbolic frame shape. -/
+theorem ConcreteReuseCapacityCacheFrame.generatedNullaryCalleeEntryAtCost
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {calleeContext : Fir.Wasm.Context}
+    {calleeCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes stepCost : Nat}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness)
+    (row : ConcreteGeneratedInternalDeclaration program declaration
+      calleeContext calleeCode sourceModule calleeFunction target)
+    (parametersEmpty : declaration.params = #[])
+    (stepFits : stepCost ≤ remainingBytes) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      stepCost sourceRuntime [] targetStore
+      (row.targetFunction.toLocals []) witness := by
+  rcases callerFrame with
+    ⟨⟨⟨⟨callerRelated, _callerOrdinary, _callerAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, cacheTable, closureTables⟩
+  have parameterLocalsEmpty : row.parameterLocals = [] := by
+    have parametersAdded := row.parametersAdded
+    unfold Fir.Wasm.addDeclarationParams at parametersAdded
+    rw [parametersEmpty] at parametersAdded
+    simpa using (Except.ok.inj parametersAdded).symm
+  have sourceParametersEmpty : calleeFunction.params = #[] := by
+    simpa [parameterLocalsEmpty] using row.sourceParameters
+  have entryState :
+      StateRelated calleeFunction sourceRuntime [] targetStore
+        (row.targetFunction.toLocals []) witness := by
+    refine ⟨callerRelated.1.1, callerRelated.1.2.1, ?_⟩
+    intro fvar value found
+    simp [lookup] at found
+  have emptyFacts :
+      ReuseCapacityFactsRel [] (functionBindings calleeFunction) []
+        (row.targetFunction.toLocals []) targetStore.host.runtime.heap witness := by
+    intro fvarId evidence found
+    simp [findReuseCapacityEvidence?] at found
+  have emptyRelated :
+      ReuseCapacityStateRelated [] calleeFunction sourceRuntime [] targetStore
+        (row.targetFunction.toLocals []) witness :=
+    ⟨entryState, emptyFacts⟩
+  have emptyOrdinary : ReuseTokenOrdinaryRel [] sourceRuntime [] := by
+    intro fvarId available location cell found
+    simp [findReuseCapacityEvidence?] at found
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  have entryAligned :
+      ConcreteLocalFrameAligned calleeFunction sourceRuntime [] targetStore
+        (row.targetFunction.toLocals []) witness := by
+    constructor
+    · simp [Wasm.Function.toLocals, sourceParametersEmpty]
+    · simp [Wasm.Function.toLocals, signature.2.1]
+  exact
+    ⟨⟨⟨⟨emptyRelated, emptyOrdinary, entryAligned,
+      budget.weaken stepFits⟩, integerImplementation, naturalImplementation,
+      scalarImplementation⟩, descriptorAgreement⟩, cacheTable,
+      closureTables⟩
+
+/-- A generated nullary initializer accepts the empty physical parameter row. -/
+theorem ConcreteGeneratedInternalDeclaration.targetParameterCount_nullary
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    (parametersEmpty : declaration.params = #[]) :
+    ([] : List Wasm.Value).length = row.targetFunction.numParams := by
+  have parameterLocalsEmpty : row.parameterLocals = [] := by
+    have parametersAdded := row.parametersAdded
+    unfold Fir.Wasm.addDeclarationParams at parametersAdded
+    rw [parametersEmpty] at parametersAdded
+    simpa using (Except.ok.inj parametersAdded).symm
+  have sourceParametersEmpty : sourceFunction.params = #[] := by
+    simpa [parameterLocalsEmpty] using row.sourceParameters
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  simp [Wasm.Function.numParams, signature.1, sourceParametersEmpty]
 
 /-- The physical argument row selected by production compilation has exactly
 the adapted callee arity, in the stack order expected by Wasm function calls. -/
@@ -11720,6 +11894,174 @@ theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
       externalsPreserved := resultInvariant.2.externals
       residualBudget }
     cacheTable := resultInvariant.1.2.1 }⟩
+
+/--
+One compiler-generated lazy layer is derived from a nested source initializer
+derivation, not from a caller-supplied target theorem.
+
+The nested derivation is discharged by the already-constructed hereditary
+generated-declaration theorem for the initializer fragment. Production
+lowering and adaptation select the exact nullary callee row and numeric call
+index; the caller frame is re-indexed at the initializer's source-selected
+cost. For exact non-heap result kinds, publication ordinaryness follows from
+the callee's returned physical-value refinement.
+-/
+theorem
+    ConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {InitializerLazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (spec : ConcreteSupportedFunction program context callerCode sourceModule
+      callerFunction target hosts)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
+    (declarations :
+      DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+        hosts sourceExternals DirectSupported ExternalSupported
+        InitializerLazySupported CaseSupported EffectSupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels target.wasmModule hosts.env sourceExternals
+      (LazyCacheInternalHereditarySupported sourceExternals DirectSupported
+        ExternalSupported InitializerLazySupported CaseSupported
+        EffectSupported context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) := by
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue initial locals resultIndex remainingBytes
+    stepCost initialWitness supported stepFits invariant sourceStep
+    valueCompiled valueAdapted resultFound
+  rcases invariant with ⟨cacheInvariant, entryTransports⟩
+  cases supported with
+  | hit call =>
+      obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer,
+          nextCache⟩ :=
+        BudgetedCapacityPreservingLazyStep.hit_of_compiler context sourceModule
+          callerFunction labels target.wasmModule hosts.env sourceExternals
+          call spec.localsAligned generated sourceStep cacheInvariant
+          valueCompiled valueAdapted resultFound rfl
+      have ordinary :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        SourceLazyLetResult.hit_ordinaryTransport_of_supported call sourceStep
+      obtain ⟨simulates, externalsPreserved, hostDescriptorsPreserved,
+          witnessDescriptorsPreserved, nextTransfer, nextCacheInvariant⟩ :=
+        cacheInvariant.ofLazyCacheResult stepFits step (fun _ => nextCache)
+          resultFound transfer
+      have nextEntry :
+          ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+            nextStore entryWitness nextWitness :=
+        entryTransports.step step.witnessTransport step.capacityTransport
+          ordinary step.externalsPreserved step.toClosureTablesTransport
+      exact ⟨nextStore, nextLocals, nextWitness,
+        eraseReuseCapacityFact facts decl.fvarId, simulates,
+        externalsPreserved, hostDescriptorsPreserved,
+        witnessDescriptorsPreserved, nextTransfer,
+        ⟨nextCacheInvariant, nextEntry⟩⟩
+  | @miss sourceRuntime nextRuntime callRuntime sourceEnv calleeResultEnv decl
+      continuation sourceValue stepCost declaration sourceDeclaration
+      resultKind calleeCode calleeFunction calleeResultFacts call loweredRow
+      resultClassified calleeEvaluation =>
+      rcases call with
+        ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
+      have programEq : context.program = program := spec.contextProgram
+      subst program
+      obtain ⟨generatedRow⟩ :=
+        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+          rfl contextCaches spec.programNamesUnique spec.lowered
+          spec.adapted targetEq loweredRow resultClassified
+      have parametersEmpty : sourceDeclaration.params = #[] :=
+        Array.isEmpty_iff.mp paramsEq
+      have calleeFrame :=
+        cacheInvariant.generatedNullaryCalleeEntryAtCost generatedRow
+          parametersEmpty stepFits
+      have declarationNameEq : sourceDeclaration.name = declaration :=
+        declarationName_of_findDecl? targetEq
+      have exactCallIndex :
+          callIndex? sourceModule (.declaration declaration) =
+            some generatedRow.targetFunctionIndex := by
+        simpa [declarationNameEq] using generatedRow.callIndexEq
+      have hereditary :
+          LazyCacheInternalHereditaryInduction context sourceModule
+            target.wasmModule hosts.env sourceExternals sourceRuntime
+            declaration calleeCode resultKind initial initialWitness
+            sourceValue stepCost := by
+        intro declarationId declarationCall
+        rw [exactCallIndex] at declarationCall
+        have declarationIdEq := Option.some.inj declarationCall
+        subst declarationId
+        obtain ⟨afterCall, callWitness, physical, calleeResult⟩ :=
+          declarations generatedRow resultClassified calleeEvaluation
+            calleeFrame
+            (generatedRow.targetParameterCount_nullary parametersEmpty)
+        exact ⟨loweredRow.context, calleeFunction,
+          generatedRow.targetFunction, callRuntime, afterCall, callWitness,
+          physical, loweredRow.contextsCoherent rfl rfl, calleeResult,
+          trivial⟩
+      have missSupported :
+          LazyCacheInternalMissSupported context decl declaration
+            sourceDeclaration resultKind calleeCode :=
+        .intro (.intro valueEq kindEq targetEq paramsEq resultCompiled) bodyEq
+      obtain ⟨notObject, notTObject⟩ := resultKinds missSupported
+      have publication :
+          LazyCacheInternalPublicationInduction context sourceModule
+            target.wasmModule hosts.env sourceExternals facts sourceRuntime
+            sourceEnv declaration calleeCode resultKind initial initialWitness
+            sourceValue stepCost :=
+        LazyCacheInternalHereditaryInduction.publication_of_nonHeapKind
+          hereditary notObject notTObject
+      obtain ⟨nextStore, nextLocals, nextWitness, physical, step, transfer,
+          nextCache⟩ :=
+        BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
+          context sourceModule callerFunction labels target hosts spec
+          sourceExternals missSupported
+          generated sourceStep cacheInvariant valueCompiled valueAdapted
+          resultFound
+          (LazyCacheInternalPublicationInduction.toMissInduction
+            (resultId := decl.fvarId) publication)
+      have ordinary :
+          OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+        SourceLazyLetResult.miss_ordinaryTransport_of_internalCompiler_nonHeap
+          (stepCost := stepCost) missSupported
+          sourceStep valueCompiled valueAdapted hereditary notObject notTObject
+      obtain ⟨simulates, externalsPreserved, hostDescriptorsPreserved,
+          witnessDescriptorsPreserved, nextTransfer, nextCacheInvariant⟩ :=
+        cacheInvariant.ofLazyCacheResult stepFits step (fun _ => nextCache)
+          resultFound transfer
+      have nextEntry :
+          ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+            nextStore entryWitness nextWitness :=
+        entryTransports.step step.witnessTransport step.capacityTransport
+          ordinary step.externalsPreserved step.toClosureTablesTransport
+      exact ⟨nextStore, nextLocals, nextWitness,
+        eraseReuseCapacityFact facts decl.fvarId, simulates,
+        externalsPreserved, hostDescriptorsPreserved,
+        witnessDescriptorsPreserved, nextTransfer,
+        ⟨nextCacheInvariant, nextEntry⟩⟩
 
 /-- Compiler-generated declarations in the direct/no-calls fragment satisfy
 the recursive declaration contract solely from the production operation
