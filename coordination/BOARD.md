@@ -19,6 +19,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-REUSABLE-RESIDENT-LINKER`.
+- Integration owner: `wasm-gen`; the user assigned the W7 owner the dynamic
+  integration lease for this generation-only consolidation.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`.
+- Published stack: reusable resident linker `e46fbe3b` and ready mailbox
+  `2ae6a1e9`, based directly on `main` at `4af25685`.
+- Lease boundary: satisfied. PrettyFormat and Illuminate v3/v4 now use one
+  ordered, policy-driven symbolic linker with explicit strict-versus-available
+  helper admission, module-owned-memory and import-closure postconditions,
+  exact public-export checks, final validation, and one final Wasm encoding.
+  Application-specific source capture and ownership preparation remain outside
+  the generic linker. No shared semantic, helper-signature, concrete-runtime,
+  or ABI contract changed.
+- Artifact identity: PrettyFormat styled `bcf8da4eaa0edc6f` (104,909 bytes),
+  PrettyFormat plain `3625bdcde88379f8` (100,831 bytes), Illuminate v3
+  `b36cfaf21175a40b` (50,203 bytes), and Illuminate v4
+  `0371d430f2b04dab` (55,518 bytes), all byte-identical to their pre-refactor
+  artifacts. Both Illuminate artifacts retain zero imports and their reviewed
+  six-function live-player export surface.
+- Validation: Lean Beam zero-diagnostic checkpoints; `git diff --check`;
+  focused `lake build Fir.Wasm.Emit.ResidentPrettyFormat`; complete
+  `make check` with 642 unique cases and 1,844/1,844 equal comparisons; Talos
+  setup at `a01d01c`; all 3,125 `make talos-check` jobs; the complete
+  PrettyFormat artifact gate; and the Illuminate v3/v4 gate with two
+  deterministic publications, all 106 four-way traces, and flat frontiers in
+  both 10,000-tick tests.
+
+## Previous completed integration lease
+
 - Milestone: `W6-CLOSURE-ALLOCATION-PERSISTENCE`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler-proof boundary.
