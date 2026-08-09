@@ -11068,7 +11068,7 @@ All physical arguments, decoded lanes, the import/local indices, allocation
 address, response, and extended witness are constructed inside the proof.
 -/
 theorem
-    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureInteger
+    ConcreteSupportedFunction.externalLetRuntimeRefinesWithCostAndTransports_pureInteger
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -11076,10 +11076,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
       sourceFunction [] target.wasmModule hosts.env externals
@@ -11342,7 +11341,7 @@ representation, and post-witness from the generated export and source result;
 none of those target artifacts appear in the source admission relation.
 -/
 theorem
-    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureNatural
+    ConcreteSupportedFunction.externalLetRuntimeRefinesWithCostAndTransports_pureNatural
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -11350,10 +11349,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
       sourceFunction [] target.wasmModule hosts.env externals
@@ -11616,7 +11614,7 @@ binding are all reconstructed internally, while the heap budget and witness
 remain unchanged.
 -/
 theorem
-    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureScalar
+    ConcreteSupportedFunction.externalLetRuntimeRefinesWithCostAndTransports_pureScalar
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -11624,10 +11622,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
       sourceFunction [] target.wasmModule hosts.env externals
@@ -21284,7 +21281,7 @@ Integer-, natural-, and scalar-result external calls share one invariant and
 compose by source admission disjunction.
 -/
 theorem
-    ConcreteSupportedExport.externalLetRuntimeRefinesWithCostAndTransports_pureExternal
+    ConcreteSupportedFunction.externalLetRuntimeRefinesWithCostAndTransports_pureExternal
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -21292,10 +21289,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl) :
     ExternalLetRuntimeRefinesWithCostAndTransports context sourceModule
       sourceFunction [] target.wasmModule hosts.env externals

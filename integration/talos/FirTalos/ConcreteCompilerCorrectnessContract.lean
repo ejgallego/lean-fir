@@ -4292,6 +4292,56 @@ example
   spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_noCalls
     sourceExternals
 
+/-- Pure-external operation correctness is a generated-function law: an
+internal compiler row does not need to claim named export membership. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    (sourceExternals : ExternalImpl)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction [] target.wasmModule hosts.env sourceExternals
+      (PureExternalSupported context sourceExternals)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) :=
+  spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+    sourceExternals
+
+/-- The production recursive induction admits pure `Nat`/`Int`/scalar
+externals without adding an external-execution or callee-correctness premise. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (sourceExternals : ExternalImpl) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun context => PureExternalSupported context sourceExternals)
+      (fun _ => NoReuseCapacityLazySupported)
+      (fun _ => DefaultOnlyCaseSupported)
+      (fun _ => NoEffectsSupported) :=
+  spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal
+    sourceExternals
+
 /-- Consequently the root named-call law is also production-derived: callers
 supply the canonical compiler context fact, not target behavior for callees. -/
 example
