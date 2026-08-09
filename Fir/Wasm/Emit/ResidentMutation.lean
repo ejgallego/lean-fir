@@ -113,8 +113,8 @@ private def objectSetFunction (ordinal index : Nat) (field : AbiKind) :
 private def scalarBytes : AbiKind → Option Nat
   | .uint8 => some 1
   | .uint16 => some 2
-  | .uint32 => some 4
-  | .uint64 => some 8
+  | .uint32 | .float32 => some 4
+  | .uint64 | .float => some 8
   | _ => none
 
 private def scalarStore (field : AbiKind) (fieldOffset : UInt32) :
@@ -131,6 +131,14 @@ private def scalarStore (field : AbiKind) (fieldOffset : UInt32) :
         .i32Store .uint32 fieldOffset]
   | .uint64 =>
       pure [.localGet addressLocal, .localGet valueParam,
+        .i64Store .uint64 fieldOffset]
+  | .float32 =>
+      pure [.localGet addressLocal, .localGet valueParam,
+        .i32ReinterpretF32 .uint32,
+        .i32Store .uint32 fieldOffset]
+  | .float =>
+      pure [.localGet addressLocal, .localGet valueParam,
+        .i64ReinterpretF64 .uint64,
         .i64Store .uint64 fieldOffset]
   | kind => throw (.unsupportedScalarKind kind)
 
@@ -296,7 +304,9 @@ def internalizeTagSetters (module : Module) : Except LinkError Module := do
 
 def exampleOperations : Array RuntimeOp := #[
   .objectSet 1 .tobject,
-  .scalarSet 2 1 .uint8]
+  .scalarSet 2 1 .uint8,
+  .scalarSet 2 4 .float32,
+  .scalarSet 2 8 .float]
 
 def exampleObjectSetCaller : Function := {
   name := `resident_set_object
@@ -320,10 +330,34 @@ def exampleScalarSetCaller : Function := {
     .call (.runtime exampleOperations[1]!),
     .ret] }
 
+def exampleFloat32SetCaller : Function := {
+  name := `resident_set_float32
+  params := #[(objectParam, .object), (valueParam, .float32)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet objectParam,
+    .localGet valueParam,
+    .call (.runtime exampleOperations[2]!),
+    .ret] }
+
+def exampleFloatSetCaller : Function := {
+  name := `resident_set_float
+  params := #[(objectParam, .object), (valueParam, .float)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet objectParam,
+    .localGet valueParam,
+    .call (.runtime exampleOperations[3]!),
+    .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
-  functions := #[exampleObjectSetCaller, exampleScalarSetCaller]
-  exports := #[exampleObjectSetCaller.name, exampleScalarSetCaller.name]
+  functions := #[exampleObjectSetCaller, exampleScalarSetCaller,
+    exampleFloat32SetCaller, exampleFloatSetCaller]
+  exports := #[exampleObjectSetCaller.name, exampleScalarSetCaller.name,
+    exampleFloat32SetCaller.name, exampleFloatSetCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   memory := some ResidentRuntime.residentMemory }
@@ -360,13 +394,15 @@ def manifest : Json :=
   Json.mkObj [
     ("entries", Json.arr #[
       Json.mkObj [("entry", exampleObjectSetCaller.name.toString)],
-      Json.mkObj [("entry", exampleScalarSetCaller.name.toString)]]),
+      Json.mkObj [("entry", exampleScalarSetCaller.name.toString)],
+      Json.mkObj [("entry", exampleFloat32SetCaller.name.toString)],
+      Json.mkObj [("entry", exampleFloatSetCaller.name.toString)]]),
     ("objectHeader",
       Json.mkObj [
         ("tag", 7),
         ("objectFields", 2),
         ("usizeFields", 0),
-        ("scalarBytes", 2)]),
+        ("scalarBytes", 16)]),
     ("status", "generation-only; W6 mutation contract proof pending")]
 
 def tagManifest : Json :=
