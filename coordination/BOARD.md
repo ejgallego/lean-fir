@@ -19,6 +19,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-CLOSURE-ALLOCATION-PERSISTENCE`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler-proof boundary.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: proof transport foundation `7943fdfa` and ready mailbox
+  `5f6ba8e5`, based directly on `main` at `18af585a`.
+- Lease boundary: satisfied. Every currently proved non-closure concrete
+  runtime transition now proves that it cannot invent a closure descriptor.
+  The cache/call proof can therefore transport program-indexed closure ABI
+  alignment across constructors, reuse, scalar boxing, promoted tags, and
+  their compiled runtime steps instead of assuming alignment again after each
+  step. Actual closure allocation remains governed by the compiler-derived
+  ABI compatibility law.
+- Validation: Lean Beam zero-error checkpoints and saves for all changed proof
+  consumers; focused 3,103- and 3,098-job dependency cones;
+  `git diff --check`; complete `make check` with 642 unique cases and
+  1,844/1,844 equal comparisons; Talos setup at `a01d01c`; and all 3,125
+  `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler-proof boundary.
@@ -470,6 +492,15 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-CLOSURE-ALLOCATION-PERSISTENCE` is linked/accepted through W6
+  functional head `7943fdfa`, based directly on `main` at `18af585a`. All
+  ordinary concrete runtime operations now carry a compositional proof that
+  post-state closure descriptors were already present in the pre-state, and
+  `ClosureAllocationsAbiAligned.ofPersistent` turns that fact into ABI-frame
+  preservation. W6 next threads the same fact through external operations,
+  lifts direct/effect/external generated laws to the ABI frame, and derives
+  `DirectHereditaryGeneratedDeclarationAbiInduction` from those compiler laws.
 
 - `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW` is linked/accepted through W6
   functional head `bca03085`, based directly on `main` at `5307f77d`. The
