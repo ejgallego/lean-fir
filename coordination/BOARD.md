@@ -15,7 +15,28 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- No cross-lane integration lease is currently active.
+- Milestone: `W7-FLAT-PUBLICATION`.
+- Integration owner: `wasm-gen`; the user assigned the W7 owner the temporary
+  integration lease for the two shared compiler-admission repairs required by
+  the separate Verso Flat artifact.
+- Integration branch/worktree: `integration/flat-publication` in
+  `.worktrees/integration-flat-publication`, based directly on `main` at
+  `f47ee553`.
+- Contract queue: `FIR-BUG-wasm-none-generic-object-join-admission` aligns
+  local-join transfers with the existing Lean-compatible object-family call
+  ABI; `FIR-BUG-wasm-none-precise-box-result-admission` admits only the generic
+  `tobject` declaration or the exact `boxResultKind type .tobject` selected by
+  lowering. Scalar and erased lanes remain exact; concrete layouts and runtime
+  helper signatures do not change.
+- Consumers: W7 rebases before committing the Flat resident helpers and
+  package. W6 is notified of the stable join/box admission surface and may
+  adapt the compiler proof in parallel; proof completion does not block the
+  generation-ready executable package. Validation receives focused malformed
+  scalar/object regressions and the unchanged root corpus.
+- Lease boundary: land only the two isolated admission repairs, their focused
+  regressions, bug-card resolutions, and green integration evidence. Rebase
+  `wasm/generation` after the main fast-forward; all Flat resident-runtime and
+  package files remain W7-owned and land separately.
 
 ## Latest completed integration lease
 
