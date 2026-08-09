@@ -33,7 +33,7 @@ ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 
 The gate builds both focused Lean dependency cones, publishes both packages
 twice, checks deterministic bytes and checksums, runs the source-tree and
-packaged smokes, and compares 106 legacy-JavaScript/FIR-v3/FIR-v4 traces event
+packaged smokes, and compares 107 legacy-JavaScript/FIR-v3/FIR-v4 traces event
 by event. The
 smoke includes every event and patch target, non-integral timestamps, two
 independent players, failure poisoning, repeated disposal, repeated
