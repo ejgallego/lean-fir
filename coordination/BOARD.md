@@ -15,6 +15,10 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
+- No cross-lane integration lease is active.
+
+## Latest completed integration lease
+
 - Milestone: `W7-FLAT-RESIDENT-PACKAGE`.
 - Integration owner: `wasm-gen`; the user assigned the W7 owner the temporary
   lease to land the generation-ready resident helpers and separate Verso Flat
@@ -22,16 +26,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Integration branch/worktree: `integration/flat-publication` in
   `.worktrees/integration-flat-publication`, based directly on `main` at
   `18d38ba9`.
-- Candidate stack: W7 helper/linker head `e8026976`, package head `561f9e66`,
-  and formatting follow-up `54c09641`, cherry-picked without the unrelated
-  queued W7 branch history.
-- Lease boundary: validate the isolated stack, publish the helper signatures
-  as generation-ready for W6, and land the deterministic package machinery.
-  The executable Flat package is separately marked provisional until the
-  Verso owner publishes the clean source refactor on a remote-resolvable ref;
-  no local source hash will be presented as accepted provenance.
+- Published stack: active-slice record `4dd90837`, isolated helper/linker head
+  `061a1db0`, package head `e1e904d6`, and formatting follow-up `3b76ab67`.
+- Lease boundary: satisfied. W7 supplies generation-ready resident UInt8
+  boxing/unboxing, UInt32 unboxing, tagged closure projections, and batched
+  whole-module runtime/linker rewriting including loops. The deterministic
+  Verso Flat package machinery compiles the real
+  `VersoSlides.Pretty.formatRenderedForRuntime` entry with zero imports,
+  module-owned memory, and the five intended function exports. These helpers
+  do not claim W6 refinement proofs. The executable package remains explicitly
+  provisional until the Verso owner publishes the clean capture refactor on a
+  remote-resolvable commit; its local source hash is not accepted provenance.
+- Artifact identity: 164,441-byte Wasm with SHA-256
+  `cb4092061337d29f44c3444560b0bcbfaa2ea275ef256cae7a9cf7de7612ba35`;
+  113 captured declarations, 24 reviewed pre-link externals, 82 retained source
+  functions, 574 resident helpers, 656 total functions, 23 lazy cache
+  initializers, one resident global, and zero unresolved runtime operations.
+- Validation: Lean Beam clean saves during development; `git diff --check`;
+  complete `make check` with 642 unique cases, 1,844/1,844 equal comparisons,
+  and 116 bug cards; all 3,131 `make talos-check` jobs; complete deterministic
+  resident-artifact gate with 44/44 readiness artifacts, 15/15 source probes,
+  and the 601-case V8 matrix; two deterministic package publications; exact
+  native/Wasm, Node, stress, checksum, source-validator, and Chrome checks.
 
-## Latest completed integration lease
+## Previous completed integration lease
 
 - Milestone: `W6-FINITE-TRACE-ROADMAP-ALIGNMENT`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
