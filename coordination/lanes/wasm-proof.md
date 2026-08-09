@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: 92e94f2d on main
-functional-head: 625d4883
-contract-base: 92e94f2d on main; the ownership-aware hereditary closure source boundary and existing concrete closure descriptor/application contracts
+base: 5307f77d on main
+functional-head: bca03085
+contract-base: 5307f77d on main; ownership-threaded matcher/projection and the existing concrete closure application contracts
 clean-at-update: true
-slice: Thread persistent, exclusive-transfer, and shared-retain closure ownership through the executable matcher into the complete cache/capacity frame; derive the selected candidate's actual post-consumption store instead of assuming store identity; repair closure projection so an immutable precise capture descriptor may widen exactly along AbiKind.refines to the generated callee parameter kind; expose resolver-selected closureProj imports and an executable tagged-to-tobject allocation/matcher/projection regression
-files: Fir/Wasm/Concrete/OwnershipFrameCorrectness.lean; Fir/Wasm/Concrete/ClosureApplicationCorrectness.lean; Fir/Wasm/Concrete/ClosureRuntime.lean; Fir/Wasm/Concrete/ClosureCorrectness.lean; integration/talos/FirTalos/ConcreteRuntime.lean; integration/talos/FirTalos/ConcreteReuseCapacityCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteSupportedExportCorrectness.lean; integration/talos/FirTalos/ConcreteRuntimeExamples.lean; bugs/FIR-BUG-wasm-none-closure-projection-kind-refinement.md; this mailbox
-contracts: CLOSURE-PROJECTION-KIND-REFINEMENT accepts exactly actualKind.refines expectedKind at live and post-application capture projection, reads at the immutable descriptor kind, and preserves the physical lane while widening its proof relation; the resident projection helper already performs the same raw slot load, so no W7 implementation change is required
-checks: PASS Lean Beam zero-error checkpoints for the changed root concrete modules and FirTalos ConcreteRuntime, ConcreteSupportedExportCorrectness, and ConcreteRuntimeExamples; PASS focused root and Talos dependency builds including FirTalos.ConcreteCompilerCorrectnessContract; PASS git diff --check; PASS make check (633 native/LCNF cases, 1,266/1,266 results, zero findings; direct machine suite 9/9); PASS make talos-check (3,125 jobs)
-bug-cards: FIR-BUG-wasm-none-closure-projection-kind-refinement fixed with executable allocation/matcher/projection regression
+slice: Derive the ownership-aware saturated closure-call runtime law from the finite hereditary source derivation, exact compiler candidate identity, post-consumption matcher refinement, program-indexed closure ABI alignment, and generated-declaration induction; assemble the complete fixed-capture plus ordinary-argument callee row from compiler output; eliminate the historical selected.nextStore = initial shortcut and all per-call selected-body/argument-assembly target certificates
+files: Fir/Wasm/Lower.lean; integration/talos/FirTalos/ConcreteReuseCapacityCallCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; this mailbox
+contracts: Introduces proof-only ClosureAllocationsAbiAligned, ConcreteReuseCapacityCacheAbiFrame, SaturatedClosureCandidateResolver, and DirectHereditaryGeneratedDeclarationAbiInduction boundaries; no shared semantic runtime, symbolic Wasm ABI, resident-helper signature, or concrete layout changed
+checks: PASS Lean Beam update/sync/save for FirTalos.ConcreteReuseCapacityCacheCorrectness and prior focused checkpoints; PASS lake build Fir.Wasm.Lower; PASS lake build FirTalos.ConcreteReuseCapacityCallCorrectness; PASS lake build FirTalos.ConcreteReuseCapacityCacheCorrectness (3103 jobs); PASS git diff --check; PASS make check (642 unique validation cases, 1844/1844 comparisons equal, zero findings); PASS make talos-check (3125 jobs)
+bug-cards: none
 blockers: none
-handoff: ready for fast-forward integration; branch contains ownership functional head 9ef99067 followed by projection-contract functional head 625d4883 and is clean at this mailbox update
-next: define and preserve the program-indexed closure heap ABI invariant stating that every live closure descriptor refines its target declaration's fixed parameter prefix; use it to derive generated capture assembly and enter the selected callee from selected.nextStore
+handoff: ready for fast-forward integration; branch is four functional commits ahead of main and clean at this mailbox update
+next: prove DirectHereditaryGeneratedDeclarationAbiInduction from ABI-preserving generated operation laws, then discharge SaturatedClosureCandidateResolver from the executable adapter/resolver rather than retaining it as an external premise
 ```

@@ -19,6 +19,25 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler-proof boundary.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: closure ABI alignment `8194acef`, generated argument
+  assembly `3340ae73`, ownership-aware call composition `527e13ea`, runtime
+  law `bca03085`, and the ready lane mailbox based directly on `5307f77d`.
+- Lease boundary: satisfied. The production theorem now composes semantic
+  closure consumption, executable matcher selection, exact compiler body
+  inversion, post-matcher capture projection, generated callee entry, and
+  hereditary declaration correctness without a per-call target certificate.
+- Validation: Lean Beam zero-error checkpoints and save; focused root and
+  Talos dependency cones; `git diff --check`; complete `make check` with 642
+  unique cases and 1,844/1,844 equal comparisons; all 3,125
+  `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W6-CLOSURE-MATCHER-OWNERSHIP-AND-PROJECTION`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler-proof boundary.
@@ -451,6 +470,21 @@ This section is authoritative for the current integration boundary; older
 candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
+
+- `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW` is ready through W6
+  functional head `bca03085`, based directly on `main` at `5307f77d`. The
+  selected matcher may consume the source closure; capture projection,
+  generated argument assembly, and the callee all start from its real
+  successor store and semantic call runtime. Exact compiler-candidate
+  inversion derives the selected call body and complete physical
+  capture-plus-argument row. The new production runtime theorem accepts no
+  unchanged-store equation, per-call body theorem, argument assembly, or
+  target execution certificate. Its only remaining global premises are the
+  executable candidate resolver and the program-wide ABI-preserving generated
+  declaration induction. Lean Beam, focused dependency cones, all 3,125 Talos
+  jobs, and all 1,844 repository comparisons pass. W6 next proves those two
+  global premises, beginning with generated-operation preservation of the
+  program-indexed closure allocation ABI invariant.
 
 - `W6-DIRECT-HEREDITARY-SOURCE-EVALUATION` is linked/accepted through W6
   functional head `cbb0f0d1` and ready mailbox `6fe75308`, based directly on
