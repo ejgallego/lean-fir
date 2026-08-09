@@ -11000,6 +11000,27 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   bodyAdapted := row.bodyAdapted
   singleResult := row.singleResult }
 
+/-- Module-wide executable closure-candidate metadata for generated internal
+declarations.
+
+Recursive closure correctness needs the adapter's candidate enumeration at
+every generated callee, not only at the root export. This boundary supplies
+exactly that function-local enumeration. It contains no source evaluation,
+target execution, store relation, or callee correctness theorem. -/
+def GeneratedSaturatedClosureCandidateResolvers
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts) : Prop :=
+  ∀ {declaration : LCNF.Decl .impure}
+      {context : Fir.Wasm.Context}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function},
+    ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target →
+      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
+        target hosts
+
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
 private theorem declarationParameterNamesNodup
@@ -14458,6 +14479,123 @@ theorem DirectHereditaryGeneratedDeclarationAbiInduction.ofInduction
     DirectHereditaryGeneratedDeclarationAbiInduction program sourceModule
       target hosts sourceExternals DirectSupported ExternalSupported
       LazySupported CaseSupported EffectSupported := by
+  intro declaration context sourceCode sourceFunction resultKind row
+    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultValue requiredBytes evaluation initial initialWitness parameters
+    invariant parameterCount
+  obtain ⟨resultStore, resultWitness, physical, result⟩ :=
+    declarations row resultClassified evaluation invariant.cacheFrame
+      parameterCount
+  have initialAbi : ClosureAllocationsAbiAligned program initialWitness := by
+    rw [← row.contextProgram]
+    exact invariant.closureAbi
+  exact ⟨resultStore, resultWitness, physical, result,
+    initialAbi.ofPersistent
+      result.declaration.closureAllocationsPersistent⟩
+
+/-- Generated-declaration target theorem for the recursively hereditary
+production source relation.
+
+This is the precise induction goal needed for unbounded finite closure-call
+nesting: every actual generated row is correct for every finite recursive
+source derivation of its body. The caller still provides only the ordinary
+concrete entry frame and exact generated parameter count. -/
+def ProductionHereditaryGeneratedDeclarationInduction
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {declaration : LCNF.Decl .impure}
+      {context : Fir.Wasm.Context}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {resultKind : AbiKind}
+      (row : ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target)
+      (_resultClassified :
+        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
+      {resultFacts : ReuseCapacityFacts}
+      {sourceRuntime resultRuntime : RuntimeState}
+      {sourceEnv resultEnv : Env}
+      {resultValue : Value}
+      {requiredBytes : Nat}
+      (_evaluation :
+        ReuseCapacityProductionHereditaryCodeEvaluates sourceExternals context
+          resultKind [] sourceRuntime sourceEnv sourceCode resultFacts
+          resultRuntime resultEnv resultValue requiredBytes)
+      {initial : Wasm.Store Host}
+      {initialWitness : RefinementWitness}
+      {parameters : List Wasm.Value},
+    ConcreteReuseCapacityCacheFrame sourceModule sourceFunction sourceExternals
+          [] requiredBytes sourceRuntime sourceEnv initial
+          (row.targetFunction.toLocals parameters.reverse) initialWitness →
+      parameters.length = row.targetFunction.numParams →
+        ∃ resultStore resultWitness physical,
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+            sourceModule sourceFunction target.wasmModule hosts.env
+            sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+            row.targetFunction row.targetFunctionIndex initial resultStore
+            initialWitness resultWitness parameters resultKind resultValue
+            physical requiredBytes
+
+/-- Closure-ABI strengthening of the recursive production declaration goal.
+It makes the invariant consumed by a later nested saturated call explicit at
+both declaration entry and exit. -/
+def ProductionHereditaryGeneratedDeclarationAbiInduction
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl) : Prop :=
+  ∀ {declaration : LCNF.Decl .impure}
+      {context : Fir.Wasm.Context}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {resultKind : AbiKind}
+      (row : ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target)
+      (_resultClassified :
+        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
+      {resultFacts : ReuseCapacityFacts}
+      {sourceRuntime resultRuntime : RuntimeState}
+      {sourceEnv resultEnv : Env}
+      {resultValue : Value}
+      {requiredBytes : Nat}
+      (_evaluation :
+        ReuseCapacityProductionHereditaryCodeEvaluates sourceExternals context
+          resultKind [] sourceRuntime sourceEnv sourceCode resultFacts
+          resultRuntime resultEnv resultValue requiredBytes)
+      {initial : Wasm.Store Host}
+      {initialWitness : RefinementWitness}
+      {parameters : List Wasm.Value},
+    ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+          sourceExternals [] requiredBytes sourceRuntime sourceEnv initial
+          (row.targetFunction.toLocals parameters.reverse) initialWitness →
+      parameters.length = row.targetFunction.numParams →
+        ∃ resultStore resultWitness physical,
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+              sourceModule sourceFunction target.wasmModule hosts.env
+              sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+              row.targetFunction row.targetFunctionIndex initial resultStore
+              initialWitness resultWitness parameters resultKind resultValue
+              physical requiredBytes ∧
+            ClosureAllocationsAbiAligned program resultWitness
+
+/-- The ordinary recursive declaration theorem implies its closure-ABI form
+via the same cumulative allocation-persistence argument used by the one-layer
+boundary. No second compiler induction is needed. -/
+theorem ProductionHereditaryGeneratedDeclarationAbiInduction.ofInduction
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    (declarations :
+      ProductionHereditaryGeneratedDeclarationInduction program sourceModule
+        target hosts sourceExternals) :
+    ProductionHereditaryGeneratedDeclarationAbiInduction program sourceModule
+      target hosts sourceExternals := by
   intro declaration context sourceCode sourceFunction resultKind row
     resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
     resultValue requiredBytes evaluation initial initialWitness parameters
