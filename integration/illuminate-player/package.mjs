@@ -35,17 +35,17 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/FirLive.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 114,
+  finalLcnfDeclarations: 115,
   finalLcnfDeclarationSha256:
-    "57919367c84f2902a08bf57dfb3d3fc7f8077ff75c048fc2092893fab0ef38c4",
-  retainedSourceFunctions: 72,
+    "f8b99d05fd2eb37b2a3bd8f8ba78b2610552b253b306b85280a733d45cf1382c",
+  retainedSourceFunctions: 73,
   retainedSourceFunctionSha256:
-    "43631415b2a08bc907b2849240ce9bb73ddd3ac54c5a8d15ef3bb8815c3f55b8",
+    "09895eb26975484d2768992320136a7f9a91364afc333eea8c83bc37dde14852",
   residentHelpers: 151,
   residentHelperSha256:
     "9404e1b086528ad0bfc4b9887dc3fe2e356407d8bcbf2438266da90960124e1e",
-  baseWasmBytes: 18904,
-  completeWasmBytes: 50203,
+  baseWasmBytes: 18911,
+  completeWasmBytes: 50211,
 });
 const outputNames = [
   "BUILD.json",

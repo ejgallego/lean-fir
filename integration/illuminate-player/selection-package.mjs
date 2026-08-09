@@ -37,17 +37,17 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/FirSelection.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 125,
+  finalLcnfDeclarations: 126,
   finalLcnfDeclarationSha256:
-    "4f86903e2b94ba766d8ea4308fd25e8bf1f1149ce526ef7e53ec278a5c6f8ff6",
-  retainedSourceFunctions: 80,
+    "81d4a9200869748e6e15c7ac262ee1e3c567ba864b9dca8f41786c80b901b416",
+  retainedSourceFunctions: 81,
   retainedSourceFunctionSha256:
-    "6c7be20e5ca8f305ab61fca1affc20b77a24d359c3b887c271dc4eff1e0e9c2f",
+    "c397ed4627a8ee5a3882a93de3ced207f68a042f063181158d650a4b7c007814",
   residentHelpers: 163,
   residentHelperSha256:
-    "fb2592443c4759d184ed515825f8ffcae80ace2baa982f217d6d77da162a0e57",
-  baseWasmBytes: 20497,
-  completeWasmBytes: 55518,
+    "351298b04364a28c99aa6867551f639cbf22afe31593f0e343b46f409a12db91",
+  baseWasmBytes: 20505,
+  completeWasmBytes: 55527,
 });
 const outputNames = [
   "BUILD.json",
