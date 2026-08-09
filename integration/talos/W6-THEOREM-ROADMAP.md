@@ -1154,9 +1154,19 @@ acceptance tests pass.
    constructive allocation headroom, ordinary-token provenance, and the
    shared result-kind gate, not an execution certificate.
    Structured unreachability remains the shared-contract blocker.
-7. Add a target relational execution/adequacy layer and prove finite-prefix
-   preservation, divergence preservation, and then weak simulation or weak
-   bisimulation as useful.
+7. Add the target relational execution/adequacy layer and instantiate the
+   checked weak-simulation boundary. `ObservedWeakSimulation` and its ranked
+   form now provide exact finite-path composition, observation preservation,
+   and the anti-infinite-stuttering premise. The concrete specialization fixes
+   source transitions to deterministic `ExecSteps` and observations to exact
+   world/event traces modulo `ConcreteTraceRel`; its `execSteps` theorem
+   already transports every finite source prefix without assuming source
+   termination. The remaining target work is to define a resumable structured
+   Wasm configuration (Talos `OutOfFuel` does not retain one), prove its finite
+   terminating adequacy with `Wasm.run`, construct the compiler relation and
+   rank from lowering/adaptation plus W6 operation laws, and derive divergence
+   preservation. Add the backward direction only when the supported target
+   transition surface is closed enough for a useful weak bisimulation.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

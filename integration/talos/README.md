@@ -464,6 +464,25 @@ endpoint preserves finite source behaviors conditionally;
 later finite-trace and weak-simulation work will cover divergence without
 proving source termination.
 
+That later theorem now has a checked interface in
+`FirTalos.Correctness.WeakSimulation` and
+`FirTalos.ConcreteTraceSimulation`. `ConcreteFiniteTraceCorrect` means that
+the compiler proof itself produces a ranked relation between the source entry
+and a resumable concrete Wasm entry. From it,
+`ConcreteRankedTraceSimulation.execSteps` maps every finite LCNF interpreter
+prefix to a finite target prefix with equal world and external-event trace
+modulo the existing concrete address witness. Zero-step target matches must
+strictly decrease a source rank, which is the progress condition needed for
+silent-divergence preservation.
+
+The target side is intentionally an interface for now. Talos's executable
+`Wasm.run` retains no resumable store/control state when fuel is exhausted, so
+using `OutOfFuel` as a trace checkpoint would state a false abstraction. The
+next W6 slice supplies a structured resumable Wasm configuration and proves
+its finite terminating executions agree with `Wasm.run`; subsequent compiler
+step cases instantiate the checked simulation interface. No caller will pass
+the relation as a correctness certificate in the final export theorem.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine
 runner paths and produces standards-consumable, host-backed Wasm artifacts for

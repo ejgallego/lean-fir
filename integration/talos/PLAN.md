@@ -5763,6 +5763,32 @@ theorem. The remaining major proof direction is the separately stated
 finite-trace/weak-simulation extension for divergence; it does not require a
 termination proof for source programs.
 
+The finite-trace extension now has an explicit checked boundary. The generic
+`ObservedWeakSimulation` transports exact-length paths between heterogeneous
+transition systems while relating the observation at every reached
+configuration. `RankedObservedWeakSimulation` additionally requires every
+zero-target-step match to decrease a natural-number source rank, so infinite
+silent stuttering cannot masquerade as target progress.
+
+`ConcreteRankedTraceSimulation` specializes that interface to deterministic
+LCNF `ExecSteps` and the W6 concrete world/event trace relation. Its
+`execSteps` theorem already states the desired non-terminating-program-safe
+result: every finite source prefix has a finite target prefix with the same
+world and exact external-event trace modulo the existing address refinement
+witness. This statement contains no target execution certificate and no
+termination premise.
+
+The next implementation boundary is deliberately honest. Talos's current
+fuel-bounded `Wasm.run` returns `OutOfFuel` without the in-flight store or
+control stack, so it cannot serve as the target configuration of a weak
+simulation. W6 must define a resumable structured Wasm configuration for the
+emitted subset, expose its current concrete store, and prove finite
+terminating adequacy with `Wasm.run`. The compiler proof will then construct
+the simulation relation and its rank from lowering/adaptation and the existing
+runtime operation laws. The current terminating whole-export theorem becomes
+a corollary of that stronger relation; it is not discarded or repackaged as a
+certificate.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
