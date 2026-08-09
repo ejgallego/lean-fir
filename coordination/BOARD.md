@@ -19,6 +19,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-EMITTED-WASM-FRAME-STACK-MACHINE`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler proof.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: active-slice record `b8fe230f`, W6 functional head
+  `dbecabba`, and ready mailbox `119fea21`, based directly on `main` at
+  `56d1c09c`.
+- Lease boundary: satisfied. The generated target now has an explicit
+  structured-control small-step state with a frame stack and distinct
+  running, breaking, returning, and halted modes. Atomic and imported calls
+  delegate to Talos; internal calls, block/loop/conditional entry, normal
+  exits, loop restart, outward branch propagation, return unwinding, and
+  terminal fallthrough are reified as target steps. The concrete generated
+  trace boundary now selects this machine. The next proof must show that a
+  finite terminal structured path collapses to the exact corresponding Talos
+  run; that theorem is not claimed at this checkpoint. No shared semantics,
+  symbolic Wasm instruction, concrete layout/runtime operation, resident
+  helper, or artifact changed.
+- Validation: Lean Beam zero-error/zero-warning saves for the structured
+  machine and concrete packaging modules; focused and umbrella 3,131-job
+  Talos dependency cone; `git diff --check`; complete `make check` on the
+  unchanged 642-case and 1,844-comparison corpus; Talos pinned at `a01d01c`;
+  and all 3,131 `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W6-EMITTED-WASM-FRAME-COLLAPSE-LAWS`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler proof.
@@ -783,6 +810,18 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- `W6-EMITTED-WASM-FRAME-STACK-MACHINE` is linked/accepted through active
+  record `b8fe230f`, W6 functional head `dbecabba`, and ready mailbox
+  `119fea21`, based directly on `main` at `56d1c09c`. Generated execution now
+  uses an explicit structured-control frame stack with reified internal calls,
+  blocks, loops, conditionals, branch propagation, return unwinding, and
+  halting; atomic and imported calls retain the existing exact Talos boundary.
+  Lean Beam, the 3,131-job Talos cone, all 1,844 repository comparisons, and
+  all 3,131 Talos jobs pass. W6 is parked at this clean checkpoint. On resume,
+  prove that finite terminal structured paths collapse to exact Talos runs,
+  then construct the compiler relation and silence rank from the existing W6
+  operation laws.
+
 - `W6-EMITTED-WASM-FRAME-COLLAPSE-LAWS` is linked/accepted through active
   record `5d3f8725`, W6 functional head `0f466b9c`, and ready mailbox
   `6bf9807e`, based directly on `main` at `b1aa9a95`. Finite internal calls,
@@ -1400,7 +1439,7 @@ moving global snapshot hash.
 |---|---|---|---|---|---|
 | Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `6bf9807e`, functional head `0f466b9c`, on base `b1aa9a95`, inventories the emitted control grammar and proves exact local collapse laws for calls, block exits, loop fallthrough, conditionals, and branches. | No shared semantic or runtime contract changed. All 3,130 Talos jobs pass. Next package the laws as an explicit frame-stack small-step machine with loop restart and outward branch propagation. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | parked | Ready mailbox `119fea21`, functional head `dbecabba`, on base `56d1c09c`, defines the explicit emitted-subset frame-stack machine and selects it as the concrete generated-trace target. | No shared semantic or runtime contract changed. All 3,131 Talos jobs pass. Resume with terminal structured-path adequacy to exact Talos execution, then the compiler relation and silence rank. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `dfe6da0b`, functional head `e5a8612b`, on base `cdb8c4f3`, replaces application-specific final-LCNF kind repairs with the generic Lean object-family call ABI and publishes reviewed PrettyFormat and Illuminate v3/v4 artifacts. | Shared contract `bd7a5e55` makes `object`, `tagged`, and `tobject` compiler-call compatible without changing directional semantic refinement or concrete layout. W6 rebases and consumes the stable generic Array/weak-Inhabited `tobject` signatures in its next proof checkpoint. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
