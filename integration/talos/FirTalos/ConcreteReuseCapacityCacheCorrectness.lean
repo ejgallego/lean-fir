@@ -8435,15 +8435,49 @@ def SaturatedClosureDispatchSelectionInduction
                               site.resultKind sourceValue physical stepCost ∧
                             locals.set? resultIndex physical = some updated
 
-/-- Executable adapter/resolver boundary for the compiler's complete closure
-candidate enumeration.
+/-- Static half of a compiler-produced closure candidate.
 
-This boundary contains no semantic call result and no callee correctness. It
-only resolves each compiler-produced symbolic candidate into the numeric
-Talos body and the concrete matcher invocation at a supplied store/address.
-The W6 simulation derives first-match selection, post-matcher refinement,
-argument assembly, and callee entry from these cases. -/
-def SaturatedClosureCandidateResolver
+All fields are determined by lowering, numeric adaptation, and host
+resolution.  In particular there is no concrete store, closure address,
+matcher result, or matcher execution in this package. -/
+structure ClosureCandidateAdapterCase
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (module : Wasm.Module)
+    (spec : Wasm.HostSpec Host)
+    (closureId : FVarId) where
+  source : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction
+  targetBody : Wasm.Program
+  function : Name
+  arity : Nat
+  fixed : Nat
+  matcherIndex : Nat
+  imp : Wasm.ImportDecl
+  sourceMatcher :
+    source.1 = [
+      .localGet closureId,
+      .call (.runtime (.closureMatches function arity fixed))]
+  bodyAdapted :
+    instructions sourceModule sourceFunction labels source.2 = .ok targetBody
+  matcherFound :
+    callIndex? sourceModule
+      (.runtime (.closureMatches function arity fixed)) = some matcherIndex
+  importFound : module.imports[matcherIndex]? = some imp
+  importInBounds : matcherIndex < module.imports.length
+  contractFound :
+    spec.contracts[matcherIndex]? =
+      some (closureMatchesContract function arity fixed)
+  parameterCount : imp.params.length = 1
+  resultCount : imp.results.length = 1
+
+/-- Static adapter/resolver boundary for the compiler's complete candidate
+enumeration at one supported function.
+
+This is the constructible metadata interface that W7 may emit or W6 may later
+derive from adapter completeness.  Runtime matcher success is intentionally
+absent and is reconstructed at the actual related closure address. -/
+def SaturatedClosureCandidateAdapterResolver
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
     (callerFunction : Fir.Wasm.Function)
@@ -8452,19 +8486,163 @@ def SaturatedClosureCandidateResolver
     (hosts : ResolvedHosts) : Prop :=
   ∀ {decl : LCNF.LetDecl .impure}
       {sourceEnv : Env}
-      (site : SaturatedClosureCallSite context decl sourceEnv)
-      {initial : Wasm.Store Host}
-      {closureIndex : Nat}
-      {address : Word32},
+      (site : SaturatedClosureCallSite context decl sourceEnv),
     ∃ candidates : List
-        (ClosureCandidateCase sourceModule callerFunction labels
-          targetModule.wasmModule hosts.spec initial site.closureId
-          closureIndex address),
+        (ClosureCandidateAdapterCase sourceModule callerFunction labels
+          targetModule.wasmModule hosts.spec site.closureId),
       context.program.decls.toList.flatMap (fun target =>
           compileClosureCandidatesForTarget context.program decl.fvarId
             site.closureId site.resultKind site.argumentCode
             site.argumentKinds target) =
         candidates.map (·.source)
+
+/-- Execute one static candidate at the actual related source closure.
+
+A nonmatching row is a read-only zero result.  A matching row uses the same
+semantic ownership transition as the source call.  Hence successful matcher
+execution is a theorem of the simulation invariant, not compiler metadata. -/
+theorem ClosureCandidateAdapterCase.execute_of_refines
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {closureId : FVarId}
+    (candidate : ClosureCandidateAdapterCase sourceModule sourceFunction labels
+      module spec closureId)
+    {initial : Wasm.Store Host}
+    {witness : RefinementWitness}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {location : Location}
+    {address : Word32}
+    {cell : HeapCell}
+    {function : Name}
+    {arity : Nat}
+    {captures : Array Value}
+    {closureIndex : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness sourceRuntime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime location { cell with rc := cell.rc - 1 } =
+          .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime captures.toList)
+    (application :
+      Fir.LeanIR.Impure.takeClosureApplication sourceRuntime location =
+        .ok (nextRuntime, function, arity, captures)) :
+    ∃ resolved : ClosureCandidateCase sourceModule sourceFunction labels module
+        spec initial closureId closureIndex address,
+      resolved.source = candidate.source := by
+  by_cases identity :
+      (function == candidate.function && arity == candidate.arity &&
+        captures.size == candidate.fixed) = true
+  · obtain ⟨next, _applicationSnapshot, _captureKinds, operation, _, _, _, _, _,
+        _⟩ :=
+      closureMatchesStep_hit_of_refines runtimeRelated dispatchEq descriptorsEq
+        mapped cellFound cellLive cellObjectEq identity sharedCapacity
+        application
+    exact ⟨{
+      source := candidate.source
+      targetBody := candidate.targetBody
+      function := candidate.function
+      arity := candidate.arity
+      fixed := candidate.fixed
+      matcherIndex := candidate.matcherIndex
+      matched := 1
+      nextStore := next
+      imp := candidate.imp
+      sourceMatcher := candidate.sourceMatcher
+      bodyAdapted := candidate.bodyAdapted
+      matcherFound := candidate.matcherFound
+      importFound := candidate.importFound
+      importInBounds := candidate.importInBounds
+      contractFound := candidate.contractFound
+      parameterCount := candidate.parameterCount
+      resultCount := candidate.resultCount
+      operation }, rfl⟩
+  · have identityFalse :
+        (function == candidate.function && arity == candidate.arity &&
+          captures.size == candidate.fixed) = false :=
+      Bool.eq_false_of_not_eq_true identity
+    have operation :=
+      closureMatchesStep_miss_of_refines runtimeRelated dispatchEq descriptorsEq
+        mapped cellFound cellLive cellObjectEq identityFalse
+    exact ⟨{
+      source := candidate.source
+      targetBody := candidate.targetBody
+      function := candidate.function
+      arity := candidate.arity
+      fixed := candidate.fixed
+      matcherIndex := candidate.matcherIndex
+      matched := 0
+      nextStore := clearFailure initial
+      imp := candidate.imp
+      sourceMatcher := candidate.sourceMatcher
+      bodyAdapted := candidate.bodyAdapted
+      matcherFound := candidate.matcherFound
+      importFound := candidate.importFound
+      importInBounds := candidate.importInBounds
+      contractFound := candidate.contractFound
+      parameterCount := candidate.parameterCount
+      resultCount := candidate.resultCount
+      operation }, rfl⟩
+
+/-- Execute every static candidate independently at the same valid closure
+address, preserving the compiler-source enumeration exactly. -/
+theorem ClosureCandidateAdapterCase.executeAll_of_refines
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {closureId : FVarId}
+    (candidates : List
+      (ClosureCandidateAdapterCase sourceModule sourceFunction labels module
+        spec closureId))
+    {initial : Wasm.Store Host}
+    {witness : RefinementWitness}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {location : Location}
+    {address : Word32}
+    {cell : HeapCell}
+    {function : Name}
+    {arity : Nat}
+    {captures : Array Value}
+    {closureIndex : Nat}
+    (runtimeRelated :
+      ConcreteRuntimeRel initial.host.runtime witness sourceRuntime)
+    (dispatchEq : witness.closureDispatch = initial.host.closureDispatch)
+    (descriptorsEq :
+      witness.closureDescriptors = initial.host.closureDescriptors)
+    (mapped : witness.locations.lookup? location = some address)
+    (cellFound : findCell? sourceRuntime.heap location = some cell)
+    (cellLive : cell.live = true)
+    (cellObjectEq : cell.object = .closure function arity captures)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime location { cell with rc := cell.rc - 1 } =
+          .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime captures.toList)
+    (application :
+      Fir.LeanIR.Impure.takeClosureApplication sourceRuntime location =
+        .ok (nextRuntime, function, arity, captures)) :
+    ∃ resolved : List
+        (ClosureCandidateCase sourceModule sourceFunction labels module spec
+          initial closureId closureIndex address),
+      candidates.map (·.source) = resolved.map (·.source) := by
+  induction candidates with
+  | nil => exact ⟨[], rfl⟩
+  | cons candidate candidates ih =>
+      obtain ⟨resolved, resolvedSource⟩ :=
+        candidate.execute_of_refines runtimeRelated dispatchEq descriptorsEq
+          mapped cellFound cellLive cellObjectEq sharedCapacity application
+      obtain ⟨rest, restSources⟩ := ih
+      exact ⟨resolved :: rest, by simp [resolvedSource, restSources]⟩
 
 /--
 Static resolver and hereditary-body induction for saturated closure dispatch,
@@ -11000,26 +11178,25 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   bodyAdapted := row.bodyAdapted
   singleResult := row.singleResult }
 
-/-- Module-wide executable closure-candidate metadata for generated internal
-declarations.
+/-- Uniform static closure-candidate metadata for every supported function
+in one compiled module.
 
-Recursive closure correctness needs the adapter's candidate enumeration at
-every generated callee, not only at the root export. This boundary supplies
-exactly that function-local enumeration. It contains no source evaluation,
-target execution, store relation, or callee correctness theorem. -/
-def GeneratedSaturatedClosureCandidateResolvers
+Unlike the generated-row-only view above, this interface also covers the
+exported root.  Its argument is the static whole-pipeline function package;
+the result still contains only numeric adaptation and concrete matcher
+execution data, never source or target behavioral correctness. -/
+def SupportedFunctionSaturatedClosureCandidateAdapterResolvers
     (program : Fir.LeanIR.ImpureProgram)
     (sourceModule : Fir.Wasm.Module)
     (target : AdaptedModule)
     (hosts : ResolvedHosts) : Prop :=
-  ∀ {declaration : LCNF.Decl .impure}
-      {context : Fir.Wasm.Context}
+  ∀ {context : Fir.Wasm.Context}
       {sourceCode : LCNF.Code .impure}
       {sourceFunction : Fir.Wasm.Function},
-    ConcreteGeneratedInternalDeclaration program declaration context
-        sourceCode sourceModule sourceFunction target →
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts
+    ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts →
+      SaturatedClosureCandidateAdapterResolver context sourceModule
+        sourceFunction [] target hosts
 
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
@@ -14664,8 +14841,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         (fun context =>
           OwnershipTagAndAllFieldMutationEffectSupported context))
     (resolvers :
-      GeneratedSaturatedClosureCandidateResolvers program sourceModule target
-        hosts)
+      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+        sourceModule target hosts)
     {context : Fir.Wasm.Context}
     {functionCode code : LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
@@ -14676,9 +14853,6 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
     (functionLaws :
       ProductionHereditaryFunctionOperationLaws context sourceModule
         sourceFunction target hosts sourceExternals)
-    (resolver :
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts)
     {expectedResult : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime entryRuntime : RuntimeState}
@@ -14761,8 +14935,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         simpa only [budgetEq] using nextInvariant
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        ih functionSpec contextCaches functionLaws resolver continuationAdapted
-          entryAbi continuationInvariant
+        ih functionSpec contextCaches functionLaws continuationAdapted entryAbi
+          continuationInvariant
       subst targetCode
       exact ⟨resultStore, resultLocals, resultWitness, physical,
         codeWP_letValue valueCompiled valueAdapted resultFound step
@@ -14805,8 +14979,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         simpa only [budgetEq] using nextInvariant
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        ih functionSpec contextCaches functionLaws resolver continuationAdapted
-          entryAbi continuationInvariant
+        ih functionSpec contextCaches functionLaws continuationAdapted entryAbi
+          continuationInvariant
       subst targetCode
       exact ⟨resultStore, resultLocals, resultWitness, physical,
         codeWP_externalLet valueCompiled valueAdapted resultFound step
@@ -14900,8 +15074,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           calleeInvariant, calleeFailureClear, calleeValueRelated⟩ :=
         calleeIH (generatedRow.toSupportedFunction spec)
           generatedRow.contextCaches (operationLaws.productionAt generatedRow)
-          (resolvers generatedRow) generatedRow.bodyAdapted calleeEntryAbi
-          calleeEntry
+          generatedRow.bodyAdapted calleeEntryAbi calleeEntry
       have parameterCount :
           physicalArgs.reverse.length =
             generatedRow.targetFunction.numParams :=
@@ -14973,8 +15146,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
             slackInvariant, _, _⟩ :=
           calleeIH (generatedRow.toSupportedFunction spec)
             generatedRow.contextCaches
-            (operationLaws.productionAt generatedRow) (resolvers generatedRow)
-            generatedRow.bodyAdapted calleeEntryAbi slackEntry
+            (operationLaws.productionAt generatedRow) generatedRow.bodyAdapted
+            calleeEntryAbi slackEntry
         have resultEq := calleeWP.exactReturn_unique slackWP
         rw [resultEq.1]
         simpa [calleeSlack] using slackInvariant.1.budget
@@ -15057,8 +15230,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         simpa only [budgetEq] using nextBaseInvariant
       obtain ⟨resultStore, resultLocals, finalWitness, resultPhysical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        continuedIH functionSpec contextCaches functionLaws resolver
-          continuationAdapted entryAbi continuationInvariant
+        continuedIH functionSpec contextCaches functionLaws continuationAdapted
+          entryAbi continuationInvariant
       subst targetCode
       exact ⟨resultStore, resultLocals, finalWitness, resultPhysical,
         codeWP_callLet expectedCompiled valueAdapted resultFound callStep
@@ -15121,7 +15294,16 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
       obtain ⟨address, closureLocal, mapped⟩ :=
         abiInvariant.cacheFrame.resolveClosureAddress site resolution
           closureFound closureKindAt
-      obtain ⟨candidates, candidatesEq⟩ := resolver site
+      obtain ⟨staticCandidates, staticCandidatesEq⟩ :=
+        resolvers functionSpec site
+      obtain ⟨candidates, executedSources⟩ :=
+        ClosureCandidateAdapterCase.executeAll_of_refines staticCandidates
+          abiInvariant.cacheFrame.stateRelated.stateRelated.1
+          abiInvariant.cacheFrame.2.2.dispatch
+          abiInvariant.cacheFrame.2.2.descriptors.symm mapped
+          resolution.cellFound resolution.cellLive resolution.cellObjectEq
+          sharedCapacity application
+      have candidatesEq := staticCandidatesEq.trans executedSources
       obtain ⟨before, selected, suffix, candidatesSplit, _, beforeNonmatching,
           selectedMatches, selectedIdentity⟩ :=
         abiInvariant.cacheFrame.closureCandidates_exists_first_match_of_resolution
@@ -15171,8 +15353,7 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           calleeInvariant, calleeFailureClear, calleeValueRelated⟩ :=
         calleeIH (generatedRow.toSupportedFunction spec)
           generatedRow.contextCaches (operationLaws.productionAt generatedRow)
-          (resolvers generatedRow) generatedRow.bodyAdapted calleeEntryAbi
-          calleeEntry
+          generatedRow.bodyAdapted calleeEntryAbi calleeEntry
       have parameterCount :
           physicalArgs.reverse.length =
             generatedRow.targetFunction.numParams :=
@@ -15250,8 +15431,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
             slackInvariant, _, _⟩ :=
           calleeIH (generatedRow.toSupportedFunction spec)
             generatedRow.contextCaches
-            (operationLaws.productionAt generatedRow) (resolvers generatedRow)
-            generatedRow.bodyAdapted calleeEntryAbi slackEntry
+            (operationLaws.productionAt generatedRow) generatedRow.bodyAdapted
+            calleeEntryAbi slackEntry
         have resultEq := calleeWP.exactReturn_unique slackWP
         rw [resultEq.1]
         simpa [calleeSlack] using slackInvariant.1.budget
@@ -15363,8 +15544,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         exact ⟨by simpa only [budgetEq] using nextCacheFrame, nextEntry⟩
       obtain ⟨resultStore, resultLocals, finalWitness, resultPhysical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        continuedIH functionSpec contextCaches functionLaws resolver
-          continuationAdapted entryAbi continuationInvariant
+        continuedIH functionSpec contextCaches functionLaws continuationAdapted
+          entryAbi continuationInvariant
       subst targetCode
       exact ⟨resultStore, resultLocals, finalWitness, resultPhysical,
         codeWP_callLet expectedCompiled valueAdapted resultFound callStep
@@ -15407,8 +15588,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         simpa only [budgetEq] using nextInvariant
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        ih functionSpec contextCaches functionLaws resolver continuationAdapted
-          entryAbi continuationInvariant
+        ih functionSpec contextCaches functionLaws continuationAdapted entryAbi
+          continuationInvariant
       subst targetCode
       exact ⟨resultStore, resultLocals, resultWitness, physical,
         codeWP_lazyLet valueCompiled valueAdapted resultFound step
@@ -15422,8 +15603,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           invariant.1.stateRelated.stateRelated codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        ih functionSpec contextCaches functionLaws resolver selectedAdapted
-          entryAbi invariant
+        ih functionSpec contextCaches functionLaws selectedAdapted entryAbi
+          invariant
       exact ⟨resultStore, resultLocals, resultWitness, physical,
         lift [] (ExactReturnControlPost resultStore physical)
           (by
@@ -15441,13 +15622,13 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           invariant.1.stateRelated.stateRelated invariant codeAdapted
       obtain ⟨resultStore, resultLocals, resultWitness, physical,
           continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
-        ih functionSpec contextCaches functionLaws resolver continuationAdapted
-          entryAbi nextInvariant
+        ih functionSpec contextCaches functionLaws continuationAdapted entryAbi
+          nextInvariant
       exact ⟨resultStore, resultLocals, resultWitness, physical,
         codeWP_effect step continuationWP, resultInvariant, failureClear,
         valueRelated⟩
 
-/-- The production operation laws and executable generated-row resolver family
+/-- The production operation laws and static supported-function resolver family
 close the fully recursive declaration induction constructively. -/
 theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
     {program : Fir.LeanIR.ImpureProgram}
@@ -15471,8 +15652,8 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
         (fun context =>
           OwnershipTagAndAllFieldMutationEffectSupported context))
     (resolvers :
-      GeneratedSaturatedClosureCandidateResolvers program sourceModule target
-        hosts) :
+      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+        sourceModule target hosts) :
     ProductionHereditaryGeneratedDeclarationInduction program sourceModule
       target hosts sourceExternals := by
   intro declaration context sourceCode sourceFunction resultKind row
@@ -15493,8 +15674,8 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
       resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
       operationLaws resolvers (row.toSupportedFunction spec) row.contextCaches
-      (operationLaws.productionAt row) (resolvers row) evaluation
-      row.bodyAdapted invariant.closureAbi initialEntry
+      (operationLaws.productionAt row) evaluation row.bodyAdapted
+      invariant.closureAbi initialEntry
   have body :
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode row.targetFunction initial
@@ -15557,8 +15738,8 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
         slackInvariant, _, _⟩ :=
       codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
         operationLaws resolvers (row.toSupportedFunction spec)
-        row.contextCaches (operationLaws.productionAt row) (resolvers row)
-        evaluation row.bodyAdapted invariant.closureAbi slackEntry
+        row.contextCaches (operationLaws.productionAt row) evaluation
+        row.bodyAdapted invariant.closureAbi slackEntry
     have resultEq := exactWP.exactReturn_unique slackWP
     rw [resultEq.1]
     simpa [slack] using slackInvariant.1.budget
@@ -16026,8 +16207,8 @@ theorem
     (sourceExternals : ExternalImpl)
     (generated : LazyCacheGeneratedEnvironment rootContext sourceModule)
     (resolvers :
-      GeneratedSaturatedClosureCandidateResolvers program sourceModule target
-        hosts) :
+      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+        sourceModule target hosts) :
     ProductionHereditaryGeneratedDeclarationInduction program sourceModule
       target hosts sourceExternals :=
   ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws spec
@@ -16306,8 +16487,9 @@ theorem
 /-- Certificate-free ownership-aware runtime law for saturated closure calls.
 
 The source payload supplies the semantic ownership transition and finite
-callee derivation. The executable resolver supplies only the actual adapted
-candidate cases. From those inputs this theorem derives first-match selection,
+callee derivation. The static resolver supplies only the actual adapted
+candidate rows. From those inputs this theorem executes the matchers at the
+related live closure address and derives first-match selection,
 the post-consumption matcher frame, the exact generated argument body, the
 related callee parameter row, and the recursive generated declaration result.
 The ordinary declaration induction is sufficient: its cumulative
@@ -16344,8 +16526,8 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (resolver :
-      SaturatedClosureCandidateResolver context sourceModule callerFunction
-        labels target hosts)
+      SaturatedClosureCandidateAdapterResolver context sourceModule
+        callerFunction labels target hosts)
     (declarations :
       DirectHereditaryGeneratedDeclarationInduction program sourceModule target
         hosts sourceExternals DirectSupported ExternalSupported LazySupported
@@ -16401,7 +16583,15 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
   obtain ⟨address, closureLocal, mapped⟩ :=
     abiInvariant.cacheFrame.resolveClosureAddress site resolution closureFound
       closureKindAt
-  obtain ⟨candidates, candidatesEq⟩ := resolver site
+  obtain ⟨staticCandidates, staticCandidatesEq⟩ := resolver site
+  obtain ⟨candidates, executedSources⟩ :=
+    ClosureCandidateAdapterCase.executeAll_of_refines staticCandidates
+      abiInvariant.cacheFrame.stateRelated.stateRelated.1
+      abiInvariant.cacheFrame.2.2.dispatch
+      abiInvariant.cacheFrame.2.2.descriptors.symm mapped
+      resolution.cellFound resolution.cellLive resolution.cellObjectEq
+      sharedCapacity application
+  have candidatesEq := staticCandidatesEq.trans executedSources
   obtain ⟨before, selected, suffix, candidatesSplit, _, beforeNonmatching,
       selectedMatches, selectedIdentity⟩ :=
     abiInvariant.cacheFrame.closureCandidates_exists_first_match_of_resolution
@@ -16529,8 +16719,8 @@ declaration theorem.
 
 The generated declaration induction, including its closure-ABI preservation,
 is derived from lowering, adaptation, and the production operation laws. The
-remaining resolver is executable compiler metadata: it enumerates the actual
-adapted dispatch candidates and does not certify their behavior. -/
+remaining resolver is static compiler metadata: it enumerates the actual
+adapted dispatch candidates and does not certify matcher or callee behavior. -/
 theorem
     ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
     {program : Fir.LeanIR.ImpureProgram}
@@ -16549,8 +16739,8 @@ theorem
     (sourceExternals : ExternalImpl)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
     (resolver :
-      SaturatedClosureCandidateResolver context sourceModule callerFunction
-        labels target hosts)
+      SaturatedClosureCandidateAdapterResolver context sourceModule
+        callerFunction labels target hosts)
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
@@ -16598,8 +16788,8 @@ theorem
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
     (resolver :
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts)
+      SaturatedClosureCandidateAdapterResolver context sourceModule
+        sourceFunction [] target hosts)
     {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -17429,8 +17619,8 @@ theorem
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
     (resolver :
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts)
+      SaturatedClosureCandidateAdapterResolver context sourceModule
+        sourceFunction [] target hosts)
     {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -17494,12 +17684,9 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolver :
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts)
-    (generatedResolvers :
-      GeneratedSaturatedClosureCandidateResolvers program sourceModule target
-        hosts)
+    (resolvers :
+      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+        sourceModule target hosts)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -17547,9 +17734,8 @@ theorem
   obtain ⟨resultStore, resultLocals, resultWitness, physical, exactWP,
       resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-      generatedLaws generatedResolvers spec.toConcreteSupportedFunction
-      contextCaches rootLaws resolver evaluation spec.bodyAdapted
-      invariant.closureAbi initialEntry
+      generatedLaws resolvers spec.toConcreteSupportedFunction contextCaches
+      rootLaws evaluation spec.bodyAdapted invariant.closureAbi initialEntry
   have body :
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction initial
@@ -17611,9 +17797,8 @@ theorem
     obtain ⟨slackStore, slackLocals, slackWitness, slackPhysical, slackWP,
         slackInvariant, _, _⟩ :=
       codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-        generatedLaws generatedResolvers spec.toConcreteSupportedFunction
-        contextCaches rootLaws resolver evaluation spec.bodyAdapted
-        invariant.closureAbi slackEntry
+        generatedLaws resolvers spec.toConcreteSupportedFunction contextCaches
+        rootLaws evaluation spec.bodyAdapted invariant.closureAbi slackEntry
     have resultEq := exactWP.exactReturn_unique slackWP
     rw [resultEq.1]
     simpa [slack] using slackInvariant.1.budget
@@ -17660,12 +17845,9 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolver :
-      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
-        target hosts)
-    (generatedResolvers :
-      GeneratedSaturatedClosureCandidateResolvers program sourceModule target
-        hosts)
+    (resolvers :
+      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+        sourceModule target hosts)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -17694,8 +17876,7 @@ theorem
         (RefinedReturnPost resultRuntime resultValue resultKind callerTail) := by
   obtain ⟨resultStore, resultWitness, physical, result, _resultAbi⟩ :=
     spec.budgetedDeclarationWithCache_of_reuseCapacityProductionHereditaryCodeEvaluates
-      contextCaches generated resolver generatedResolvers evaluation invariant
-      parameterCount
+      contextCaches generated resolvers evaluation invariant parameterCount
   have successful := result.declaration.capacityPreserving.successful
   exact ⟨successful.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
     successful.terminatesWith callerTail⟩
