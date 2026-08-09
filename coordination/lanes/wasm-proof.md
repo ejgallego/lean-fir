@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
-base: 5490cc07 on main
-functional-head: bca03085
-contract-base: 5307f77d on main; ownership-threaded matcher/projection and the existing concrete closure application contracts
+state: ready
+base: 18af585a on main
+functional-head: 7943fdfa
+contract-base: 18af585a on main; existing concrete heap refinement, runtime-step transport, cache-frame, and closure ABI-alignment contracts
 clean-at-update: true
-slice: Derive the ownership-aware saturated closure-call runtime law from the finite hereditary source derivation, exact compiler candidate identity, post-consumption matcher refinement, program-indexed closure ABI alignment, and generated-declaration induction; assemble the complete fixed-capture plus ordinary-argument callee row from compiler output; eliminate the historical selected.nextStore = initial shortcut and all per-call selected-body/argument-assembly target certificates
-files: Fir/Wasm/Lower.lean; integration/talos/FirTalos/ConcreteReuseCapacityCallCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; this mailbox
-contracts: Introduces proof-only ClosureAllocationsAbiAligned, ConcreteReuseCapacityCacheAbiFrame, SaturatedClosureCandidateResolver, and DirectHereditaryGeneratedDeclarationAbiInduction boundaries; no shared semantic runtime, symbolic Wasm ABI, resident-helper signature, or concrete layout changed
-checks: PASS Lean Beam update/sync/save for FirTalos.ConcreteReuseCapacityCacheCorrectness and prior focused checkpoints; PASS lake build Fir.Wasm.Lower; PASS lake build FirTalos.ConcreteReuseCapacityCallCorrectness; PASS lake build FirTalos.ConcreteReuseCapacityCacheCorrectness (3103 jobs); PASS git diff --check; PASS make check (642 unique validation cases, 1844/1844 comparisons equal, zero findings); PASS make talos-check (3125 jobs)
+slice: Establish closure-allocation persistence for every currently proved non-closure concrete runtime transition; thread it through constructor allocation/reuse, scalar boxing, promoted tags, compiler runtime transports, and cache/call frames; derive transport of program-indexed closure ABI alignment without a fresh post-step premise
+files: Fir/Wasm/Concrete/Refinement.lean; Fir/Wasm/Concrete/PromotedTagCorrectness.lean; Fir/Wasm/Concrete/ConstructorHeapCorrectness.lean; integration/talos/FirTalos/ConcreteRuntime.lean; integration/talos/FirTalos/ConcreteReuseCapacityCorrectness.lean; integration/talos/FirTalos/ConcreteCompilerCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteRuntimeExamples.lean; this mailbox
+contracts: Adds proof-only ClosureAllocationsPersistent and a corresponding RuntimeStepTransports field; ordinary runtime operations cannot invent closure descriptors, while actual closure allocation remains governed by the compiler-derived ABI compatibility law; no shared semantic runtime, symbolic Wasm ABI, resident-helper signature, or concrete layout changed
+checks: PASS Lean Beam update/sync/save checkpoints for all changed proof modules and FirTalos.ConcreteRuntimeExamples; PASS lake build FirTalos.ConcreteReuseCapacityCacheCorrectness (3103 jobs); PASS forced lake build FirTalos.ConcreteRuntimeExamples (3098 jobs); PASS git diff --check; PASS make check (642 unique validation cases, 1844/1844 comparisons equal, zero findings); PASS make talos-setup at a01d01c; PASS make talos-check (3125 jobs)
 bug-cards: none
 blockers: none
-handoff: the saturated closure runtime-law stack is linked/accepted on main at 5490cc07; the lane has started the ABI-preserving generated-declaration proof from that clean base
-next: prove DirectHereditaryGeneratedDeclarationAbiInduction from ABI-preserving generated operation laws, then discharge SaturatedClosureCandidateResolver from the executable adapter/resolver rather than retaining it as an external premise
+handoff: ready for fast-forward integration as the transport foundation for deriving DirectHereditaryGeneratedDeclarationAbiInduction from compiler operation laws
+next: strengthen concrete external-operation correctness with the same persistence fact, then lift direct/effect/external generated laws to the closure-ABI frame and derive the global ABI induction
 ```
