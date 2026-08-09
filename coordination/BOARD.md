@@ -19,6 +19,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-REUSABLE-SOURCE-AND-BATCHED-ILLUMINATE-ENCODER`.
+- Integration owner: `wasm-gen`; the user assigned the generation owner to
+  integrate the ready W7 stack after the previous lease completed.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: reusable multi-entry source capture `1996d2d5`, generic
+  rewind-safe cache elimination `eeb6cabe`, batched persistent animation
+  encoding `5c571398`, and ready mailbox `4234cbea`, based directly on `main`
+  at `f0ee6857`.
+- Lease boundary: satisfied. Final-LCNF source capture can retain multiple
+  requested entries and their exact transitive closure. Rewind-safe lazy-cache
+  elimination is fail-closed and preserves/remaps unrelated resident globals.
+  Illuminate consumes both W7 APIs and measures its persistent animation graph
+  before encoding it into one exact resident allocation. Adapter v3, input
+  layout v3, ownership v2, concrete layouts, resident-helper signatures, and
+  generated Wasm bytes are unchanged.
+- Artifact: immutable package
+  `integration/illuminate-player/_build/illuminate-player-packages/5c571398dc46-006dc1d1db18-8be7788263f52afe63e4`,
+  50,203 bytes, SHA-256
+  `b36cfaf21175a40bfb5156e527057700eed56609bd8f2b8f91e68914c254158e`,
+  with zero imports and six public functions. Persistent allocator calls fall
+  from 94--9,547 to exactly 11 while the 10,000-dispatch frontier plateau is
+  unchanged. Across 16 dashboard examples, the order-balanced benchmark's
+  aggregate encode median falls from 0.1516205 ms to 0.1094375 ms; the
+  997,480-byte example falls from 6.165221 ms to 5.172888 ms.
+- Validation: Lean Beam zero-diagnostic checkpoints; focused dependency cones;
+  `git diff --check`; complete `make check` with 642 unique cases and
+  1,844/1,844 equal comparisons; all 3,125 Talos jobs; complete W7 artifact,
+  engine, determinism, and concrete-readiness gate; two byte-identical
+  Illuminate package publications with complete checksums; 105/105 locally
+  available trace matches; 10,000-tick flat-frontier stress; and action
+  equality for all 256 old/new benchmark samples.
+
+## Previous completed integration lease
+
 - Milestone: `W6-DIRECT-HEREDITARY-SOURCE-EVALUATION`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for this certificate-free compiler-proof slice.
