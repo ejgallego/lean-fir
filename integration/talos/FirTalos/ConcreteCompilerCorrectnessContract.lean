@@ -821,7 +821,8 @@ example
 
 /--
 One source-facing natural result and exact budget construct the physical
-representation, extended witness, exact event trace, and residual budget.
+representation, extended witness, exact event trace, residual budget, and the
+fact that allocating the natural introduced no closure descriptor.
 -/
 example
     {concreteImplementation : ConcreteExternalImpl}
@@ -859,7 +860,8 @@ example
           (concreteNaturalExternalResponse concreteBefore result word)
           (semanticNaturalExternalResponse semanticBefore value) ∧
         result.AddressSpaceBudget
-          (remainingBytes - naturalAllocationBytes value) :=
+          (remainingBytes - naturalAllocationBytes value) ∧
+        ClosureAllocationsPersistent beforeWitness afterWitness :=
   FirTalos.Concrete.ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
     runtimeRelated implementationRelated requestRelated resultKind
       semanticCalled budget fits

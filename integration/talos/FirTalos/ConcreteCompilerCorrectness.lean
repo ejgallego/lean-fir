@@ -7754,8 +7754,9 @@ This is the operation-family strengthening needed by the reuse-capacity
 simulation. In addition to the ordinary external step and residual invariant,
 it exposes the checked destination write and the three semantic transports
 that were already constructed internally by the concrete implementation:
-old values remain related, old owned headers retain their extents, and
-ordinary source cells remain ordinary. It also retains exact preservation of
+old values remain related, old owned headers retain their extents, ordinary
+source cells remain ordinary, and no new closure allocation descriptor is
+introduced. It also retains exact preservation of
 the semantic globals, physical Wasm globals, and concrete host global layout,
 so clients can transport a generated lazy-cache table across the call. No
 translated program or numeric target index is supplied by the caller.
@@ -7808,17 +7809,18 @@ def ExternalLetRuntimeRefinesWithCostAndTransports
           ClosureTablesTransport targetStore nextStore witness nextWitness ∧
             LocalUpdate targetLocals nextLocals resultIndex resultPhysical ∧
                 WitnessTransport witness nextWitness ∧
-                  HeaderCapacityTransport targetStore.host.runtime.heap
-                    nextStore.host.runtime.heap witness ∧
-                    OrdinaryPersistenceTransport sourceRuntime nextRuntime ∧
-                      nextRuntime.globals = sourceRuntime.globals ∧
-                        nextStore.globals.globals =
-                          targetStore.globals.globals ∧
-                          nextStore.host.runtime.globals.staticLayout =
-                            targetStore.host.runtime.globals.staticLayout ∧
-                            Invariant (remainingBytes - stepCost) nextRuntime
-                              (bind sourceEnv decl.fvarId sourceValue) nextStore
-                              nextLocals nextWitness
+                  ClosureAllocationsPersistent witness nextWitness ∧
+                    HeaderCapacityTransport targetStore.host.runtime.heap
+                      nextStore.host.runtime.heap witness ∧
+                      OrdinaryPersistenceTransport sourceRuntime nextRuntime ∧
+                        nextRuntime.globals = sourceRuntime.globals ∧
+                          nextStore.globals.globals =
+                            targetStore.globals.globals ∧
+                            nextStore.host.runtime.globals.staticLayout =
+                              targetStore.host.runtime.globals.staticLayout ∧
+                              Invariant (remainingBytes - stepCost) nextRuntime
+                                (bind sourceEnv decl.fvarId sourceValue) nextStore
+                                nextLocals nextWitness
 
 /-- Forget the reuse-specific transports and recover the ordinary structural
 external runtime law. -/
@@ -7848,7 +7850,8 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.runtimeRefines
     valueCompiled valueAdapted resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, _resultPhysical, step,
       externalsPreserved, closureTables, _localUpdate, _witnessTransport,
-      _capacityTransport, _ordinaryTransport, _runtimeGlobals,
+      _closureAllocationsPersistent, _capacityTransport, _ordinaryTransport,
+      _runtimeGlobals,
       _storeGlobals, _hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant sourceStep stateRelated
       valueCompiled valueAdapted resultFound
@@ -7933,14 +7936,14 @@ theorem
     valueCompiled valueAdapted resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, closureTables, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
-      hostStaticLayout, nextInvariant⟩ :=
+      closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+      runtimeGlobals, storeGlobals, hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits invariant.1 sourceStep stateRelated
       valueCompiled valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
     externalsPreserved, closureTables, localUpdate, witnessTransport,
-    capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
-    hostStaticLayout, nextInvariant,
+    closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+    runtimeGlobals, storeGlobals, hostStaticLayout, nextInvariant,
     by simpa [externalsPreserved] using invariant.2⟩
 
 /-- Transport a strengthened external law across a pointwise equivalent
@@ -7982,16 +7985,16 @@ theorem ExternalLetRuntimeRefinesWithCostAndTransports.mapInvariant
     valueCompiled valueAdapted resultFound
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, closureTables, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
-      hostStaticLayout, nextInvariant⟩ :=
+      closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+      runtimeGlobals, storeGlobals, hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
       (toOld remainingBytes sourceRuntime sourceEnv targetStore targetLocals
         witness invariant)
       sourceStep stateRelated valueCompiled valueAdapted resultFound
   exact ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
     externalsPreserved, closureTables, localUpdate, witnessTransport,
-    capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
-    hostStaticLayout,
+    closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+    runtimeGlobals, storeGlobals, hostStaticLayout,
     toNew (remainingBytes - stepCost) nextRuntime
       (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
       nextInvariant⟩
@@ -11308,7 +11311,8 @@ theorem
         physicalArgs = .ok concreteArgs := by
     simpa [operationSignature] using decoded
   obtain ⟨allocatedHeap, address, allocated, operationStep, _,
-      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget⟩ :=
+      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget,
+      closureAllocationsPersistent⟩ :=
     integerExternalStep_of_budget externalOperation resultKind targetStore
       physicalArgs concreteArgs semanticArgs witness sourceRuntime externals
       value remainingBytes decoded' stateRelated.1 requestRelated invariant.2
@@ -11433,7 +11437,7 @@ theorem
     by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
     closureTables, localUpdate, witnessTransport,
-    capacityTransport, ordinaryTransport,
+    closureAllocationsPersistent, capacityTransport, ordinaryTransport,
     by simp [semanticExternalRuntimeAfter],
     by simp [nextStore, replaceRuntime, clearFailure],
     by simp [nextStore, response, replaceRuntime, clearFailure,
@@ -11581,7 +11585,8 @@ theorem
         physicalArgs = .ok concreteArgs := by
     simpa [operationSignature] using decoded
   obtain ⟨allocatedHeap, word, nextWitness, allocated, operationStep, _,
-      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget⟩ :=
+      witnessExtension, nextRuntimeRelated, resultRelated, remainingBudget,
+      closureAllocationsPersistent⟩ :=
     naturalExternalStep_of_budget externalOperation resultKind targetStore
       physicalArgs concreteArgs semanticArgs witness sourceRuntime externals
       value remainingBytes decoded' stateRelated.1 requestRelated invariant.2
@@ -11705,7 +11710,7 @@ theorem
     by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
     closureTables, localUpdate, witnessTransport,
-    capacityTransport, ordinaryTransport,
+    closureAllocationsPersistent, capacityTransport, ordinaryTransport,
     by simp [semanticExternalRuntimeAfter],
     by simp [nextStore, replaceRuntime, clearFailure],
     by simp [nextStore, response, replaceRuntime, clearFailure,
@@ -11970,7 +11975,8 @@ theorem
   exact ⟨nextStore, updated, witness, physicalOfLane response.value,
     by simpa [requestEq] using step,
     by simp [nextStore, replaceRuntime, clearFailure],
-    closureTables, localUpdate, WitnessTransport.refl witness, capacityTransport,
+    closureTables, localUpdate, WitnessTransport.refl witness,
+    ClosureAllocationsPersistent.refl witness, capacityTransport,
     ordinaryTransport,
     by simp [semanticExternalRuntimeAfter],
     by simp [nextStore, replaceRuntime, clearFailure],
@@ -16412,7 +16418,8 @@ The fields are consequences of generated execution, not target-execution
 certificates. Keeping them together makes the exact induction invariant
 explicit: old values remain represented, old owned headers keep their
 capacity, ordinary source cells remain ordinary, and immutable implementation
-tables do not change.
+tables do not change. It also records that every closure allocation descriptor
+still visible at the current point was already present at declaration entry.
 -/
 structure ReuseCapacityCodeEntryTransports
     (entryRuntime currentRuntime : RuntimeState)
@@ -16421,6 +16428,8 @@ structure ReuseCapacityCodeEntryTransports
     extends ClosureTablesTransport entryStore currentStore entryWitness
       currentWitness where
   witness : WitnessTransport entryWitness currentWitness
+  closureAllocationsPersistent :
+    ClosureAllocationsPersistent entryWitness currentWitness
   capacity :
     HeaderCapacityTransport entryStore.host.runtime.heap
       currentStore.host.runtime.heap entryWitness
@@ -16437,6 +16446,7 @@ theorem ReuseCapacityCodeEntryTransports.refl
       witness := {
   toClosureTablesTransport := ClosureTablesTransport.refl store witness
   witness := WitnessTransport.refl witness
+  closureAllocationsPersistent := ClosureAllocationsPersistent.refl witness
   capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
   ordinary := OrdinaryPersistenceTransport.refl runtime
   externals := rfl }
@@ -16456,6 +16466,8 @@ theorem ReuseCapacityCodeEntryTransports.step
       ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
         currentStore entryWitness currentWitness)
     (witness : WitnessTransport currentWitness nextWitness)
+    (closureAllocationsPersistent :
+      ClosureAllocationsPersistent currentWitness nextWitness)
     (capacity :
       HeaderCapacityTransport currentStore.host.runtime.heap
         nextStore.host.runtime.heap currentWitness)
@@ -16481,6 +16493,9 @@ theorem ReuseCapacityCodeEntryTransports.step
       closureTables.witnessDescriptorsPreserved.trans
         entry.witnessDescriptorsPreserved }
   witness := WitnessTransport.trans entry.witness witness
+  closureAllocationsPersistent :=
+    ClosureAllocationsPersistent.trans entry.closureAllocationsPersistent
+      closureAllocationsPersistent
   capacity :=
     HeaderCapacityTransport.transAcross entry.capacity entry.witness capacity
   ordinary := OrdinaryPersistenceTransport.trans entry.ordinary ordinary
@@ -17062,8 +17077,8 @@ theorem
       integerImplementation, naturalImplementation, scalarImplementation⟩
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, closureTables, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, _runtimeGlobals, _storeGlobals,
-      _hostStaticLayout, nextInvariant⟩ :=
+      _closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+      _runtimeGlobals, _storeGlobals, _hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
       ⟨⟨frameAligned, budget⟩, integerImplementation,
         naturalImplementation, scalarImplementation⟩

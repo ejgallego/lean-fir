@@ -2048,6 +2048,8 @@ structure BudgetedCapacityPreservingLazyStep
       nextRuntime sourceEnv sourceValue
   witnessTransport :
     WitnessTransport initialWitness nextWitness
+  closureAllocationsPersistent :
+    ClosureAllocationsPersistent initialWitness nextWitness
   capacityTransport :
     HeaderCapacityTransport initial.host.runtime.heap
       nextStore.host.runtime.heap initialWitness
@@ -2544,6 +2546,8 @@ theorem BudgetedCapacityPreservingLazyStep.hit
       ReuseTokenOrdinaryBindTransport.ofOrdinaryPersistence
         (OrdinaryPersistenceTransport.refl sourceRuntime)
     witnessTransport := WitnessTransport.refl initialWitness
+    closureAllocationsPersistent :=
+      ClosureAllocationsPersistent.refl initialWitness
     capacityTransport :=
       HeaderCapacityTransport.refl initial.host.runtime.heap initialWitness
     externalsPreserved := rfl
@@ -2889,6 +2893,8 @@ theorem BudgetedCapacityPreservingLazyStep.miss
         nextRuntime sourceEnv sourceValue)
     (witnessTransport :
       WitnessTransport initialWitness nextWitness)
+    (closureAllocationsPersistent :
+      ClosureAllocationsPersistent initialWitness nextWitness)
     (capacityTransport :
       HeaderCapacityTransport initial.host.runtime.heap
         nextStore.host.runtime.heap initialWitness)
@@ -2922,6 +2928,7 @@ theorem BudgetedCapacityPreservingLazyStep.miss
   targetSet
   ordinaryFrame
   witnessTransport
+  closureAllocationsPersistent
   capacityTransport
   externalsPreserved
   hostDescriptorsPreserved
@@ -3020,6 +3027,8 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
         nextRuntime sourceEnv sourceValue)
     (witnessTransport :
       WitnessTransport initialWitness nextWitness)
+    (closureAllocationsPersistent :
+      ClosureAllocationsPersistent initialWitness nextWitness)
     (capacityTransport :
       HeaderCapacityTransport initial.host.runtime.heap
         (writeWasmGlobal valueStore flagIndex (.i32 1)).host.runtime.heap
@@ -3095,7 +3104,8 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet
     lazyLetStepSimulates_miss sourceStep initialRelated flagEmpty missBody
       nextRelated
   exact .miss simulates targetSet ordinaryFrame witnessTransport
-    capacityTransport externalsPreserved hostDispatchPreserved
+    closureAllocationsPersistent capacityTransport externalsPreserved
+    hostDispatchPreserved
     witnessDispatchPreserved hostDescriptorsPreserved
     witnessDescriptorsPreserved residualBudget
 
@@ -3264,6 +3274,7 @@ theorem
     exact publicationOrdinary
       (ordinary.transport callee.ordinaryTransport)
   · exact callee.capacityPreserving.witnessTransport
+  · exact callee.closureAllocationsPersistent
   · apply callee.capacityPreserving.capacityTransport.transAcross
       callee.capacityPreserving.witnessTransport
     simpa [writeWasmGlobal, valueStoreEq] using
@@ -4314,8 +4325,10 @@ theorem
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
-    entryTransports.step transports.witnessTransport transports.capacity
-      transports.ordinary externalsPreserved
+    entryTransports.step transports.witnessTransport
+      transports.closureAllocationsPersistent transports.capacity
+      transports.ordinary
+      externalsPreserved
       transports.toClosureTablesTransport
   exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
     externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
@@ -4414,8 +4427,8 @@ theorem
       entryTransports⟩
   obtain ⟨nextStore, nextLocals, nextWitness, resultPhysical, step,
       externalsPreserved, closureTables, localUpdate, witnessTransport,
-      capacityTransport, ordinaryTransport, runtimeGlobals, storeGlobals,
-      hostStaticLayout, nextInvariant⟩ :=
+      closureAllocationsPersistent, capacityTransport, ordinaryTransport,
+      runtimeGlobals, storeGlobals, hostStaticLayout, nextInvariant⟩ :=
     runtimeRefines supported stepFits
       ⟨⟨frameAligned, budget⟩, integerImplementation,
         naturalImplementation, scalarImplementation⟩
@@ -4448,8 +4461,8 @@ theorem
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
-    entryTransports.step witnessTransport capacityTransport ordinaryTransport
-      externalsPreserved closureTables
+    entryTransports.step witnessTransport closureAllocationsPersistent
+      capacityTransport ordinaryTransport externalsPreserved closureTables
   have nextClosureTables :
       ClosureTablesAgree nextStore nextWitness :=
     closureTables.agree initialClosureTables
@@ -4549,8 +4562,10 @@ theorem
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
-    entryTransports.step transports.witnessTransport transports.capacity
-      transports.ordinary externalsPreserved
+    entryTransports.step transports.witnessTransport
+      transports.closureAllocationsPersistent transports.capacity
+      transports.ordinary
+      externalsPreserved
       transports.toClosureTablesTransport
   exact ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
     externalsPreserved,
@@ -4710,6 +4725,7 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
         afterCall entryWitness resultWitness :=
     entryTransports.step
       callee.declaration.capacityPreserving.witnessTransport
+      callee.declaration.closureAllocationsPersistent
       callee.declaration.capacityPreserving.capacityTransport
       callee.declaration.ordinaryTransport
       callee.declaration.externalsPreserved
@@ -6471,6 +6487,7 @@ theorem
         afterCall entryWitness resultWitness :=
     entryTransports.step
       callee.declaration.capacityPreserving.witnessTransport
+      callee.declaration.closureAllocationsPersistent
       callee.declaration.capacityPreserving.capacityTransport
       callee.declaration.ordinaryTransport
       callee.declaration.externalsPreserved
@@ -9971,7 +9988,8 @@ theorem
   have nextEntry :
       ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
         nextStore entryWitness nextWitness :=
-    entryTransports.step step.witnessTransport step.capacityTransport ordinary
+    entryTransports.step step.witnessTransport
+      step.closureAllocationsPersistent step.capacityTransport ordinary
       step.externalsPreserved step.toClosureTablesTransport
   exact ⟨nextStore, nextLocals, nextWitness,
     eraseReuseCapacityFact facts decl.fvarId, simulates, externalsPreserved,
@@ -12682,6 +12700,8 @@ theorem
     declaration := {
       toClosureTablesTransport := entryTransports.toClosureTablesTransport
       capacityPreserving
+      closureAllocationsPersistent :=
+        entryTransports.closureAllocationsPersistent
       ordinaryTransport := entryTransports.ordinary
       externalsPreserved := entryTransports.externals
       residualBudget }
@@ -12877,6 +12897,8 @@ theorem
     declaration := {
       toClosureTablesTransport := resultInvariant.2.toClosureTablesTransport
       capacityPreserving
+      closureAllocationsPersistent :=
+        resultInvariant.2.closureAllocationsPersistent
       ordinaryTransport := resultInvariant.2.ordinary
       externalsPreserved := resultInvariant.2.externals
       residualBudget }
@@ -13598,6 +13620,8 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
           toClosureTablesTransport :=
             calleeInvariant.2.toClosureTablesTransport
           capacityPreserving := calleeCapacityPreserving
+          closureAllocationsPersistent :=
+            calleeInvariant.2.closureAllocationsPersistent
           ordinaryTransport := calleeInvariant.2.ordinary
           externalsPreserved := calleeInvariant.2.externals
           residualBudget := calleeResidualBudget }
@@ -13639,6 +13663,7 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
             afterCall entryWitness resultWitness :=
         invariant.2.step
           callerResult.declaration.capacityPreserving.witnessTransport
+          callerResult.declaration.closureAllocationsPersistent
           callerResult.declaration.capacityPreserving.capacityTransport
           callerResult.declaration.ordinaryTransport
           callerResult.declaration.externalsPreserved
@@ -13865,6 +13890,56 @@ def DirectHereditaryGeneratedDeclarationAbiInduction
               physical requiredBytes ∧
             ClosureAllocationsAbiAligned program resultWitness
 
+/-- The ordinary generated-declaration induction already implies the
+closure-ABI strengthening for operation families that do not allocate new
+closures.
+
+The input ABI invariant describes every closure allocation present at entry.
+The ordinary result package proves that each closure descriptor present at
+exit was already present at entry, so ABI alignment transports directly to
+the result witness.  This avoids duplicating the hereditary compiler proof:
+closure-producing operations remain responsible only for proving the ABI of
+the descriptor they introduce. -/
+theorem DirectHereditaryGeneratedDeclarationAbiInduction.ofInduction
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (declarations :
+      DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+        hosts sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported) :
+    DirectHereditaryGeneratedDeclarationAbiInduction program sourceModule
+      target hosts sourceExternals DirectSupported ExternalSupported
+      LazySupported CaseSupported EffectSupported := by
+  intro declaration context sourceCode sourceFunction resultKind row
+    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultValue requiredBytes evaluation initial initialWitness parameters
+    invariant parameterCount
+  obtain ⟨resultStore, resultWitness, physical, result⟩ :=
+    declarations row resultClassified evaluation invariant.cacheFrame
+      parameterCount
+  have initialAbi : ClosureAllocationsAbiAligned program initialWitness := by
+    rw [← row.contextProgram]
+    exact invariant.closureAbi
+  exact ⟨resultStore, resultWitness, physical, result,
+    initialAbi.ofPersistent
+      result.declaration.closureAllocationsPersistent⟩
+
 /--
 Production generated-row operation laws close the recursive declaration
 induction constructively.
@@ -13993,6 +14068,8 @@ theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
     declaration := {
       toClosureTablesTransport := resultInvariant.2.toClosureTablesTransport
       capacityPreserving
+      closureAllocationsPersistent :=
+        resultInvariant.2.closureAllocationsPersistent
       ordinaryTransport := resultInvariant.2.ordinary
       externalsPreserved := resultInvariant.2.externals
       residualBudget }
@@ -14077,8 +14154,9 @@ theorem
       have nextEntry :
           ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
             nextStore entryWitness nextWitness :=
-        entryTransports.step step.witnessTransport step.capacityTransport
-          ordinary step.externalsPreserved step.toClosureTablesTransport
+        entryTransports.step step.witnessTransport
+          step.closureAllocationsPersistent step.capacityTransport ordinary
+          step.externalsPreserved step.toClosureTablesTransport
       exact ⟨nextStore, nextLocals, nextWitness,
         eraseReuseCapacityFact facts decl.fvarId, simulates,
         externalsPreserved, hostDescriptorsPreserved,
@@ -14156,8 +14234,9 @@ theorem
       have nextEntry :
           ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
             nextStore entryWitness nextWitness :=
-        entryTransports.step step.witnessTransport step.capacityTransport
-          ordinary step.externalsPreserved step.toClosureTablesTransport
+        entryTransports.step step.witnessTransport
+          step.closureAllocationsPersistent step.capacityTransport ordinary
+          step.externalsPreserved step.toClosureTablesTransport
       exact ⟨nextStore, nextLocals, nextWitness,
         eraseReuseCapacityFact facts decl.fvarId, simulates,
         externalsPreserved, hostDescriptorsPreserved,
@@ -14502,8 +14581,11 @@ callee derivation. The executable resolver supplies only the actual adapted
 candidate cases. From those inputs this theorem derives first-match selection,
 the post-consumption matcher frame, the exact generated argument body, the
 related callee parameter row, and the recursive generated declaration result.
-No selected-body theorem, argument assembly, unchanged-store equation, or
-target execution is accepted from the caller. -/
+The ordinary declaration induction is sufficient: its cumulative
+closure-allocation persistence transports the entry ABI invariant to the
+callee result. No separate ABI induction, selected-body theorem, argument
+assembly, unchanged-store equation, or target execution is accepted from the
+caller. -/
 theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -14536,9 +14618,9 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
       SaturatedClosureCandidateResolver context sourceModule callerFunction
         labels target hosts)
     (declarations :
-      DirectHereditaryGeneratedDeclarationAbiInduction program sourceModule
-        target hosts sourceExternals DirectSupported ExternalSupported
-        LazySupported CaseSupported EffectSupported)
+      DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+        hosts sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported)
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
@@ -14551,6 +14633,11 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
         (ConcreteReuseCapacityCacheAbiFrame context sourceModule callerFunction
           sourceExternals)
         entryRuntime entryStore entryWitness) := by
+  have abiDeclarations :
+      DirectHereditaryGeneratedDeclarationAbiInduction program sourceModule
+        target hosts sourceExternals DirectSupported ExternalSupported
+        LazySupported CaseSupported EffectSupported :=
+    DirectHereditaryGeneratedDeclarationAbiInduction.ofInduction declarations
   have contextProgram := spec.contextProgram
   subst program
   intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
@@ -14628,7 +14715,7 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     ⟨calleeCacheFrame, calleeAbi⟩
   obtain ⟨afterCall, resultWitness, physical, calleeResult,
       resultAbi⟩ :=
-    declarations generatedRow resultClassified calleeEvaluation
+    abiDeclarations generatedRow resultClassified calleeEvaluation
       (by simpa using calleeFrame)
       (generatedRow.targetParameterCount_saturatedClosure site resolution
         argumentsRelated)
@@ -14689,6 +14776,7 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
       ReuseCapacityCodeEntryTransports entryRuntime callRuntime entryStore
         selected.nextStore entryWitness initialWitness :=
     entryTransports.step (WitnessTransport.refl initialWitness)
+      (ClosureAllocationsPersistent.refl initialWitness)
       matcherCapacity
       (takeClosureApplication_ordinaryPersistenceTransport application)
       matcherFrame.externals matcherTables
@@ -14697,6 +14785,7 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
         afterCall entryWitness resultWitness :=
     matcherEntry.step
       callerResult.declaration.capacityPreserving.witnessTransport
+      callerResult.declaration.closureAllocationsPersistent
       callerResult.declaration.capacityPreserving.capacityTransport
       callerResult.declaration.ordinaryTransport
       callerResult.declaration.externalsPreserved
@@ -14705,6 +14794,55 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     eraseReuseCapacityFact facts decl.fvarId, callStep, externalsPreserved,
     hostDescriptorsPreserved, witnessDescriptorsPreserved, producedTransfer,
     ⟨⟨nextCacheFrame, resultAbi⟩, nextEntry⟩⟩
+
+/-- Production saturated-closure runtime law with no caller-supplied
+declaration theorem.
+
+The generated declaration induction, including its closure-ABI preservation,
+is derived from lowering, adaptation, and the production operation laws. The
+remaining resolver is executable compiler metadata: it enumerates the actual
+adapted dispatch candidates and does not certify their behavior. -/
+theorem
+    ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context callerCode sourceModule
+      callerFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (sourceExternals : ExternalImpl)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (resolver :
+      SaturatedClosureCandidateResolver context sourceModule callerFunction
+        labels target hosts)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels target.wasmModule hosts.env sourceExternals
+      (SaturatedClosureHereditaryCallSupported sourceExternals
+        (fun context => ReuseBudgetedDirectSupported context)
+        (fun context => PureExternalSupported context sourceExternals)
+        (fun context =>
+          ProductionHereditaryLazySupported sourceExternals context)
+        (fun context => ProductionCasesSupported context)
+        (fun context =>
+          OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheAbiFrame context sourceModule callerFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) :=
+  spec.saturatedClosureCallRuntimeRefines_hereditary contextCaches resolver
+    (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
+      contextCaches sourceExternals generated)
 
 /-- Saturated named calls in the direct/no-calls fragment are implemented by
 the generated callee selected by the production compiler. The only additional

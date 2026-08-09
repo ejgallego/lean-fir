@@ -84,6 +84,8 @@ structure BudgetedCapacityPreservingSuccessfulDeclaration
       module hostEnv sourceExternals sourceRuntime resultRuntime sourceEnv
       sourceCode targetFunction functionIndex initial afterCall initialWitness
       resultWitness parameters resultKind resultValue physical
+  closureAllocationsPersistent :
+    ClosureAllocationsPersistent initialWitness resultWitness
   ordinaryTransport :
     OrdinaryPersistenceTransport sourceRuntime resultRuntime
   externalsPreserved :

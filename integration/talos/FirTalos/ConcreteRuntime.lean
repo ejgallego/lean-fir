@@ -402,17 +402,18 @@ theorem ConcreteRuntimeRel.naturalExternalResponse
         .ok (result, word)) :
     ∃ afterWitness,
       ConcreteExternalResponseRel beforeWitness afterWitness
-        semanticRequest semanticBefore .tobject
-        (concreteNaturalExternalResponse concreteBefore result word)
-        (semanticNaturalExternalResponse semanticBefore value) := by
-  obtain ⟨afterWitness, extension, _closureAllocationsPersistent,
+          semanticRequest semanticBefore .tobject
+          (concreteNaturalExternalResponse concreteBefore result word)
+          (semanticNaturalExternalResponse semanticBefore value) ∧
+        ClosureAllocationsPersistent beforeWitness afterWitness := by
+  obtain ⟨afterWitness, extension, closureAllocationsPersistent,
       nextRuntimeRelated, valueRelated⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
   refine ⟨afterWitness, {
     witnessExtension := extension
     heap := ?_
     value := ?_
-    world := runtimeRelated.world }⟩
+    world := runtimeRelated.world }, closureAllocationsPersistent⟩
   · apply nextRuntimeRelated.heap.auxiliary
     · simp [semanticNaturalExternalResponse, semanticExternalRuntimeAfter]
     · simp [semanticNaturalExternalResponse, semanticExternalRuntimeAfter]
@@ -456,10 +457,11 @@ theorem ConcreteExternalImpl.invoke_pure_natural_result_refines
         semanticImplementation.call semanticRequest semanticBefore =
           .ok (semanticNaturalExternalResponse semanticBefore value) ∧
         ConcretePureExternalPost concreteBefore beforeWitness afterWitness
-          semanticBefore concreteRequest semanticRequest
-          (concreteNaturalExternalResponse concreteBefore result word)
-          (semanticNaturalExternalResponse semanticBefore value) := by
-  obtain ⟨afterWitness, responseRelated⟩ :=
+            semanticBefore concreteRequest semanticRequest
+            (concreteNaturalExternalResponse concreteBefore result word)
+            (semanticNaturalExternalResponse semanticBefore value) ∧
+          ClosureAllocationsPersistent beforeWitness afterWitness := by
+  obtain ⟨afterWitness, responseRelated, closureAllocationsPersistent⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.naturalExternalResponse runtimeRelated
       semanticRequest result word value allocated
   have responseRelated' : ConcreteExternalResponseRel beforeWitness afterWitness
@@ -468,9 +470,11 @@ theorem ConcreteExternalImpl.invoke_pure_natural_result_refines
       (semanticNaturalExternalResponse semanticBefore value) := by
     rw [resultKind]
     exact responseRelated
-  exact ⟨afterWitness,
+  obtain ⟨concreteInvoke, semanticInvoke, post⟩ :=
     concreteImplementation.invoke_pure_result_refines runtimeRelated
-      requestRelated concreteCalled semanticCalled responseRelated' (by rfl)⟩
+      requestRelated concreteCalled semanticCalled responseRelated' (by rfl)
+  exact ⟨afterWitness, concreteInvoke, semanticInvoke, post,
+    closureAllocationsPersistent⟩
 
 /--
 Operation-family correctness law for pure concrete handlers that return a
@@ -539,17 +543,19 @@ theorem ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
           (concreteNaturalExternalResponse concreteBefore result word)
           (semanticNaturalExternalResponse semanticBefore value) ∧
         result.AddressSpaceBudget
-          (remainingBytes - naturalAllocationBytes value) := by
+            (remainingBytes - naturalAllocationBytes value) ∧
+          ClosureAllocationsPersistent beforeWitness afterWitness := by
   obtain ⟨result, word, allocated, remainingBudget⟩ :=
     runtimeRelated.heap.frontier.allocateNatural_eq_ok_of_budget value budget fits
   have concreteCalled :=
     implementationRelated runtimeRelated requestRelated semanticCalled allocated
-  obtain ⟨afterWitness, concreteInvoke, semanticInvoke, post⟩ :=
+  obtain ⟨afterWitness, concreteInvoke, semanticInvoke, post,
+      closureAllocationsPersistent⟩ :=
     FirTalos.Concrete.ConcreteExternalImpl.invoke_pure_natural_result_refines
       runtimeRelated requestRelated resultKind allocated concreteCalled
       semanticCalled
   exact ⟨result, word, afterWitness, allocated, concreteInvoke, semanticInvoke,
-    post, remainingBudget⟩
+    post, remainingBudget, closureAllocationsPersistent⟩
 
 /--
 Canonical concrete response for a pure nonallocating scalar external.
@@ -1899,7 +1905,9 @@ theorem integerExternalStep_of_budget
               result address).value)
           (semanticIntegerExternalResponse semanticRuntime value).value ∧
         result.AddressSpaceBudget
-          (remainingBytes - integerAllocationBytes value) := by
+            (remainingBytes - integerAllocationBytes value) ∧
+          ClosureAllocationsPersistent witness
+            (witness.bindInteger semanticRuntime.nextLocation address value) := by
   obtain ⟨result, address, allocated, concreteInvoke, semanticInvoke, post,
       remainingBudget⟩ :=
     runtimeRelated.invoke_pure_integer_result_refines_of_budget
@@ -1924,7 +1932,7 @@ theorem integerExternalStep_of_budget
     simp [externalStep, decoded, concreteInvoke, laneMatches]
   exact ⟨result, address, allocated, operationStep, semanticInvoke,
     post.witnessExtension, post.runtime, physicalOfLane_related post.value,
-    remainingBudget⟩
+    remainingBudget, ClosureAllocationsPersistent.bindInteger _ _ _ _⟩
 
 /--
 Constructive Talos host step for a pure external returning one `Nat`.
@@ -1990,9 +1998,10 @@ theorem naturalExternalStep_of_budget
               result word).value)
           (semanticNaturalExternalResponse semanticRuntime value).value ∧
         result.AddressSpaceBudget
-          (remainingBytes - naturalAllocationBytes value) := by
+            (remainingBytes - naturalAllocationBytes value) ∧
+          ClosureAllocationsPersistent witness afterWitness := by
   obtain ⟨result, word, afterWitness, allocated, concreteInvoke,
-      semanticInvoke, post, remainingBudget⟩ :=
+      semanticInvoke, post, remainingBudget, closureAllocationsPersistent⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.invoke_pure_natural_result_refines_of_budget
       runtimeRelated
       implementationRelated requestRelated
@@ -2016,7 +2025,7 @@ theorem naturalExternalStep_of_budget
     simp [externalStep, decoded, concreteInvoke, laneMatches]
   exact ⟨result, word, afterWitness, allocated, operationStep, semanticInvoke,
     post.witnessExtension, post.runtime, physicalOfLane_related post.value,
-    remainingBudget⟩
+    remainingBudget, closureAllocationsPersistent⟩
 
 /--
 Constructive Talos host step for a pure nonallocating scalar external.
