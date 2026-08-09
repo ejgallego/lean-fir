@@ -5,6 +5,7 @@ namespace Fir.Wasm.Emit.ResidentArray
 open Fir.Wasm
 open Fir.Wasm.Concrete
 open Lean
+open Lean.Compiler
 
 /-!
 # Persistent arena arrays for whole-trace execution
@@ -49,7 +50,8 @@ them.  They are deliberately not part of `externalDeclarations`, so the
 historical strict `internalize` frontier remains source-compatible.
 -/
 def availableExternalDeclarations : Array Name :=
-  externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed]
+  externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed, `Array.uget,
+    `Array.uset, `Array.replicate]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -296,6 +298,26 @@ def ugetBorrowedFunction : Function := {
     .i32Load .object 0,
     .ret] }
 
+def ugetFunction : Function := {
+  name := externalName `Array.uget
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .usize), (proofParam, .erased)]
+  results := #[.tobject]
+  locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet indexParam,
+    .localGet sizeLocal,
+    .i64ExtendI32U .usize,
+    .i64LtU,
+    .ifElse [] [.unreachable],
+    .localGet indexParam,
+    .i32WrapI64 .uint32,
+    .localSet indexLocal] ++ elementAddress ++ [
+    .localGet sourceCursorLocal,
+    .i32Load .tobject 0,
+    .ret] }
+
 private def emptyWrapper (declaration : Name) : Function := {
   name := externalName declaration
   params := #[(erasedParam, .erased), (capacityParam, .tobject)]
@@ -310,6 +332,26 @@ def mkEmptyFunction : Function := emptyWrapper `Array.mkEmpty
 
 private def allocationBytesBody : List Instruction := [
   .i32Const .uint32 (u32 (headerBytes + target.semanticSlotBytes)),
+  .localSet allocationBytesLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop byteLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet allocationBytesLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet allocationBytesLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br byteLoopLabel] []]]
+
+private def exactAllocationBytesBody : List Instruction := [
+  .i32Const .uint32 (u32 headerBytes),
   .localSet allocationBytesLocal,
   .i32Const .uint32 0,
   .localSet countLocal,
@@ -387,6 +429,113 @@ def pushFunction : Function := {
       .i32Store .tobject 0] ++
     retypeAddress }
 
+private def copyUpdatedElementsBody : List Instruction := [
+  .localGet arrayParam,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet sourceCursorLocal,
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet targetCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop copyLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet countLocal,
+      .localGet indexLocal,
+      .i32Eq,
+      .ifElse [
+        .localGet targetCursorLocal,
+        .localGet valueParam,
+        .i32Store .tobject 0] [
+        .localGet targetCursorLocal,
+        .localGet sourceCursorLocal,
+        .i32Load .tobject 0,
+        .i32Store .tobject 0],
+      .localGet sourceCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet sourceCursorLocal,
+      .localGet targetCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet targetCursorLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br copyLoopLabel] []]]
+
+def usetFunction : Function := {
+  name := externalName `Array.uset
+  params := #[(erasedParam, .erased), (arrayParam, .object),
+    (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (indexLocal, .uint32), (countLocal, .uint32),
+    (sourceCursorLocal, .uint32), (targetCursorLocal, .uint32),
+    (allocationBytesLocal, .uint32), (savedScratchLocal, .uint32),
+    (objectResultLocal, .object)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet indexParam,
+    .localGet sizeLocal,
+    .i64ExtendI32U .usize,
+    .i64LtU,
+    .ifElse [] [.unreachable],
+    .localGet indexParam,
+    .i32WrapI64 .uint32,
+    .localSet indexLocal] ++ exactAllocationBytesBody ++ [
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
+    copyUpdatedElementsBody ++ retypeAddress }
+
+private def fillElementsBody : List Instruction := [
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet targetCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop copyLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet targetCursorLocal,
+      .localGet valueParam,
+      .i32Store .tobject 0,
+      .localGet targetCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet targetCursorLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br copyLoopLabel] []]]
+
+def replicateFunction : Function := {
+  name := externalName `Array.replicate
+  params := #[(erasedParam, .erased), (indexParam, .tobject),
+    (valueParam, .tobject)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (indexLocal, .uint32), (countLocal, .uint32),
+    (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
+  body := decodeIndex ++ [
+    .localGet indexLocal,
+    .localSet sizeLocal] ++ exactAllocationBytesBody ++ [
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
+    fillElementsBody ++ retypeAddress }
+
 def functions : Array Function := #[
   allocateEmptyFunction,
   sizeFunction,
@@ -396,8 +545,11 @@ def functions : Array Function := #[
   mkEmptyFunction,
   getBorrowedFunction,
   ugetBorrowedFunction,
+  ugetFunction,
   pushFunction,
-  getBangOwnedFunction]
+  getBangOwnedFunction,
+  usetFunction,
+  replicateFunction]
 
 private partial def rewriteInstruction (declarations : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -431,6 +583,18 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `Array.ugetBorrowed then
     some {
       params := #[.erased, .object, .usize, .erased]
+      results := #[.object] }
+  else if declaration == `Array.uget then
+    some {
+      params := #[.erased, .object, .usize, .erased]
+      results := #[.tobject] }
+  else if declaration == `Array.uset then
+    some {
+      params := #[.erased, .object, .usize, .tobject, .erased]
+      results := #[.object] }
+  else if declaration == `Array.replicate then
+    some {
+      params := #[.erased, .tobject, .tobject]
       results := #[.object] }
   else if declaration == `Array.push then
     some { params := #[.erased, .object, .tobject], results := #[.object] }
@@ -499,5 +663,57 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
   let declarations := availableExternalDeclarations.filter fun declaration =>
     module.imports.any (·.declaration? == some declaration)
   internalizeSelected module declarations
+
+private def exampleDeclarations : Array Name :=
+  #[`Array.uget, `Array.uset, `Array.replicate]
+
+private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
+  let erased := LCNF.ImpureType.erased
+  let object := LCNF.ImpureType.object
+  let tobject := LCNF.ImpureType.tobject
+  let usize := LCNF.ImpureType.usize
+  if declaration == `Array.uget then
+    { params := #[erased, object, usize, erased], result := tobject }
+  else if declaration == `Array.uset then
+    { params := #[erased, object, usize, tobject, erased], result := object }
+  else
+    { params := #[erased, tobject, tobject], result := object }
+
+private def exampleExternalImport (declaration : Name) : Import := {
+  key := .external declaration
+  moduleName := "lean.extern"
+  itemName := declaration.toString
+  signature := (expectedSignature? declaration).get!
+  externalTypes? := some (exampleExternalTypes declaration) }
+
+/-- Closed generation-only probe for the array helpers added by the compact
+Illuminate validation closure. -/
+def residentExampleModule : Except String Module := do
+  let numeric ← ResidentNumeric.residentExampleModule
+  let module : Module := {
+    numeric with
+    imports := numeric.imports ++ exampleDeclarations.map exampleExternalImport }
+  internalizeSelected module exampleDeclarations
+    |>.mapError fun error => s!"array: {repr error}"
+
+def manifest : Json :=
+  Json.mkObj [
+    ("entries", Json.arr <| exampleDeclarations.map fun declaration =>
+      Json.mkObj [
+        ("sourceEntry", declaration.toString),
+        ("entry", externalName declaration |>.toString)]),
+    ("imports", Json.arr #[]),
+    ("status", "generation-ready; W6 array contract proofs pending")]
+
+#guard match residentExampleModule with
+  | .ok module =>
+      module.imports.isEmpty &&
+      module.runtimeOperations.isEmpty &&
+      exampleDeclarations.all fun declaration =>
+        module.exports.contains (externalName declaration) &&
+      module.memory == some ResidentRuntime.residentMemory &&
+      (Fir.Wasm.validateModule module |>.isOk) &&
+      (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
 
 end Fir.Wasm.Emit.ResidentArray

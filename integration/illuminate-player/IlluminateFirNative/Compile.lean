@@ -49,7 +49,9 @@ private def expectedArrayGetCaller (target caller : Name) : Bool :=
   else if target == arrayGetBangOwnedName then
     suffix.endsWith "Illuminate.AnimationPlayer.tick"
   else if target == arrayUgetBorrowedName then
-    generatedCallerFamily suffix "Illuminate.AnimationPlayer.validatePrepared"
+    generatedCallerFamily suffix "Illuminate.AnimationPlayer.validatePrepared" ||
+      generatedCallerFamily suffix
+        "Illuminate.AnimationPlayer.validateSelectionAnimation"
   else
     false
 
@@ -132,7 +134,9 @@ Recovers the monomorphic heap-object results erased by Lean 4.32's generic
 array-read declarations. The transform is deliberately tied to the exact
 prepared-player call sites and rejects closure drift.
 -/
-def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
+def refineMonomorphicArrayGetsWithSelectionValidation
+    (artifact : Fir.Validation.Lcnf.Artifact)
+    (selectionValidationSites : Nat) :
     Except String Fir.Validation.Lcnf.Artifact := do
   for targetName in #[arrayGetBangName, arrayGetName, arrayGetBangOwnedName,
       arrayUgetBorrowedName] do
@@ -157,7 +161,7 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
         let (code, sites) ← refineArrayGetCalls decl.name code
         return ({ decl with value := .code code }, sites)
   let sites := results.foldl (init := #[]) fun sites result => sites ++ result.2
-  unless sites.size == 21 &&
+  unless sites.size == 21 + selectionValidationSites &&
       arrayGetSiteCount sites arrayGetBangName
         "Illuminate.AnimationPlayer.actionAt" == 1 &&
       arrayGetSiteCount sites arrayGetBangName
@@ -189,12 +193,20 @@ def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
       arrayGetSiteCount sites arrayGetBangOwnedName
         "Illuminate.AnimationPlayer.tick" == 1 &&
       arrayGetFamilySiteCount sites arrayUgetBorrowedName
-        "Illuminate.AnimationPlayer.validatePrepared" == 3 do
+        "Illuminate.AnimationPlayer.validatePrepared" == 3 &&
+      arrayGetFamilySiteCount sites arrayUgetBorrowedName
+        "Illuminate.AnimationPlayer.validateSelectionAnimation" ==
+          selectionValidationSites do
     throw s!"Illuminate array-read call-site inventory changed: {sites.map (fun site => (site.1.toString, site.2.toString))}"
   let program : Fir.LeanIR.ImpureProgram := { decls := results.map (fun result => result.1) }
   return { artifact with
     program
     forms := Fir.Validation.Lcnf.collectForms program }
+
+/-- Recover the exact v3 live-player array-read ABI inventory. -/
+def refineMonomorphicArrayGets (artifact : Fir.Validation.Lcnf.Artifact) :
+    Except String Fir.Validation.Lcnf.Artifact :=
+  refineMonomorphicArrayGetsWithSelectionValidation artifact 0
 
 /-- Capture both real persistent-player entries and apply only checked ABI recovery. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
@@ -305,15 +317,9 @@ private def internalizeUSize
   return { artifact with module, bytes }
 
 private def pruneLinkedModule
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact)
+    (publicExports : Array Name) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let publicExports := #[
-    ``Illuminate.AnimationPlayer.initialLive,
-    ``Illuminate.AnimationPlayer.transitionLive,
-    Fir.Wasm.Emit.ResidentAllocator.frontierName,
-    Fir.Wasm.Emit.ResidentAllocator.setFrontierName,
-    Fir.Wasm.Emit.ResidentAllocator.rewindName,
-    Fir.Wasm.Emit.ResidentAllocator.allocateName]
   let module ← match Fir.Wasm.Emit.ResidentDeadCode.pruneToExports
       artifact.module publicExports with
     | .ok module => pure module
@@ -324,8 +330,11 @@ private def pruneLinkedModule
     | .error error => throw (.encoding error)
   return { artifact with module, bytes }
 
-/-- Link every reusable resident helper family already accepted by W7. -/
-def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+/-- Link every reusable resident helper family already accepted by W7, then
+retain exactly the requested source and allocator exports. -/
+def internalizeExistingRuntimeForExports
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact)
+    (sourceExports : Array Name) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeGetTag artifact
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIsShared artifact
@@ -349,7 +358,18 @@ def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) 
   let artifact ← internalizeNatShift artifact
   let artifact ← internalizeUSize artifact
   let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
-  pruneLinkedModule artifact
+  pruneLinkedModule artifact (sourceExports ++ #[
+    Fir.Wasm.Emit.ResidentAllocator.frontierName,
+    Fir.Wasm.Emit.ResidentAllocator.setFrontierName,
+    Fir.Wasm.Emit.ResidentAllocator.rewindName,
+    Fir.Wasm.Emit.ResidentAllocator.allocateName])
+
+/-- Link the accepted resident runtime for the v3 live-player entries. -/
+def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact :=
+  internalizeExistingRuntimeForExports artifact #[
+    ``Illuminate.AnimationPlayer.initialLive,
+    ``Illuminate.AnimationPlayer.transitionLive]
 
 /-- Compile and link the currently reusable Wasm-resident runtime frontier. -/
 def compileResidentModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError

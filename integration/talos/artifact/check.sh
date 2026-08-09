@@ -21,6 +21,8 @@ lake exe fir-wasm-artifact resident-memory-surface \
 node run-resident-memory-surface.mjs _build/resident-memory-surface.wasm
 lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
+lake exe fir-wasm-artifact resident-arrays _build/resident-arrays.wasm
+node run-resident-arrays.mjs _build/resident-arrays.wasm
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm

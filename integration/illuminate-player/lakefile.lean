@@ -26,7 +26,8 @@ lean_lib «IlluminatePlayerSource» where
   roots := #[
     `Illuminate.Animation.Types,
     `Illuminate.Animation.Player,
-    `Illuminate.Animation.FirLive]
+    `Illuminate.Animation.FirLive,
+    `Illuminate.Animation.FirSelection]
 
 @[default_target]
 lean_lib «IlluminateFirNative»

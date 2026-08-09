@@ -1,6 +1,7 @@
 import Fir.Wasm.Emit.Examples
 import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.Emit.ResidentAllocator
+import Fir.Wasm.Emit.ResidentArray
 import Fir.Wasm.Emit.ResidentCache
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
@@ -89,6 +90,19 @@ def emitResidentAllocator (path : System.FilePath) : IO Unit := do
   IO.FS.writeFile manifestPath
     Fir.Wasm.Emit.ResidentAllocator.manifest.compress
   IO.println s!"resident-allocator: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
+def emitResidentArrays (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentArray.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident array encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentArray.manifest.compress
+  IO.println s!"resident-arrays: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
 def emitResidentConstructors (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
@@ -321,6 +335,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-global <output.wasm>\n" ++
     "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-allocator <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-arrays <output.wasm>\n" ++
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-literals <output.wasm>\n" ++
@@ -358,6 +373,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-allocator", output] =>
         emitResidentAllocator output
+        return 0
+    | ["resident-arrays", output] =>
+        emitResidentArrays output
         return 0
     | ["resident-constructors", output] =>
         emitResidentConstructors output
