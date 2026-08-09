@@ -1097,6 +1097,38 @@ theorem instructions_cons_eq_ok
               Bind.bind, Except.bind] using adapted
           exact ⟨targetHead, targetRest, rfl, rfl, targetEq.symm⟩
 
+/-- Invert successful adaptation across an arbitrary symbolic instruction
+append. The target split is the exact homomorphic split used by argument-prefix
+assembly; it contains no execution premise. -/
+theorem instructions_append_eq_ok
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {left right : List Fir.Wasm.Instruction} {target : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels (left ++ right) =
+        .ok target) :
+    ∃ targetLeft targetRight,
+      instructions sourceModule sourceFunction labels left = .ok targetLeft ∧
+        instructions sourceModule sourceFunction labels right =
+          .ok targetRight ∧
+        target = targetLeft ++ targetRight := by
+  cases leftAdapted :
+      instructions sourceModule sourceFunction labels left with
+  | error error =>
+      rw [FirTalos.Correctness.instructions_append, leftAdapted] at adapted
+      contradiction
+  | ok targetLeft =>
+      rw [FirTalos.Correctness.instructions_append, leftAdapted] at adapted
+      cases rightAdapted :
+          instructions sourceModule sourceFunction labels right with
+      | error error =>
+          rw [rightAdapted] at adapted
+          contradiction
+      | ok targetRight =>
+          rw [rightAdapted] at adapted
+          exact ⟨targetLeft, targetRight, rfl, rfl,
+            (Except.ok.inj adapted).symm⟩
+
 /--
 Syntax-directed characterization of the argument code and ABI kinds emitted
 by `compileArg`.  The relation is deliberately independent of target
@@ -1154,6 +1186,23 @@ theorem ConstructorArgumentsRelated.physicalLength
   induction related with
   | nil => rfl
   | cons _ _ ih => simp [ih]
+
+/-- Independently related argument rows concatenate without changing their
+source order or physical Wasm lanes. -/
+theorem ConstructorArgumentsRelated.append
+    {witness : RefinementWitness}
+    {leftKinds rightKinds : List AbiKind}
+    {leftPhysical rightPhysical : List Wasm.Value}
+    {leftSemantic rightSemantic : List Value}
+    (left : ConstructorArgumentsRelated witness leftKinds leftPhysical
+      leftSemantic)
+    (right : ConstructorArgumentsRelated witness rightKinds rightPhysical
+      rightSemantic) :
+    ConstructorArgumentsRelated witness (leftKinds ++ rightKinds)
+      (leftPhysical ++ rightPhysical) (leftSemantic ++ rightSemantic) := by
+  induction left with
+  | nil => simpa using right
+  | cons head rest ih => exact .cons head ih
 
 /-- Resolve one semantic argument position to the ABI kind and physical lane
 related at the same position. -/
@@ -1251,6 +1300,31 @@ theorem ConstructorArgumentsRelated.ofKindsRefine
     rw [← Array.all_toList] at allRefines
     simpa only [Array.toList_zip] using allRefines
   exact related.ofListRefines sizes pointwise
+
+/-- Pointwise array refinement exposes the relation at any pair of successful
+lookups. This is the index-shaped form used by generated closure projections. -/
+theorem kindsRefine_getElem
+    {actual expected : Array AbiKind}
+    {index : Nat} {actualKind expectedKind : AbiKind}
+    (refines : Fir.Wasm.kindsRefine actual expected = true)
+    (actualAt : actual[index]? = some actualKind)
+    (expectedAt : expected[index]? = some expectedKind) :
+    actualKind.refines expectedKind = true := by
+  simp only [Fir.Wasm.kindsRefine, Bool.and_eq_true] at refines
+  have actualLt := (Array.getElem?_eq_some_iff.mp actualAt).1
+  have expectedLt := (Array.getElem?_eq_some_iff.mp expectedAt).1
+  have zipLt : index < (actual.zip expected).size := by
+    simp only [Array.size_zip]
+    omega
+  have pointwise := Array.all_eq_true.mp refines.2 index zipLt
+  rw [Array.getElem_zip] at pointwise
+  have actualEq : actual[index] = actualKind := by
+    exact Option.some.inj
+      ((Array.getElem?_eq_getElem actualLt).symm.trans actualAt)
+  have expectedEq : expected[index] = expectedKind := by
+    exact Option.some.inj
+      ((Array.getElem?_eq_getElem expectedLt).symm.trans expectedAt)
+  simpa [actualEq, expectedEq] using pointwise
 
 /--
 An object-field ABI kind rules out every non-i32 physical lane. The remaining

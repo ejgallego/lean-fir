@@ -592,6 +592,47 @@ theorem ClosureArgumentAssembly.closureProj
   apply assembled rest Q (physical :: tail)
   simpa [List.reverse_cons, List.append_assoc] using continued
 
+/-- One compiler-selected projection instruction pair both assembles its
+physical operand and relates that operand to the semantic capture at the
+callee's (possibly wider) parameter ABI. -/
+theorem ClosureArgumentAssembly.closureProj_of_related
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureIndex : Nat} {address : Word32}
+    {function : Lean.Name} {arity fixed index : Nat}
+    {captures : Array Value} {captureKinds : Array AbiKind}
+    {actualKind expectedKind : AbiKind} {value : Value}
+    (hClosure : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (hImp : module.imports[id]? = some imp)
+    (hSat : hostEnv.Satisfies module spec)
+    (hi : id < module.imports.length)
+    (hContract : spec.contracts[id]? =
+      some (closureProjContract function arity fixed index expectedKind))
+    (hParams : imp.params.length = 1)
+    (hResults : imp.results.length = 1)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
+    (fixedSize : captures.size = fixed)
+    (kindAt : captureKinds[index]? = some actualKind)
+    (kindRefines : actualKind.refines expectedKind = true)
+    (valueAt : captures[index]? = some value)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physical,
+      ClosureArgumentAssembly module hostEnv
+          [.localGet closureIndex, .call id] [physical] initial locals ∧
+        PhysicalValueRel witness expectedKind physical value := by
+  obtain ⟨lane, operation, valueRelated⟩ :=
+    closureProjStep_of_capture_refines applicationFound applicationRelated
+      fixedSize kindAt kindRefines valueAt
+  refine ⟨physicalOfLane lane, ?_, valueRelated⟩
+  apply ClosureArgumentAssembly.closureProj hClosure hImp hSat hi hContract
+    hParams hResults operation failureClear
+  exact .nil
+
 /-- A proved argument assembly feeds the generated underapplication host call
 and stores its closure result in the compiler-selected dispatch local. -/
 theorem wp_partialApplyBody_of_assembly

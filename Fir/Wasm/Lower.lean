@@ -801,15 +801,20 @@ def kindsRefine (actual expected : Array AbiKind) : Bool :=
   actual.size == expected.size &&
     (actual.zip expected).all fun pair => pair.fst.refines pair.snd
 
+def compileFixedClosureField (closureId : FVarId) (target : LCNF.Decl .impure)
+    (arity fixed : Nat) (kinds : Array AbiKind) (index : Nat) :
+    List Instruction :=
+  match kinds[index]? with
+  | some AbiKind.erased => [.i32Const .erased 0]
+  | some kind => [
+      .localGet closureId,
+      .call (.runtime (.closureProj target.name arity fixed index kind))]
+  | none => []
+
 def compileFixedClosureFields (closureId : FVarId) (target : LCNF.Decl .impure)
     (arity fixed : Nat) (kinds : Array AbiKind) : List Instruction :=
-  (List.range fixed).flatMap fun index =>
-    match kinds[index]? with
-    | some AbiKind.erased => [.i32Const .erased 0]
-    | some kind => [
-        .localGet closureId,
-        .call (.runtime (.closureProj target.name arity fixed index kind))]
-    | none => []
+  (List.range fixed).flatMap
+    (compileFixedClosureField closureId target arity fixed kinds)
 
 def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
     (argumentCode : List Instruction) (argumentKinds : Array AbiKind)

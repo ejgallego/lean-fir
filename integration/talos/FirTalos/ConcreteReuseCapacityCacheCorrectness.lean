@@ -6511,6 +6511,501 @@ theorem SaturatedClosureCallResolution.captureKindsRefine
   subst parameterKinds
   exact refines
 
+/-- Exact saturation splits the declaration ABI row into the fixed capture
+prefix followed by the ordinary argument suffix. -/
+theorem SaturatedClosureCallResolution.parameterKinds_partition
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site) :
+    (resolution.parameterKinds.extract 0 resolution.captures.size).toList ++
+        (resolution.parameterKinds.extract resolution.captures.size
+          resolution.parameterKinds.size).toList =
+      resolution.parameterKinds.toList := by
+  simp only [Array.toList_extract, List.extract_eq_take_drop,
+    List.drop_zero, Nat.sub_zero]
+  rw [← Array.length_toList]
+  have tail :
+      List.take
+          (resolution.parameterKinds.size -
+            resolution.captures.toList.length)
+          (resolution.parameterKinds.toList.drop
+            resolution.captures.toList.length) =
+        resolution.parameterKinds.toList.drop
+          resolution.captures.toList.length := by
+    rw [← Array.length_toList]
+    rw [← List.length_drop]
+    exact List.take_length
+  rw [tail]
+  exact List.take_append_drop resolution.captures.toList.length
+    resolution.parameterKinds.toList
+
+/-- Adaptation of one compiler-generated non-erased fixed field determines
+the numeric projection import. Resolver alignment and the concrete snapshot
+then prove both its stack assembly and its semantic argument relation. -/
+theorem ClosureArgumentAssembly.fixedProjection_of_adapted
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureId : FVarId} {closureIndex : Nat} {address : Word32}
+    {function : Name} {arity fixed index : Nat}
+    {captures : Array Value} {captureKinds : Array AbiKind}
+    {actualKind expectedKind : AbiKind} {value : Value}
+    {targetCode : Wasm.Program}
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureLocal : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (adapted :
+      instructions sourceModule sourceFunction labels [
+          .localGet closureId,
+          .call (.runtime
+            (.closureProj function arity fixed index expectedKind))] =
+        .ok targetCode)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
+    (fixedSize : captures.size = fixed)
+    (kindAt : captureKinds[index]? = some actualKind)
+    (kindRefines : actualKind.refines expectedKind = true)
+    (valueAt : captures[index]? = some value)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physical,
+      ClosureArgumentAssembly target.wasmModule hosts.env targetCode [physical]
+          initial locals ∧
+        PhysicalValueRel witness expectedKind physical value := by
+  have localFound :
+      findFVar?
+          (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          closureId = some closureIndex := by
+    simpa [functionBindings] using closureFound
+  cases callFound :
+      callIndex? sourceModule
+        (.runtime (.closureProj function arity fixed index expectedKind)) with
+  | none =>
+      simp [instructions, instruction, localFound, callFound, Functor.map,
+        Except.map, Bind.bind, Except.bind, pure, Except.pure] at adapted
+  | some id =>
+      have targetEq :
+          targetCode = [.localGet closureIndex, .call id] := by
+        simpa [instructions, instruction, localFound, callFound, Functor.map,
+          Except.map, Bind.bind, Except.bind, pure, Except.pure] using adapted.symm
+      subst targetCode
+      obtain ⟨imp, importFound, inBounds, contractFound, parameterCount,
+          resultCount⟩ := spec.closureProjCall callFound
+      exact ClosureArgumentAssembly.closureProj_of_related closureLocal
+        importFound spec.hostsSatisfy inBounds contractFound parameterCount
+        resultCount applicationFound applicationRelated fixedSize kindAt
+        kindRefines valueAt failureClear
+
+/-- The erased sibling of `fixedProjection_of_adapted`. ABI refinement forces
+the stored capture kind and semantic value to be erased, while adaptation
+turns the compiler's canonical erased constant into the exact physical zero
+operand expected by the callee. -/
+theorem ClosureArgumentAssembly.fixedErased_of_adapted
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {address : Word32} {function : Name} {arity index : Nat}
+    {captures : Array Value} {captureKinds : Array AbiKind}
+    {actualKind : AbiKind} {value : Value} {targetCode : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels
+          [.i32Const .erased 0] = .ok targetCode)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
+    (kindAt : captureKinds[index]? = some actualKind)
+    (kindRefines : actualKind.refines .erased = true)
+    (valueAt : captures[index]? = some value) :
+    ClosureArgumentAssembly module hostEnv targetCode [.i32 0] initial locals ∧
+      PhysicalValueRel witness .erased (.i32 0) value := by
+  have actualEq : actualKind = .erased := by
+    cases actualKind <;> simp [AbiKind.refines] at kindRefines ⊢
+  subst actualKind
+  obtain ⟨lane, _, valueRelated⟩ :=
+    applicationRelated.captures index .erased value kindAt valueAt
+  cases valueRelated
+  have targetEq : targetCode = [.const 0] := by
+    have adaptedEq :
+        (Except.ok [.const 0] : Except AdapterError Wasm.Program) =
+          .ok targetCode := by
+      simpa [instructions, instruction, Bind.bind, Except.bind, pure,
+        Except.pure] using adapted
+    exact (Except.ok.inj adaptedEq).symm
+  subst targetCode
+  exact ⟨ClosureArgumentAssembly.erased .nil, .word32 .erased⟩
+
+/-- Pointwise source relation for a selected list of fixed closure slots. The
+expected row comes from the callee declaration; the actual row and semantic
+values come from the allocation snapshot. -/
+inductive ClosureCaptureRows
+    (parameterKinds captureKinds : Array AbiKind) (captures : Array Value) :
+    List Nat → List AbiKind → List Value → Prop where
+  | nil : ClosureCaptureRows parameterKinds captureKinds captures [] [] []
+  | cons
+      (expectedAt : parameterKinds[index]? = some expectedKind)
+      (actualAt : captureKinds[index]? = some actualKind)
+      (valueAt : captures[index]? = some value)
+      (kindRefines : actualKind.refines expectedKind = true)
+      (rest : ClosureCaptureRows parameterKinds captureKinds captures indices
+        expectedKinds values) :
+      ClosureCaptureRows parameterKinds captureKinds captures
+        (index :: indices) (expectedKind :: expectedKinds) (value :: values)
+  | snoc
+      (rest : ClosureCaptureRows parameterKinds captureKinds captures indices
+        expectedKinds values)
+      (expectedAt : parameterKinds[index]? = some expectedKind)
+      (actualAt : captureKinds[index]? = some actualKind)
+      (valueAt : captures[index]? = some value)
+      (kindRefines : actualKind.refines expectedKind = true) :
+      ClosureCaptureRows parameterKinds captureKinds captures
+        (indices ++ [index]) (expectedKinds ++ [expectedKind])
+        (values ++ [value])
+
+/-- A compatible allocation descriptor constructs the exact ordered fixed
+row used by `compileFixedClosureFields`, for any prefix that fits in the
+captured semantic array. -/
+theorem ClosureCaptureRows.prefix
+    {parameterKinds captureKinds : Array AbiKind} {captures : Array Value}
+    (captureKindsSize : captureKinds.size = captures.size)
+    (refines : Fir.Wasm.kindsRefine captureKinds
+      (parameterKinds.extract 0 captureKinds.size) = true)
+    (count : Nat) (countFits : count ≤ captures.size) :
+    ClosureCaptureRows parameterKinds captureKinds captures (List.range count)
+      (parameterKinds.extract 0 count).toList
+      (captures.extract 0 count).toList := by
+  have refinementParts :
+      (captureKinds.size ==
+          (parameterKinds.extract 0 captureKinds.size).size) = true ∧
+        (captureKinds.zip
+          (parameterKinds.extract 0 captureKinds.size)).all
+            (fun pair => pair.fst.refines pair.snd) = true := by
+    simpa [Fir.Wasm.kindsRefine, Bool.and_eq_true] using refines
+  have descriptorSize :
+      captureKinds.size =
+        (parameterKinds.extract 0 captureKinds.size).size :=
+    beq_iff_eq.mp refinementParts.1
+  have parameterFits : captureKinds.size ≤ parameterKinds.size := by
+    rw [Array.size_extract] at descriptorSize
+    simp only [Nat.sub_zero] at descriptorSize
+    omega
+  induction count with
+  | zero =>
+      simpa using
+        (ClosureCaptureRows.nil (parameterKinds := parameterKinds)
+          (captureKinds := captureKinds) (captures := captures))
+  | succ count ih =>
+      have valueLt : count < captures.size := by omega
+      have actualLt : count < captureKinds.size := by
+        rw [captureKindsSize]
+        exact valueLt
+      have expectedLt : count < parameterKinds.size := by
+        exact Nat.lt_of_lt_of_le actualLt parameterFits
+      let expectedKind : AbiKind := parameterKinds[count]'expectedLt
+      let actualKind : AbiKind := captureKinds[count]'actualLt
+      let semanticValue : Value := captures[count]'valueLt
+      have expectedAt : parameterKinds[count]? = some expectedKind :=
+        Array.getElem?_eq_getElem expectedLt
+      have actualAt : captureKinds[count]? = some actualKind :=
+        Array.getElem?_eq_getElem actualLt
+      have valueAt : captures[count]? = some semanticValue :=
+        Array.getElem?_eq_getElem valueLt
+      have extractedExpectedAt :
+          (parameterKinds.extract 0 captureKinds.size)[count]? =
+            some expectedKind := by
+        rw [Array.getElem?_extract]
+        simp [actualLt, parameterFits, expectedAt]
+      have kindRefines : actualKind.refines expectedKind = true :=
+        kindsRefine_getElem refines actualAt extractedExpectedAt
+      have prefixRows := ih (by omega)
+      have expectedTake :
+          parameterKinds.toList.take (count + 1) =
+            parameterKinds.toList.take count ++ [expectedKind] := by
+        rw [List.take_succ_eq_append_getElem (by simpa using expectedLt)]
+        simp [expectedKind]
+      have semanticTake :
+          captures.toList.take (count + 1) =
+            captures.toList.take count ++ [semanticValue] := by
+        rw [List.take_succ_eq_append_getElem (by simpa using valueLt)]
+        simp [semanticValue]
+      have prefixTake :
+          ClosureCaptureRows parameterKinds captureKinds captures
+            (List.range count) (parameterKinds.toList.take count)
+            (captures.toList.take count) := by
+        simpa [Array.toList_extract, List.extract_eq_take_drop] using prefixRows
+      have appended := ClosureCaptureRows.snoc prefixTake expectedAt actualAt
+        valueAt kindRefines
+      rw [← expectedTake, ← semanticTake] at appended
+      simpa [List.range_succ, Array.toList_extract,
+        List.extract_eq_take_drop] using appended
+
+/-- Successful adaptation of any compiler-selected fixed-slot list executes
+as an argument assembly related to the corresponding declaration parameter
+row. The proof is structural over source slots and obtains every numeric host
+index from the real Talos adapter equation. -/
+theorem ClosureCaptureRows.assembly_of_adapted
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureId : FVarId} {closureIndex : Nat} {address : Word32}
+    {function : Name} {arity fixed : Nat}
+    {captures : Array Value} {captureKinds parameterKinds : Array AbiKind}
+    {target : LCNF.Decl .impure}
+    {indices : List Nat} {expectedKinds : List AbiKind}
+    {semanticValues : List Value} {targetCode : Wasm.Program}
+    (rows : ClosureCaptureRows parameterKinds captureKinds captures indices
+      expectedKinds semanticValues)
+    (targetName : target.name = function)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) closureId =
+        some closureIndex)
+    (closureLocal : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (adapted : instructions sourceModule sourceFunction labels
+      (indices.flatMap
+        (Fir.Wasm.compileFixedClosureField closureId target arity fixed
+          parameterKinds)) = .ok targetCode)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
+    (fixedSize : captures.size = fixed)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physicalArgs,
+      ClosureArgumentAssembly targetModule.wasmModule hosts.env targetCode
+          physicalArgs initial locals ∧
+        ConstructorArgumentsRelated witness expectedKinds physicalArgs
+          semanticValues := by
+  induction rows generalizing targetCode with
+  | nil =>
+      simp only [List.flatMap_nil, instructions] at adapted
+      change (Except.ok [] : Except AdapterError Wasm.Program) =
+        .ok targetCode at adapted
+      have targetEq : targetCode = [] := (Except.ok.inj adapted).symm
+      subst targetCode
+      exact ⟨[], .nil, .nil⟩
+  | @cons index expectedKind actualKind value indices expectedKinds
+      semanticValues expectedAt actualAt valueAt kindRefines rest ih =>
+      obtain ⟨targetField, targetRest, fieldAdapted, restAdapted,
+          targetEq⟩ :=
+        instructions_append_eq_ok (by simpa using adapted)
+      subst targetCode
+      obtain ⟨restPhysical, restAssembly, restRelated⟩ :=
+        ih restAdapted
+      by_cases expectedErased : expectedKind = .erased
+      · subst expectedKind
+        have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index =
+              [.i32Const .erased 0] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt]
+        rw [fieldSource] at fieldAdapted
+        obtain ⟨fieldAssembly, fieldRelated⟩ :=
+          ClosureArgumentAssembly.fixedErased_of_adapted fieldAdapted
+            applicationRelated actualAt kindRefines valueAt
+        refine ⟨.i32 0 :: restPhysical, ?_, .cons fieldRelated restRelated⟩
+        simpa using fieldAssembly.append restAssembly
+      · have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [
+              .localGet closureId,
+              .call (.runtime
+                (.closureProj function arity fixed index expectedKind))] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt, expectedErased,
+            targetName]
+        rw [fieldSource] at fieldAdapted
+        obtain ⟨fieldPhysical, fieldAssembly, fieldRelated⟩ :=
+          ClosureArgumentAssembly.fixedProjection_of_adapted spec closureFound
+            closureLocal fieldAdapted applicationFound applicationRelated
+            fixedSize actualAt kindRefines valueAt failureClear
+        refine ⟨fieldPhysical :: restPhysical, ?_,
+          .cons fieldRelated restRelated⟩
+        simpa using fieldAssembly.append restAssembly
+  | @snoc indices expectedKinds semanticValues index expectedKind actualKind
+      value rest expectedAt actualAt valueAt kindRefines ih =>
+      obtain ⟨targetPrefix, targetField, prefixAdapted, fieldAdapted,
+          targetEq⟩ :=
+        instructions_append_eq_ok (by simpa [List.flatMap_append] using adapted)
+      subst targetCode
+      obtain ⟨prefixPhysical, prefixAssembly, prefixRelated⟩ :=
+        ih prefixAdapted
+      by_cases expectedErased : expectedKind = .erased
+      · subst expectedKind
+        have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index =
+              [.i32Const .erased 0] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt]
+        rw [fieldSource] at fieldAdapted
+        obtain ⟨fieldAssembly, fieldRelated⟩ :=
+          ClosureArgumentAssembly.fixedErased_of_adapted fieldAdapted
+            applicationRelated actualAt kindRefines valueAt
+        refine ⟨prefixPhysical ++ [.i32 0], ?_,
+          prefixRelated.append (.cons fieldRelated .nil)⟩
+        simpa using prefixAssembly.append fieldAssembly
+      · have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [
+              .localGet closureId,
+              .call (.runtime
+                (.closureProj function arity fixed index expectedKind))] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt, expectedErased,
+            targetName]
+        rw [fieldSource] at fieldAdapted
+        obtain ⟨fieldPhysical, fieldAssembly, fieldRelated⟩ :=
+          ClosureArgumentAssembly.fixedProjection_of_adapted spec closureFound
+            closureLocal fieldAdapted applicationFound applicationRelated
+            fixedSize actualAt kindRefines valueAt failureClear
+        refine ⟨prefixPhysical ++ [fieldPhysical], ?_,
+          prefixRelated.append (.cons fieldRelated .nil)⟩
+        simpa using prefixAssembly.append fieldAssembly
+
+/-- The actual fixed-field prefix emitted for a resolved saturated call
+assembles exactly the captured semantic prefix expected by the callee. The
+allocation ABI invariant supplies the pointwise kind compatibility; all
+numeric target indices still come from successful adaptation. -/
+theorem SaturatedClosureCallResolution.fixedFieldsAssembly
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureIndex : Nat} {address : Word32}
+    {captureKinds : Array AbiKind} {targetCode : Wasm.Program}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) site.closureId =
+        some closureIndex)
+    (closureLocal : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (adapted : instructions sourceModule sourceFunction labels
+      (Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+        resolution.arity resolution.captures.size resolution.parameterKinds) =
+        .ok targetCode)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds resolution.captures)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physicalCaptures,
+      ClosureArgumentAssembly targetModule.wasmModule hosts.env targetCode
+          physicalCaptures initial locals ∧
+        ConstructorArgumentsRelated witness
+          (resolution.parameterKinds.extract 0 resolution.captures.size).toList
+          physicalCaptures resolution.captures.toList := by
+  have captureKindsRefine :=
+    resolution.captureKindsRefine aligned applicationRelated
+  have rows := ClosureCaptureRows.prefix applicationRelated.captureKindsSize
+    captureKindsRefine resolution.captures.size (le_refl _)
+  simpa [Array.toList_extract, List.extract_eq_take_drop] using
+    rows.assembly_of_adapted spec resolution.targetName closureFound
+      closureLocal (by
+        simpa [Fir.Wasm.compileFixedClosureFields] using adapted)
+      applicationFound applicationRelated rfl failureClear
+
+/-- The complete generated capture/ordinary-argument prefix for a resolved
+saturated call assembles a physical operand row related to the callee's full
+declaration ABI row. This is the execution-facing bridge from compiler output
+to declaration induction; it assumes neither a target trace certificate nor
+execution of the callee body. -/
+theorem SaturatedClosureCallResolution.argumentsAssembly
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureIndex : Nat} {address : Word32}
+    {captureKinds : Array AbiKind} {targetCode : Wasm.Program}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) site.closureId =
+        some closureIndex)
+    (closureLocal : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (adapted : instructions sourceModule sourceFunction labels
+      (Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+          resolution.arity resolution.captures.size
+          resolution.parameterKinds ++ site.argumentCode) =
+        .ok targetCode)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds resolution.captures)
+    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv initial
+      locals witness)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physicalArgs,
+      ClosureArgumentAssembly targetModule.wasmModule hosts.env targetCode
+          physicalArgs initial locals ∧
+        ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+          physicalArgs (resolution.captures ++ site.semanticArgs).toList := by
+  obtain ⟨targetCaptures, targetArguments, capturesAdapted,
+      argumentsAdapted, targetEq⟩ := instructions_append_eq_ok adapted
+  subst targetCode
+  obtain ⟨physicalCaptures, capturesAssembly, capturesRelated⟩ :=
+    resolution.fixedFieldsAssembly spec aligned closureFound closureLocal
+      capturesAdapted applicationFound applicationRelated failureClear
+  obtain ⟨physicalArguments, argumentsReady, _, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs spec.localsAligned
+      site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+      stateRelated
+  have expectedArguments :
+      ConstructorArgumentsRelated witness
+        (resolution.parameterKinds.extract resolution.captures.size
+          resolution.parameterKinds.size).toList
+        physicalArguments site.semanticArgs.toList :=
+    argumentsRelated.ofKindsRefine resolution.argumentsRefine
+  refine ⟨physicalCaptures ++ physicalArguments,
+    capturesAssembly.append
+      (ClosureArgumentAssembly.ofConstructorArgsReady argumentsReady), ?_⟩
+  rw [← resolution.parameterKinds_partition]
+  simpa using capturesRelated.append expectedArguments
+
 /-- Source-only hereditary admission for one exactly saturated closure call.
 
 The successful semantic application equation exposes the runtime *after*
