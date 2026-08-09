@@ -1169,8 +1169,13 @@ acceptance tests pass.
    Talos instruction also produces target progress, prove finite terminal
    collapse to the checked boundary, construct the compiler relation and rank
    from lowering/adaptation plus W6 operation laws, and derive divergence
-   preservation. Add the backward direction only when the supported target
-   transition surface is closed enough for a useful weak bisimulation.
+   preservation. The emitted grammar inventory and local collapse laws are
+   already checked: finite internal calls ending at `.ret`, block fallthrough
+   and `br 0`, loop fallthrough, and either conditional branch reconstruct the
+   exact outer Talos step. Next package them as an explicit stack with loop
+   restart and outward branch propagation. Add the backward direction only
+   when the supported target transition surface is closed enough for a useful
+   weak bisimulation.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

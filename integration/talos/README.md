@@ -495,6 +495,16 @@ result. `OutOfFuel` is still never used as a trace checkpoint, and no caller
 will pass the relation as a correctness certificate in the final export
 theorem.
 
+`FirTalos.Correctness.StructuredWasmFrames` now supplies the first local
+collapse laws for that refinement. The adapter inventory reduces the relevant
+structured grammar to direct calls, zero-arity blocks/loops/conditionals,
+indexed branches, `.ret`, and ordinary atomic instructions. A finite internal
+callee ending at generated `.ret` reconstructs the caller's exact Talos call;
+completed block fallthrough and `br 0`, loop fallthrough, and either selected
+conditional body reconstruct their exact outer instruction step. The next
+slice turns these laws into an explicit frame stack and adds loop restart and
+outward branch propagation.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine
 runner paths and produces standards-consumable, host-backed Wasm artifacts for

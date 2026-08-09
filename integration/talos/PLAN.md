@@ -5798,6 +5798,16 @@ operation laws. The current terminating whole-export theorem becomes a
 corollary of that stronger relation; it is not discarded or repackaged as a
 certificate.
 
+The adapter inventory and first collapse layer are now checked in
+`StructuredWasmFrames`. The relevant emitted structured grammar is direct
+calls, zero-arity blocks/loops/conditionals, indexed branches, `.ret`, and
+ordinary atomics. Exact frame laws collapse a finite internal call ending at
+generated `.ret`, block fallthrough or `br 0`, loop fallthrough, and either
+selected conditional body back to their outer Talos instruction step. The
+next implementation slice packages these laws into an explicit frame stack
+and adds loop restart plus outward branch propagation before the compiler
+relation is instantiated.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

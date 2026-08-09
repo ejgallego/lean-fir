@@ -151,6 +151,53 @@ theorem finitePath_exec_ret
   apply finitePath_exec_return (exitFuel := 1) path atExit
   simp only [Wasm.execOne.eq_def]
 
+/-- A finite prefix whose next residual instruction branches agrees with the
+corresponding Talos break continuation above one common fuel bound. -/
+theorem finitePath_exec_break
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {count : Nat} {before after : ResumableWasmState α}
+    {exitFuel level : Nat} {instruction : Wasm.Instruction}
+    {rest : Wasm.Program} {finalStore : Wasm.Store α}
+    {finalLocals : Wasm.Locals}
+    (path : FinitePath (ResumableWasmStep module env) count before after)
+    (atExit : after.program = instruction :: rest)
+    (branched :
+      Wasm.execOne exitFuel module after.store after.locals instruction env =
+        .Break level finalStore finalLocals) :
+    ∃ bound, ∀ fuel, bound ≤ fuel →
+      Wasm.exec fuel module before.store before.locals before.program env =
+        .Break level finalStore finalLocals := by
+  obtain ⟨prefixBound, prefixStable⟩ := finitePath_exec_eq path
+  refine ⟨Nat.max prefixBound exitFuel, ?_⟩
+  intro fuel enough
+  have prefixEnough : prefixBound ≤ fuel :=
+    Nat.le_trans (Nat.le_max_left prefixBound exitFuel) enough
+  have exitEnough : exitFuel ≤ fuel :=
+    Nat.le_trans (Nat.le_max_right prefixBound exitFuel) enough
+  have notOutOfFuel :
+      Wasm.execOne exitFuel module after.store after.locals instruction env ≠
+        .OutOfFuel := by
+    rw [branched]
+    intro impossible
+    cases impossible
+  have exitAtFuel := Wasm.execOne_fuel_mono exitEnough notOutOfFuel
+  rw [branched] at exitAtFuel
+  rw [prefixStable fuel prefixEnough, atExit]
+  simp only [Wasm.exec, exitAtFuel]
+
+/-- Direct symbolic-compiler specialization for a residual branch. -/
+theorem finitePath_exec_br
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {count : Nat} {before after : ResumableWasmState α}
+    {level : Nat} {rest : Wasm.Program}
+    (path : FinitePath (ResumableWasmStep module env) count before after)
+    (atExit : after.program = .br level :: rest) :
+    ∃ bound, ∀ fuel, bound ≤ fuel →
+      Wasm.exec fuel module before.store before.locals before.program env =
+        .Break level after.store after.locals := by
+  apply finitePath_exec_break (exitFuel := 1) path atExit
+  simp only [Wasm.execOne.eq_def]
+
 end ResumableWasmStep
 
 /-- Canonical resumable entry configuration for a non-imported function. -/
