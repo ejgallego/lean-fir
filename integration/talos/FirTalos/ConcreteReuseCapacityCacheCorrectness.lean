@@ -5025,6 +5025,421 @@ theorem codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
     invariant, stateRelated.2.1,
     valueRelated.ofRefines resultRefines⟩
 
+/--
+Structural target correctness for the ABI-indexed hereditary source judgment.
+
+This theorem is the non-circular compiler core. It consumes uniform runtime
+laws for the current generated function, follows the finite source derivation,
+and returns the physical value at the enclosing declaration's exact ABI. The
+call law is still an explicit parameter here; the generated-declaration
+induction discharges it recursively from the nested callee derivation.
+-/
+theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {labels : List FVarId}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported
+        directLetAllocationCost context expectedResult facts sourceRuntime
+        sourceEnv code resultFacts resultRuntime resultEnv resultValue
+        requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (DirectSupported context) directLetAllocationCost Frame)
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (ExternalSupported context) Frame)
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          directLetAllocationCost context)
+        Frame)
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (LazySupported context) Frame)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env (CaseSupported context))
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env (EffectSupported context) (Frame facts)) :
+    ∃ resultStore resultLocals resultWitness physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness [] (ExactReturnControlPost resultStore physical) ∧
+        Frame resultFacts 0 resultRuntime resultEnv resultStore resultLocals
+          resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness expectedResult physical resultValue := by
+  induction evaluation generalizing targetCode initial locals witness with
+  | ret sourceLookup resultCompiled resultRefines =>
+      exact codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
+        (slack := 0) sourceLookup resultCompiled resultRefines adapted
+        localsAligned invariant frameRelated
+  | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
+      nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
+      resultValue continuationCost supported sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          directLetAllocationCost decl ≤
+            directLetAllocationCost decl + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, _directTransports, producedTransfer,
+          nextInvariant⟩ :=
+        directRuntimeRefines supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted localsAligned continuationInvariant
+          directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+          lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @externalLet context sourceRuntime sourceEnv decl continuation nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult resultFacts
+      resultRuntime resultEnv resultValue continuationCost supported sourceStep
+      transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ stepCost + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        externalRuntimeRefines supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted localsAligned continuationInvariant
+          directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+          lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_externalLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @directCallLet context decl sourceEnv sourceRuntime calleeResultFacts
+      nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
+      expectedResult continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction site row callee transfer continued calleeIH
+      continuedIH =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ stepCost + continuationCost :=
+        Nat.le_add_right _ _
+      have sourceStep :
+          SourceCallLetResult context externals sourceRuntime sourceEnv decl
+            continuation nextRuntime sourceValue :=
+        site.sourceCallLetResult (row.contextsCoherent rfl rfl)
+          callee.sourceResult
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        callRuntimeRefines (.intro site row callee) stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        continuedIH continuationAdapted localsAligned continuationInvariant
+          directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+          lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_callLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @lazyLet context sourceRuntime sourceEnv decl continuation nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult resultFacts
+      resultRuntime resultEnv resultValue continuationCost path supported
+      sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ stepCost + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        lazyRuntimeRefines supported stepFits invariant sourceStep valueCompiled
+          valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Frame nextFacts continuationCost nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted localsAligned continuationInvariant
+          directRuntimeRefines externalRuntimeRefines callRuntimeRefines
+          lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_lazyLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @caseOf context sourceRuntime sourceEnv cases selected expectedResult facts
+      resultFacts resultRuntime resultEnv resultValue requiredBytes supported
+      sourceStep continued ih =>
+      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
+        caseRuntimeRefines supported sourceStep
+          (frameRelated invariant).stateRelated adapted
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih selectedAdapted localsAligned invariant directRuntimeRefines
+          externalRuntimeRefines callRuntimeRefines lazyRuntimeRefines
+          caseRuntimeRefines effectRuntimeRefines
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        lift [] (ExactReturnControlPost resultStore physical)
+          (by
+            intro continuation returned
+            subst continuation
+            rfl)
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @effect context sourceRuntime sourceEnv code continuation nextRuntime
+      expectedResult facts resultFacts resultRuntime resultEnv resultValue
+      requiredBytes supported sourceStep continued ih =>
+      obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+          _externalsPreserved, nextInvariant⟩ :=
+        effectRuntimeRefines _ supported sourceStep
+          (frameRelated invariant).stateRelated invariant adapted
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih continuationAdapted localsAligned nextInvariant directRuntimeRefines
+          externalRuntimeRefines callRuntimeRefines lazyRuntimeRefines
+          caseRuntimeRefines effectRuntimeRefines
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_effect step continuationWP, resultInvariant, failureClear,
+        valueRelated⟩
+
+/--
+The ABI-indexed hereditary theorem preserves arbitrary caller-owned budget
+slack. The source derivation accounts only for the selected path cost; the
+shifted operation laws thread the additional budget through every step and
+the terminal return therefore retains it unchanged.
+-/
+theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_withSlack
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {labels : List FVarId}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value} {requiredBytes slack : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported
+        directLetAllocationCost context expectedResult facts sourceRuntime
+        sourceEnv code resultFacts resultRuntime resultEnv resultValue
+        requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels code targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts (requiredBytes + slack) sourceRuntime sourceEnv initial locals
+        witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness)
+    (directRuntimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env
+        (DirectSupported context) directLetAllocationCost Frame)
+    (externalRuntimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (ExternalSupported context) Frame)
+    (callRuntimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          directLetAllocationCost context)
+        Frame)
+    (lazyRuntimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels target.wasmModule hosts.env externals
+        (LazySupported context) Frame)
+    (caseRuntimeRefines :
+      CaseRuntimeRefines context sourceModule sourceFunction labels
+        target.wasmModule hosts.env (CaseSupported context))
+    (effectRuntimeRefines :
+      ∀ facts,
+        EffectRuntimeRefines context sourceModule sourceFunction labels
+          target.wasmModule hosts.env (EffectSupported context) (Frame facts)) :
+    ∃ resultStore resultLocals resultWitness physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+          hosts.env sourceRuntime sourceEnv code targetCode initial locals
+          witness [] (ExactReturnControlPost resultStore physical) ∧
+        Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
+          resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness expectedResult physical resultValue := by
+  have shiftedInvariant :
+      ReuseCapacityBudgetShiftedFrame Frame slack facts requiredBytes
+        sourceRuntime sourceEnv initial locals witness := by
+    simpa [ReuseCapacityBudgetShiftedFrame] using invariant
+  have shiftedFrameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        ReuseCapacityBudgetShiftedFrame Frame slack frameFacts frameBytes
+            frameRuntime frameEnv frameStore frameLocals frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness := by
+    intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+      frameWitness related
+    exact frameRelated related
+  obtain ⟨resultStore, resultLocals, resultWitness, physical, targetWP,
+      resultInvariant, failureClear, valueRelated⟩ :=
+    codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_exactResult evaluation
+      adapted localsAligned shiftedInvariant shiftedFrameRelated
+      (directRuntimeRefines.shiftBudget slack)
+      (externalRuntimeRefines.shiftBudget slack)
+      (callRuntimeRefines.shiftBudget slack)
+      (lazyRuntimeRefines.shiftBudget slack) caseRuntimeRefines
+      (fun facts =>
+        EffectRuntimeRefines.shiftBudget (effectRuntimeRefines facts) slack)
+  have resultFrame :
+      Frame resultFacts slack resultRuntime resultEnv resultStore resultLocals
+        resultWitness := by
+    simpa [ReuseCapacityBudgetShiftedFrame] using resultInvariant
+  exact ⟨resultStore, resultLocals, resultWitness, physical, targetWP,
+    resultFrame, failureClear, valueRelated⟩
+
 /-- The nested body determines the ordinary source call prefix. -/
 theorem ReuseCapacityDirectHereditaryCallSupported.sourceStep
     {externals : ExternalImpl}
@@ -10153,6 +10568,113 @@ private theorem abiKind?_eq_ok_some_of_directAbiKind?_eq_some
           simp only [result, Option.some.injEq] at classified
           subst actual
           rfl
+
+/--
+Uniform non-recursive operation laws for every declaration row generated by
+one successful production pipeline.
+
+These are the local compiler/runtime theorems consumed by the hereditary
+structural induction. They quantify over the actual generated function and
+over every concrete entry state; they contain no source execution or target
+execution certificate. Direct named calls are deliberately absent: their law
+is obtained recursively from the nested hereditary derivation.
+-/
+structure DirectHereditaryGeneratedOperationLaws
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl)
+    (DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop)
+    (CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate) : Prop where
+  direct :
+    ∀ {declaration : LCNF.Decl .impure}
+        {context : Fir.Wasm.Context}
+        {sourceCode : LCNF.Code .impure}
+        {sourceFunction : Fir.Wasm.Function}
+        (_row : ConcreteGeneratedInternalDeclaration program declaration
+          context sourceCode sourceModule sourceFunction target)
+        {entryRuntime : RuntimeState}
+        {entryStore : Wasm.Store Host}
+        {entryWitness : RefinementWitness},
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env
+        (DirectSupported context) directLetAllocationCost
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          entryRuntime entryStore entryWitness)
+  external :
+    ∀ {declaration : LCNF.Decl .impure}
+        {context : Fir.Wasm.Context}
+        {sourceCode : LCNF.Code .impure}
+        {sourceFunction : Fir.Wasm.Function}
+        (_row : ConcreteGeneratedInternalDeclaration program declaration
+          context sourceCode sourceModule sourceFunction target)
+        {entryRuntime : RuntimeState}
+        {entryStore : Wasm.Store Host}
+        {entryWitness : RefinementWitness},
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (ExternalSupported context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          entryRuntime entryStore entryWitness)
+  lazy :
+    ∀ {declaration : LCNF.Decl .impure}
+        {context : Fir.Wasm.Context}
+        {sourceCode : LCNF.Code .impure}
+        {sourceFunction : Fir.Wasm.Function}
+        (_row : ConcreteGeneratedInternalDeclaration program declaration
+          context sourceCode sourceModule sourceFunction target)
+        {entryRuntime : RuntimeState}
+        {entryStore : Wasm.Store Host}
+        {entryWitness : RefinementWitness},
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (LazySupported context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          entryRuntime entryStore entryWitness)
+  caseOf :
+    ∀ {declaration : LCNF.Decl .impure}
+        {context : Fir.Wasm.Context}
+        {sourceCode : LCNF.Code .impure}
+        {sourceFunction : Fir.Wasm.Function}
+        (_row : ConcreteGeneratedInternalDeclaration program declaration
+          context sourceCode sourceModule sourceFunction target),
+      CaseRuntimeRefines context sourceModule sourceFunction []
+        target.wasmModule hosts.env (CaseSupported context)
+  effect :
+    ∀ {declaration : LCNF.Decl .impure}
+        {context : Fir.Wasm.Context}
+        {sourceCode : LCNF.Code .impure}
+        {sourceFunction : Fir.Wasm.Function}
+        (_row : ConcreteGeneratedInternalDeclaration program declaration
+          context sourceCode sourceModule sourceFunction target)
+        {entryRuntime : RuntimeState}
+        {entryStore : Wasm.Store Host}
+        {entryWitness : RefinementWitness}
+        (facts : ReuseCapacityFacts),
+      EffectRuntimeRefines context sourceModule sourceFunction []
+        target.wasmModule hosts.env (EffectSupported context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          entryRuntime entryStore entryWitness facts)
 
 /--
 Recursive semantic obligation for compiler-generated internal declarations.
