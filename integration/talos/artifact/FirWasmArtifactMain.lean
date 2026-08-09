@@ -13,6 +13,7 @@ import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentScalarBox
 import Fir.Wasm.Emit.ResidentString
 
 open Fir.Wasm
@@ -132,6 +133,21 @@ def emitResidentClosureAllocation (path : System.FilePath) : IO Unit := do
     Fir.Wasm.Emit.ResidentClosureAllocation.manifest.compress
   IO.println
     s!"resident-closure-allocation: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
+def emitResidentScalarBox (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentScalarBox.residentExampleModule.mapError fun error =>
+      s!"resident scalar-box linking failed: {repr error}"
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident scalar-box encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath <|
+    Fir.Wasm.Emit.ResidentScalarBox.manifest.compress
+  IO.println
+    s!"resident-scalar-box: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
 def emitResidentLiterals (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
@@ -338,6 +354,7 @@ def usage : String :=
     "       fir-wasm-artifact resident-arrays <output.wasm>\n" ++
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-scalar-box <output.wasm>\n" ++
     "       fir-wasm-artifact resident-literals <output.wasm>\n" ++
     "       fir-wasm-artifact resident-setters <output.wasm>\n" ++
     "       fir-wasm-artifact resident-tag-setter <output.wasm>\n" ++
@@ -382,6 +399,9 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-closure-allocation", output] =>
         emitResidentClosureAllocation output
+        return 0
+    | ["resident-scalar-box", output] =>
+        emitResidentScalarBox output
         return 0
     | ["resident-literals", output] =>
         emitResidentLiterals output

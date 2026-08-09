@@ -350,6 +350,72 @@ private def internalizeOperationUnchecked (operation : RuntimeOp) (name : Name)
     memory := some memory }
   return result
 
+private structure RuntimeBinding where
+  operation : RuntimeOp
+  name : Name
+  function : Function
+
+private partial def rewriteRuntimeInstructionBatch
+    (bindings : Array RuntimeBinding) : Instruction → Instruction
+  | .call (.runtime operation) =>
+      match bindings.find? (fun binding => binding.operation == operation) with
+      | some binding => .call (.declaration binding.name)
+      | none => .call (.runtime operation)
+  | .block label body =>
+      .block label (body.map (rewriteRuntimeInstructionBatch bindings))
+  | .loop label body =>
+      .loop label (body.map (rewriteRuntimeInstructionBatch bindings))
+  | .ifElse thenBody elseBody =>
+      .ifElse
+        (thenBody.map (rewriteRuntimeInstructionBatch bindings))
+        (elseBody.map (rewriteRuntimeInstructionBatch bindings))
+  | instruction => instruction
+
+private def installRuntimeBinding (functions : Array Function)
+    (binding : RuntimeBinding) : Except LinkError (Array Function) := do
+  match functions.find? (·.name == binding.name) with
+  | none => return functions.push binding.function
+  | some existing =>
+      unless existing == binding.function do
+        throw (.reservedDeclaration binding.name)
+      return functions
+
+/--
+Internalize one complete helper family with a single whole-module rewrite.
+Several compiler operations may intentionally share one physical helper; the
+binding check accepts that only when their generated functions are identical.
+-/
+private def internalizeOperationsUnchecked (bindings : Array RuntimeBinding)
+    (module : Module) : Except LinkError Module := do
+  if bindings.isEmpty then
+    return module
+  for binding in bindings do
+    unless module.runtimeOperations.contains binding.operation do
+      throw (.missingOperation binding.name)
+    if module.imports.any (·.declaration? == some binding.name) then
+      throw (.reservedDeclaration binding.name)
+  let memory ← match module.memory with
+    | none => pure residentMemory
+    | some memory =>
+        unless memory == residentMemory do
+          throw .incompatibleMemory
+        pure memory
+  let functions := module.functions.map fun function =>
+    { function with
+      body := function.body.map (rewriteRuntimeInstructionBatch bindings) }
+  let functions ← bindings.foldlM (init := functions) installRuntimeBinding
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  return {
+    module with
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    functions
+    exports := bindings.foldl
+      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
+      module.exports
+    runtimeOperations
+    memory := some memory }
+
 private def internalizeOperation (operation : RuntimeOp) (name : Name)
     (function : Function) (module : Module) : Except LinkError Module := do
   validateInput module
@@ -374,11 +440,12 @@ separate proof-lane work.
 def internalizeReadProjections (module : Module) : Except LinkError Module := do
   validateInput module
   let operations := module.runtimeOperations.filter supportsReadProjection
-  let result ← operations.foldlM (init := module) fun result operation => do
+  let bindings ← operations.mapM fun operation => do
     let some name := readProjectionName? operation |
       throw (.unsupportedProjection 0 0 .erased)
     let function ← readProjectionFunction operation
-    internalizeOperationUnchecked operation name function result
+    return { operation, name, function : RuntimeBinding }
+  let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
 /-- The exact projection family exercised by compiler-produced Lean 4.32 `prettyM`. -/
@@ -408,6 +475,7 @@ def prettyFormatReadProjectionModule : Except LinkError Module := do
 
 private def closureProjectionSuffix? : AbiKind → Option String
   | .object => some "object"
+  | .tagged => some "tagged"
   | .tobject => some "tobject"
   | .uint8 => some "uint8"
   | .uint32 => some "uint32"
@@ -477,18 +545,20 @@ private def closureProjectionFunction (index : Nat) (result : AbiKind) :
 def internalizeClosureProjections (module : Module) : Except LinkError Module := do
   validateInput module
   let operations := module.runtimeOperations.filter supportsClosureProjection
-  let result ← operations.foldlM (init := module) fun result operation => do
+  let bindings ← operations.mapM fun operation => do
     let some name := closureProjectionName? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let some (index, kind) := closureProjectionCoordinate? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let function ← closureProjectionFunction index kind
-    internalizeOperationUnchecked operation name function result
+    return { operation, name, function : RuntimeBinding }
+  let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
-/-- The twelve distinct physical closure-capture reads reachable from `prettyM`. -/
+/-- Physical closure-capture reads reachable from the control and Flat `prettyM` entries. -/
 def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (0, .object),
+  (0, .tagged),
   (0, .tobject),
   (0, .uint8),
   (1, .object),
@@ -577,13 +647,14 @@ these physical header comparisons implement semantic `closureMatches`.
 def internalizeClosureMatches (module : Module) : Except LinkError Module := do
   validateInput module
   let operations := module.runtimeOperations.filter isClosureMatch
-  let result ← operations.foldlM (init := module) fun result operation => do
-    let some name := closureMatchName? result.closureDispatch operation |
+  let bindings ← operations.mapM fun operation => do
+    let some name := closureMatchName? module.closureDispatch operation |
       match operation.closureTarget? with
       | some function => throw (.missingClosureTarget function)
       | none => throw .unsupportedClosureMatch
-    let function ← closureMatchFunction result.closureDispatch operation
-    internalizeOperationUnchecked operation name function result
+    let function ← closureMatchFunction module.closureDispatch operation
+    return { operation, name, function : RuntimeBinding }
+  let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
 def closureMatchExampleDispatch : Array Name := #[`callee, `other]

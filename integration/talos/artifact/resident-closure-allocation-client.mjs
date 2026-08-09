@@ -41,6 +41,8 @@ export async function checkResidentClosureAllocation(bytes) {
     "resident empty-closure export is missing");
   equal(typeof exports.resident_closure_captured, "function",
     "resident captured-closure export is missing");
+  equal(typeof exports.resident_closure_inside_loop, "function",
+    "resident loop-closure export is missing");
   equal(typeof exports.fir_heap_frontier, "function",
     "resident closure-allocation frontier export is missing");
 
@@ -80,6 +82,14 @@ export async function checkResidentClosureAllocation(bytes) {
     "captured usize slot drifted");
   equal(u32(exports.memory, 0), 0xdecafbad,
     "captured closure failed to restore the scratch word");
+
+  const insideLoop = exports.resident_closure_inside_loop();
+  equal(insideLoop, 1112, "loop-nested closure returned the wrong address");
+  equal(exports.fir_heap_frontier(), 1144,
+    "loop-nested closure advanced the wrong extent");
+  expect(header(exports.memory, insideLoop).every((value, index) =>
+    value === [2, 2, 1, 32, 1, 3, 0, 1][index]),
+  `loop-nested closure header drifted: ${header(exports.memory, insideLoop)}`);
 
   const { exports: concrete } = await WebAssembly.instantiate(module, {});
   const host = new ConcreteHost(

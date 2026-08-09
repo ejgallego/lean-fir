@@ -147,44 +147,31 @@ def partialApplicationFunction (module : Module) (ordinal : Nat)
       stores ++
       retagAddress result }
 
-private partial def rewriteInstruction (operation : RuntimeOp)
-    (name : Name) : Instruction → Instruction
-  | .call (.runtime candidate) =>
-      if candidate == operation then
-        .call (.declaration name)
-      else
-        .call (.runtime candidate)
+private structure Binding where
+  operation : RuntimeOp
+  name : Name
+  function : Function
+
+private partial def rewriteInstruction (bindings : Array Binding) :
+    Instruction → Instruction
+  | .call (.runtime operation) =>
+      match bindings.find? (fun binding => binding.operation == operation) with
+      | some binding => .call (.declaration binding.name)
+      | none => .call (.runtime operation)
   | .block label body =>
-      .block label (body.map (rewriteInstruction operation name))
+      .block label (body.map (rewriteInstruction bindings))
+  | .loop label body =>
+      .loop label (body.map (rewriteInstruction bindings))
   | .ifElse thenBody elseBody =>
-      .ifElse
-        (thenBody.map (rewriteInstruction operation name))
-        (elseBody.map (rewriteInstruction operation name))
+      .ifElse (thenBody.map (rewriteInstruction bindings))
+        (elseBody.map (rewriteInstruction bindings))
   | instruction => instruction
 
-private def rewriteFunction (operation : RuntimeOp) (name : Name)
-    (function : Function) : Function :=
-  { function with body := function.body.map (rewriteInstruction operation name) }
-
-private def internalizeOne (ordinal : Nat) (operation : RuntimeOp)
-    (module : Module) : Except LinkError Module := do
-  let name := partialApplicationName ordinal
-  if module.imports.any (·.declaration? == some name) ||
-      module.functions.any (·.name == name) ||
-      module.exports.contains name then
-    throw (.reservedDeclaration name)
-  let function ← partialApplicationFunction module ordinal operation
-  let functions :=
-    (module.functions.map (rewriteFunction operation name)).push function
-  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  let externalImports := module.imports.filter (·.operation?.isNone)
-  let imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
-  return {
-    module with
-    imports
-    functions
-    exports := Fir.Wasm.addUnique module.exports name
-    runtimeOperations }
+private def installBinding (functions : Array Function) (binding : Binding) :
+    Except LinkError (Array Function) := do
+  if functions.any (·.name == binding.name) then
+    throw (.reservedDeclaration binding.name)
+  return functions.push binding.function
 
 /--
 Internalize every supported closure allocation after the resident allocator is
@@ -204,9 +191,26 @@ def internalizePartialApplications (module : Module) : Except LinkError Module :
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
   let operations := module.runtimeOperations.filter isPartialApplication
-  let result ← operations.toList.zipIdx.foldlM (init := module)
-    fun result (operation, ordinal) =>
-      internalizeOne ordinal operation result
+  let bindings ← operations.toList.zipIdx.toArray.mapM fun (operation, ordinal) => do
+    let name := partialApplicationName ordinal
+    if module.imports.any (·.declaration? == some name) ||
+        module.functions.any (·.name == name) || module.exports.contains name then
+      throw (.reservedDeclaration name)
+    let function ← partialApplicationFunction module ordinal operation
+    return { operation, name, function : Binding }
+  let functions := module.functions.map fun function =>
+    { function with body := function.body.map (rewriteInstruction bindings) }
+  let functions ← bindings.foldlM (init := functions) installBinding
+  let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
+  let externalImports := module.imports.filter (·.operation?.isNone)
+  let result : Module := {
+    module with
+    imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
+    functions
+    exports := bindings.foldl
+      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
+      module.exports
+    runtimeOperations }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
@@ -249,10 +253,22 @@ def exampleCapturedCaller : Function := {
     .call (.runtime exampleOperations[1]!),
     .ret] }
 
+def exampleLoopCaller : Function := {
+  name := `resident_closure_inside_loop
+  params := #[]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .loop ⟨`residentClosureLoop⟩ [
+      .call (.runtime exampleOperations[0]!),
+      .ret],
+    .unreachable] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
-  functions := #[exampleEmptyCaller, exampleCapturedCaller]
-  exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name]
+  functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller]
+  exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
+    exampleLoopCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -282,9 +298,10 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        2 + ResidentAllocator.helperNames.size + exampleOperations.size &&
+        3 + ResidentAllocator.helperNames.size + exampleOperations.size &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
+      module.exports.contains exampleLoopCaller.name &&
       module.closureDispatch == exampleClosureDispatch &&
       module.closureDescriptors == exampleClosureDescriptors &&
       module.memory == some ResidentRuntime.residentMemory &&

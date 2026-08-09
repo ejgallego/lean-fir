@@ -14,6 +14,7 @@ import Fir.Wasm.Emit.ResidentNumeric
 import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentScalarBox
 import Fir.Wasm.Emit.ResidentString
 import Fir.Wasm.Emit.ResidentUSize
 import Fir.Wasm.Emit.Source
@@ -44,6 +45,7 @@ inductive Step where
   | releases
   | tagSetters
   | cacheSets
+  | scalarBoxesAvailable
   | numericStrict
   | numericAvailable
   | bigNumeric
@@ -132,6 +134,8 @@ private def applyStep (step : Step) (module : Module) :
   | .tagSetters => transform "tag setters" ResidentMutation.internalizeTagSetters module
   | .cacheSets =>
       transform "cache publication" ResidentCache.internalizeCacheSets module
+  | .scalarBoxesAvailable =>
+      transform "available scalar boxes" ResidentScalarBox.internalizeAvailable module
   | .numericStrict =>
       transform "Nat/Int operations" ResidentNumeric.internalize module
   | .numericAvailable =>
@@ -224,7 +228,8 @@ def commonSteps : Array Step := #[
   .increments,
   .releases,
   .tagSetters,
-  .cacheSets]
+  .cacheSets,
+  .scalarBoxesAvailable]
 
 /-- Exact resident pipeline used by the accepted `Std.Format.prettyM` closure. -/
 def prettyFormatPolicy : Policy := {

@@ -13,6 +13,9 @@ import {
   checkFetchedResidentClosureAllocation,
 } from "./resident-closure-allocation-client.mjs";
 import {
+  checkFetchedResidentScalarBox,
+} from "./resident-scalar-box-client.mjs";
+import {
   checkFetchedResidentLiterals,
 } from "./resident-literal-client.mjs";
 import {
@@ -70,6 +73,7 @@ try {
     checkFetchedResidentClosureAllocation(
       "./_build/resident-closure-allocation.wasm",
     ),
+    checkFetchedResidentScalarBox("./_build/resident-scalar-box.wasm"),
     checkFetchedResidentLiterals("./_build/resident-literals.wasm"),
     checkFetchedResidentSetters("./_build/resident-setters.wasm"),
     checkFetchedResidentTagSetter("./_build/resident-tag-setter.wasm"),

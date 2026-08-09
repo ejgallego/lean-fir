@@ -2,6 +2,7 @@ import { ConcreteHost } from "./concrete-host.mjs";
 
 const ENTRIES = [
   ["fir_cproj_0_object", 0, "object"],
+  ["fir_cproj_0_tagged", 0, "tagged"],
   ["fir_cproj_0_tobject", 0, "tobject"],
   ["fir_cproj_0_uint8", 0, "uint8"],
   ["fir_cproj_1_object", 1, "object"],
@@ -98,6 +99,7 @@ function partialOperation(index, result, ordinal) {
 function concreteValue(host, kind, ordinal, leaf) {
   switch (kind) {
     case "object": return leaf;
+    case "tagged": return host.encodeTagged(BigInt(20 + ordinal));
     case "tobject": return host.encodeTagged(BigInt(20 + ordinal));
     case "uint8": return 0x80 + ordinal;
     case "uint32": return (0xf0000000 + ordinal) | 0;

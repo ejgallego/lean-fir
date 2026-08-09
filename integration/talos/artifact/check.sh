@@ -30,6 +30,9 @@ lake exe fir-wasm-artifact resident-closure-allocation \
   _build/resident-closure-allocation.wasm
 node run-resident-closure-allocation.mjs \
   _build/resident-closure-allocation.wasm
+lake exe fir-wasm-artifact resident-scalar-box \
+  _build/resident-scalar-box.wasm
+node run-resident-scalar-box.mjs _build/resident-scalar-box.wasm
 lake exe fir-wasm-artifact resident-literals \
   _build/resident-literals.wasm
 node run-resident-literals.mjs _build/resident-literals.wasm
