@@ -15,7 +15,21 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- No cross-lane integration lease is active.
+- Milestone: `W7-FLAT-RESIDENT-PACKAGE`.
+- Integration owner: `wasm-gen`; the user assigned the W7 owner the temporary
+  lease to land the generation-ready resident helpers and separate Verso Flat
+  package machinery after the shared compiler admission reached `main`.
+- Integration branch/worktree: `integration/flat-publication` in
+  `.worktrees/integration-flat-publication`, based directly on `main` at
+  `18d38ba9`.
+- Candidate stack: W7 helper/linker head `e8026976`, package head `561f9e66`,
+  and formatting follow-up `54c09641`, cherry-picked without the unrelated
+  queued W7 branch history.
+- Lease boundary: validate the isolated stack, publish the helper signatures
+  as generation-ready for W6, and land the deterministic package machinery.
+  The executable Flat package is separately marked provisional until the
+  Verso owner publishes the clean source refactor on a remote-resolvable ref;
+  no local source hash will be presented as accepted provenance.
 
 ## Latest completed integration lease
 
