@@ -19,6 +19,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-HEREDITARY-EXACT-RESULT-STRUCTURAL-CORE`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for this certificate-free compiler-proof slice.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: W6 functional head `d907ef42` and ready mailbox
+  `464e086f`, based directly on `main` at `6061b90c`.
+- Lease boundary: satisfied. The finite hereditary source judgment now records
+  the compiler-derived returned-local ABI and its refinement to the enclosing
+  declaration result. Structural target correctness follows every finite
+  hereditary code spine under explicit generated-operation laws, returns the
+  exact declared ABI, preserves arbitrary caller-owned budget slack, and is
+  packaged as the cache-aware declaration theorem with entry-to-exit
+  transports. No target execution or translation certificate is a premise;
+  no shared semantic Wasm ABI, lowering, validator, adapter, concrete-runtime,
+  cache, closure-table, or interpreter contract changed.
+- Validation: Lean Beam zero-error checkpoint; focused 3,103-job dependency
+  cone; `git diff --check`; Talos setup at `a01d01c`; complete `make check`
+  with 642 unique cases and 1,844/1,844 equal comparisons; and all 3,125
+  `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W7-REUSABLE-SOURCE-AND-BATCHED-ILLUMINATE-ENCODER`.
 - Integration owner: `wasm-gen`; the user assigned the generation owner to
   integrate the ready W7 stack after the previous lease completed.
