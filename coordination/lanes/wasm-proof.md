@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 5307f77d on main
+state: active
+base: 5490cc07 on main
 functional-head: bca03085
 contract-base: 5307f77d on main; ownership-threaded matcher/projection and the existing concrete closure application contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: Introduces proof-only ClosureAllocationsAbiAligned, ConcreteReuseCapa
 checks: PASS Lean Beam update/sync/save for FirTalos.ConcreteReuseCapacityCacheCorrectness and prior focused checkpoints; PASS lake build Fir.Wasm.Lower; PASS lake build FirTalos.ConcreteReuseCapacityCallCorrectness; PASS lake build FirTalos.ConcreteReuseCapacityCacheCorrectness (3103 jobs); PASS git diff --check; PASS make check (642 unique validation cases, 1844/1844 comparisons equal, zero findings); PASS make talos-check (3125 jobs)
 bug-cards: none
 blockers: none
-handoff: ready for fast-forward integration; branch is four functional commits ahead of main and clean at this mailbox update
+handoff: the saturated closure runtime-law stack is linked/accepted on main at 5490cc07; the lane has started the ABI-preserving generated-declaration proof from that clean base
 next: prove DirectHereditaryGeneratedDeclarationAbiInduction from ABI-preserving generated operation laws, then discharge SaturatedClosureCandidateResolver from the executable adapter/resolver rather than retaining it as an external premise
 ```

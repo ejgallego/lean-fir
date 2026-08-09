@@ -471,7 +471,7 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
-- `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW` is ready through W6
+- `W6-SATURATED-CLOSURE-HEREDITARY-RUNTIME-LAW` is linked/accepted through W6
   functional head `bca03085`, based directly on `main` at `5307f77d`. The
   selected matcher may consume the source closure; capture projection,
   generated argument assembly, and the callee all start from its real
