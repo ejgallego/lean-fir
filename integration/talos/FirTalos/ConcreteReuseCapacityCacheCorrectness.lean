@@ -4666,6 +4666,11 @@ continuation. Recursive calls use the exact declaration-local context exposed
 by the executable source lowerer; the derivation contains no target program,
 store, witness, execution, or translation certificate.
 
+The result-ABI index is also source/static evidence. A terminal return records
+the ABI kind assigned to its local by `getLocal` and requires that kind to
+refine the enclosing declaration's expected result. This is the invariant
+needed to relate the returned physical lane at the declaration boundary.
+
 External calls and lazy paths remain explicit source steps for now. Saturated
 closure dispatch and hereditary lazy misses will receive analogous nested
 constructors after the direct-call induction is closed.
@@ -4686,15 +4691,20 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         LCNF.Code .impure → Prop)
     (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate)
     (letCost : LCNF.LetDecl .impure → Nat) :
-    Fir.Wasm.Context → ReuseCapacityFacts → RuntimeState → Env →
+    Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState → Env →
       LCNF.Code .impure → ReuseCapacityFacts → RuntimeState → Env → Value →
         Nat → Prop where
   | ret
-      (sourceLookup : lookup sourceEnv result = some sourceValue) :
+      {actualResultKind : AbiKind}
+      (sourceLookup : lookup sourceEnv result = some sourceValue)
+      (resultCompiled :
+        Fir.Wasm.getLocal context result =
+          .ok (.localGet result, actualResultKind))
+      (resultRefines : actualResultKind.refines expectedResult = true) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.return result) facts
-        sourceRuntime sourceEnv sourceValue 0
+        context expectedResult facts sourceRuntime sourceEnv (.return result)
+        facts sourceRuntime sourceEnv sourceValue 0
   | letValue
       (supported : DirectSupported context facts decl)
       (sourceStep :
@@ -4704,13 +4714,13 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context nextFacts nextRuntime
+          letCost context expectedResult nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
           resultRuntime resultEnv resultValue continuationCost) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.let decl continuation)
-        resultFacts resultRuntime resultEnv resultValue
+        context expectedResult facts sourceRuntime sourceEnv
+        (.let decl continuation) resultFacts resultRuntime resultEnv resultValue
         (letCost decl + continuationCost)
   | externalLet
       (supported :
@@ -4723,13 +4733,13 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context nextFacts nextRuntime
+          letCost context expectedResult nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
           resultRuntime resultEnv resultValue continuationCost) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.let decl continuation)
-        resultFacts resultRuntime resultEnv resultValue
+        context expectedResult facts sourceRuntime sourceEnv
+        (.let decl continuation) resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
   | directCallLet
       {calleeFunction : Fir.Wasm.Function}
@@ -4740,19 +4750,20 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (callee :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost row.context [] sourceRuntime site.calleeEnv site.calleeCode
+          letCost row.context site.calleeResultKind [] sourceRuntime
+          site.calleeEnv site.calleeCode
           calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost)
       (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context nextFacts nextRuntime
+          letCost context expectedResult nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
           resultRuntime resultEnv resultValue continuationCost) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.let decl continuation)
-        resultFacts resultRuntime resultEnv resultValue
+        context expectedResult facts sourceRuntime sourceEnv
+        (.let decl continuation) resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
   | lazyLet
       (path : LazyCachePath)
@@ -4766,13 +4777,13 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context nextFacts nextRuntime
+          letCost context expectedResult nextFacts nextRuntime
           (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
           resultRuntime resultEnv resultValue continuationCost) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.let decl continuation)
-        resultFacts resultRuntime resultEnv resultValue
+        context expectedResult facts sourceRuntime sourceEnv
+        (.let decl continuation) resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
   | caseOf
       (supported : CaseSupported context sourceRuntime sourceEnv cases selected)
@@ -4780,11 +4791,13 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context facts sourceRuntime sourceEnv selected resultFacts
+          letCost context expectedResult facts sourceRuntime sourceEnv selected
+          resultFacts
           resultRuntime resultEnv resultValue requiredBytes) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        context expectedResult facts sourceRuntime sourceEnv (.cases cases)
+        resultFacts
         resultRuntime resultEnv resultValue requiredBytes
   | effect
       (supported :
@@ -4796,12 +4809,13 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost context facts nextRuntime sourceEnv continuation resultFacts
+          letCost context expectedResult facts nextRuntime sourceEnv continuation
+          resultFacts
           resultRuntime resultEnv resultValue requiredBytes) :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv code resultFacts resultRuntime
-        resultEnv resultValue requiredBytes
+        context expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The support payload exposed to the generic structural call theorem. -/
 inductive ReuseCapacityDirectHereditaryCallSupported
@@ -4835,8 +4849,9 @@ inductive ReuseCapacityDirectHereditaryCallSupported
       (callee :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost row.context [] sourceRuntime site.calleeEnv site.calleeCode
-          calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost) :
+          letCost row.context site.calleeResultKind [] sourceRuntime
+          site.calleeEnv site.calleeCode calleeResultFacts nextRuntime
+          calleeResultEnv sourceValue stepCost) :
       ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
         context sourceRuntime sourceEnv decl _continuation nextRuntime
@@ -4860,6 +4875,7 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
     {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -4868,8 +4884,8 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
     (evaluation :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv sourceCode resultFacts
-        resultRuntime resultEnv resultValue requiredBytes) :
+        context expectedResult facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes) :
     ReuseCapacityBudgetedCodeEvaluates context externals
       (DirectSupported context) (ExternalSupported context)
       (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
@@ -4879,16 +4895,17 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
       (EffectSupported context) letCost facts sourceRuntime sourceEnv sourceCode
       resultFacts resultRuntime resultEnv resultValue requiredBytes := by
   induction evaluation with
-  | ret sourceLookup => exact .ret sourceLookup
+  | ret sourceLookup _resultCompiled _resultRefines => exact .ret sourceLookup
   | letValue supported sourceStep transfer _ ih =>
       exact .letValue supported sourceStep transfer ih
   | externalLet supported sourceStep transfer _ ih =>
       exact .externalLet supported sourceStep transfer ih
-  | @directCallLet context decl sourceEnv calleeFunction sourceRuntime
-      calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost facts
-      nextFacts continuation resultFacts resultRuntime resultEnv resultValue
-      continuationCost site row callee transfer continued calleeIH continuedIH =>
-      have contexts : DeclarationContextsCoherent context row.context :=
+  | @directCallLet callContext decl sourceEnv sourceRuntime calleeResultFacts
+      nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
+      expectedResult continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction site row callee transfer continued calleeIH
+      continuedIH =>
+      have contexts : DeclarationContextsCoherent callContext row.context :=
         row.contextsCoherent rfl rfl
       exact .callLet
         (.intro site row callee)
@@ -4919,6 +4936,7 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
     {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -4927,8 +4945,8 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
     (evaluation :
       ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
-        context facts sourceRuntime sourceEnv sourceCode resultFacts
-        resultRuntime resultEnv resultValue requiredBytes) :
+        context expectedResult facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes) :
     SourceCodeResult context externals sourceRuntime sourceEnv sourceCode
       resultRuntime resultValue :=
   evaluation.toBudgeted.sourceResult
@@ -10105,9 +10123,9 @@ def DirectHereditaryGeneratedDeclarationInduction
       (_evaluation :
         ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
           DirectSupported ExternalSupported LazySupported CaseSupported
-          EffectSupported directLetAllocationCost context [] sourceRuntime
-          sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
-          requiredBytes)
+          EffectSupported directLetAllocationCost context resultKind []
+          sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+          resultValue requiredBytes)
       {initial : Wasm.Store Host}
       {initialWitness : RefinementWitness}
       {parameters : List Wasm.Value},

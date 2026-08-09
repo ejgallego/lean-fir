@@ -178,8 +178,9 @@ example
 /--
 The recursive finite-evaluation boundary is source-only: a direct-call node
 contains its callee and continuation derivations, erases to the ordinary mixed
-source judgment, and fixes the exact terminal source state. No target program,
-store, witness, execution, or translation certificate is an input.
+source judgment, fixes the exact terminal source state, and checks that its
+terminal local's ABI refines the enclosing declaration result ABI. No target
+program, store, witness, execution, or translation certificate is an input.
 -/
 example
     {sourceExternals : ExternalImpl}
@@ -198,6 +199,7 @@ example
     {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv resultEnv : Env}
@@ -206,8 +208,9 @@ example
     (evaluation :
       ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
         DirectSupported ExternalSupported LazySupported CaseSupported
-        EffectSupported letCost context facts sourceRuntime sourceEnv sourceCode
-        resultFacts resultRuntime resultEnv resultValue requiredBytes) :
+        EffectSupported letCost context expectedResult facts sourceRuntime
+        sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes) :
     SourceCodeResult context sourceExternals sourceRuntime sourceEnv sourceCode
       resultRuntime resultValue :=
   evaluation.sourceResult
