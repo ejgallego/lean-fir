@@ -1161,10 +1161,14 @@ acceptance tests pass.
    source transitions to deterministic `ExecSteps` and observations to exact
    world/event traces modulo `ConcreteTraceRel`; its `execSteps` theorem
    already transports every finite source prefix without assuming source
-   termination. The remaining target work is to define a resumable structured
-   Wasm configuration (Talos `OutOfFuel` does not retain one), prove its finite
-   terminating adequacy with `Wasm.run`, construct the compiler relation and
-   rank from lowering/adaptation plus W6 operation laws, and derive divergence
+   termination. The instruction-boundary target is now concrete: it retains
+   store, locals, and residual program; exact finite paths collapse above one
+   common fuel bound to Talos `exec`, and both fallthrough and generated `.ret`
+   exits recover the exact successful `Wasm.run`. The remaining target work is
+   to reify call and structured-control frames so divergence inside an atomic
+   Talos instruction also produces target progress, prove finite terminal
+   collapse to the checked boundary, construct the compiler relation and rank
+   from lowering/adaptation plus W6 operation laws, and derive divergence
    preservation. Add the backward direction only when the supported target
    transition surface is closed enough for a useful weak bisimulation.
 8. Let W7 generation proceed independently against the current concrete

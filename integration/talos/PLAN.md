@@ -5778,15 +5778,24 @@ world and exact external-event trace modulo the existing address refinement
 witness. This statement contains no target execution certificate and no
 termination premise.
 
-The next implementation boundary is deliberately honest. Talos's current
-fuel-bounded `Wasm.run` returns `OutOfFuel` without the in-flight store or
-control stack, so it cannot serve as the target configuration of a weak
-simulation. W6 must define a resumable structured Wasm configuration for the
-emitted subset, expose its current concrete store, and prove finite
-terminating adequacy with `Wasm.run`. The compiler proof will then construct
-the simulation relation and its rank from lowering/adaptation and the existing
-runtime operation laws. The current terminating whole-export theorem becomes
-a corollary of that stronger relation; it is not discarded or repackaged as a
+The first target implementation boundary is now checked. A
+`ResumableWasmState` stores the concrete Talos store, locals, and residual
+outer program; `ResumableWasmStep` consumes one instruction only after a
+finite `execOne` fallthrough exposes the successor. Fuel monotonicity proves
+that every finite path has one common bound and agrees exactly with the
+residual `exec` above it. The fallthrough, general return, and compiler-emitted
+`.ret` adequacy theorems then recover the exact successful `Wasm.run` result.
+`concreteResumableWasmMachine` packages this state and step relation for
+`ConcreteRankedTraceSimulation`.
+
+That boundary does not pretend to solve divergence inside an atomic Talos
+`execOne`: calls, blocks, and loops still need a reified control/frame stack
+for their internal progress to form a target path. W6 next defines that
+emitted-subset structured machine and proves its finite terminal paths collapse
+to the checked instruction-boundary/Talos theorem. It then constructs the
+compiler relation and rank from lowering/adaptation plus the existing runtime
+operation laws. The current terminating whole-export theorem becomes a
+corollary of that stronger relation; it is not discarded or repackaged as a
 certificate.
 
 ## Parallel agent packages

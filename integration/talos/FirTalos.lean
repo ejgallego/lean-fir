@@ -11,6 +11,7 @@ import FirTalos.Correctness.Adapter
 import FirTalos.Correctness.Host
 import FirTalos.Correctness.Execution
 import FirTalos.Correctness.WeakSimulation
+import FirTalos.Correctness.ResumableWasm
 import FirTalos.Correctness.Lowering
 import FirTalos.Correctness.Composition
 import FirTalos.Correctness.Semantics
@@ -31,6 +32,7 @@ import FirTalos.ConcreteClosureDispatch
 import FirTalos.ConcreteResolver
 import FirTalos.ConcreteSupportedExportCorrectness
 import FirTalos.ConcreteTraceSimulation
+import FirTalos.ConcreteResumableWasm
 import FirTalos.ConcreteCompilerCorrectness
 import FirTalos.ConcreteCompilerCorrectnessContract
 import FirTalos.ConcreteReuseCapacityCallCorrectness

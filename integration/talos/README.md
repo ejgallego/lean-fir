@@ -475,13 +475,25 @@ modulo the existing concrete address witness. Zero-step target matches must
 strictly decrease a source rank, which is the progress condition needed for
 silent-divergence preservation.
 
-The target side is intentionally an interface for now. Talos's executable
-`Wasm.run` retains no resumable store/control state when fuel is exhausted, so
-using `OutOfFuel` as a trace checkpoint would state a false abstraction. The
-next W6 slice supplies a structured resumable Wasm configuration and proves
-its finite terminating executions agree with `Wasm.run`; subsequent compiler
-step cases instantiate the checked simulation interface. No caller will pass
-the relation as a correctness certificate in the final export theorem.
+The first target layer is now checked in
+`FirTalos.Correctness.ResumableWasm` and
+`FirTalos.ConcreteResumableWasm`. Its configuration retains the concrete
+store, locals, and remaining outer instruction list. A transition consumes
+one instruction only when a finite Talos `execOne` exposes its next store and
+locals. Every finite path has one common fuel threshold above which it is
+exactly equivalent to the residual Talos `exec`; completed fallthrough and
+the generated `.ret` exit are therefore exactly successful `Wasm.run`
+results. The concrete packaging is the actual target accepted by
+`ConcreteRankedTraceSimulation`.
+
+This checkpoint is deliberately only an outer-instruction boundary. Talos
+calls and structured control remain atomic inside `execOne`, so it does not
+yet expose an infinite path for divergence inside a call or loop. The next W6
+slice reifies the emitted subset's call/control frames and proves that its
+finite terminal paths collapse to this checked instruction-boundary/Talos
+result. `OutOfFuel` is still never used as a trace checkpoint, and no caller
+will pass the relation as a correctness certificate in the final export
+theorem.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine
