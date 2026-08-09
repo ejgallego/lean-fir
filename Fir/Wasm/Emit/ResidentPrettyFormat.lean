@@ -12,6 +12,7 @@ import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
 import Fir.Wasm.Emit.ResidentRuntime
 import Fir.Wasm.Emit.ResidentString
+import Fir.Wasm.Emit.ResidentLinker
 import Fir.Wasm.Emit.TailCall
 
 namespace Fir.Wasm.Emit.ResidentPrettyFormat
@@ -452,59 +453,6 @@ def compileStackSafeModule (entry : Name) :
   let result ← compileClosedModule entry
   return result.bind eliminateDirectSelfCalls
 
-private def transformFinalModule [Repr error] (label : String)
-    (transform : Fir.Wasm.Module → Except error Fir.Wasm.Module)
-    (module : Fir.Wasm.Module) : Except Source.CompileError Fir.Wasm.Module :=
-  transform module |>.mapError fun error =>
-    .manifest s!"failed to internalize resident {label}: {repr error}"
-
-/-- Apply the complete resident pipeline without encoding intermediate checkpoints. -/
-private def internalizeFinalModule (module : Fir.Wasm.Module) :
-    Except Source.CompileError Fir.Wasm.Module := do
-  let module ← transformFinalModule "getTag"
-    Fir.Wasm.Emit.ResidentRuntime.internalizeGetTag module
-  let module ← transformFinalModule "isShared"
-    Fir.Wasm.Emit.ResidentRuntime.internalizeIsShared module
-  let module ← transformFinalModule "read projections"
-    Fir.Wasm.Emit.ResidentRuntime.internalizeReadProjections module
-  let module ← transformFinalModule "closure projections"
-    Fir.Wasm.Emit.ResidentRuntime.internalizeClosureProjections module
-  let module ← transformFinalModule "closure matches"
-    Fir.Wasm.Emit.ResidentRuntime.internalizeClosureMatches module
-  let module ← transformFinalModule "allocator"
-    Fir.Wasm.Emit.ResidentAllocator.install module
-  let module ← transformFinalModule "constructor allocation"
-    Fir.Wasm.Emit.ResidentConstructor.internalizeConstructors module
-  let module ← transformFinalModule "immediate Naturals"
-    Fir.Wasm.Emit.ResidentLiteral.internalizeImmediateNaturals module
-  let module ← transformFinalModule "partial applications"
-    Fir.Wasm.Emit.ResidentClosureAllocation.internalizePartialApplications module
-  let module ← transformFinalModule "setters"
-    Fir.Wasm.Emit.ResidentMutation.internalizeSetters module
-  let module ← transformFinalModule "increments"
-    Fir.Wasm.Emit.ResidentReferenceCount.internalizeIncrements module
-  let module ← transformFinalModule "releases"
-    Fir.Wasm.Emit.ResidentRelease.internalizeReleases module
-  let module ← transformFinalModule "tag setters"
-    Fir.Wasm.Emit.ResidentMutation.internalizeTagSetters module
-  let module ← transformFinalModule "cache publication"
-    Fir.Wasm.Emit.ResidentCache.internalizeCacheSets module
-  let module ← transformFinalModule "Nat/Int operations"
-    Fir.Wasm.Emit.ResidentNumeric.internalize module
-  let module ← transformFinalModule "arbitrary-precision Nat/Int operations"
-    Fir.Wasm.Emit.ResidentBigNumeric.internalize module
-  let module ← transformFinalModule "String operations"
-    Fir.Wasm.Emit.ResidentString.internalize module
-  let module ← transformFinalModule "String literals"
-    Fir.Wasm.Emit.ResidentLiteral.internalizeStrings module
-  let module ← transformFinalModule "fallbacks"
-    Fir.Wasm.Emit.ResidentFallback.internalize module
-  let result ← Fir.Wasm.Emit.TailCall.eliminateDirectSelfCalls module
-    |>.mapError Source.CompileError.manifest
-  unless result.rewrittenCalls > 0 do
-    throw (.manifest "prettyM closure contains no direct self-tail calls")
-  return result.module
-
 /--
 Current furthest W7 resident-runtime artifact for compiler consumers. The
 checkpoint API above remains available for acceptance generation; this path
@@ -514,7 +462,10 @@ def compileModule (entry : Name) :
     CoreM (Except Source.CompileError Source.ModuleArtifact) := do
   let source ← Fir.Wasm.Emit.PrettyFormat.compileSource entry
   match source with
-  | .ok source => Source.compileModuleArtifactWith source internalizeFinalModule
+  | .ok source =>
+      Source.compileModuleArtifactWith source fun module =>
+        Fir.Wasm.Emit.ResidentLinker.linkModule
+          Fir.Wasm.Emit.ResidentLinker.prettyFormatPolicy module
   | .error error => return .error error
 
 end Fir.Wasm.Emit.ResidentPrettyFormat

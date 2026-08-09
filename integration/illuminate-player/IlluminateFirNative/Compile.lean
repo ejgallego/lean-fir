@@ -1,10 +1,4 @@
-import Fir.Wasm.Emit.ResidentPrettyFormat
-import Fir.Wasm.Emit.ResidentFloat
-import Fir.Wasm.Emit.ResidentDeadCode
-import Fir.Wasm.Emit.ResidentArray
-import Fir.Wasm.Emit.ResidentNatMod
-import Fir.Wasm.Emit.ResidentNatShift
-import Fir.Wasm.Emit.ResidentUSize
+import Fir.Wasm.Emit.ResidentLinker
 import Illuminate.Animation.FirLive
 
 namespace IlluminateFirNative.Compile
@@ -244,125 +238,14 @@ def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
         ``Illuminate.AnimationPlayer.transitionLive] .ok
       return result.bind configureLiveModule
 
-private def internalizeAvailableNumeric
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentNumeric.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize available Nat/Int operations: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def internalizeFloat
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentFloat.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate Float operations: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def internalizeArrays
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentArray.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate Array operations: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def internalizeNatMod
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentNatMod.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate Nat.mod: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def internalizeNatShift
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentNatShift.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate Nat.shiftRight: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def internalizeUSize
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentUSize.internalizeAvailable artifact.module with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to internalize Illuminate USize operations: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
-private def pruneLinkedModule
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact)
-    (publicExports : Array Name) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← match Fir.Wasm.Emit.ResidentDeadCode.pruneToExports
-      artifact.module publicExports with
-    | .ok module => pure module
-    | .error error =>
-        throw (.manifest s!"failed to prune the linked Illuminate module: {repr error}")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
-
 /-- Link every reusable resident helper family already accepted by W7, then
 retain exactly the requested source and allocator exports. -/
 def internalizeExistingRuntimeForExports
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact)
     (sourceExports : Array Name) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeGetTag artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIsShared artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeReadProjections artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureProjections artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeClosureMatches artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.installAllocator artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeConstructors artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeImmediateNaturals artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizePartialApplications artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeSetters artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeIncrements artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeReleases artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeTagSetters artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeCacheSets artifact
-  let artifact ← internalizeAvailableNumeric artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeBigNumeric artifact
-  let artifact ← internalizeFloat artifact
-  let artifact ← internalizeArrays artifact
-  let artifact ← internalizeNatMod artifact
-  let artifact ← internalizeNatShift artifact
-  let artifact ← internalizeUSize artifact
-  let artifact ← Fir.Wasm.Emit.ResidentPrettyFormat.internalizeStringLiterals artifact
-  pruneLinkedModule artifact (sourceExports ++ #[
-    Fir.Wasm.Emit.ResidentAllocator.frontierName,
-    Fir.Wasm.Emit.ResidentAllocator.setFrontierName,
-    Fir.Wasm.Emit.ResidentAllocator.rewindName,
-    Fir.Wasm.Emit.ResidentAllocator.allocateName])
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact :=
+  Fir.Wasm.Emit.ResidentLinker.linkArtifact
+    (Fir.Wasm.Emit.ResidentLinker.closedApplicationPolicy sourceExports) artifact
 
 /-- Link the accepted resident runtime for the v3 live-player entries. -/
 def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
