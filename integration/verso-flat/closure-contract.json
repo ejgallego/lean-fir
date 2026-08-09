@@ -1,0 +1,14 @@
+{
+  "schemaVersion": 1,
+  "capturedDeclarations": 113,
+  "reviewedExternalsBeforeLink": 24,
+  "retainedSourceFunctions": 82,
+  "residentHelpers": 574,
+  "completeFunctions": 656,
+  "baseWasmBytes": 64730,
+  "completeWasmBytes": 164441,
+  "lazyCacheInitializers": 23,
+  "residentGlobals": 1,
+  "retainedSourceFunctionSha256": "8122962226bc992eb6b3f7bc2ceb91d19eb957635be717be80ad81d65ea9fa01",
+  "residentHelperSha256": "f9f4b5f28810aa6e53a875bf0a6f5c12e2c49898e493c45c41587f9f07140776"
+}

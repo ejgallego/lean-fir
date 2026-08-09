@@ -1,0 +1,44 @@
+<!doctype html>
+<html lang="en" data-result="running">
+  <head>
+    <meta charset="utf-8">
+    <title>FIR Verso Flat package smoke</title>
+  </head>
+  <body>
+    <pre id="result">RUNNING</pre>
+    <script type="module">
+      import {
+        PrettyFormat as F,
+        fetchPrettyMAdapter,
+      } from "./_build/verso-flat-current/prettyM-browser-adapter.mjs";
+
+      const output = document.querySelector("#result");
+      try {
+        const adapter = await fetchPrettyMAdapter(
+          "./_build/verso-flat-current/prettyM.wasm");
+        const result = adapter.render({
+          format: F.tag(5, F.text("α")),
+          width: 80,
+          indent: 0,
+          column: 0,
+        });
+        const expected = JSON.stringify({
+          text: "α",
+          events: [
+            { offset: 0, kind: 0, value: 5 },
+            { offset: 2, kind: 1, value: 1 },
+          ],
+        });
+        if (JSON.stringify(result.rendered) !== expected) {
+          throw new Error(`unexpected Flat result: ${JSON.stringify(result.rendered)}`);
+        }
+        output.textContent = "PASS browser Flat prettyM package";
+        document.documentElement.dataset.result = "pass";
+      } catch (error) {
+        output.textContent = `FAIL ${error.stack ?? error}`;
+        document.documentElement.dataset.result = "fail";
+      }
+    </script>
+  </body>
+</html>
+
