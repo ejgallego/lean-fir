@@ -6,16 +6,16 @@ owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
 state: ready
-base: caa2f345 on main
-functional-head: 28b380a1
-contract-base: 6061b90c on main; the ownership-aware hereditary closure source boundary builds on the unchanged shared interpreter, symbolic Wasm, adapter, concrete-runtime, cache, closure-application, and closure-table contracts
+base: 92e94f2d on main
+functional-head: 625d4883
+contract-base: 92e94f2d on main; the ownership-aware hereditary closure source boundary and existing concrete closure descriptor/application contracts
 clean-at-update: true
-slice: Add a source-only hereditary admission for one exactly saturated closure call whose nested callee derivation starts at the runtime produced by semantic takeClosureApplication; derive the exact caller-visible source execution through let staging, ownership consumption, callee execution under the caller frame, and continuation resumption; prove generated parameter classification preserves declaration arity and expose the new boundary in the contract module
-files: integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteCompilerCorrectnessContract.lean; this mailbox
-contracts: proof-only source admission and compiler-correctness theorem surface; the payload contains source resolution, the semantic ownership-consumption equation, and a finite callee derivation from the post-consumption runtime, but no target candidate, matcher/address witness, or target execution; no shared semantic Wasm ABI, lowering, validator, adapter, concrete-runtime, cache, closure-table, closure-application, or interpreter contract changed
-checks: PASS Lean Beam save of ConcreteReuseCapacityCacheCorrectness (zero errors; eleven pre-existing/style warnings) and refresh/save of ConcreteCompilerCorrectnessContract (zero errors); PASS focused lake build FirTalos.ConcreteReuseCapacityCacheCorrectness FirTalos.ConcreteCompilerCorrectnessContract (3104 jobs); PASS git diff --check; PASS make check (642 unique validation cases; 1844/1844 comparisons equal; zero findings; 111 bug cards and trusted assumptions valid); PASS make talos-check (3125 jobs)
-bug-cards: none
+slice: Thread persistent, exclusive-transfer, and shared-retain closure ownership through the executable matcher into the complete cache/capacity frame; derive the selected candidate's actual post-consumption store instead of assuming store identity; repair closure projection so an immutable precise capture descriptor may widen exactly along AbiKind.refines to the generated callee parameter kind; expose resolver-selected closureProj imports and an executable tagged-to-tobject allocation/matcher/projection regression
+files: Fir/Wasm/Concrete/OwnershipFrameCorrectness.lean; Fir/Wasm/Concrete/ClosureApplicationCorrectness.lean; Fir/Wasm/Concrete/ClosureRuntime.lean; Fir/Wasm/Concrete/ClosureCorrectness.lean; integration/talos/FirTalos/ConcreteRuntime.lean; integration/talos/FirTalos/ConcreteReuseCapacityCorrectness.lean; integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteSupportedExportCorrectness.lean; integration/talos/FirTalos/ConcreteRuntimeExamples.lean; bugs/FIR-BUG-wasm-none-closure-projection-kind-refinement.md; this mailbox
+contracts: CLOSURE-PROJECTION-KIND-REFINEMENT accepts exactly actualKind.refines expectedKind at live and post-application capture projection, reads at the immutable descriptor kind, and preserves the physical lane while widening its proof relation; the resident projection helper already performs the same raw slot load, so no W7 implementation change is required
+checks: PASS Lean Beam zero-error checkpoints for the changed root concrete modules and FirTalos ConcreteRuntime, ConcreteSupportedExportCorrectness, and ConcreteRuntimeExamples; PASS focused root and Talos dependency builds including FirTalos.ConcreteCompilerCorrectnessContract; PASS git diff --check; PASS make check (633 native/LCNF cases, 1,266/1,266 results, zero findings; direct machine suite 9/9); PASS make talos-check (3,125 jobs)
+bug-cards: FIR-BUG-wasm-none-closure-projection-kind-refinement fixed with executable allocation/matcher/projection regression
 blockers: none
-handoff: ready for fast-forward integration; branch contains functional commit 28b380a1 after main and is clean at this mailbox update
-next: prove the target selected-candidate path across the ownership-changing matcher/projection prefix, then thread that law into the generalized hereditary evaluator and public compiler-correctness theorem without admitting target execution certificates
+handoff: ready for fast-forward integration; branch contains ownership functional head 9ef99067 followed by projection-contract functional head 625d4883 and is clean at this mailbox update
+next: define and preserve the program-indexed closure heap ABI invariant stating that every live closure descriptor refines its target declaration's fixed parameter prefix; use it to derive generated capture assembly and enter the selected callee from selected.nextStore
 ```
