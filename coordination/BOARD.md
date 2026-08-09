@@ -19,6 +19,30 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-DERIVED-CLOSURE-ABI-INDUCTION`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler-proof boundary.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: W6 functional head `9feaaa00` and ready mailbox
+  `e802efaf`, rebased directly on `main` at `8ec10ffe`.
+- Lease boundary: satisfied. Pure external results, effects, direct calls, and
+  lazy-cache steps now carry cumulative closure-allocation persistence. The
+  ordinary hereditary generated-declaration theorem therefore implies its
+  closure-ABI strengthening. The saturated-closure runtime theorem consumes
+  only that ordinary induction, and its production one-lazy specialization is
+  derived from lowering, adaptation, operation laws, and executable resolver
+  metadata rather than a separate ABI theorem or target certificate. No
+  shared source semantics, symbolic Wasm ABI, resident-helper signature, or
+  concrete layout changed.
+- Validation: Lean Beam zero-error checkpoints and saves for every changed
+  proof/contract module; focused 3,105-job downstream dependency cone;
+  `git diff --check`; complete post-rebase `make check` with 642 unique cases
+  and 1,844/1,844 equal comparisons; Talos setup at `a01d01c`; and all 3,125
+  post-rebase `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W7-REUSABLE-RESIDENT-LINKER`.
 - Integration owner: `wasm-gen`; the user assigned the W7 owner the dynamic
   integration lease for this generation-only consolidation.
