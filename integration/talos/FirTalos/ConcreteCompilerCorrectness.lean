@@ -8402,7 +8402,7 @@ theorem EffectRuntimeRefines.mapInvariant
 Resolver/adaptor alignment specialized to the concrete reference-count
 increment host selected by a compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.incrementCall
+theorem ConcreteSupportedFunction.incrementCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8410,10 +8410,9 @@ theorem ConcreteSupportedExport.incrementCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {amount : Nat}
     {check : Bool}
     {id : Nat}
@@ -8443,7 +8442,7 @@ theorem ConcreteSupportedExport.incrementCall
 Resolver/adaptor alignment specialized to the concrete recursive decrement
 host selected by a compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.decrementCall
+theorem ConcreteSupportedFunction.decrementCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8451,10 +8450,9 @@ theorem ConcreteSupportedExport.decrementCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {amount : Nat}
     {check : Bool}
     {objectFields? : Option Nat}
@@ -8487,7 +8485,7 @@ theorem ConcreteSupportedExport.decrementCall
 Resolver/adaptor alignment specialized to the concrete explicit-delete host
 selected by the compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.deleteCall
+theorem ConcreteSupportedFunction.deleteCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8495,10 +8493,9 @@ theorem ConcreteSupportedExport.deleteCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {id : Nat}
     (found :
       callIndex? sourceModule (.runtime .delete) = some id) :
@@ -8526,7 +8523,7 @@ theorem ConcreteSupportedExport.deleteCall
 Resolver/adaptor alignment specialized to the concrete constructor-tag host
 selected by the compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.setTagCall
+theorem ConcreteSupportedFunction.setTagCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8534,10 +8531,9 @@ theorem ConcreteSupportedExport.setTagCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {tag id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.setTag tag)) = some id) :
@@ -8565,7 +8561,7 @@ theorem ConcreteSupportedExport.setTagCall
 Resolver/adaptor alignment specialized to the concrete object-field setter
 selected by the compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.objectSetCall
+theorem ConcreteSupportedFunction.objectSetCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8573,10 +8569,9 @@ theorem ConcreteSupportedExport.objectSetCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {index : Nat}
     {fieldKind : AbiKind}
     {id : Nat}
@@ -8608,7 +8603,7 @@ theorem ConcreteSupportedExport.objectSetCall
 Resolver/adaptor alignment specialized to the concrete `USize` field setter
 selected by the compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.usizeSetCall
+theorem ConcreteSupportedFunction.usizeSetCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8616,10 +8611,9 @@ theorem ConcreteSupportedExport.usizeSetCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {index id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.usizeSet index)) = some id) :
@@ -8647,7 +8641,7 @@ theorem ConcreteSupportedExport.usizeSetCall
 Resolver/adaptor alignment specialized to the kind-indexed concrete packed
 scalar setter selected by the compiler-derived runtime-call slot.
 -/
-theorem ConcreteSupportedExport.scalarSetCall
+theorem ConcreteSupportedFunction.scalarSetCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -8655,10 +8649,9 @@ theorem ConcreteSupportedExport.scalarSetCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule sourceFunction
+        target hosts)
     {slotIndex byteOffset id : Nat}
     {fieldKind : AbiKind}
     (found :
@@ -19149,7 +19142,7 @@ The concrete step changes only heap memory and retains the same witness, so
 closure-descriptor agreement is unchanged.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryIncrement_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_ordinaryIncrement_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19157,10 +19150,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19247,7 +19239,7 @@ frame. The existing executable theorem owns descriptor-guided release and
 mapped-header transport; the source fuel induction owns ordinary persistence.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryDecrement_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_ordinaryDecrement_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19255,10 +19247,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19343,7 +19334,7 @@ frame. The erased sentinel is an identity; ordinary deletion changes only one
 cell's reference count/liveness and preserves mapped capacity.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_ordinaryDelete_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_ordinaryDelete_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19351,10 +19342,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19439,7 +19429,7 @@ moving the heap frontier. The source constructor rewrite retains the target
 cell's persistence bit, so every tracked ordinary reuse token remains valid.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_constructorTag_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_constructorTag_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19447,10 +19437,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19524,7 +19513,7 @@ concrete binary call; the generic constructor rewrite and effect-frame
 transports retain every facts-indexed reuse obligation.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_objectFieldFVar_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_objectFieldFVar_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19532,10 +19521,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19645,7 +19633,7 @@ Production inversion recovers the canonical zero payload, while the source
 operation remains the same constructor-payload rewrite.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_objectFieldErased_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_objectFieldErased_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19653,10 +19641,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19762,7 +19749,7 @@ setter; the checked constructor rewrite retains ordinary-token provenance and
 the exact heap frontier.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_usizeField_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_usizeField_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19770,10 +19757,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -19849,7 +19835,7 @@ installed width-specific setter; the generic source and target transports
 retain every reuse fact across its checked payload write.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_scalarField_reuseCapacityOwnership
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_scalarField_reuseCapacityOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19857,10 +19843,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (supportedExport :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -20289,7 +20274,7 @@ pure operation-family composition: no target execution, cache slot, or
 per-program certificate is supplied by a caller.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -20297,10 +20282,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction
       labels target.wasmModule hosts.env
@@ -20337,7 +20321,7 @@ The transport-strengthened production effect family retains all installed
 pure-external handler laws in the canonical ownership frame.
 -/
 theorem
-    ConcreteSupportedExport.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation_pureExternal
+    ConcreteSupportedFunction.effectRuntimeRefinesWithTransports_reuseOwnershipTagAndAllFieldMutation_pureExternal
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -20345,10 +20329,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl)
     {labels : List FVarId} {facts : ReuseCapacityFacts} :
     EffectRuntimeRefinesWithTransports context sourceModule sourceFunction

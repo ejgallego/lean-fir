@@ -3987,10 +3987,10 @@ example
     externals
 
 /--
-The complete production no-result effect family is available over the same
-entry-relative whole-cache frame. Ownership operations and every admitted
-constructor mutation preserve cache globals and extend all hereditary entry
-transports without a caller-supplied target execution.
+The complete production no-result effect family is a generated-function law,
+not an export law. Ownership operations and every admitted constructor
+mutation preserve cache globals and extend all hereditary entry transports
+without export membership or a caller-supplied target execution.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -4000,10 +4000,9 @@ example
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl)
     {labels : List FVarId}
     {facts : ReuseCapacityFacts}
@@ -4340,6 +4339,32 @@ example
       (fun _ => DefaultOnlyCaseSupported)
       (fun _ => NoEffectsSupported) :=
   spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal
+    sourceExternals
+
+/-- The production recursive induction admits pure externals together with
+ownership, tag mutation, and all supported field mutations. The root supplies
+only its successful compiler pipeline; neither operation executions nor
+recursive callee correctness are certificates. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (sourceExternals : ExternalImpl) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun context => PureExternalSupported context sourceExternals)
+      (fun _ => NoReuseCapacityLazySupported)
+      (fun _ => DefaultOnlyCaseSupported)
+      (fun context => OwnershipTagAndAllFieldMutationEffectSupported context) :=
+  spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
     sourceExternals
 
 /-- Consequently the root named-call law is also production-derived: callers
