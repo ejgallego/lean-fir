@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
+state: ready
 base: b4b33102 on main
-functional-head: none yet
+functional-head: defe31ea
 contract-base: b4b33102 on main; ranked finite-trace simulation boundary is linked/accepted; no shared semantic or runtime contract is queued
 clean-at-update: true
-slice: Define a structured resumable Wasm configuration for the emitted subset and prove finite terminating adequacy to Talos Wasm.run, preserving the state needed by the ranked finite-prefix simulation rather than treating OutOfFuel as resumable
-files: coordination/lanes/wasm-proof.md; anticipated proof-owned modules under integration/talos/FirTalos/Correctness/ and integration/talos/FirTalos/
-contracts: none anticipated; this slice should relate proof-local structured execution to the existing Talos evaluator without changing source semantics, symbolic Wasm instructions, concrete runtime layout, resident helpers, or artifacts
-checks: pending; Lean edits will use Lean Beam, followed by the focused dependency cone, git diff --check, make check, make talos-setup, and make talos-check
+slice: Added the first concrete target for ranked trace simulation: a resumable outer-instruction state retaining Talos store, locals, and residual program; proved every finite path agrees above one common fuel bound with residual Talos exec; proved exact successful Wasm.run adequacy for fallthrough, general return, and the compiler-emitted .ret exit; packaged the machine with the concrete W6 host and documented the remaining atomic-call/control limitation
+files: integration/talos/FirTalos/Correctness/ResumableWasm.lean; integration/talos/FirTalos/ConcreteResumableWasm.lean; integration/talos/FirTalos.lean; integration/talos/PLAN.md; integration/talos/README.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
+contracts: none; adds proof-local target semantics and adequacy theorems without changing source semantics, symbolic Wasm instructions, Talos, concrete runtime layout/operations, resident helpers, or artifacts
+checks: Lean Beam save FirTalos.Correctness.ResumableWasm passed with 0 errors and 0 warnings (source 4645a42115a56d27); Lean Beam save FirTalos.ConcreteResumableWasm passed with 0 errors and 0 warnings (source 9227ecaf4ba02e79); lake build FirTalos.Correctness.ResumableWasm FirTalos.ConcreteResumableWasm FirTalos passed (3129 jobs); git diff --check passed; make check passed on the unchanged 642-case/1844-comparison corpus; make talos-setup passed at Talos a01d01c778b794dd00956748a067b6793c2c9f9b; make talos-check passed (3129 jobs)
 bug-cards: none
 blockers: none
-handoff: none; active slice
-next: Inspect the Talos evaluator state/result surface, choose the smallest faithful emitted-subset configuration, and prove its terminating-run bridge before compiler instantiation
+handoff: Land functional-head defe31ea plus this ready mailbox; the target is faithful and adequate at outer instruction boundaries and does not claim internal progress for an atomic call, block, or loop
+next: Reify the emitted subset's call and structured-control frames, prove finite terminal collapse to the checked instruction-boundary/Talos theorem, then instantiate compiler relation/rank cases from W6 operation laws
 ```
