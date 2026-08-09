@@ -115,3 +115,9 @@ re-exported.
   integration workflow for concurrent agents.
 - `bugs/`: textual semantic-discrepancy cards, their required format, and
   links to permanent regression tests.
+
+## License
+
+FIR is licensed under the Apache License 2.0, matching Lean and Verso. See
+[LICENSE](./LICENSE) for the full terms. This license does not make FIR an
+official or supported Lean project.
