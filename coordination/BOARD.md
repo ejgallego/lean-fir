@@ -15,7 +15,23 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- No cross-lane integration lease is active.
+- Milestone: `W7-HITSCENE-PARTIAL-APPLICATION-ADMISSION`.
+- Integration owner: `wasm-gen`; the user assigned W7 the temporary lease to
+  land the exact postponed-LCNF HitScene capture checkpoint and isolate the
+  shared result-kind/partial-application admission repair.
+- Integration branch/worktree: `integration/hitscene-admission` in
+  `.worktrees/integration-hitscene-admission`, based directly on `main` at
+  `691e00b9`.
+- Lease boundary: land the green W7 source-capture checkpoint, then repair
+  `FIR-BUG-wasm-none-endpoint-partial-application-admission` without an
+  Illuminate-specific exception. Prefer preserving the precise heap-object
+  result of the generated boxed Float constant through its nullary call/cache
+  boundary. Any alternative that broadens closure capture/projection
+  compatibility requires W6 review before landing.
+- W6 notification: seed the `wasm-proof` mailbox at milestone start. W6 may
+  continue its independent structured-terminal adequacy work; no proof change
+  is requested unless the shared repair changes the refinement premise used
+  by concrete closure projection.
 
 ## Latest completed integration lease
 
