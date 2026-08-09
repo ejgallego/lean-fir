@@ -4951,6 +4951,80 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
       resultRuntime resultValue :=
   evaluation.toBudgeted.sourceResult
 
+/--
+The hereditary return invariant closes the declaration ABI at the concrete
+lane boundary.
+
+The compiler and adapter still determine the returned numeric local. The
+source/static `getLocal` equation stored in the hereditary derivation
+identifies its actual ABI kind, and the stored refinement fact widens that
+lane to the enclosing declaration result kind. Arbitrary caller-owned budget
+slack is untouched by a return.
+-/
+theorem codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
+    {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
+    {actualResultKind : AbiKind}
+    {facts : ReuseCapacityFacts}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : FVarId}
+    {resultValue : Value}
+    {slack : Nat}
+    (sourceLookup : lookup sourceEnv result = some resultValue)
+    (resultCompiled :
+      Fir.Wasm.getLocal context result =
+        .ok (.localGet result, actualResultKind))
+    (resultRefines : actualResultKind.refines expectedResult = true)
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {labels : List FVarId}
+    {targetCode : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {Frame :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels (.return result)
+        targetCode)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Frame facts slack sourceRuntime sourceEnv initial locals witness)
+    (frameRelated :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Frame frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+            frameWitness →
+          ReuseCapacityStateRelated frameFacts sourceFunction frameRuntime
+            frameEnv frameStore frameLocals frameWitness) :
+    ∃ resultStore resultLocals resultWitness physical,
+      CodeWP context sourceModule sourceFunction labels target.wasmModule
+        hosts.env sourceRuntime sourceEnv (.return result) targetCode initial
+          locals witness [] (ExactReturnControlPost resultStore physical) ∧
+        Frame facts slack sourceRuntime sourceEnv resultStore resultLocals
+          resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness expectedResult physical resultValue := by
+  obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt, targetEq⟩ :=
+    CodeAdapted.return_eq localsAligned adapted
+  have kindEq : kind = actualResultKind := by
+    rw [resultCompiled] at localCompiled
+    exact (congrArg Prod.snd (Except.ok.inj localCompiled)).symm
+  subst kind
+  have stateRelated := (frameRelated invariant).stateRelated
+  obtain ⟨physical, targetLookup, valueRelated⟩ :=
+    stateRelated.resolve sourceLookup resultFound kindAt
+  subst targetCode
+  exact ⟨initial, locals, witness, physical,
+    codeWP_return_to_exactControlPost resultCompiled resultFound kindAt
+      sourceLookup stateRelated targetLookup,
+    invariant, stateRelated.2.1,
+    valueRelated.ofRefines resultRefines⟩
+
 /-- The nested body determines the ordinary source call prefix. -/
 theorem ReuseCapacityDirectHereditaryCallSupported.sourceStep
     {externals : ExternalImpl}
