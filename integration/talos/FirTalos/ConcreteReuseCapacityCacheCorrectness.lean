@@ -3673,6 +3673,124 @@ theorem
       by rw [step.externalsPreserved]; exact scalarImplementation⟩,
       nextDescriptorAgreement⟩⟩
 
+/-- A concrete closure allocation descriptor is compatible with the source
+program when it resolves to a declaration of the recorded arity and every
+stored capture lane refines the ABI of the parameter slot it will occupy.
+
+This is proof state derived when the compiler creates the closure. It neither
+records target execution nor certifies a compiler decision after the fact. -/
+def ClosureAllocationAbiCompatible
+    (program : Fir.LeanIR.ImpureProgram) (function : Name) (arity : Nat)
+    (captureKinds : Array AbiKind) : Prop :=
+  ∃ (target : LCNF.Decl .impure) (parameterKinds : Array AbiKind),
+    program.findDecl? function = some target ∧
+      Fir.Wasm.declarationParameterKinds? program target =
+        some parameterKinds ∧
+      arity = parameterKinds.size ∧
+      Fir.Wasm.kindsRefine captureKinds
+        (parameterKinds.extract 0 captureKinds.size) = true
+
+/-- Program-indexed ABI invariant for every active closure descriptor in a
+refinement witness. It survives closure consumption because the witness keeps
+the allocation descriptor needed by the generated projection prefix. -/
+def ClosureAllocationsAbiAligned
+    (program : Fir.LeanIR.ImpureProgram) (witness : RefinementWitness) : Prop :=
+  ∀ {address function arity captureKinds},
+    witness.descriptors.lookup? address =
+        some (.closure function arity captureKinds) →
+      ClosureAllocationAbiCompatible program function arity captureKinds
+
+/-- The generated-module entry witness has no allocation descriptors, so its
+program-indexed closure ABI invariant is immediate. Static capture-descriptor
+tables are module metadata and do not represent allocated closure objects. -/
+theorem ClosureAllocationsAbiAligned.initial
+    (program : Fir.LeanIR.ImpureProgram)
+    (dispatch : ClosureDispatchTable)
+    (descriptors : ClosureDescriptorTable) :
+    ClosureAllocationsAbiAligned program
+      (initialWitness dispatch descriptors) := by
+  intro address function arity captureKinds found
+  simp [initialWitness, RefinementWitness.withClosureTables,
+    DescriptorMap.lookup?] at found
+
+/-- A post-consumption application snapshot recovers the ABI compatibility
+of the closure allocation from the program-indexed witness invariant. -/
+theorem ClosureAllocationsAbiAligned.ofApplication
+    {program : Fir.LeanIR.ImpureProgram} {witness : RefinementWitness}
+    {application : ClosureApplication} {address : Word32}
+    {function : Name} {arity : Nat} {captureKinds : Array AbiKind}
+    {captures : Array Value}
+    (aligned : ClosureAllocationsAbiAligned program witness)
+    (related : ClosureApplicationRel witness application address function arity
+      captureKinds captures) :
+    ClosureAllocationAbiCompatible program function arity captureKinds :=
+  aligned related.descriptor
+
+/-- ABI alignment depends only on the active allocation-descriptor map. -/
+theorem ClosureAllocationsAbiAligned.ofDescriptorsEq
+    {program : Fir.LeanIR.ImpureProgram}
+    {before after : RefinementWitness}
+    (aligned : ClosureAllocationsAbiAligned program before)
+    (descriptorsEq : after.descriptors = before.descriptors) :
+    ClosureAllocationsAbiAligned program after := by
+  intro address function arity captureKinds found
+  rw [descriptorsEq] at found
+  exact aligned found
+
+/-- Generic descriptor-extension law. A newly shadowing descriptor preserves
+closure ABI alignment exactly when, if it is a closure descriptor, its own
+recorded ABI is compatible with the source program. -/
+theorem ClosureAllocationsAbiAligned.pushDescriptor
+    {program : Fir.LeanIR.ImpureProgram} {witness : RefinementWitness}
+    {address : Word32} {descriptor : AllocationDescriptor}
+    (aligned : ClosureAllocationsAbiAligned program witness)
+    (headCompatible : ∀ {function arity captureKinds},
+      descriptor = .closure function arity captureKinds →
+        ClosureAllocationAbiCompatible program function arity captureKinds) :
+    ClosureAllocationsAbiAligned program
+      { witness with
+        descriptors := (address, descriptor) :: witness.descriptors } := by
+  intro other function arity captureKinds found
+  change
+    DescriptorMap.lookup? ((address, descriptor) :: witness.descriptors) other =
+      some (.closure function arity captureKinds) at found
+  simp only [DescriptorMap.lookup?] at found
+  split at found
+  · exact headCompatible (Option.some.inj found)
+  · exact aligned found
+
+/-- Pushing a non-closure allocation descriptor cannot create a new closure
+ABI obligation. -/
+theorem ClosureAllocationsAbiAligned.pushNonClosure
+    {program : Fir.LeanIR.ImpureProgram} {witness : RefinementWitness}
+    {address : Word32} {descriptor : AllocationDescriptor}
+    (aligned : ClosureAllocationsAbiAligned program witness)
+    (notClosure : ∀ function arity captureKinds,
+      descriptor ≠ .closure function arity captureKinds) :
+    ClosureAllocationsAbiAligned program
+      { witness with
+        descriptors := (address, descriptor) :: witness.descriptors } :=
+  aligned.pushDescriptor (fun descriptorEq =>
+    False.elim (notClosure _ _ _ descriptorEq))
+
+/-- Allocating one compiler-compatible closure preserves ABI alignment. The
+new descriptor shadows any older descriptor at the same physical address;
+all other lookups reduce to the previous invariant. -/
+theorem ClosureAllocationsAbiAligned.bindClosure
+    {program : Fir.LeanIR.ImpureProgram} {witness : RefinementWitness}
+    {location : Location} {address : Word32} {function : Name} {arity : Nat}
+    {captureKinds : Array AbiKind}
+    (aligned : ClosureAllocationsAbiAligned program witness)
+    (compatible :
+      ClosureAllocationAbiCompatible program function arity captureKinds) :
+    ClosureAllocationsAbiAligned program
+      (witness.bindClosure location address function arity captureKinds) := by
+  unfold RefinementWitness.bindClosure
+  apply aligned.pushDescriptor
+  intro otherFunction otherArity otherCaptureKinds descriptorEq
+  cases descriptorEq
+  exact compatible
+
 /--
 Canonical W6 program frame with generated lazy-cache state.
 
@@ -3698,6 +3816,63 @@ def ConcreteReuseCapacityCacheFrame
       witness ∧
     LazyCacheGlobalsRel witness sourceModule sourceRuntime targetStore ∧
     ClosureTablesAgree targetStore witness
+
+/-- The hereditary-call frame adds exactly the program-indexed closure ABI
+invariant needed to assemble captured arguments at generated callee entry.
+Keeping it as a wrapper leaves operation-family proofs that do not allocate
+closures independent of source-program lookup. -/
+def ConcreteReuseCapacityCacheAbiFrame
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (externals : ExternalImpl)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness) : Prop :=
+  ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals facts
+      remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness ∧
+    ClosureAllocationsAbiAligned context.program witness
+
+theorem ConcreteReuseCapacityCacheAbiFrame.cacheFrame
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      targetStore targetLocals witness) :
+    ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals facts
+      remainingBytes sourceRuntime sourceEnv targetStore targetLocals witness :=
+  invariant.1
+
+theorem ConcreteReuseCapacityCacheAbiFrame.closureAbi
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      targetStore targetLocals witness) :
+    ClosureAllocationsAbiAligned context.program witness :=
+  invariant.2
 
 /-- The canonical cache frame retains the facts-indexed concrete/source state
 relation used by every structural operation family. -/
@@ -6302,6 +6477,39 @@ theorem SaturatedClosureCallResolution.parameterKinds_size
         simpa [listKnown] using known.symm
       rw [parameterKindsEq]
       simpa using optionListMapM_length listKnown
+
+/-- The live application's allocation descriptor supplies the missing ABI
+fact for the fixed capture prefix of a resolved saturated call. Declaration
+and parameter-row equality follow from deterministic source-program lookup;
+no generated target execution is assumed. -/
+theorem SaturatedClosureCallResolution.captureKindsRefine
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution :
+      SaturatedClosureCallResolution context sourceRuntime site)
+    {witness : RefinementWitness}
+    {application : ClosureApplication}
+    {address : Word32}
+    {captureKinds : Array AbiKind}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds resolution.captures) :
+    Fir.Wasm.kindsRefine captureKinds
+      (resolution.parameterKinds.extract 0 captureKinds.size) = true := by
+  obtain ⟨target, parameterKinds, targetFound, parametersKnown, _, refines⟩ :=
+    aligned.ofApplication applicationRelated
+  have targetEq : target = resolution.target := by
+    rw [resolution.targetFound] at targetFound
+    exact (Option.some.inj targetFound).symm
+  subst target
+  have parameterKindsEq : parameterKinds = resolution.parameterKinds := by
+    rw [resolution.parametersKnown] at parametersKnown
+    exact (Option.some.inj parametersKnown).symm
+  subst parameterKinds
+  exact refines
 
 /-- Source-only hereditary admission for one exactly saturated closure call.
 

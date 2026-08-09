@@ -155,6 +155,10 @@ structure ClosureApplicationRel (witness : RefinementWitness)
     (application : ClosureApplication) (address : Word32)
     (function : Lean.Name) (arity : Nat) (captureKinds : Array AbiKind)
     (semantic : Array Value) : Prop where
+  /-- The snapshot retains the allocation-time ABI descriptor even when
+  exclusive ownership consumption has made the source closure cell dead. -/
+  descriptor : witness.descriptors.lookup? address =
+    some (.closure function arity captureKinds)
   objectEq : application.object = address
   functionEq : application.function = function
   arityEq : application.arity = arity
@@ -327,6 +331,7 @@ theorem ClosureObjectRel.readCaptures
             (by simpa using valueAt)
         exact ⟨lane, by simpa using laneRead, laneRelated⟩)
   refine ⟨lanes, lanesRead, {
+    descriptor := related.descriptor
     objectEq := rfl
     functionEq := rfl
     arityEq := rfl

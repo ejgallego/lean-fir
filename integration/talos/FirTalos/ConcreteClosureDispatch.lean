@@ -496,6 +496,43 @@ theorem ClosureArgumentAssembly.ofConstructorArgsReady
   intro rest Q tail continued
   exact ready.wp continued
 
+/-- The compiler's canonical erased argument contributes the physical zero
+word expected by the Wasm ABI and extends an already-proved assembly. -/
+theorem ClosureArgumentAssembly.erased
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {code : Wasm.Program} {physicalArgs : List Wasm.Value}
+    (assembled :
+      ClosureArgumentAssembly module hostEnv code physicalArgs initial locals) :
+    ClosureArgumentAssembly module hostEnv
+      (.const 0 :: code) (.i32 0 :: physicalArgs) initial locals := by
+  intro rest Q tail continued
+  change Wasm.wp module (.const 0 :: (code ++ rest)) Q initial
+    { locals with values := tail } hostEnv
+  rw [Wasm.wp_const_cons]
+  apply assembled rest Q (.i32 0 :: tail)
+  simpa [List.reverse_cons, List.append_assoc] using continued
+
+/-- Sequential argument prefixes compose in source order. Their physical
+arguments compose in the same order even though Wasm stores the evaluated
+operand prefix in reverse order on the stack. -/
+theorem ClosureArgumentAssembly.append
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {leftCode rightCode : Wasm.Program}
+    {leftArgs rightArgs : List Wasm.Value}
+    (left : ClosureArgumentAssembly module hostEnv leftCode leftArgs
+      initial locals)
+    (right : ClosureArgumentAssembly module hostEnv rightCode rightArgs
+      initial locals) :
+    ClosureArgumentAssembly module hostEnv (leftCode ++ rightCode)
+      (leftArgs ++ rightArgs) initial locals := by
+  intro rest Q tail continued
+  rw [List.append_assoc]
+  apply left (rightCode ++ rest) Q tail
+  apply right rest Q (leftArgs.reverse ++ tail)
+  simpa [List.reverse_append, List.append_assoc] using continued
+
 /-- Prepending one compiler-resolved local argument extends an already-proved
 argument assembly. -/
 theorem ClosureArgumentAssembly.localGet
