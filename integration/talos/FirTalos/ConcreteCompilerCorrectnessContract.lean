@@ -5089,4 +5089,26 @@ example
       sourceFunction target hosts :=
   row.toSupportedFunction spec
 
+/-- The recursive production admission relation remains purely source-side:
+arbitrarily nested named and saturated-closure calls erase to the public
+interpreter judgment before any target refinement theorem is invoked. -/
+example
+    {externals : ExternalImpl}
+    {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) :=
+  evaluation.execEvaluates
+
 end FirTalos.Concrete.CompilerCorrectnessContract

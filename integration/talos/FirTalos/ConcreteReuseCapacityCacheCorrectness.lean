@@ -7329,6 +7329,171 @@ inductive SaturatedClosureHereditaryCallSupported
         context sourceRuntime sourceEnv decl _continuation nextRuntime
         sourceValue stepCost
 
+/-- Reconstruct the exact caller-visible source step for a saturated closure
+application from an arbitrary finite callee result.
+
+This is independent of the particular hereditary relation used to establish
+the callee result. It is therefore the source-semantic bridge needed by both
+the current one-layer closure boundary and the recursively hereditary
+production relation. -/
+theorem SaturatedClosureCallSite.sourceCallLetResult
+    {externals : ExternalImpl}
+    {context : Fir.Wasm.Context}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {calleeFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration context.program context.cachedDeclarations
+        resolution.target resolution.calleeCode calleeFunction)
+    (application :
+      Fir.LeanIR.Impure.takeClosureApplication sourceRuntime
+          resolution.location =
+        .ok (callRuntime, resolution.function, resolution.arity,
+          resolution.captures))
+    (calleeResult :
+      SourceCodeResult row.context externals callRuntime resolution.calleeEnv
+        resolution.calleeCode nextRuntime sourceValue) :
+    SourceCallLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue := by
+  have semanticArgumentSize :
+      site.semanticArgs.size = site.args.size := by
+    have evaluated := site.argumentsEvaluated
+    unfold evalArgs at evaluated
+    rw [Array.mapM_eq_mapM_toList] at evaluated
+    cases listResult :
+        site.args.toList.mapM (evalArg sourceEnv) with
+    | error fault =>
+        rw [listResult] at evaluated
+        contradiction
+    | ok results =>
+        rw [listResult] at evaluated
+        have valuesEq : results.toArray = site.semanticArgs :=
+          Except.ok.inj evaluated
+        rw [← valuesEq]
+        simpa using
+          listMapM_length_of_ok_for_directCall site.args.toList
+            (evalArg sourceEnv) results listResult
+  have applicationArgumentSize :
+      (resolution.captures ++ site.semanticArgs).size =
+        resolution.target.params.size := by
+    rw [Array.size_append, semanticArgumentSize,
+      ← site.argumentKinds_size, ← resolution.parameterKinds_size]
+    exact resolution.saturated
+  have callArgs :
+      (resolution.captures ++ site.semanticArgs).extract 0
+          resolution.target.params.size =
+        resolution.captures ++ site.semanticArgs := by
+    rw [← applicationArgumentSize]
+    exact Array.extract_size
+  have extraArgs :
+      (resolution.captures ++ site.semanticArgs).extract
+          resolution.target.params.size
+          (resolution.captures ++ site.semanticArgs).size =
+        #[] := by
+    simp [← applicationArgumentSize]
+  have semanticArgumentsPositive : 0 < site.semanticArgs.size := by
+    rw [semanticArgumentSize]
+    exact Array.size_pos_iff.mpr
+      (Array.isEmpty_eq_false_iff.mp site.nonempty)
+  have semanticArgumentsNonempty : site.semanticArgs.isEmpty = false :=
+    Array.isEmpty_eq_false_iff.mpr
+      (Array.size_pos_iff.mp semanticArgumentsPositive)
+  have applicationArgumentsPositive :
+      0 < (resolution.captures ++ site.semanticArgs).size := by
+    simp only [Array.size_append]
+    omega
+  have applicationArgumentsNonempty :
+      (resolution.captures ++ site.semanticArgs).isEmpty = false := by
+    exact Array.isEmpty_eq_false_iff.mpr
+      (Array.size_pos_iff.mp applicationArgumentsPositive)
+  have staged :
+      executeStep externals {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } =
+        .next {
+          program := context.program
+          control := .invokeValue site.sourceClosure site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } := by
+    simp [executeStep, coreStep, evalLetValue, lookupValue, site.valueEq,
+      site.sourceLookup, site.argumentsEvaluated, semanticArgumentsNonempty,
+      pushBindFrame, Bind.bind, Except.bind, pure, Except.pure]
+  have entered :
+      executeStep externals {
+          program := context.program
+          control := .invokeValue site.sourceClosure site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } =
+        .next {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } := by
+    simp [executeStep, coreStep, invokeClosure,
+      resolution.sourceClosureEq, application, invokeDecl,
+      resolution.targetFound, applicationArgumentSize, callArgs, extraArgs,
+      applicationArgumentsNonempty, resolution.parametersBound,
+      resolution.bodyEq]
+  have callerResult :=
+    (row.contextsCoherent rfl rfl).sourceCodeResult calleeResult
+  rcases callerResult with ⟨calleeCount, resultEnv, calleeSteps⟩
+  have protectedSteps :
+      ExecSteps externals calleeCount {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } {
+          program := context.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } := by
+    simpa [sourceCodeState, sourceYieldState, withFrameSuffix] using
+      (FirTalos.Correctness.ExecSteps.withFrameSuffix calleeSteps
+        (suffix := [.bind decl.fvarId continuation sourceEnv []]))
+  have resumed :
+      executeStep externals {
+          program := context.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } =
+        .next {
+          program := context.program
+          control := .code continuation
+          env := bind sourceEnv decl.fvarId sourceValue
+          runtime := nextRuntime } := by
+    simp [executeStep, coreStep]
+  have callPrefix :
+      ExecSteps externals 2 {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } :=
+    .step staged (.step entered (.refl _))
+  obtain ⟨withCalleeCount, withCallee⟩ :=
+    FirTalos.Correctness.ExecSteps.trans callPrefix protectedSteps
+  obtain ⟨count, steps⟩ :=
+    FirTalos.Correctness.ExecSteps.trans withCallee
+      (.step resumed (.refl _))
+  exact ⟨count, steps⟩
+
 /-- The hereditary closure payload reconstructs the exact ordinary source
 call step, including the ownership-changing application prefix. -/
 theorem SaturatedClosureHereditaryCallSupported.sourceStep
@@ -9643,6 +9808,280 @@ def ProductionHereditaryCallSupported
       (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
       directLetAllocationCost context sourceRuntime sourceEnv decl continuation
       nextRuntime sourceValue stepCost
+
+/-- Fully recursive finite source evaluation for the current production
+fragment.
+
+Both statically named generated calls and exactly saturated closure calls carry
+a recursive callee derivation in the declaration-local lowering context, as
+well as a recursive caller continuation. Thus closure applications may occur
+at arbitrary finite nesting depth. The relation contains source execution and
+compiler/source admission data only: no target program, store, witness,
+execution, or translation certificate occurs in a constructor. -/
+inductive ReuseCapacityProductionHereditaryCodeEvaluates
+    (externals : ExternalImpl) :
+    Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState → Env →
+      LCNF.Code .impure → ReuseCapacityFacts → RuntimeState → Env → Value →
+        Nat → Prop where
+  | ret
+      {actualResultKind : AbiKind}
+      (sourceLookup : lookup sourceEnv result = some sourceValue)
+      (resultCompiled :
+        Fir.Wasm.getLocal context result =
+          .ok (.localGet result, actualResultKind))
+      (resultRefines : actualResultKind.refines expectedResult = true) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.return result) facts
+        sourceRuntime sourceEnv sourceValue 0
+  | letValue
+      (supported : ReuseBudgetedDirectSupported context facts decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (directLetAllocationCost decl + continuationCost)
+  | externalLet
+      (supported :
+        PureExternalSupported context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue stepCost)
+      (sourceStep :
+        SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | directCallLet
+      {calleeFunction : Fir.Wasm.Function}
+      (site : DirectInternalCallSite context decl sourceEnv)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          site.sourceDeclaration site.calleeCode calleeFunction)
+      (callee :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals row.context
+          site.calleeResultKind [] sourceRuntime site.calleeEnv site.calleeCode
+          calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | saturatedClosureCallLet
+      (callRuntime : RuntimeState)
+      (calleeFunction : Fir.Wasm.Function)
+      (calleeResultFacts : ReuseCapacityFacts)
+      (calleeResultEnv : Env)
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      (resolution :
+        SaturatedClosureCallResolution context sourceRuntime site)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          resolution.target resolution.calleeCode calleeFunction)
+      (sharedCapacity : ∀ parentRuntime,
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList)
+      (application :
+        Fir.LeanIR.Impure.takeClosureApplication sourceRuntime
+            resolution.location =
+          .ok (callRuntime, resolution.function, resolution.arity,
+            resolution.captures))
+      (callee :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals row.context
+          resolution.targetResultKind [] callRuntime resolution.calleeEnv
+          resolution.calleeCode calleeResultFacts nextRuntime calleeResultEnv
+          sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | lazyLet
+      (path : LazyCachePath)
+      (supported :
+        ProductionHereditaryLazySupported externals context path sourceRuntime
+          sourceEnv decl continuation nextRuntime sourceValue stepCost)
+      (sourceStep :
+        SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | caseOf
+      (supported :
+        ProductionCasesSupported context sourceRuntime sourceEnv cases
+          selected)
+      (sourceStep : SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult facts sourceRuntime sourceEnv selected resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
+  | effect
+      (supported :
+        OwnershipTagAndAllFieldMutationEffectSupported context sourceRuntime
+          sourceEnv code continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityProductionHereditaryCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
+
+/-- Source-step-only call predicate used to erase the recursively hereditary
+production relation to the generic mixed finite-evaluation relation. -/
+def ProductionHereditarySourceCallSupported
+    (externals : ExternalImpl)
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure)
+    (continuation : LCNF.Code .impure)
+    (nextRuntime : RuntimeState)
+    (sourceValue : Value)
+    (_stepCost : Nat) : Prop :=
+  SourceCallLetResult context externals sourceRuntime sourceEnv decl
+    continuation nextRuntime sourceValue
+
+/-- Forget recursive call payloads while retaining their exact reconstructed
+source steps and the authoritative allocation budget. -/
+theorem ReuseCapacityProductionHereditaryCodeEvaluates.toBudgeted
+    {externals : ExternalImpl}
+    {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    ReuseCapacityBudgetedCodeEvaluates context externals
+      (ReuseBudgetedDirectSupported context)
+      (PureExternalSupported context externals)
+      (ProductionHereditarySourceCallSupported externals context)
+      (ProductionHereditaryLazySupported externals context)
+      (ProductionCasesSupported context)
+      (OwnershipTagAndAllFieldMutationEffectSupported context)
+      directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+      resultFacts resultRuntime resultEnv resultValue requiredBytes := by
+  induction evaluation with
+  | ret sourceLookup _resultCompiled _resultRefines => exact .ret sourceLookup
+  | letValue supported sourceStep transfer _ ih =>
+      exact .letValue supported sourceStep transfer ih
+  | externalLet supported sourceStep transfer _ ih =>
+      exact .externalLet supported sourceStep transfer ih
+  | @directCallLet callContext decl sourceEnv sourceRuntime calleeResultFacts
+      nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
+      expectedResult continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction site row callee transfer continued calleeIH
+      continuedIH =>
+      have contexts : DeclarationContextsCoherent callContext row.context :=
+        row.contextsCoherent rfl rfl
+      have sourceStep :
+          SourceCallLetResult callContext externals sourceRuntime sourceEnv decl
+            continuation nextRuntime sourceValue :=
+        site.sourceCallLetResult contexts calleeIH.sourceResult
+      exact .callLet sourceStep sourceStep transfer continuedIH
+  | @saturatedClosureCallLet callContext decl sourceEnv sourceRuntime
+      nextRuntime sourceValue stepCost facts nextFacts expectedResult
+      continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost callRuntime calleeFunction calleeResultFacts
+      calleeResultEnv site resolution row sharedCapacity application callee
+      transfer continued calleeIH continuedIH =>
+      have sourceStep :
+          SourceCallLetResult callContext externals sourceRuntime sourceEnv decl
+            continuation nextRuntime sourceValue :=
+        site.sourceCallLetResult resolution row application
+          calleeIH.sourceResult
+      exact .callLet sourceStep sourceStep transfer continuedIH
+  | lazyLet path supported sourceStep transfer _ ih =>
+      exact .lazyLet path supported sourceStep transfer ih
+  | caseOf supported sourceStep _ ih =>
+      exact .caseOf supported sourceStep ih
+  | effect supported sourceStep _ ih =>
+      exact .effect supported sourceStep ih
+
+/-- Recursive production admission is an exact finite source execution. -/
+theorem ReuseCapacityProductionHereditaryCodeEvaluates.sourceResult
+    {externals : ExternalImpl}
+    {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    SourceCodeResult context externals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue :=
+  evaluation.toBudgeted.sourceResult
+
+/-- The recursive production source result erases to the public interpreter
+judgment without a termination or target-execution premise. -/
+theorem ReuseCapacityProductionHereditaryCodeEvaluates.execEvaluates
+    {externals : ExternalImpl}
+    {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityProductionHereditaryCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    ExecEvaluates externals
+      (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+      (ReturnedObservation resultRuntime resultValue) :=
+  evaluation.sourceResult.execEvaluates
 
 /--
 Source-only result-kind policy for the internal lazy fragment whose
