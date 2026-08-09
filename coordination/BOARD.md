@@ -19,6 +19,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `ILLUMINATE-SELECTION-PLAYER-V4`.
+- Integration owner: `wasm-gen`; the user authorized the generation owner to
+  continue with the completed W7 selection package.
+- Integration branch/worktree: `integration/closure-ownership` in
+  `.worktrees/integration-closure-ownership`.
+- Published stack: generation-ready resident-array helpers `ddf83417`, the
+  selection-only adapter/package and acceptance suite `e15f4027`, and ready
+  mailbox `0a485fdd`, rebased directly on `main` at `c4a9aa09`.
+- Lease boundary: satisfied. FIR compiles the exact read-only Illuminate
+  `initialSelectionLive` and `transitionSelectionLive` entries. The v4 adapter
+  keeps SVG, patch bindings, and parameter strings in JavaScript; retains only
+  the timeline selection graph and fixed state below a persistent checkpoint;
+  and clears and exactly rewinds per-dispatch scratch. The accepted full-action
+  v3 artifact remains byte-identical. `Array.uget`, `Array.uset`, and
+  `Array.replicate` are generation-ready with standalone external-engine
+  coverage; their W6 refinement proofs remain a separate follow-up.
+- Artifact: immutable package
+  `integration/illuminate-player/_build/illuminate-selection-player-packages/ab177f502816-006dc1d1db18-650b4cef2360a5144098`,
+  55,518 bytes, SHA-256
+  `0371d430f2b04dab6ad7e545c22aa591bb177fc853f366d77aeae8a4c3ac5474`,
+  with zero function imports, zero memory imports, module-owned memory, and six
+  public functions. The 10,000-tick stress exactly restores checkpoint 1,792
+  with peak frontier 2,512. The large morph resident graph is 648 bytes versus
+  997,480 bytes in v3.
+- Validation: Lean Beam zero-error checkpoints and focused dependency cones;
+  `git diff --check`; complete `make check` with 642 unique cases and
+  1,844/1,844 equal comparisons; Talos setup at `a01d01c`; all 3,125
+  `make talos-check` jobs; the complete deterministic W7 artifact gate; two
+  byte-identical v3/v4 package publications with complete checksums; 106/106
+  legacy/FIR-v3/FIR-v4 trace matches after host materialization; 16/16
+  dashboard-data checks; and flat-frontier, two-player, failure, disposal,
+  binary64-boundary, and ownership tests.
+
+## Previous completed integration lease
+
 - Milestone: `W6-HEREDITARY-EXACT-RESULT-STRUCTURAL-CORE`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for this certificate-free compiler-proof slice.
