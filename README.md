@@ -1,5 +1,17 @@
 # FIR
 
+> [!CAUTION]
+> **Internal, non-official research workspace — not for external use.**
+>
+> FIR is an unfinished implementation and proof experiment. It is not an
+> official Lean project, specification, product, or supported toolchain
+> component. It carries no promise of API or ABI stability, correctness,
+> security review, release cadence, production readiness, or user support.
+>
+> Do not depend on its code or artifacts, cite it as a reference
+> implementation, or treat this repository as public documentation. Unless
+> you are an invited collaborator, please stop here.
+
 FIR is a research workspace for executable semantics and compiler-correctness
 proofs for Lean's `Lean.Compiler.LCNF` pipeline. It contains a phase-indexed
 program model, a small-step interpreter for final impure LCNF, the interfaces
@@ -51,9 +63,11 @@ integration-only `main`. See `AGENTS.md` for the normative rules and
 
 ## Layout
 
-Public imports are deliberately small: consumers import `Fir`, or the
-individual umbrellas `Fir.LeanIR` and `Fir.Wasm`. Test programs and the legacy
-baseline are not re-exported.
+The internal import surface is deliberately small: code in this workspace
+imports `Fir`, or the individual umbrellas `Fir.LeanIR` and `Fir.Wasm`. Names
+marked public refer only to Lean module visibility within this experiment, not
+to a supported external API. Test programs and the legacy baseline are not
+re-exported.
 
 - `Fir/LeanIR/Phase.lean`: phase-indexed base, mono, and impure programs plus
   checked-program wrappers.
