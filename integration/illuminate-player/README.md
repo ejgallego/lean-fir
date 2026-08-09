@@ -71,6 +71,25 @@ SHA256SUMS
 smoke.mjs
 ```
 
+### External artifact producer
+
+`export-v3-package.sh` exposes the accepted v3 package through the common
+caller-owned output-directory contract. The caller must supply a fresh output
+path and the exact clean Illuminate checkout explicitly:
+
+```sh
+ILLUMINATE_ROOT=/path/to/illuminate \
+  ./export-v3-package.sh /path/to/fresh-output
+```
+
+The FIR checkout must also be clean. The producer runs the complete existing
+gate, including deterministic double publication, checksums, packaged smokes,
+and the 107-trace v3/v4 comparison. It then installs regular copies of the six
+v3 package files into the requested directory and independently checks that
+directory's `SHA256SUMS` and package-local smoke before returning success. It
+does not copy the `_build/illuminate-player-current` symlink, publish the
+export, or collect performance timings.
+
 ## Browser and Node contract
 
 The asynchronous loader compiles one shared `WebAssembly.Module`. Each opaque
