@@ -1,4 +1,9 @@
-# FIR-native Illuminate live-player package
+# FIR-native Illuminate player packages
+
+This integration publishes the accepted full-action v3 live player and a
+separately versioned selection-only v4 player. The v3 artifact is unchanged;
+v4 retains only timing and selection state in Wasm while JavaScript owns SVG,
+parameter bindings, and per-frame parameter strings.
 
 This integration compiles the real Lean 4.32 entries from
 `Illuminate.Animation.FirLive`:
@@ -26,9 +31,10 @@ cd integration/illuminate-player
 ILLUMINATE_ROOT=/path/to/illuminate ./check.sh
 ```
 
-The gate builds the focused Lean dependency cone, publishes the package twice,
-checks deterministic bytes and checksums, runs the source-tree and packaged
-smokes, and compares 105 legacy-JavaScript/FIR traces event by event. The
+The gate builds both focused Lean dependency cones, publishes both packages
+twice, checks deterministic bytes and checksums, runs the source-tree and
+packaged smokes, and compares 106 legacy-JavaScript/FIR-v3/FIR-v4 traces event
+by event. The
 smoke includes every event and patch target, non-integral timestamps, two
 independent players, failure poisoning, repeated disposal, repeated
 create/dispose cycles, and 10,000 ticks at a flat post-dispatch frontier.
@@ -119,6 +125,61 @@ synchronization contract; backward restoration is deliberately isolated in
 `fir_heap_rewind`. Resident helpers remain internal unless listed above.
 `BUILD.json` records both entry ABIs, source and helper inventories, the absent
 cache roots, ownership versions, source hashes, artifact sizes, and checksums.
+
+## Selection-only v4 package
+
+`Illuminate.Animation.FirSelection` contributes the real entries:
+
+```text
+initialSelectionLive : SelectionAnimation → Except String LiveSelectionTransition
+transitionSelectionLive : SelectionAnimation → PlayerState → PlayerEvent → LiveSelectionTransition
+```
+
+They reuse `initialPrepared` and `transitionPrepared`; there is no copied state
+machine. Lean erases the single-field `SelectionAnimation` wrapper, so the
+physical object parameter is its underlying `PlayerAnimation` timeline. The
+adapter documents and encodes that representation directly.
+
+`selection-package.mjs` atomically publishes a distinct immutable directory
+under `_build/illuminate-selection-player-packages/`; the canonical
+`_build/illuminate-selection-player-current` symlink points to:
+
+```text
+illuminate-selection-player.wasm
+illuminate-selection-player.wasm.json
+illuminate-selection-player-browser-adapter.mjs
+BUILD.json
+SHA256SUMS
+smoke.mjs
+```
+
+The adapter API remains `createPlayer`, `dispatch`, `disposePlayer`, and
+`replayTrace`, at capability `fir.illuminate-player.browser/v4`. Returned
+actions contain frame, step, segment, local frame, segment-change, and playback
+only. Consumers materialize patches from their original `pmap` and
+`params[localFrame]`; the adapter neither reads nor transfers those values.
+
+The v4 package preserves the v3 persistent-checkpoint ownership protocol:
+one shared compiled module, one instance per opaque player, a retained compact
+selection graph and fixed state slot below the checkpoint, and cleared/re-wound
+event and result scratch after every call. Its source and package smokes enforce
+the 16 KiB/400-allocation/one-page creation bounds and a flat frontier across
+10,000 ticks.
+
+Against an Illuminate checkout that has generated
+`test_output/anim-comparison.html`, the package-level dashboard check and the
+order-balanced phase benchmark are:
+
+```sh
+ILLUMINATE_ROOT=/path/to/illuminate node check-selection-dashboard.mjs
+ILLUMINATE_ROOT=/path/to/illuminate node selection-benchmark.mjs
+```
+
+The dashboard check compares v4 after host-side patch-row materialization with
+v3 at every segment boundary, step, and final frame of all 16 examples. The
+benchmark excludes a warmup, alternates v3/v4 order for at least seven rounds,
+records raw samples and median/p95/MAD summaries, and writes
+`_build/illuminate-selection-benchmark.json`.
 
 ## Benchmarking
 

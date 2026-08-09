@@ -9,6 +9,12 @@ import {
   ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-player-browser-adapter.mjs";
+import {
+  createIlluminateSelectionPlayerAdapter,
+  ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
+} from "./illuminate-selection-player-browser-adapter.mjs";
 
 const illuminateRoot = process.env.ILLUMINATE_ROOT ??
   path.resolve("../../../../../illuminate");
@@ -39,6 +45,8 @@ class LegacyPlayerOracle {
     this.advancePending = false;
     this.finished = false;
     this.currentSegment = -1;
+    this.targetFrame = null;
+    this.loopAfterTarget = false;
   }
 
   playback() {
@@ -46,6 +54,7 @@ class LegacyPlayerOracle {
     if (this.finished) return "finished";
     if (!this.playing) return "paused";
     if (this.advancePending) return "finishingLoop";
+    if (this.targetFrame !== null) return "playing";
     if (this.data.steps[this.currentStep]?.loop) return "looping";
     return "playing";
   }
@@ -81,6 +90,8 @@ class LegacyPlayerOracle {
       this.startTime = null;
       this.playing = true;
       this.finished = false;
+      this.targetFrame = null;
+      this.loopAfterTarget = false;
       return;
     }
     if (this.playing) {
@@ -90,6 +101,8 @@ class LegacyPlayerOracle {
       } else {
         this.playing = false;
         this.pauseFrame = this.frame;
+        this.targetFrame = null;
+        this.loopAfterTarget = false;
       }
       return;
     }
@@ -101,6 +114,19 @@ class LegacyPlayerOracle {
     this.playing = true;
     this.startTime = null;
     this.finished = false;
+    this.targetFrame = null;
+    this.loopAfterTarget = false;
+  }
+
+  pause() {
+    this.startTime = null;
+    this.pauseFrame = this.frame;
+    this.playing = false;
+    this.waitingForClick = false;
+    this.advancePending = false;
+    this.finished = false;
+    this.targetFrame = null;
+    this.loopAfterTarget = false;
   }
 
   seek(requested) {
@@ -111,10 +137,71 @@ class LegacyPlayerOracle {
     this.pauseFrame = this.frame;
     this.currentStep = animFindCurrentStep(this.data.steps, this.frame);
     this.finished = this.frame === this.data.totalFrames - 1;
+    this.targetFrame = null;
+    this.loopAfterTarget = false;
+  }
+
+  loopAt(requested) {
+    const frame = animClampFrame(requested, this.data.totalFrames);
+    const step = animFindCurrentStep(this.data.steps, frame);
+    const stepInfo = this.data.steps[step];
+    if (!stepInfo?.loop) {
+      this.seek(frame);
+      return;
+    }
+    this.frame = stepInfo.frame;
+    this.currentStep = step;
+    this.startTime = null;
+    this.pauseFrame = stepInfo.frame;
+    this.playing = true;
+    this.waitingForClick = false;
+    this.advancePending = false;
+    this.finished = false;
+    this.targetFrame = null;
+    this.loopAfterTarget = false;
+  }
+
+  playTo(requested, loopAfter) {
+    const target = animClampFrame(requested, this.data.totalFrames);
+    if (target === this.frame) {
+      if (loopAfter) this.loopAt(target);
+      else this.pause();
+      return;
+    }
+    this.currentStep = animFindCurrentStep(this.data.steps, this.frame);
+    this.startTime = null;
+    this.pauseFrame = this.frame;
+    this.playing = true;
+    this.waitingForClick = false;
+    this.advancePending = false;
+    this.finished = false;
+    this.targetFrame = target;
+    this.loopAfterTarget = loopAfter;
   }
 
   tick(timestamp) {
     if (!this.playing || this.waitingForClick) return;
+    if (this.targetFrame !== null) {
+      if (this.startTime === null) this.startTime = timestamp;
+      const elapsed = animComputeFrame(
+        this.startTime, timestamp, this.data.fps, 0);
+      const target = this.targetFrame;
+      const forward = target >= this.pauseFrame;
+      this.frame = forward
+        ? Math.min(target, this.pauseFrame + elapsed)
+        : this.pauseFrame - Math.min(elapsed, this.pauseFrame - target);
+      this.currentStep = animFindCurrentStep(this.data.steps, this.frame);
+      if (this.frame === target) {
+        const loopAfter = this.loopAfterTarget;
+        this.startTime = null;
+        this.pauseFrame = this.frame;
+        this.playing = false;
+        this.targetFrame = null;
+        this.loopAfterTarget = false;
+        if (loopAfter) this.loopAt(this.frame);
+      }
+      return;
+    }
     if (this.startTime === null) this.startTime = timestamp;
     let frame = animComputeFrame(
       this.startTime, timestamp, this.data.fps, this.pauseFrame);
@@ -166,7 +253,10 @@ class LegacyPlayerOracle {
 
   dispatch(event) {
     if (event.kind === "advance") this.advance();
+    else if (event.kind === "pause") this.pause();
     else if (event.kind === "seek") this.seek(event.frame);
+    else if (event.kind === "playTo") this.playTo(event.frame, event.loopAfter);
+    else if (event.kind === "loopAt") this.loopAt(event.frame);
     else if (event.kind === "tick") this.tick(event.timestamp);
     else throw new Error(`unknown oracle event ${event.kind}`);
     return this.action();
@@ -244,6 +334,25 @@ const cases = [
       { kind: "seek", frame: 3 },
     ],
   },
+  {
+    name: "directed playback and explicit loop controls",
+    data: animation(12, [
+      { frame: 0, pause: false, loop: false },
+      { frame: 5, pause: true, loop: true },
+    ]),
+    events: [
+      { kind: "playTo", frame: 5, loopAfter: true },
+      { kind: "tick", timestamp: 0 },
+      { kind: "tick", timestamp: 500 },
+      { kind: "pause" },
+      { kind: "loopAt", frame: 5 },
+      { kind: "tick", timestamp: 1000 },
+      { kind: "tick", timestamp: 1200 },
+      { kind: "playTo", frame: 2, loopAfter: false },
+      { kind: "tick", timestamp: 1300 },
+      { kind: "tick", timestamp: 1800 },
+    ],
+  },
 ];
 
 let randomState = 0x1_11_04_28;
@@ -305,6 +414,35 @@ const build = {
   },
 };
 const adapter = await createIlluminatePlayerAdapter({ bytes, manifest, build });
+const selectionBytes = await readFile(
+  "_build/illuminate-selection-player-resident.wasm");
+const selectionManifest = JSON.parse(await readFile(
+  "_build/illuminate-selection-player-resident.wasm.json", "utf8"));
+const selectionBuild = { capabilities: {
+  browserAdapter: { apiVersion:
+    ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
+  inputLayout: { version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION },
+  ownership: { version: ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION },
+} };
+const selectionAdapter = await createIlluminateSelectionPlayerAdapter({
+  bytes: selectionBytes,
+  manifest: selectionManifest,
+  build: selectionBuild,
+});
+
+function materializeSelection(animation, action) {
+  const segment = animation.segments[action.segment];
+  const values = segment.params[action.localFrame] ?? [];
+  return {
+    ...action,
+    updates: segment.pmap.flatMap((binding, index) =>
+      values[index] === undefined ? [] : [{
+        e: binding.e,
+        a: binding.a,
+        v: values[index],
+      }]),
+  };
+}
 
 for (const testCase of cases) {
   const oracle = new LegacyPlayerOracle(testCase.data);
@@ -313,6 +451,13 @@ for (const testCase of cases) {
   const result = adapter.replayTrace(testCase.data, testCase.events);
   assert.equal(result.ok, true, `${testCase.name}: ${result.error ?? "failed"}`);
   assert.deepEqual(result.actions, expected, testCase.name);
+  const selectionResult = selectionAdapter.replayTrace(
+    testCase.data, testCase.events);
+  assert.equal(selectionResult.ok, true,
+    `${testCase.name} selection: ${selectionResult.error ?? "failed"}`);
+  assert.deepEqual(selectionResult.actions.map((action) =>
+    materializeSelection(testCase.data, action)), expected,
+  `${testCase.name} selection`);
 }
 
-console.log(`${cases.length} legacy/FIR-native player traces matched`);
+console.log(`${cases.length} legacy/FIR-v3/FIR-selection-v4 player traces matched`);
