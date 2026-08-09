@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
+state: ready
 base: 56d1c09c on main
-functional-head: none yet
+functional-head: dbecabba
 contract-base: 56d1c09c on main; ranked finite-trace, instruction-boundary adequacy, and emitted frame-collapse laws are linked/accepted; no shared semantic or runtime contract is queued
 clean-at-update: true
-slice: Define the explicit emitted-subset frame-stack state and small-step relation; expose primitive progress, call/block/loop/conditional entry, normal frame exits, loop restart, returns through nested structured frames, and outward branch propagation; relate its store observation to the concrete ranked trace machine
-files: coordination/lanes/wasm-proof.md; anticipated proof-owned state/transition modules under integration/talos/FirTalos/Correctness/ and concrete packaging under integration/talos/FirTalos/
-contracts: none anticipated; adds proof-local target semantics without changing shared source semantics, symbolic Wasm instructions, Talos, concrete runtime layout/operations, resident helpers, or artifacts
-checks: pending; Lean edits will use Lean Beam, followed by focused/umbrella builds, git diff --check, make check, make talos-setup, and make talos-check
+slice: Defined the explicit emitted-subset frame-stack state and small-step relation with running/breaking/returning/halted control; delegated atomic instructions and imports to Talos; exposed internal call and structured entry, normal label/loop/call exits, loop restart, outward branch propagation, return unwinding, and top-level halting; switched the concrete generated trace-simulation target to this store-exposing structured machine
+files: integration/talos/FirTalos/Correctness/StructuredWasmMachine.lean; integration/talos/FirTalos/ConcreteResumableWasm.lean; integration/talos/FirTalos.lean; integration/talos/PLAN.md; integration/talos/README.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
+contracts: none; adds proof-local target semantics without changing source semantics, symbolic Wasm instructions, Talos, concrete runtime layout/operations, resident helpers, or artifacts
+checks: Lean Beam save FirTalos.Correctness.StructuredWasmMachine passed with 0 errors and 0 warnings (source dc84876ba1bae852); Lean Beam save FirTalos.ConcreteResumableWasm passed with 0 errors and 0 warnings (source e1119f9bb10c8f65); lake build FirTalos.Correctness.StructuredWasmMachine FirTalos.ConcreteResumableWasm FirTalos passed (3131 jobs); git diff --check passed; make check passed on the unchanged 642-case/1844-comparison corpus; Talos setup remains pinned at a01d01c778b794dd00956748a067b6793c2c9f9b; make talos-check passed (3131 jobs)
 bug-cards: none
 blockers: none
-handoff: none; active slice
-next: Implement the frame/state grammar first, prove store exposure and the administrative progress rules, then add the terminal-collapse theorem in a separate checked layer
+handoff: Land functional-head dbecabba plus this ready mailbox; the concrete ranked-simulation alias now uses the structured target, while terminal adequacy remains explicitly a theorem to prove rather than a premise
+next: Prove that every finite structured path from a canonical function entry to a halted empty-frame state yields the exact successful Talos run above a finite fuel bound; then instantiate compiler relation/rank cases
 ```
