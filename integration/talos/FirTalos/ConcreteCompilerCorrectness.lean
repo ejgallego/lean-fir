@@ -5718,6 +5718,18 @@ def ScalarUInt8CasesSupported
     Fir.Wasm.getLocal context cases.discr =
       .ok (.localGet cases.discr, .uint8)
 
+/-- The complete currently proved production case family. A recursive program
+may freely mix erased default wrappers, normalized object-constructor chains,
+and normalized scalar `UInt8` chains. -/
+def ProductionCasesSupported
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (cases : LCNF.Cases .impure) (selected : LCNF.Code .impure) : Prop :=
+  DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected ∨
+    ObjectConstructorCasesSupported context sourceRuntime sourceEnv cases
+      selected ∨
+    ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases selected
+
 /--
 Static admission for a direct local alias.
 
@@ -9936,7 +9948,7 @@ only the branch selected by `chooseAlt` needs a semantic `CodeWP`, while all
 unselected arms are recovered structurally from production compilation and
 adaptation.
 -/
-theorem ConcreteSupportedExport.objectConstructorCaseChainRefines
+theorem ConcreteSupportedFunction.objectConstructorCaseChainRefines
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -9944,10 +9956,9 @@ theorem ConcreteSupportedExport.objectConstructorCaseChainRefines
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -10161,7 +10172,7 @@ case, but each constructor test is an in-Wasm local/constant comparison.
 `StateRelated` supplies the concrete `UInt8` lane and hence the dynamic tag
 bound; no runtime import or per-program translation certificate is needed.
 -/
-theorem ConcreteSupportedExport.scalarUInt8CaseChainRefines
+theorem ConcreteSupportedFunction.scalarUInt8CaseChainRefines
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10169,10 +10180,9 @@ theorem ConcreteSupportedExport.scalarUInt8CaseChainRefines
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId}
     {sourceRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -10386,9 +10396,38 @@ def CaseRuntimeRefines
             CodeWP context sourceModule sourceFunction labels module hostEnv
                 sourceRuntime sourceEnv selected selectedTarget targetStore
                 targetLocals witness tail Q →
-              CodeWP context sourceModule sourceFunction labels module hostEnv
+            CodeWP context sourceModule sourceFunction labels module hostEnv
                 sourceRuntime sourceEnv (.cases cases) target targetStore
                 targetLocals witness tail Q
+
+/-- Case implementations compose by disjunction of their source-facing
+admission predicates. -/
+theorem CaseRuntimeRefines.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {LeftSupported RightSupported :
+      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
+    (left :
+      CaseRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv LeftSupported)
+    (right :
+      CaseRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv RightSupported) :
+    CaseRuntimeRefines context sourceModule sourceFunction labels module
+      hostEnv (fun runtime env cases selected =>
+        LeftSupported runtime env cases selected ∨
+          RightSupported runtime env cases selected) := by
+  intro sourceRuntime sourceEnv cases selected target targetStore targetLocals
+    witness supported sourceStep stateRelated adapted
+  cases supported with
+  | inl supported =>
+      exact left supported sourceStep stateRelated adapted
+  | inr supported =>
+      exact right supported sourceStep stateRelated adapted
 
 /--
 Default-only cases satisfy the generic case runtime condition without a host
@@ -10420,7 +10459,7 @@ compiler inversion recovers the fallback and constructor chain, and
 `objectConstructorCaseChainRefines` follows exactly that selected path through
 the concrete `getTag` calls.
 -/
-theorem ConcreteSupportedExport.caseRuntimeRefines_objectConstructorCases
+theorem ConcreteSupportedFunction.caseRuntimeRefines_objectConstructorCases
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10428,10 +10467,9 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_objectConstructorCases
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
@@ -10475,7 +10513,7 @@ compiler inversion recovers the direct local comparisons, while the related
 `.uint8` discriminator proves that every executed comparison observes the
 same tag without consulting the concrete host.
 -/
-theorem ConcreteSupportedExport.caseRuntimeRefines_scalarUInt8Cases
+theorem ConcreteSupportedFunction.caseRuntimeRefines_scalarUInt8Cases
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10483,10 +10521,9 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_scalarUInt8Cases
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
@@ -10518,14 +10555,9 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_scalarUInt8Cases
   apply codeWP_cases fallbackCompiled
   exact liftChain tail Q stable continued
 
-/--
-The concrete `getTag` host implements singleton object-constructor dispatch.
-
-All target structure is recovered from the production compiler and adapter.
-The source admission contributes only the singleton shape, compiler ABI facts,
-and the dynamic guarantee that the semantic tag fits the generated i32 lane.
--/
-theorem ConcreteSupportedExport.caseRuntimeRefines_singleObjectConstructor
+/-- Every currently proved production case mode satisfies one uniform runtime
+law, so different generated declarations may use different case modes. -/
+theorem ConcreteSupportedFunction.caseRuntimeRefines_productionCases
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10533,10 +10565,34 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_singleObjectConstructor
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ProductionCasesSupported context) := by
+  apply CaseRuntimeRefines.or caseRuntimeRefines_defaultOnly
+  exact CaseRuntimeRefines.or spec.caseRuntimeRefines_objectConstructorCases
+    spec.caseRuntimeRefines_scalarUInt8Cases
+
+/--
+The concrete `getTag` host implements singleton object-constructor dispatch.
+
+All target structure is recovered from the production compiler and adapter.
+The source admission contributes only the singleton shape, compiler ABI facts,
+and the dynamic guarantee that the semantic tag fits the generated i32 lane.
+-/
+theorem ConcreteSupportedFunction.caseRuntimeRefines_singleObjectConstructor
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env
@@ -10660,7 +10716,7 @@ The proof executes the first hit, second hit after one miss, and default after
 two misses. Nested generated resumption wrappers are discharged from the
 single semantic stability condition carried by `CaseRuntimeRefines`.
 -/
-theorem ConcreteSupportedExport.caseRuntimeRefines_twoObjectConstructorDefault
+theorem ConcreteSupportedFunction.caseRuntimeRefines_twoObjectConstructorDefault
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -10668,10 +10724,9 @@ theorem ConcreteSupportedExport.caseRuntimeRefines_twoObjectConstructorDefault
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     CaseRuntimeRefines context sourceModule sourceFunction labels
       target.wasmModule hosts.env

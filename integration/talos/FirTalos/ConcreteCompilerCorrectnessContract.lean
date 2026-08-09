@@ -4342,9 +4342,9 @@ example
     sourceExternals
 
 /-- The production recursive induction admits pure externals together with
-ownership, tag mutation, and all supported field mutations. The root supplies
-only its successful compiler pipeline; neither operation executions nor
-recursive callee correctness are certificates. -/
+ownership, tag mutation, all supported field mutations, and all production
+case modes. The root supplies only its successful compiler pipeline; neither
+operation executions nor recursive callee correctness are certificates. -/
 example
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -4362,10 +4362,28 @@ example
       (fun context => ReuseBudgetedDirectSupported context)
       (fun context => PureExternalSupported context sourceExternals)
       (fun _ => NoReuseCapacityLazySupported)
-      (fun _ => DefaultOnlyCaseSupported)
+      (fun context => ProductionCasesSupported context)
       (fun context => OwnershipTagAndAllFieldMutationEffectSupported context) :=
   spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
     sourceExternals
+
+/-- The mixed production case law is attached to any generated function, not
+only a named export. A body may select among default-only, object-constructor,
+and scalar-`UInt8` case nodes without target-code evidence. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List FVarId} :
+    CaseRuntimeRefines context sourceModule sourceFunction labels
+      target.wasmModule hosts.env (ProductionCasesSupported context) :=
+  spec.caseRuntimeRefines_productionCases
 
 /-- Consequently the root named-call law is also production-derived: callers
 supply the canonical compiler context fact, not target behavior for callees. -/

@@ -11009,9 +11009,9 @@ theorem
       entryStore entryWitness facts
     exact effectRuntimeRefines_noEffects
 
-/-- The production operation laws with both pure external calls and the
-complete supported no-result runtime family. Ownership, tag mutation, and all
-field mutations are selected for each exact generated function row; export
+/-- The production operation laws with pure external calls, the complete
+supported no-result runtime family, and every currently proved production
+case mode. Each law is selected for the exact generated function row; export
 membership remains a property only of the root entry point. -/
 theorem
     ConcreteSupportedExport.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_pureExternal_effects
@@ -11031,7 +11031,7 @@ theorem
       (fun context => ReuseBudgetedDirectSupported context)
       (fun context => PureExternalSupported context sourceExternals)
       (fun _ => NoReuseCapacityLazySupported)
-      (fun _ => DefaultOnlyCaseSupported)
+      (fun context => ProductionCasesSupported context)
       (fun context => OwnershipTagAndAllFieldMutationEffectSupported context) := by
   constructor
   · intro declaration context sourceCode sourceFunction row entryRuntime
@@ -11048,7 +11048,7 @@ theorem
       entryStore entryWitness
     exact reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
   · intro declaration context sourceCode sourceFunction row
-    exact caseRuntimeRefines_defaultOnly
+    exact (row.toSupportedFunction spec).caseRuntimeRefines_productionCases
   · intro declaration context sourceCode sourceFunction row entryRuntime
       entryStore entryWitness facts
     exact
@@ -11783,9 +11783,9 @@ theorem
     (spec.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_pureExternal
       sourceExternals)
 
-/-- Generated declarations with pure externals and supported no-result runtime
-effects satisfy the recursive declaration contract directly from the
-production operation laws. -/
+/-- Generated declarations with pure externals, supported no-result runtime
+effects, and production cases satisfy the recursive declaration contract
+directly from the operation laws. -/
 theorem
     ConcreteSupportedExport.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
     {program : Fir.LeanIR.ImpureProgram}
@@ -11804,7 +11804,7 @@ theorem
       (fun context => ReuseBudgetedDirectSupported context)
       (fun context => PureExternalSupported context sourceExternals)
       (fun _ => NoReuseCapacityLazySupported)
-      (fun _ => DefaultOnlyCaseSupported)
+      (fun context => ProductionCasesSupported context)
       (fun context => OwnershipTagAndAllFieldMutationEffectSupported context) :=
   DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
     spec.programNamesUnique spec.lowered spec.adapted
@@ -12012,10 +12012,10 @@ theorem
     (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal
       sourceExternals)
 
-/-- Saturated named calls in the direct/pure-external/effect fragment execute
-the exact compiler-generated callee. Recursive callees may use the same
-ownership and mutation operations, with their correctness derived internally
-from the hereditary declaration induction. -/
+/-- Saturated named calls in the direct/pure-external/effect/case fragment
+execute the exact compiler-generated callee. Recursive callees may use the
+same ownership, mutation, and production case operations, with their
+correctness derived internally from the hereditary declaration induction. -/
 theorem
     ConcreteSupportedExport.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects
     {program : Fir.LeanIR.ImpureProgram}
@@ -12038,7 +12038,7 @@ theorem
         (fun context => ReuseBudgetedDirectSupported context)
         (fun context => PureExternalSupported context sourceExternals)
         (fun _ => NoReuseCapacityLazySupported)
-        (fun _ => DefaultOnlyCaseSupported)
+        (fun context => ProductionCasesSupported context)
         (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost context) :=
   DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
@@ -12306,8 +12306,8 @@ theorem
     successful.terminatesWith callerTail⟩
 
 /-- Certificate-free declaration correctness for recursively generated code
-with direct operations, pure externals, and the complete supported no-result
-ownership/tag/field-mutation family. -/
+with direct operations, pure externals, the complete supported no-result
+ownership/tag/field-mutation family, and production cases. -/
 theorem
     ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates_reuseBudgetedDirect_pureExternal_effects
     {program : Fir.LeanIR.ImpureProgram}
@@ -12337,7 +12337,7 @@ theorem
         (fun context => ReuseBudgetedDirectSupported context)
         (fun context => PureExternalSupported context sourceExternals)
         (fun _ => NoReuseCapacityLazySupported)
-        (fun _ => DefaultOnlyCaseSupported)
+        (fun context => ProductionCasesSupported context)
         (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost context resultKind facts sourceRuntime sourceEnv
         sourceCode resultFacts resultRuntime resultEnv resultValue
@@ -12367,14 +12367,15 @@ theorem
           (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects
             contextCaches sourceExternals))
         reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
-        caseRuntimeRefines_defaultOnly
+        spec.caseRuntimeRefines_productionCases
         (fun _ =>
           spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
             sourceExternals)
         parameterCount
 
 /-- Public partial correctness for the recursive production fragment with
-direct operations, pure externals, and supported ownership/tag/field effects.
+direct operations, pure externals, supported ownership/tag/field effects, and
+default/object-constructor/scalar-`UInt8` cases.
 
 For every finite hereditary LCNF evaluation in this fragment, the generated
 Wasm export terminates with the same semantic result and a related concrete
@@ -12409,7 +12410,7 @@ theorem
         (fun context => ReuseBudgetedDirectSupported context)
         (fun context => PureExternalSupported context sourceExternals)
         (fun _ => NoReuseCapacityLazySupported)
-        (fun _ => DefaultOnlyCaseSupported)
+        (fun context => ProductionCasesSupported context)
         (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
         directLetAllocationCost context resultKind facts sourceRuntime sourceEnv
         sourceCode resultFacts resultRuntime resultEnv resultValue
