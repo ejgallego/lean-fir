@@ -12,6 +12,7 @@ import {
 import {
   createIlluminateSelectionPlayerAdapter,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
@@ -430,6 +431,7 @@ const selectionManifest = JSON.parse(await readFile(
 const selectionBuild = { capabilities: {
   browserAdapter: { apiVersion:
     ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
+  hotEvent: { version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION },
   inputLayout: { version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION },
   ownership: { version: ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION },
 } };
@@ -453,6 +455,24 @@ function materializeSelection(animation, action) {
   };
 }
 
+function replaySelectionHot(animation, events) {
+  const created = selectionAdapter.createPlayer(animation);
+  if (!created.ok) return created;
+  const actions = [created.action];
+  try {
+    for (const event of events) {
+      const result = event.kind === "tick"
+        ? selectionAdapter.dispatchTick(created.player, event.timestamp)
+        : selectionAdapter.dispatch(created.player, event);
+      if (!result.ok) return result;
+      actions.push(result.action);
+    }
+    return { ok: true, actions };
+  } finally {
+    selectionAdapter.disposePlayer(created.player);
+  }
+}
+
 for (const testCase of cases) {
   const oracle = new LegacyPlayerOracle(testCase.data);
   const expected = [oracle.action(),
@@ -467,6 +487,12 @@ for (const testCase of cases) {
   assert.deepEqual(selectionResult.actions.map((action) =>
     materializeSelection(testCase.data, action)), expected,
   `${testCase.name} selection`);
+  const hotResult = replaySelectionHot(testCase.data, testCase.events);
+  assert.equal(hotResult.ok, true,
+    `${testCase.name} scalar tick: ${hotResult.error ?? "failed"}`);
+  assert.deepEqual(hotResult.actions, selectionResult.actions,
+    `${testCase.name} scalar tick versus generic event`);
 }
 
-console.log(`${cases.length} legacy/FIR-v3/FIR-selection-v4 player traces matched`);
+console.log(`${cases.length} legacy/FIR-v3/FIR-selection-v4 generic/scalar-tick ` +
+  "player traces matched");

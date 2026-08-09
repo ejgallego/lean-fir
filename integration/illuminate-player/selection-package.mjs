@@ -18,6 +18,7 @@ import { fileURLToPath } from "node:url";
 
 import {
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
@@ -39,17 +40,17 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/FirSelection.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 126,
+  finalLcnfDeclarations: 127,
   finalLcnfDeclarationSha256:
-    "81d4a9200869748e6e15c7ac262ee1e3c567ba864b9dca8f41786c80b901b416",
-  retainedSourceFunctions: 81,
+    "0ee1e73c21173216a80746bd2432944e42ca0d439f6ba178e3713b112c56b32b",
+  retainedSourceFunctions: 82,
   retainedSourceFunctionSha256:
-    "c397ed4627a8ee5a3882a93de3ced207f68a042f063181158d650a4b7c007814",
-  residentHelpers: 163,
+    "fdf43ab9f6c0bd8d85ea8bd951c25af8189aa13739cf419110f31d05c85dd471",
+  residentHelpers: 167,
   residentHelperSha256:
-    "351298b04364a28c99aa6867551f639cbf22afe31593f0e343b46f409a12db91",
-  baseWasmBytes: 20505,
-  completeWasmBytes: 55527,
+    "f37cef4296f3fdcb4005c9a964ad98ac1c447f4e4c5481f211a125f8ad876532",
+  baseWasmBytes: 20761,
+  completeWasmBytes: 56156,
 });
 const outputNames = [
   "BUILD.json",
@@ -169,6 +170,7 @@ assert.deepEqual(memoryExports, ["memory"]);
 assert.deepEqual(functionExports, [
   "Illuminate.AnimationPlayer.initialSelectionLive",
   "Illuminate.AnimationPlayer.transitionSelectionLive",
+  "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact",
   "fir_heap_frontier",
   "fir_heap_set_frontier",
   "fir_heap_rewind",
@@ -193,6 +195,13 @@ assert.deepEqual(inventory.publicSignatures.find((entry) =>
   entry.name === "Illuminate.AnimationPlayer.transitionSelectionLive"), {
   name: "Illuminate.AnimationPlayer.transitionSelectionLive",
   params: ["object", "object", "tobject"],
+  results: ["object"],
+});
+assert.deepEqual(inventory.publicSignatures.find((entry) =>
+  entry.name ===
+    "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact"), {
+  name: "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact",
+  params: ["object", "object", "uint64"],
   results: ["object"],
 });
 assert.equal(inventory.lazyCacheInitializers, 0);
@@ -250,6 +259,29 @@ const build = {
       ],
       result: { lean: "LiveSelectionTransition", fir: "object" },
     },
+    {
+      sourceName: "IlluminateFirNative.transitionSelectionTickLive",
+      exportName:
+        "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact",
+      parameters: [
+        {
+          name: "animation",
+          lean: "SelectionAnimation",
+          fir: "object",
+          physicalRepresentation:
+            "single-field wrapper erased to its PlayerAnimation timeline",
+        },
+        { name: "state", lean: "PlayerState", fir: "object" },
+        {
+          name: "timestampBits",
+          lean: "Float",
+          fir: "uint64",
+          physicalRepresentation:
+            "bit-exact binary64 payload reinterpreted to f64 inside Wasm",
+        },
+      ],
+      result: { lean: "LiveSelectionTransition", fir: "object" },
+    },
   ],
   wasm: {
     file: "illuminate-selection-player.wasm",
@@ -270,17 +302,31 @@ const build = {
     },
     browserAdapter: {
       apiVersion: ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
-      methods: ["createPlayer", "dispatch", "disposePlayer", "replayTrace"],
+      methods: ["createPlayer", "dispatch", "dispatchTick", "disposePlayer",
+        "replayTrace"],
       phases: ["project", "selectionEncode", "eventEncode", "execute",
         "decode", "rewind"],
       timing: {
         creation: ["instantiateMs", "projectMs", "selectionEncodeMs",
           "stateSlotMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
         dispatch: ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
+        dispatchTick:
+          ["encodeMs", "executeMs", "decodeMs", "rewindMs", "totalMs"],
         intervals: "non-overlapping; totalMs is independently measured",
       },
       result:
         "copied FrameSelection exposed as action plus Lean scheduling decision; no updates array",
+    },
+    hotEvent: {
+      version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
+      method: "dispatchTick(player, timestamp)",
+      semanticOracle: "dispatch(player, { kind: 'tick', timestamp })",
+      sourceEntry: "IlluminateFirNative.transitionSelectionTickLive",
+      wasmExport:
+        "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact",
+      transport: "IEEE-754 binary64 bits over a Wasm i64 parameter",
+      eventConstruction: "PlayerEvent.tick is constructed inside Wasm",
+      hostScratch: "zero bytes and zero resident allocation calls",
     },
     inputLayout: {
       version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
@@ -337,6 +383,7 @@ const build = {
     helperFamilies: [
       "object projections and scalar projections",
       "module-owned allocation and scalar stores",
+      "bit-exact Float32 and Float packed-scalar stores",
       "constructors, setters, increments, releases, and cache setters",
       "small and big Nat operations",
       "Float subtraction, division, multiplication, comparison, round, and toUInt64",

@@ -4,6 +4,7 @@ import { readFile } from "node:fs/promises";
 import {
   createIlluminateSelectionPlayerAdapter,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
@@ -14,6 +15,7 @@ const manifest = JSON.parse(await readFile(
 const build = { capabilities: {
   browserAdapter: { apiVersion:
     ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
+  hotEvent: { version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION },
   inputLayout: { version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION },
   ownership: { version: ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION },
 } };
@@ -48,6 +50,15 @@ function materialize(action) {
     a: binding.a,
     v: segment.params[action.localFrame][index],
   }));
+}
+
+function adjacentFloat(value, direction) {
+  const storage = new ArrayBuffer(8);
+  const view = new DataView(storage);
+  view.setFloat64(0, value, true);
+  const bits = view.getBigUint64(0, true);
+  view.setBigUint64(0, bits + (direction > 0 ? 1n : -1n), true);
+  return view.getFloat64(0, true);
 }
 
 const adapter = await createIlluminateSelectionPlayerAdapter({
@@ -88,6 +99,29 @@ for (const event of events) {
   assert.equal(result.memory.postRewindFrontier,
     created.memory.persistentCheckpoint);
 }
+
+const genericTickPlayer = adapter.createPlayer(animation);
+const scalarTickPlayer = adapter.createPlayer(animation);
+assert.equal(genericTickPlayer.ok && scalarTickPlayer.ok, true);
+for (const timestamp of [adjacentFloat(50, -1), 50,
+  adjacentFloat(50, 1), 300.125]) {
+  const generic = adapter.dispatch(genericTickPlayer.player,
+    { kind: "tick", timestamp });
+  const scalar = adapter.dispatchTick(scalarTickPlayer.player, timestamp);
+  assert.equal(generic.ok && scalar.ok, true, generic.error ?? scalar.error);
+  assert.deepEqual(scalar.action, generic.action);
+  assert.equal(scalar.scheduleNextFrame, generic.scheduleNextFrame);
+  assert.ok(generic.memory.scratchBytes > 0);
+  assert.ok(generic.memory.scratchAllocationCalls > 0);
+  assert.equal(scalar.memory.scratchBytes, 0);
+  assert.equal(scalar.memory.scratchAllocationCalls, 0);
+  assert.equal(scalar.memory.frontierAfterEncode,
+    scalar.memory.persistentCheckpoint);
+  assert.equal(scalar.memory.postRewindFrontier,
+    scalar.memory.persistentCheckpoint);
+}
+adapter.disposePlayer(genericTickPlayer.player);
+adapter.disposePlayer(scalarTickPlayer.player);
 adapter.disposePlayer(created.player);
 adapter.disposePlayer(created.player);
 assert.throws(() => adapter.dispatch(created.player, { kind: "advance" }),
@@ -127,11 +161,17 @@ const steady = adapter.createPlayer({
 });
 assert.equal(steady.ok, true, steady.error);
 assert.equal(adapter.dispatch(steady.player, { kind: "advance" }).ok, true);
+const malformedTick = adapter.dispatchTick(steady.player, Number.NaN);
+assert.equal(malformedTick.ok, false);
+assert.match(malformedTick.error, /timestamp must be finite/);
+assert.equal(malformedTick.memory.postRewindFrontier,
+  steady.memory.persistentCheckpoint);
 let peak = steady.memory.persistentCheckpoint;
 for (let index = 0; index < 10_000; ++index) {
-  const tick = adapter.dispatch(steady.player,
-    { kind: "tick", timestamp: index / 7 });
+  const tick = adapter.dispatchTick(steady.player, index / 7);
   assert.equal(tick.ok, true, tick.error);
+  assert.equal(tick.memory.scratchBytes, 0);
+  assert.equal(tick.memory.scratchAllocationCalls, 0);
   assert.equal(tick.memory.postRewindFrontier,
     steady.memory.persistentCheckpoint);
   peak = Math.max(peak, tick.memory.peakFrontier);
@@ -142,6 +182,7 @@ assert.deepEqual(WebAssembly.Module.imports(new WebAssembly.Module(bytes)), []);
 assert.deepEqual(WebAssembly.Module.exports(new WebAssembly.Module(bytes)), [
   { name: "Illuminate.AnimationPlayer.initialSelectionLive", kind: "function" },
   { name: "Illuminate.AnimationPlayer.transitionSelectionLive", kind: "function" },
+  { name: "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact", kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
   { name: "fir_heap_rewind", kind: "function" },
@@ -156,6 +197,7 @@ console.log(JSON.stringify({
   persistentAllocations: created.memory.persistentAllocationCalls,
   pages: created.memory.pagesAfter,
   ticks: 10_000,
+  hotEventScratchBytes: 0,
   checkpoint: steady.memory.persistentCheckpoint,
   peak,
 }));
