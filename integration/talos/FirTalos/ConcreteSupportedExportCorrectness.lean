@@ -111,21 +111,21 @@ def ConcreteExternalCallsAligned
           imp.params.length = operation.signature.params.size ∧
           imp.results.length = 1
 
-/-- Static whole-pipeline evidence for one concrete generated export.
+/-- Static whole-pipeline evidence for one concrete generated function.
 
 `bodyAdapted` is the crucial compiler-facing equation: it ties the selected
 source code to the actual generated target body through `compileCode` and the
-numeric Talos adapter. Dynamic source behavior and target-state refinement are
-deliberately absent from this static package. -/
-structure ConcreteSupportedExport
+numeric Talos adapter. Dynamic source behavior, target-state refinement, and
+export-table membership are deliberately absent from this reusable package.
+-/
+structure ConcreteSupportedFunction
     (program : Fir.LeanIR.ImpureProgram)
     (context : Fir.Wasm.Context)
     (code : LCNF.Code .impure)
     (sourceModule : Fir.Wasm.Module)
     (sourceFunction : Fir.Wasm.Function)
     (target : AdaptedModule)
-    (hosts : ResolvedHosts)
-    (exportName : String) where
+    (hosts : ResolvedHosts) where
   programSupported : Fir.Wasm.WasmSupported program
   programNamesUnique : program.NamesUnique
   contextProgram : context.program = program
@@ -144,8 +144,6 @@ structure ConcreteSupportedExport
     ConcreteExternalCallsAligned program sourceModule target hosts
   targetFunctionIndex : Nat
   targetFunction : Wasm.Function
-  exported :
-    target.wasmModule.findExport exportName = some targetFunctionIndex
   notImport :
     target.wasmModule.imports[targetFunctionIndex]? = none
   targetFunctionFound :
@@ -156,9 +154,24 @@ structure ConcreteSupportedExport
     CodeAdapted context sourceModule sourceFunction [] code targetFunction.body
   singleResult : targetFunction.results.length = 1
 
-/-- Successful concrete resolution provides the exact host contract installed
-for the adapted module. -/
-theorem ConcreteSupportedExport.hostsSatisfy
+/-- A supported generated function together with the one extra static fact
+needed by a named whole-export correctness theorem. Internal recursive
+declarations use `ConcreteSupportedFunction` directly. -/
+structure ConcreteSupportedExport
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (code : LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (exportName : String)
+    extends ConcreteSupportedFunction program context code sourceModule
+      sourceFunction target hosts where
+  exported :
+    target.wasmModule.findExport exportName = some targetFunctionIndex
+
+instance
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -167,15 +180,35 @@ theorem ConcreteSupportedExport.hostsSatisfy
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
     {exportName : String}
+    (spec : ConcreteSupportedExport program context code sourceModule
+      sourceFunction target hosts exportName) :
+    CoeDep
+      (ConcreteSupportedExport program context code sourceModule
+        sourceFunction target hosts exportName)
+      spec
+      (ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts) :=
+  ⟨spec.toConcreteSupportedFunction⟩
+
+/-- Successful concrete resolution provides the exact host contract installed
+for the adapted module. -/
+theorem ConcreteSupportedFunction.hostsSatisfy
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName) :
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts) :
     hosts.env.Satisfies target.wasmModule hosts.spec :=
   hosts.satisfies target.wasmModule spec.hostsAligned
 
 /-- Specialize whole-pipeline external alignment to one compiler-selected
 named call. -/
-theorem ConcreteSupportedExport.externalCall
+theorem ConcreteSupportedFunction.externalCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -183,10 +216,9 @@ theorem ConcreteSupportedExport.externalCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {name : Lean.Name} {declaration : LCNF.Decl .impure} {id : Nat}
     (found : program.findDecl? name = some declaration)
     (external : ∃ metadata, declaration.value = .extern metadata)
@@ -212,7 +244,7 @@ Successful host resolution rules out the two unrepresented floating-point
 kinds hidden behind the resolver's private classification; callers therefore
 need no separate `cacheSet` support certificate.
 -/
-theorem ConcreteSupportedExport.cacheSetCall
+theorem ConcreteSupportedFunction.cacheSetCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -220,10 +252,9 @@ theorem ConcreteSupportedExport.cacheSetCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {declaration : Lean.Name} {kind : AbiKind} {id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.cacheSet declaration kind)) =
@@ -260,7 +291,7 @@ theorem ConcreteSupportedExport.cacheSetCall
 
 /-- Resolver/adaptor alignment specializes to the exact concrete natural
 literal contract expected by the allocation refinement theorem. -/
-theorem ConcreteSupportedExport.naturalLiteralCall
+theorem ConcreteSupportedFunction.naturalLiteralCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -268,10 +299,9 @@ theorem ConcreteSupportedExport.naturalLiteralCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {value id : Nat}
     (found :
       callIndex? sourceModule
@@ -298,7 +328,7 @@ theorem ConcreteSupportedExport.naturalLiteralCall
 
 /-- Resolver/adaptor alignment specializes to the exact concrete UTF-8 String
 literal contract expected by the allocation refinement theorem. -/
-theorem ConcreteSupportedExport.stringLiteralCall
+theorem ConcreteSupportedFunction.stringLiteralCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -306,10 +336,9 @@ theorem ConcreteSupportedExport.stringLiteralCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {value : String}
     {id : Nat}
     (found :
@@ -337,7 +366,7 @@ theorem ConcreteSupportedExport.stringLiteralCall
 
 /-- Resolver/adaptor alignment specializes to the exact concrete constructor
 allocation contract selected by its compiler-derived field and result kinds. -/
-theorem ConcreteSupportedExport.allocCtorCall
+theorem ConcreteSupportedFunction.allocCtorCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -345,10 +374,9 @@ theorem ConcreteSupportedExport.allocCtorCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {info : LCNF.CtorInfo}
     {fieldKinds : Array AbiKind}
     {resultKind : AbiKind}
@@ -378,7 +406,7 @@ theorem ConcreteSupportedExport.allocCtorCall
     exact results
 
 /-- Resolver/adaptor alignment for a concrete object-field projection. -/
-theorem ConcreteSupportedExport.objectProjectionCall
+theorem ConcreteSupportedFunction.objectProjectionCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -386,10 +414,9 @@ theorem ConcreteSupportedExport.objectProjectionCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {index id : Nat}
     {resultKind : AbiKind}
     (found :
@@ -416,7 +443,7 @@ theorem ConcreteSupportedExport.objectProjectionCall
     exact results
 
 /-- Resolver/adaptor alignment for a concrete `USize`-slot projection. -/
-theorem ConcreteSupportedExport.usizeProjectionCall
+theorem ConcreteSupportedFunction.usizeProjectionCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -424,10 +451,9 @@ theorem ConcreteSupportedExport.usizeProjectionCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {index id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.usizeProj index)) = some id) :
@@ -452,7 +478,7 @@ theorem ConcreteSupportedExport.usizeProjectionCall
     exact results
 
 /-- Resolver/adaptor alignment for a concrete packed-scalar projection. -/
-theorem ConcreteSupportedExport.scalarProjectionCall
+theorem ConcreteSupportedFunction.scalarProjectionCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -460,10 +486,9 @@ theorem ConcreteSupportedExport.scalarProjectionCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {width offset id : Nat}
     {resultKind : AbiKind}
     (found :
@@ -501,7 +526,7 @@ theorem ConcreteSupportedExport.scalarProjectionCall
     exact results
 
 /-- Resolver/adaptor alignment for one count-indexed concrete reset call. -/
-theorem ConcreteSupportedExport.resetCall
+theorem ConcreteSupportedFunction.resetCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -509,10 +534,9 @@ theorem ConcreteSupportedExport.resetCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {count id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.reset count)) = some id) :
@@ -540,7 +564,7 @@ theorem ConcreteSupportedExport.resetCall
 Resolver/adaptor alignment specializes to the exact concrete reuse contract
 selected by the replacement layout and compiler-derived field/result kinds.
 -/
-theorem ConcreteSupportedExport.reuseCall
+theorem ConcreteSupportedFunction.reuseCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -548,10 +572,9 @@ theorem ConcreteSupportedExport.reuseCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {info : LCNF.CtorInfo}
     {updateHeader : Bool}
     {fieldKinds : Array AbiKind}
@@ -582,7 +605,7 @@ theorem ConcreteSupportedExport.reuseCall
     exact results
 
 /-- Resolver/adaptor alignment for one concrete integer-boxing call. -/
-theorem ConcreteSupportedExport.boxCall
+theorem ConcreteSupportedFunction.boxCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -590,10 +613,9 @@ theorem ConcreteSupportedExport.boxCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {kind : BoxedScalarKind} {resultKind : AbiKind} {id : Nat}
     (found :
       callIndex? sourceModule
@@ -620,7 +642,7 @@ theorem ConcreteSupportedExport.boxCall
     exact results
 
 /-- Resolver/adaptor alignment for one concrete typed-unbox call. -/
-theorem ConcreteSupportedExport.unboxCall
+theorem ConcreteSupportedFunction.unboxCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -628,10 +650,9 @@ theorem ConcreteSupportedExport.unboxCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {kind : BoxedScalarKind} {id : Nat}
     (found :
       callIndex? sourceModule (.runtime (.unbox kind.abiKind)) = some id) :
@@ -656,7 +677,7 @@ theorem ConcreteSupportedExport.unboxCall
     exact results
 
 /-- Resolver/adaptor alignment for the concrete sharing observation. -/
-theorem ConcreteSupportedExport.isSharedCall
+theorem ConcreteSupportedFunction.isSharedCall
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {code : LCNF.Code .impure}
@@ -664,10 +685,9 @@ theorem ConcreteSupportedExport.isSharedCall
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context code sourceModule sourceFunction
-        target hosts exportName)
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
     {id : Nat}
     (found :
       callIndex? sourceModule (.runtime .isShared) = some id) :

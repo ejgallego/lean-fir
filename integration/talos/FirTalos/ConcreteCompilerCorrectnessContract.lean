@@ -4849,4 +4849,24 @@ private def erasedFacadeProgram : Fir.LeanIR.ImpureProgram :=
       module.runtimeOperations.contains <|
         .partialApply erasedFacade.name 3 1 #[.erased] .tobject
 
+/-- An exact generated internal row inherits the reusable static pipeline
+contract without claiming that the recursive callee is itself exported. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {rootContext context : Fir.Wasm.Context}
+    {rootCode sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {rootFunction sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {declaration : LCNF.Decl .impure}
+    (spec : ConcreteSupportedExport program rootContext rootCode sourceModule
+      rootFunction target hosts exportName)
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target) :
+    ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts :=
+  row.toSupportedFunction spec
+
 end FirTalos.Concrete.CompilerCorrectnessContract

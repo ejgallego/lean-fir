@@ -13930,7 +13930,7 @@ re-established after the successful reuse; the shared validator gap tracked
 by `FIR-BUG-wasm-none-reuse-retained-token-ordinary` is now confined to
 intervening operations that may make a retained-token alias persistent.
 -/
-theorem ConcreteSupportedExport.reuseLetStep_of_capacity
+theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -13938,10 +13938,9 @@ theorem ConcreteSupportedExport.reuseLetStep_of_capacity
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {facts : ReuseCapacityFacts}
     {labels : List FVarId}
     {decl : LCNF.LetDecl .impure}
@@ -14518,7 +14517,7 @@ theorem
 The production compiler, adapter, resolver, concrete runtime, and source reuse
 semantics instantiate the uniform facts-indexed law.
 -/
-theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost
+theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -14526,10 +14525,9 @@ theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -14557,7 +14555,7 @@ The authoritative validator transfer erases only the destination's shadowed
 fact. Source and concrete heaps are unchanged, so old capacity evidence and
 ordinary-token provenance cross the step by reflexive transport.
 -/
-theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_localAlias
+theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_localAlias
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -14565,10 +14563,9 @@ theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_loc
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -14695,7 +14692,7 @@ Immediate integer and `USize` literals preserve the facts-indexed reuse frame.
 Their source and target heap transitions are both identities.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_immediateLiteral
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_immediateLiteral
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -14703,10 +14700,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -14784,7 +14780,7 @@ source and concrete heaps are unchanged; the concrete host only clears its
 failure slot before writing the projected local.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_usizeProjection
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_usizeProjection
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -14792,10 +14788,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -14892,7 +14887,7 @@ Successful object-field projections preserve the facts-indexed reuse frame.
 The checked read clears only the concrete failure slot.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_objectProjection
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_objectProjection
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -14900,10 +14895,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15009,7 +15003,7 @@ As with the other readers, the source heap is unchanged and the concrete host
 only clears failure metadata.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_scalarProjection
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_scalarProjection
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15017,10 +15011,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15121,7 +15114,7 @@ The source transition likewise either preserves the heap or appends one fresh
 ordinary cell.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_box
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_box
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15129,10 +15122,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15249,7 +15241,7 @@ while transporting older facts through the immediate, promoted-tag, or fresh
 limb-object branch selected by the concrete allocator.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_naturalLiteral
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_naturalLiteral
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15257,10 +15249,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15377,7 +15368,7 @@ UTF-8 String literals erase the destination reuse fact and transport all older
 facts through the fresh ordinary source cell and concrete prefix extension.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_stringLiteral
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_stringLiteral
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15385,10 +15376,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15509,7 +15499,7 @@ heap and concrete heap are unchanged, so the destination fact is erased while
 all older capacity facts and ordinary-token obligations cross reflexively.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_unbox
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_unbox
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15517,10 +15507,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15621,7 +15610,7 @@ Successful sharing observations preserve the facts-indexed reuse frame. They
 only inspect ownership state and clear the concrete failure slot.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_isShared
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_isShared
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15629,10 +15618,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -15727,7 +15715,7 @@ Nonempty constructor allocation inserts the validator's exact constructor
 capacity fact while preserving every older fact and ordinary token.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_nonemptyConstructor
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -15735,10 +15723,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18414,7 +18401,7 @@ def ReuseAliasSupported (context : Fir.Wasm.Context)
   ReuseSupported context facts decl ∨ LocalAliasSupported context decl
 
 /-- Reuse and local aliases share one facts-indexed production runtime law. -/
-theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseAlias
+theorem ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseAlias
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18422,10 +18409,9 @@ theorem ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reu
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18511,7 +18497,7 @@ typed unboxing, and sharing observations share one facts-indexed production
 runtime law.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnly
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnly
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18519,10 +18505,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18687,7 +18672,7 @@ def ReuseReadOnlyConstructorSupported (context : Fir.Wasm.Context)
 
 /-- The first allocating mixed facts-indexed production runtime law. -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseReadOnlyConstructor
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18695,10 +18680,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18784,7 +18768,7 @@ def ReuseConstructorBoxSupported (context : Fir.Wasm.Context)
 
 /-- Compose integer boxing with the current allocating facts-indexed family. -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseConstructorBox
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18792,10 +18776,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18883,7 +18866,7 @@ def ReuseBudgetedDirectSupported (context : Fir.Wasm.Context)
 All current direct compiler operations share the facts-indexed reuse frame.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18891,10 +18874,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -18938,7 +18920,7 @@ theorem
 /-- The complete facts-indexed direct family preserves all installed pure
 external implementation laws alongside the authoritative reuse frame. -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternal
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18946,10 +18928,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
@@ -18982,7 +18963,7 @@ theorem
 /-- The complete facts-indexed direct family also preserves the ownership
 descriptor agreement needed by recursive decrement. -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_ownership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -18990,10 +18971,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
       sourceFunction labels target.wasmModule hosts.env
@@ -19024,7 +19004,7 @@ The complete facts-indexed direct family preserves the pure external handler
 laws and closure-descriptor agreement simultaneously.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -19032,10 +19012,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl)
     {labels : List FVarId} :
     ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule

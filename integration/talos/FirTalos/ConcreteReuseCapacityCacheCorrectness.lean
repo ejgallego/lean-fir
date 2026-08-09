@@ -3934,7 +3934,7 @@ declaration proofs; target execution and cache transports are derived from
 the compiler/runtime theorem.
 -/
 theorem
-    ConcreteSupportedExport.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+    ConcreteSupportedFunction.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {sourceCode : LCNF.Code .impure}
@@ -3942,10 +3942,9 @@ theorem
     {sourceFunction : Fir.Wasm.Function}
     {target : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     (spec :
-      ConcreteSupportedExport program context sourceCode sourceModule
-        sourceFunction target hosts exportName)
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
     (externals : ExternalImpl)
     {labels : List FVarId}
     {entryRuntime : RuntimeState}
@@ -8538,6 +8537,46 @@ structure ConcreteGeneratedInternalDeclaration
   callIndexEq :
     callIndex? sourceModule (.declaration declaration.name) =
       some targetFunctionIndex
+
+/-- Every internal declaration selected from the production pipeline inherits
+the module-wide compiler, adapter, resolver, and host-alignment facts from a
+supported root export.  Its function-specific facts come from the exact
+generated row, so this construction requires no export-table membership for
+the internal declaration. -/
+def ConcreteGeneratedInternalDeclaration.toSupportedFunction
+    {program : Fir.LeanIR.ImpureProgram}
+    {rootContext context : Fir.Wasm.Context}
+    {rootCode sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {rootFunction sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {declaration : LCNF.Decl .impure}
+    (spec : ConcreteSupportedExport program rootContext rootCode sourceModule
+      rootFunction target hosts exportName)
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target) :
+    ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts := {
+  programSupported := spec.programSupported
+  programNamesUnique := spec.programNamesUnique
+  contextProgram := row.contextProgram
+  lowered := spec.lowered
+  sourceFunctionIndex := row.sourceFunctionIndex
+  sourceFunctionFound := row.sourceFunctionFound
+  localsAligned := row.localsAligned
+  adapted := spec.adapted
+  hostsResolved := spec.hostsResolved
+  hostsAligned := spec.hostsAligned
+  runtimeCallsAligned := spec.runtimeCallsAligned
+  externalCallsAligned := spec.externalCallsAligned
+  targetFunctionIndex := row.targetFunctionIndex
+  targetFunction := row.targetFunction
+  notImport := row.notImport
+  targetFunctionFound := row.targetFunctionFound
+  bodyAdapted := row.bodyAdapted
+  singleResult := row.singleResult }
 
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
