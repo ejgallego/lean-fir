@@ -3829,6 +3829,192 @@ theorem ConcreteReuseCapacityCacheFrame.resolveClosureMatcher
     invariant.2.2.dispatch invariant.2.2.descriptors.symm sourceLookup
     closureFound closureKindAt cellFound cellLive cellObjectEq
 
+/-- Execute one known successful closure matcher and re-establish the complete
+cache/ownership frame at the semantic post-consumption runtime. In particular,
+the resulting store is generally *not* the initial store: exclusive and
+shared applications update ownership, while the closure snapshot records the
+fixed captures used by the generated projection prefix. -/
+theorem ConcreteReuseCapacityCacheFrame.closureMatchesStep_hit
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {location : Location}
+    {address : Word32}
+    {cell : HeapCell}
+    {function expectedFunction : Name}
+    {arity expectedArity expectedFixed : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures)
+    (identityTrue :
+      (function == expectedFunction && arity == expectedArity &&
+        captures.size == expectedFixed) = true)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime location { cell with rc := cell.rc - 1 } =
+          .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime captures.toList)
+    (semanticOperation :
+      Fir.LeanIR.Impure.takeClosureApplication sourceRuntime location =
+        .ok (nextRuntime, function, arity, captures)) :
+    ∃ (next : Wasm.Store Host) (application : ClosureApplication)
+        (captureKinds : Array AbiKind),
+      closureMatchesStep expectedFunction expectedArity expectedFixed initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [.i32 1] next ∧
+      next.host.closureApplication? = some application ∧
+      ClosureApplicationRel witness application address function arity
+        captureKinds captures ∧
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes nextRuntime sourceEnv next locals witness := by
+  rcases invariant with
+    ⟨⟨⟨⟨related, ordinary, aligned, budget⟩, integer, natural,
+      scalar⟩, descriptors⟩, cache, closureTables⟩
+  obtain ⟨next, application, captureKinds, concrete, snapshot,
+      applicationRelated, runtimeRelated, capacity, cursor, storeFrame⟩ :=
+    closureMatchesStep_hit_of_refines related.1.1 closureTables.dispatch
+      closureTables.descriptors.symm mapped found live objectEq identityTrue
+      sharedCapacity semanticOperation
+  have nextRelated :
+      ReuseCapacityStateRelated facts sourceFunction nextRuntime sourceEnv next
+        locals witness :=
+    related.transportSameWitness
+      ⟨runtimeRelated, storeFrame.failureClear, related.1.2.2⟩ capacity
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel facts nextRuntime sourceEnv :=
+    ordinary.transport
+      (takeClosureApplication_ordinaryPersistenceTransport semanticOperation)
+  have nextBudget :
+      next.host.runtime.heap.AddressSpaceBudget remainingBytes :=
+    budget.of_heapCursor_eq cursor
+  have nextInteger :
+      next.host.externals.IntegerResultRefines externals := by
+    rw [storeFrame.externals]
+    exact integer
+  have nextNatural :
+      ConcreteExternalImpl.NaturalResultRefines next.host.externals
+        externals := by
+    rw [storeFrame.externals]
+    exact natural
+  have nextScalar :
+      ConcreteExternalImpl.ScalarResultRefines next.host.externals
+        externals := by
+    rw [storeFrame.externals]
+    exact scalar
+  have nextDescriptors :
+      next.host.closureDescriptors = witness.closureDescriptors :=
+    storeFrame.descriptors.trans descriptors
+  have runtimeAux := takeClosureApplication_runtimeAux semanticOperation
+  have nextCache :
+      LazyCacheGlobalsRel witness sourceModule nextRuntime next :=
+    cache.transport (WitnessTransport.refl witness) runtimeAux.globals
+      storeFrame.wasmGlobals storeFrame.hostStaticLayout
+  have nextClosureTables : ClosureTablesAgree next witness := {
+    dispatch := closureTables.dispatch.trans storeFrame.dispatch.symm
+    descriptors := storeFrame.descriptors.trans closureTables.descriptors }
+  exact ⟨next, application, captureKinds, concrete, snapshot,
+    applicationRelated,
+    ⟨⟨⟨⟨nextRelated, nextOrdinary, aligned, nextBudget⟩, nextInteger,
+      nextNatural, nextScalar⟩, nextDescriptors⟩, nextCache,
+      nextClosureTables⟩⟩
+
+/-- A candidate selected by the executable matcher has the semantic closure
+identity, and its recorded successor store carries the complete
+post-consumption frame. This removes the historical `selected.nextStore =
+initial` shortcut while retaining the candidate-chain interface. -/
+theorem ConcreteReuseCapacityCacheFrame.selectedClosureMatcher
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {spec : Wasm.HostSpec Host}
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime callRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {closureId : FVarId}
+    {closureIndex : Nat}
+    {location : Location}
+    {address : Word32}
+    {cell : HeapCell}
+    {function : Name}
+    {arity : Nat}
+    {captures : Array Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+        facts remainingBytes sourceRuntime sourceEnv initial locals witness)
+    (selected :
+      ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address)
+    (mapped : witness.locations.lookup? location = some address)
+    (found : findCell? sourceRuntime.heap location = some cell)
+    (live : cell.live = true)
+    (objectEq : cell.object = .closure function arity captures)
+    (selectedMatches : (selected.matched != 0) = true)
+    (sharedCapacity : ∀ parentRuntime,
+      setCell sourceRuntime location { cell with rc := cell.rc - 1 } =
+          .ok parentRuntime →
+        ClosureRetainCapacity parentRuntime captures.toList)
+    (semanticOperation :
+      Fir.LeanIR.Impure.takeClosureApplication sourceRuntime location =
+        .ok (callRuntime, function, arity, captures)) :
+    (function == selected.function && arity == selected.arity &&
+        captures.size == selected.fixed) = true ∧
+      ∃ (application : ClosureApplication) (captureKinds : Array AbiKind),
+        selected.nextStore.host.closureApplication? = some application ∧
+        ClosureApplicationRel witness application address function arity
+          captureKinds captures ∧
+        ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+          facts remainingBytes callRuntime sourceEnv selected.nextStore locals
+          witness := by
+  have matchedEq :=
+    selected.matched_eq_of_refines invariant.stateRelated.1.1
+      invariant.2.2.dispatch invariant.2.2.descriptors.symm mapped found live
+      objectEq
+  have identityTrue :
+      (function == selected.function && arity == selected.arity &&
+        captures.size == selected.fixed) = true := by
+    by_contra identityNotTrue
+    have identityFalse :
+        (function == selected.function && arity == selected.arity &&
+          captures.size == selected.fixed) = false :=
+      Bool.eq_false_of_not_eq_true identityNotTrue
+    rw [matchedEq, identityFalse] at selectedMatches
+    simp at selectedMatches
+  obtain ⟨next, application, captureKinds, concrete, snapshot,
+      applicationRelated, nextInvariant⟩ :=
+    invariant.closureMatchesStep_hit mapped found live objectEq identityTrue
+      sharedCapacity semanticOperation
+  have matchedOne : selected.matched = 1 := by
+    rw [matchedEq, identityTrue]
+    rfl
+  have selectedOperation :
+      closureMatchesStep selected.function selected.arity selected.fixed initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [.i32 1] selected.nextStore := by
+    simpa [matchedOne] using selected.operation
+  rw [selectedOperation] at concrete
+  have nextEq : selected.nextStore = next := by
+    injection concrete
+  subst next
+  exact ⟨identityTrue, application, captureKinds, snapshot,
+    applicationRelated, nextInvariant⟩
+
 /--
 The canonical cache frame also supplies the complete first-matching split for
 a generated candidate family from one semantic identity-coverage fact. No
@@ -6155,6 +6341,11 @@ inductive SaturatedClosureHereditaryCallSupported
       (row :
         LoweredInternalDeclaration context.program context.cachedDeclarations
           resolution.target resolution.calleeCode calleeFunction)
+      (sharedCapacity : ∀ parentRuntime,
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList)
       (application :
         Fir.LeanIR.Impure.takeClosureApplication sourceRuntime
             resolution.location =
@@ -6205,7 +6396,7 @@ theorem SaturatedClosureHereditaryCallSupported.sourceStep
       continuation nextRuntime sourceValue := by
   rcases supported with
     ⟨callRuntime, calleeFunction, calleeResultFacts, calleeResultEnv, site,
-      resolution, row, application, callee⟩
+      resolution, row, _sharedCapacity, application, callee⟩
   have semanticArgumentSize :
       site.semanticArgs.size = site.args.size := by
     have evaluated := site.argumentsEvaluated

@@ -1591,6 +1591,28 @@ theorem incValue_ordinaryPersistenceTransport
   | erased => simp [incValue] at operation
   | reuseToken token => simp [incValue] at operation
 
+/-- Retaining one owned closure capture preserves ordinaryness. Heap captures
+are the one-count increment above; all other semantic values are no-ops. -/
+theorem retainOwnedValue_ordinaryPersistenceTransport
+    {before after : RuntimeState} {value : Value}
+    (operation : retainOwnedValue before value = .ok after) :
+    OrdinaryPersistenceTransport before after := by
+  cases value with
+  | object reference =>
+      cases reference with
+      | heap location =>
+          exact incValue_ordinaryPersistenceTransport
+            (value := .object (.heap location)) (amount := 1) (check := true)
+            (by simpa [retainOwnedValue, incValue] using operation)
+      | tagged payload =>
+          have runtimeEq := Except.ok.inj operation
+          subst after
+          exact OrdinaryPersistenceTransport.refl before
+  | usize value | scalar value | erased | reuseToken value =>
+      have runtimeEq := Except.ok.inj operation
+      subst after
+      exact OrdinaryPersistenceTransport.refl before
+
 /-- Successful explicit deletion changes only reference count and liveness of
 one live heap cell; the erased reset sentinel is a runtime identity. -/
 theorem deleteValue_ordinaryPersistenceTransport
@@ -1665,6 +1687,96 @@ theorem Array.foldlM_ordinaryPersistenceTransport
       items.toList.foldlM (init := before) step = .ok after := by
     simpa only [Array.foldlM_toList] using operation
   exact List.foldlM_ordinaryPersistenceTransport stepTransport listOperation
+
+/-- Consuming a closure application changes reference counts and liveness but
+never turns an ordinary source heap cell persistent. The shared branch
+composes the closure decrement with the retain fold over fixed captures. -/
+theorem takeClosureApplication_ordinaryPersistenceTransport
+    {before after : RuntimeState} {location : Location}
+    {function : Lean.Name} {arity : Nat} {captures : Array Value}
+    (operation : Fir.LeanIR.Impure.takeClosureApplication before location =
+      .ok (after, function, arity, captures)) :
+    OrdinaryPersistenceTransport before after := by
+  unfold Fir.LeanIR.Impure.takeClosureApplication at operation
+  cases read : getLiveCell before location with
+  | error failure =>
+      simp only [read, Bind.bind, Except.bind] at operation
+      contradiction
+  | ok cell =>
+      have targetFound : findCell? before.heap location = some cell :=
+        (Fir.LeanIR.Passes.ElimDead.getLiveCell_spec read).1
+      simp only [read, Bind.bind, Except.bind] at operation
+      cases objectEq : cell.object with
+      | closure storedFunction storedArity storedCaptures =>
+          simp only [objectEq] at operation
+          cases persistent : cell.persistent with
+          | true =>
+              simp only [persistent, if_true] at operation
+              have runtimeEq : before = after :=
+                congrArg (fun result => result.1) (Except.ok.inj operation)
+              subst after
+              exact OrdinaryPersistenceTransport.refl before
+          | false =>
+              simp only [persistent, Bool.false_eq_true, if_false] at operation
+              by_cases zero : cell.rc = 0
+              · simp [zero] at operation
+              · rw [if_neg zero] at operation
+                by_cases one : cell.rc = 1
+                · rw [if_pos one] at operation
+                  cases changed : setCell before location
+                      { object := .closure storedFunction storedArity
+                          storedCaptures
+                        rc := 0
+                        live := false } with
+                  | error failure =>
+                      rw [changed] at operation
+                      contradiction
+                  | ok next =>
+                      rw [changed] at operation
+                      have runtimeEq : next = after :=
+                        congrArg (fun result => result.1)
+                          (Except.ok.inj operation)
+                      subst after
+                      exact setCell_ordinaryPersistenceTransport targetFound
+                        (by simp [persistent]) changed
+                · rw [if_neg one] at operation
+                  cases changed : setCell before location
+                      { object := .closure storedFunction storedArity
+                          storedCaptures
+                        rc := cell.rc - 1
+                        live := cell.live } with
+                  | error failure =>
+                      rw [changed] at operation
+                      contradiction
+                  | ok parent =>
+                      rw [changed] at operation
+                      simp only [Bind.bind, Except.bind] at operation
+                      cases retained : storedCaptures.foldlM retainOwnedValue
+                          parent with
+                      | error failure =>
+                          rw [retained] at operation
+                          contradiction
+                      | ok final =>
+                          rw [retained] at operation
+                          have runtimeEq : final = after :=
+                            congrArg (fun result => result.1)
+                              (Except.ok.inj operation)
+                          subst after
+                          exact
+                            (setCell_ordinaryPersistenceTransport targetFound
+                              (by simp [persistent]) changed).trans
+                              (Array.foldlM_ordinaryPersistenceTransport
+                                (fun stepOperation =>
+                                  retainOwnedValue_ordinaryPersistenceTransport
+                                    stepOperation)
+                                retained)
+      | ctor info => simp [objectEq] at operation
+      | boxed type value => simp [objectEq] at operation
+      | natural value => simp [objectEq] at operation
+      | integer value => simp [objectEq] at operation
+      | string value => simp [objectEq] at operation
+      | byteArray bytes => simp [objectEq] at operation
+      | «opaque» name => simp [objectEq] at operation
 
 /-- Every successful recursive semantic release preserves ordinaryness at
 every source heap location. The induction follows the explicit release fuel;

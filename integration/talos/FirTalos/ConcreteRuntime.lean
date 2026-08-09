@@ -4316,6 +4316,23 @@ theorem ConcreteRuntimeRel.replaceHeap_of_runtimeAux
       rw [aux.trace]
       simpa [replaceHeap, clearFailure] using related.trace }
 
+/-- The non-heap store components framed by a successful closure match. This
+is an execution-derived preservation record: the matcher may update the heap
+and its closure-application snapshot, but it does not mutate generated Wasm
+globals, the host cache layout, installed externals, or immutable closure
+tables, and it returns with the failure channel clear. -/
+structure ClosureMatchStoreFrame
+    (before after : Wasm.Store Host) : Prop where
+  wasmGlobals : after.globals.globals = before.globals.globals
+  hostStaticLayout :
+    after.host.runtime.globals.staticLayout =
+      before.host.runtime.globals.staticLayout
+  externals : after.host.externals = before.host.externals
+  dispatch : after.host.closureDispatch = before.host.closureDispatch
+  descriptors :
+    after.host.closureDescriptors = before.host.closureDescriptors
+  failureClear : after.host.failure? = none
+
 /-- A successful concrete closure match crosses the same ownership boundary
 as source application, records the exact typed capture snapshot used by the
 projection prefix, and relates the resulting concrete store to the semantic
@@ -4353,9 +4370,14 @@ theorem closureMatchesStep_hit_of_refines
       next.host.closureApplication? = some application ∧
       ClosureApplicationRel witness application address function arity
         captureKinds captures ∧
-      ConcreteRuntimeRel next.host.runtime witness nextRuntime := by
+      ConcreteRuntimeRel next.host.runtime witness nextRuntime ∧
+      MappedHeaderCapacityTransport initial.host.runtime.heap
+        next.host.runtime.heap witness ∧
+      next.host.runtime.heap.heapCursor =
+        initial.host.runtime.heap.heapCursor ∧
+      ClosureMatchStoreFrame initial next := by
   obtain ⟨heap, application, captureKinds, concreteOperation,
-      applicationRelated, heapRelated⟩ :=
+      applicationRelated, heapRelated, heapCapacity, heapCursor⟩ :=
     runtimeRelated.heap.takeClosureApplication_refines mapped found live
       objectEq sharedCapacity semanticOperation
   have concreteMatch := runtimeRelated.heap.closureMatches_refines mapped found
@@ -4369,7 +4391,8 @@ theorem closureMatchesStep_hit_of_refines
     let store := replaceHeap (clearFailure initial) heap
     { store with host := {
         store.host with closureApplication? := some application } }
-  refine ⟨next, application, captureKinds, ?_, ?_, applicationRelated, ?_⟩
+  refine ⟨next, application, captureKinds, ?_, ?_, applicationRelated, ?_, ?_,
+    ?_, ?_⟩
   · unfold closureMatchesStep
     simp only [clearFailure]
     rw [Word32.ofUInt32_ofNat_value, ← dispatchEq, ← descriptorsEq,
@@ -4382,6 +4405,9 @@ theorem closureMatchesStep_hit_of_refines
       FirTalos.Concrete.ConcreteRuntimeRel.replaceHeap_of_runtimeAux
         runtimeRelated heapRelated runtimeAux
     simpa [next, replaceHeap, clearFailure] using nextRuntimeRelated
+  · simpa [next, replaceHeap, clearFailure] using heapCapacity
+  · simpa [next, replaceHeap, clearFailure] using heapCursor
+  · exact ⟨rfl, rfl, rfl, rfl, rfl, rfl⟩
 
 /-- Lift a recursively changed heap while transporting the auxiliary value
 relations through a descriptor rebind. -/

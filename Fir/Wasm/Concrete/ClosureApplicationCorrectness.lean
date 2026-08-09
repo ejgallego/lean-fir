@@ -31,7 +31,9 @@ theorem LiveHeapRel.takeClosureApplication_refines
           witness.closureDescriptors address = .ok (result, application) ∧
       ClosureApplicationRel witness application address function arity
         captureKinds captures ∧
-      LiveHeapRel result witness nextRuntime := by
+      LiveHeapRel result witness nextRuntime ∧
+      MappedHeaderCapacityTransport state result witness ∧
+      result.heapCursor = state.heapCursor := by
   obtain ⟨mappedCell, mappedFound, cellRelation⟩ :=
     related.concreteToSemantic location address mapped
   rw [found] at mappedFound
@@ -104,7 +106,7 @@ theorem LiveHeapRel.takeClosureApplication_refines
               injection resultEq
             subst nextRuntime
             refine ⟨state, application, captureKinds, ?_, applicationRelated',
-              related⟩
+              related, .refl state witness, rfl⟩
             unfold takeClosureApplication
             rw [metadataRead]
             simp only [Bind.bind, Except.bind]
@@ -151,10 +153,12 @@ theorem LiveHeapRel.takeClosureApplication_refines
                   simp only [getLiveCell, found, live, if_true, Bind.bind,
                     Except.bind]
                   exact setOperation
-                obtain ⟨result, concreteDelete, resultRelated, _, _⟩ :=
+                obtain ⟨result, concreteDelete, resultRelated, resultCapacity,
+                    resultCursor⟩ :=
                   related.deleteObject_refines_with_capacity mapped semanticDelete
                 refine ⟨result, application, captureKinds, ?_,
-                  applicationRelated', resultRelated⟩
+                  applicationRelated', resultRelated, resultCapacity,
+                  resultCursor⟩
                 unfold takeClosureApplication
                 rw [metadataRead]
                 simp only [Bind.bind, Except.bind]
@@ -178,8 +182,8 @@ theorem LiveHeapRel.takeClosureApplication_refines
                 obtain ⟨words, wordsRead, wordsRelated⟩ :=
                   objectRelated.readClosureOwnedReferences
                 obtain ⟨parentState, parentRuntime, concreteParent,
-                    semanticParent, parentRelated⟩ :=
-                  related.decrementReferenceOnce_refines_above_one
+                    semanticParent, parentRelated, parentCapacity⟩ :=
+                  related.decrementReferenceOnce_refines_above_one_with_capacity
                     (descriptors := witness.closureDescriptors) mapped found live
                     ordinary oneLt true
                 have semanticParentEq :=
@@ -220,12 +224,16 @@ theorem LiveHeapRel.takeClosureApplication_refines
                       .ok nextRuntime := by
                   rw [← objectRelated.foldlM_retainOwnedValue parentRuntime]
                   exact semanticTail
-                obtain ⟨result, concreteTail, resultRelated⟩ :=
+                obtain ⟨result, concreteTail, resultRelated, tailCapacity,
+                    tailCursor⟩ :=
                   wordsRelated.foldlM_retainClosureCaptures_refines parentRelated
                     (objectRelated.closureOwnedValuesCapacity parentRuntime
                       (sharedCapacity parentRuntime parentSet)) filteredTail
                 refine ⟨result, application, captureKinds, ?_,
-                  applicationRelated', resultRelated⟩
+                  applicationRelated', resultRelated,
+                  parentCapacity.trans tailCapacity,
+                  tailCursor.trans
+                    (decrementReferenceOnce_preserves_heapCursor concreteParent)⟩
                 unfold takeClosureApplication
                 rw [metadataRead]
                 simp only [Bind.bind, Except.bind]

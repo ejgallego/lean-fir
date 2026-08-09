@@ -2310,13 +2310,15 @@ theorem OwnershipValuesRel.foldlM_retainClosureCaptures_refines
       values.foldlM (init := runtime) retainOwnedValue = .ok finalRuntime) :
     ∃ finalState,
       words.foldlM (init := state) retainClosureCapture = .ok finalState ∧
-      LiveHeapRel finalState witness finalRuntime := by
+      LiveHeapRel finalState witness finalRuntime ∧
+      MappedHeaderCapacityTransport state finalState witness ∧
+      finalState.heapCursor = state.heapCursor := by
   induction related generalizing state runtime finalRuntime with
   | nil =>
       simp only [List.foldlM_nil] at semanticOperation ⊢
       have runtimeEq := Except.ok.inj semanticOperation
       subst finalRuntime
-      exact ⟨state, rfl, heap⟩
+      exact ⟨state, rfl, heap, .refl state witness, rfl⟩
   | @cons word value words values head tail ih =>
       simp only [List.foldlM_cons, Bind.bind, Except.bind] at semanticOperation
       cases headOperation : retainOwnedValue runtime value with
@@ -2360,8 +2362,9 @@ theorem OwnershipValuesRel.foldlM_retainClosureCaptures_refines
                       incrementReference state word 1 true := by
                   simp [retainClosureCapture, wordZeroCheck]
                 obtain ⟨nextState, semanticNext, concreteHead, semanticHead,
-                    nextHeap⟩ :=
-                  heap.incrementReference_refines mapped found live 1 fits true
+                    nextHeap, nextCursor, nextCapacity⟩ :=
+                  heap.incrementReference_refines_with_capacity mapped found live 1
+                    fits true
                 have semanticHead' :
                     Fir.LeanIR.Impure.incValue runtime
                         (.object (.heap location)) 1 true = .ok nextRuntime := by
@@ -2381,9 +2384,11 @@ theorem OwnershipValuesRel.foldlM_retainClosureCaptures_refines
                     exact priorOperation
                   · exact childFound
                   · exact childLive
-                obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+                obtain ⟨finalState, concreteTail, finalHeap, tailHeaderCapacity,
+                    tailCursor⟩ :=
                   ih nextHeap tailCapacity semanticOperation
-                refine ⟨finalState, ?_, finalHeap⟩
+                refine ⟨finalState, ?_, finalHeap,
+                  nextCapacity.trans tailHeaderCapacity, tailCursor.trans nextCursor⟩
                 simp only [List.foldlM_cons, Bind.bind, Except.bind]
                 rw [retainHead, concreteHead]
                 exact concreteTail
@@ -2401,9 +2406,10 @@ theorem OwnershipValuesRel.foldlM_retainClosureCaptures_refines
                 exact priorOperation
               · exact childFound
               · exact childLive
-            obtain ⟨finalState, concreteTail, finalHeap⟩ :=
+            obtain ⟨finalState, concreteTail, finalHeap, finalCapacity,
+                finalCursor⟩ :=
               ih heap tailCapacity semanticOperation
-            refine ⟨finalState, ?_, finalHeap⟩
+            refine ⟨finalState, ?_, finalHeap, finalCapacity, finalCursor⟩
             simp only [List.foldlM_cons, Bind.bind, Except.bind]
             rw [concreteHead]
             exact concreteTail
