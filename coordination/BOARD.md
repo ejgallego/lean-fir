@@ -19,6 +19,31 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-DERIVED-CLOSURE-RESOLVER-PACKAGING`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler proof.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: active-slice record `d00a26ce`, W6 functional head
+  `bea8c53a`, and ready mailbox `9c9ae995`, based directly on `main` at
+  `480c15e7`.
+- Lease boundary: satisfied. Successful adaptation of each actual generated
+  closure-dispatch chain is inverted into the compiler's exact flat-map
+  candidate enumeration, including numeric adaptation and the precise
+  `closureMatches` import/host contract. Consequently the recursive
+  declaration proof and public whole-export theorem derive their resolver
+  evidence internally and accept no caller-supplied resolver package,
+  translation certificate, target execution, or termination oracle. No
+  shared semantics, symbolic Wasm ABI, resident helper, concrete layout, or
+  executable artifact changed.
+- Validation: Lean Beam zero-error saves for both changed proof modules;
+  focused 3,104-job dependency cone; `git diff --check`; complete `make check`
+  with 642 unique cases, 1,844/1,844 equal comparisons, zero findings, and all
+  113 bug cards validated; Talos setup at `a01d01c`; and all 3,125
+  `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `W6-STATIC-CLOSURE-CANDIDATE-RESOLUTION`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler proof.
@@ -676,6 +701,21 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- `W6-DERIVED-CLOSURE-RESOLVER-PACKAGING` is linked/accepted through active
+  record `d00a26ce`, W6 functional head `bea8c53a`, and ready mailbox
+  `9c9ae995`, based directly on `main` at `480c15e7`. The proof now inverts
+  successful adaptation of the actual nested dispatch program, reconstructs
+  the exact compiler candidate list and matcher host rows, and uses that
+  derived package at every recursive closure site. The public theorem
+  `ConcreteSupportedExport.correct_reuseCapacityProductionHereditary` has no
+  resolver/certificate argument and still derives the matching terminating
+  Wasm run, final runtime, and semantic value from every admitted finite
+  source execution. Lean Beam, the focused 3,104-job cone, all 1,844
+  repository comparisons, all 113 bug-card validations, and all 3,125 Talos
+  jobs pass. The next W6 milestone states and proves finite-trace weak
+  simulation so divergence can be handled without assuming source
+  termination.
+
 - `W6-STATIC-CLOSURE-CANDIDATE-RESOLUTION` is linked/accepted through bug-card
   report `1d55e858`, W6 functional head `9f6c5a05`, resolution `f4bf542e`, and
   ready mailbox `fcc1525d`, based directly on `main` at `9dab5f3c`. Static
@@ -1240,7 +1280,7 @@ moving global snapshot hash.
 |---|---|---|---|---|---|
 | Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `fcc1525d`, functional head `9f6c5a05`, on base `9dab5f3c`, replaces the invalid arbitrary-store/address matcher-success premise with static candidate-adapter metadata and derives matching dynamically at the related live closure. | No shared semantic or runtime contract changed. The complete root and 3,125-job Talos gates pass. Next derive the static adapter environment from lowering/adaptation completeness, then pursue the separately stated trace/coinductive extension. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `9c9ae995`, functional head `bea8c53a`, on base `480c15e7`, derives exact closure-candidate adapter and matcher-host evidence from each actual successful dispatch adaptation and removes the public resolver premise. | No shared semantic or runtime contract changed. The complete root and 3,125-job Talos gates pass. Next state and prove the finite-trace weak-simulation extension over the self-contained generated execution relation. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `dfe6da0b`, functional head `e5a8612b`, on base `cdb8c4f3`, replaces application-specific final-LCNF kind repairs with the generic Lean object-family call ABI and publishes reviewed PrettyFormat and Illuminate v3/v4 artifacts. | Shared contract `bd7a5e55` makes `object`, `tagged`, and `tobject` compiler-call compatible without changing directional semantic refinement or concrete layout. W6 rebases and consumes the stable generic Array/weak-Inhabited `tobject` signatures in its next proof checkpoint. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
