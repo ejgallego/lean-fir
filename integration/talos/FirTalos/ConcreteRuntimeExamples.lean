@@ -496,9 +496,11 @@ theorem initialUnicodeString_liveHeapRel
         (literal ({} : RuntimeState) (.str "hello α_world_β")).1 ∧
       ValueRel nextWitness .object (.word32 word)
         (literal ({} : RuntimeState) (.str "hello α_world_β")).2 := by
-  exact allocateString_liveHeapRel_extends MemoryState.initial heap
-    (initialWitness #[] #[]) ({} : RuntimeState) "hello α_world_β" word
-    (LiveHeapRel.initial #[] #[]) allocated
+  obtain ⟨nextWitness, extendsWitness, _, heapRel, valueRel⟩ :=
+    allocateString_liveHeapRel_extends MemoryState.initial heap
+      (initialWitness #[] #[]) ({} : RuntimeState) "hello α_world_β" word
+      (LiveHeapRel.initial #[] #[]) allocated
+  exact ⟨nextWitness, extendsWitness, heapRel, valueRel⟩
 
 -- Remaining unsupported runtime families are rejected by resolution rather
 -- than reaching a concrete host that only traps after instantiation.

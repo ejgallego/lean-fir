@@ -387,6 +387,7 @@ theorem encodeTagged_liveHeapRel_extends
     (encoded : encodeTagged state payload = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness runtime ∧
       ValueRel nextWitness .tobject (.word32 word)
         (.object (.tagged payload)) := by
@@ -400,7 +401,8 @@ theorem encodeTagged_liveHeapRel_extends
     change Word32.encodeImmediate payload.toNat fits = word at wordEq
     subst result
     subst word
-    exact ⟨witness, .refl witness, related,
+    exact ⟨witness, RefinementWitness.Extends.refl witness,
+      ClosureAllocationsPersistent.refl witness, related,
       encodeTagged_immediate_refines witness payload fits⟩
   · have promoted : allocatePromotedTag state payload = .ok (result, word) := by
       simpa [encodeTagged, fits] using encoded
@@ -417,7 +419,9 @@ theorem encodeTagged_liveHeapRel_extends
     have extension := witness.promoteTag_extends payload word descriptorFresh
     have refined := allocatePromotedTag_liveHeapRel state result witness runtime
       payload word related promoted
-    exact ⟨witness.promoteTag payload word, extension, refined.1, refined.2⟩
+    exact ⟨witness.promoteTag payload word, extension,
+      ClosureAllocationsPersistent.promoteTag witness payload word,
+      refined.1, refined.2⟩
 
 /-- Monotone-witness tagged encoding additionally exposes the retained-header
 transport needed by the reuse-capacity state invariant. -/
@@ -429,14 +433,17 @@ theorem encodeTagged_liveHeapRel_extends_with_capacity
     (encoded : encodeTagged state payload = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness runtime ∧
       ValueRel nextWitness .tobject (.word32 word)
         (.object (.tagged payload)) ∧
       MappedHeaderCapacityTransport state result witness := by
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated⟩ :=
     encodeTagged_liveHeapRel_extends state result witness runtime payload word
       related encoded
-  exact ⟨nextWitness, extension, heapRelated, valueRelated,
+  exact ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+    valueRelated,
     .encodeTagged state result witness payload word related.frontier encoded⟩
 
 end Fir.Wasm.Concrete

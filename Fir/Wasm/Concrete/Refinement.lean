@@ -412,6 +412,125 @@ theorem trans {first second third : RefinementWitness}
 
 end RefinementWitness.Extends
 
+/-- A witness transition preserves closure allocations when every closure
+descriptor visible afterwards was already visible beforehand.  Other
+descriptor kinds may be inserted or may shadow an old descriptor; this is the
+precise transition used by runtime operations that cannot allocate closures.
+
+Closure allocation itself deliberately does not satisfy this relation.  Its
+compiler-facing theorem instead establishes compatibility of the new closure
+descriptor before restoring the program-indexed ABI invariant. -/
+def ClosureAllocationsPersistent
+    (before after : RefinementWitness) : Prop :=
+  ∀ {address function arity captureKinds},
+    after.descriptors.lookup? address =
+        some (.closure function arity captureKinds) →
+      before.descriptors.lookup? address =
+        some (.closure function arity captureKinds)
+
+namespace ClosureAllocationsPersistent
+
+theorem refl (witness : RefinementWitness) :
+    ClosureAllocationsPersistent witness witness := by
+  intro address function arity captureKinds found
+  exact found
+
+theorem trans {first second third : RefinementWitness}
+    (left : ClosureAllocationsPersistent first second)
+    (right : ClosureAllocationsPersistent second third) :
+    ClosureAllocationsPersistent first third := by
+  intro address function arity captureKinds found
+  exact left (right found)
+
+theorem ofDescriptorsEq {before after : RefinementWitness}
+    (descriptorsEq : after.descriptors = before.descriptors) :
+    ClosureAllocationsPersistent before after := by
+  intro address function arity captureKinds found
+  simpa [descriptorsEq] using found
+
+/-- Pushing a non-closure descriptor may shadow an old allocation, but cannot
+make a new closure descriptor visible. -/
+theorem pushNonClosure
+    (witness : RefinementWitness) (address : Word32)
+    (descriptor : AllocationDescriptor)
+    (notClosure : ∀ function arity captureKinds,
+      descriptor ≠ .closure function arity captureKinds) :
+    ClosureAllocationsPersistent witness
+      { witness with
+        descriptors := (address, descriptor) :: witness.descriptors } := by
+  intro other function arity captureKinds found
+  change
+    DescriptorMap.lookup? ((address, descriptor) :: witness.descriptors) other =
+      some (.closure function arity captureKinds) at found
+  simp only [DescriptorMap.lookup?] at found
+  split at found
+  · have descriptorEq := Option.some.inj found
+    exact False.elim (notClosure _ _ _ descriptorEq)
+  · exact found
+
+theorem bindConstructor
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    ClosureAllocationsPersistent witness
+      (witness.bindConstructor location address info fieldKinds) := by
+  unfold RefinementWitness.bindConstructor
+  exact pushNonClosure witness address (.constructor info fieldKinds)
+    (by intro function arity captureKinds; simp)
+
+theorem rebindConstructor
+    (witness : RefinementWitness) (address : Word32)
+    (info : Lean.Compiler.LCNF.CtorInfo) (fieldKinds : Array AbiKind) :
+    ClosureAllocationsPersistent witness
+      (witness.rebindConstructor address info fieldKinds) := by
+  unfold RefinementWitness.rebindConstructor
+  exact pushNonClosure witness address (.constructor info fieldKinds)
+    (by intro function arity captureKinds; simp)
+
+theorem promoteTag
+    (witness : RefinementWitness) (payload : UInt64) (address : Word32) :
+    ClosureAllocationsPersistent witness (witness.promoteTag payload address) := by
+  unfold RefinementWitness.promoteTag
+  exact pushNonClosure witness address (.promotedTag payload)
+    (by intro function arity captureKinds; simp)
+
+theorem bindNatural
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Nat) :
+    ClosureAllocationsPersistent witness
+      (witness.bindNatural location address value) := by
+  unfold RefinementWitness.bindNatural
+  exact pushNonClosure witness address (.natural value)
+    (by intro function arity captureKinds; simp)
+
+theorem bindInteger
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : Int) :
+    ClosureAllocationsPersistent witness
+      (witness.bindInteger location address value) := by
+  unfold RefinementWitness.bindInteger
+  exact pushNonClosure witness address (.integer value)
+    (by intro function arity captureKinds; simp)
+
+theorem bindString
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (value : String) :
+    ClosureAllocationsPersistent witness
+      (witness.bindString location address value) := by
+  unfold RefinementWitness.bindString
+  exact pushNonClosure witness address (.string value)
+    (by intro function arity captureKinds; simp)
+
+theorem bindBoxed
+    (witness : RefinementWitness) (location : Location) (address : Word32)
+    (kind : BoxedScalarKind) :
+    ClosureAllocationsPersistent witness
+      (witness.bindBoxed location address kind) := by
+  unfold RefinementWitness.bindBoxed
+  exact pushNonClosure witness address (.boxed kind)
+    (by intro function arity captureKinds; simp)
+
+end ClosureAllocationsPersistent
+
 /-- Binding a fresh constructor extends every old lookup. Descriptor freshness
 is stated at the value-comparison boundary used by `DescriptorMap.lookup?`. -/
 theorem RefinementWitness.bindConstructor_extends

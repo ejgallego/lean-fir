@@ -264,6 +264,7 @@ theorem allocateNatural_liveHeapRel_extends
     (allocated : allocateNatural state value = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness (literal runtime (.nat value)).1 ∧
       ValueRel nextWitness .tobject (.word32 word)
         (literal runtime (.nat value)).2 := by
@@ -273,14 +274,16 @@ theorem allocateNatural_liveHeapRel_extends
       unfold allocateNatural at allocated
       rw [if_pos small] at allocated
       exact allocated
-    obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+    obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+        valueRelated⟩ :=
       encodeTagged_liveHeapRel_extends state result witness runtime
         (UInt64.ofNat value) word related encoded
     have literalEq : literal runtime (.nat value) =
         (runtime, .object (.tagged (UInt64.ofNat value))) := by
       simp [literal, small]
     rw [literalEq]
-    exact ⟨nextWitness, extension, heapRelated, valueRelated⟩
+    exact ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated⟩
   · have large : maxTaggedPayload < value := Nat.lt_of_not_ge small
     obtain ⟨_, _, _, objectAllocation, _, _⟩ :=
       allocateNatural_heap_decompose state result value word large allocated
@@ -308,7 +311,9 @@ theorem allocateNatural_liveHeapRel_extends
       value word related large allocated
     rw [semanticLiteral_natural_heap_eq runtime value large]
     exact ⟨witness.bindNatural runtime.nextLocation word value, extension,
-      refined.1, refined.2⟩
+      ClosureAllocationsPersistent.bindNatural witness runtime.nextLocation
+        word value, refined.1,
+      refined.2⟩
 
 theorem ConcreteRuntimeRel.allocateNatural
     {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
@@ -318,11 +323,13 @@ theorem ConcreteRuntimeRel.allocateNatural
     (allocated : allocateNatural concrete.heap value = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness
         (literal runtime (.nat value)).1 ∧
       ValueRel nextWitness .tobject (.word32 word)
         (literal runtime (.nat value)).2 := by
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated⟩ :=
     allocateNatural_liveHeapRel_extends concrete.heap result witness runtime
       value word related.heap allocated
   have auxiliary :
@@ -334,7 +341,8 @@ theorem ConcreteRuntimeRel.allocateNatural
     · have large : maxTaggedPayload < value := Nat.lt_of_not_ge small
       rw [semanticLiteral_natural_heap_eq runtime value large]
       simp [semanticNaturalResult]
-  refine ⟨nextWitness, extension, ?_, valueRelated⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_,
+    valueRelated⟩
   exact {
     heap := heapRelated
     globals := by
@@ -397,7 +405,8 @@ theorem ConcreteRuntimeRel.naturalExternalResponse
         semanticRequest semanticBefore .tobject
         (concreteNaturalExternalResponse concreteBefore result word)
         (semanticNaturalExternalResponse semanticBefore value) := by
-  obtain ⟨afterWitness, extension, nextRuntimeRelated, valueRelated⟩ :=
+  obtain ⟨afterWitness, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
   refine ⟨afterWitness, {
     witnessExtension := extension
@@ -660,6 +669,7 @@ theorem allocateString_liveHeapRel_extends
     (allocated : allocateString state value = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness (literal runtime (.str value)).1 ∧
       ValueRel nextWitness .object (.word32 word)
         (literal runtime (.str value)).2 := by
@@ -689,7 +699,9 @@ theorem allocateString_liveHeapRel_extends
     word related allocated
   rw [semanticLiteral_string_eq runtime value]
   exact ⟨witness.bindString runtime.nextLocation word value, extension,
-    refined.1, refined.2⟩
+    ClosureAllocationsPersistent.bindString witness runtime.nextLocation word
+      value, refined.1,
+    refined.2⟩
 
 theorem ConcreteRuntimeRel.allocateString
     {concrete : ConcreteRuntimeState} {witness : RefinementWitness}
@@ -699,11 +711,13 @@ theorem ConcreteRuntimeRel.allocateString
     (allocated : allocateString concrete.heap value = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness
         (literal runtime (.str value)).1 ∧
       ValueRel nextWitness .object (.word32 word)
         (literal runtime (.str value)).2 := by
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated⟩ :=
     allocateString_liveHeapRel_extends concrete.heap result witness runtime
       value word related.heap allocated
   have auxiliary :
@@ -712,7 +726,8 @@ theorem ConcreteRuntimeRel.allocateString
       (literal runtime (.str value)).1.trace = runtime.trace := by
     rw [semanticLiteral_string_eq runtime value]
     simp [semanticStringResult]
-  refine ⟨nextWitness, extension, ?_, valueRelated⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_,
+    valueRelated⟩
   exact {
     heap := heapRelated
     globals := by
@@ -741,16 +756,19 @@ theorem ConcreteRuntimeRel.allocateConstructorEmpty
       .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness runtime ∧
       ValueRel nextWitness .tagged (.word32 word)
         (.object (.tagged (UInt64.ofNat info.cidx))) ∧
       allocCtor runtime info semanticFields =
         .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated, semanticStep⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated, semanticStep⟩ :=
     allocateConstructor_empty_liveHeapRel_extends concrete.heap result witness
       runtime info fields semanticFields word related.heap arity semanticArity
       empty tagFits allocated
-  refine ⟨nextWitness, extension, ?_, valueRelated, semanticStep⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_,
+    valueRelated, semanticStep⟩
   exact {
     heap := heapRelated
     globals := related.globals.witnessExtension extension
@@ -774,19 +792,20 @@ theorem ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
       .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness runtime ∧
       ValueRel nextWitness .tagged (.word32 word)
         (.object (.tagged (UInt64.ofNat info.cidx))) ∧
       allocCtor runtime info semanticFields =
         .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
       MappedHeaderCapacityTransport concrete.heap result witness := by
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated, semanticStep,
-      capacityTransport⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated, semanticStep, capacityTransport⟩ :=
     allocateConstructor_empty_liveHeapRel_extends_with_capacity concrete.heap
       result witness runtime info fields semanticFields word related.heap arity
       semanticArity empty tagFits allocated
-  refine ⟨nextWitness, extension, ?_, valueRelated, semanticStep,
-    capacityTransport⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_,
+    valueRelated, semanticStep, capacityTransport⟩
   exact {
     heap := heapRelated
     globals := related.globals.witnessExtension extension
@@ -853,6 +872,7 @@ theorem ConcreteRuntimeRel.boxScalar
       .ok (result, word)) :
     ∃ nextRuntime sourceValue nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness
         nextRuntime ∧
       ValueRel nextWitness .tobject (.word32 word) sourceValue ∧
@@ -863,11 +883,13 @@ theorem ConcreteRuntimeRel.boxScalar
         .ok (result, word) := by
       rw [← boxScalar_of_tagged concrete.heap scalar tagged]
       exact boxed
-    obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+    obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+        valueRelated⟩ :=
       encodeTagged_liveHeapRel_extends concrete.heap result witness runtime
         scalar.payload word related.heap encoded
     refine ⟨runtime, .object (.tagged scalar.payload), nextWitness,
-      extension, ?_, valueRelated, semanticBox_tagged_eq runtime scalar tagged⟩
+      extension, closureAllocationsPersistent, ?_, valueRelated,
+      semanticBox_tagged_eq runtime scalar tagged⟩
     exact {
       heap := heapRelated
       globals := related.globals.witnessExtension extension
@@ -910,7 +932,9 @@ theorem ConcreteRuntimeRel.boxScalar
       boxScalar_heap_liveHeapRel concrete.heap result witness runtime scalar word
         related.heap large boxed
     refine ⟨semanticBoxResult runtime scalar,
-      .object (.heap runtime.nextLocation), nextWitness, extension, ?_,
+      .object (.heap runtime.nextLocation), nextWitness, extension,
+      ClosureAllocationsPersistent.bindBoxed witness runtime.nextLocation word
+        scalar.kind, ?_,
       valueRelated, semanticStep⟩
     exact {
       heap := heapRelated
@@ -936,6 +960,7 @@ theorem ConcreteRuntimeRel.boxScalarAtResultKind
       .ok (result, word)) :
     ∃ nextRuntime sourceValue nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel { concrete with heap := result } nextWitness
         nextRuntime ∧
       ValueRel nextWitness
@@ -944,7 +969,8 @@ theorem ConcreteRuntimeRel.boxScalarAtResultKind
       box runtime scalar.kind.semanticType scalar.semanticValue =
         .ok (nextRuntime, sourceValue) := by
   obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
-      nextRelated, valueRelated, semanticStep⟩ :=
+      closureAllocationsPersistent, nextRelated, valueRelated,
+      semanticStep⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.boxScalar related boxed
   cases scalar with
   | uint8 value =>
@@ -961,27 +987,31 @@ theorem ConcreteRuntimeRel.boxScalarAtResultKind
       subst sourceValue
       refine ⟨runtime,
         .object (.tagged (BoxedScalar.uint8 value).payload), nextWitness,
-        extension, nextRelated, ?_, canonical⟩
+        extension, closureAllocationsPersistent, nextRelated, ?_, canonical⟩
       simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
         Fir.Wasm.boxResultKind_uint8_tobject] using
           valueRelated.tobject_tagged_to_tagged
   | uint16 value =>
-      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension,
+        closureAllocationsPersistent, nextRelated,
         by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
           Fir.Wasm.boxResultKind_uint16_tobject] using valueRelated,
         semanticStep⟩
   | uint32 value =>
-      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension,
+        closureAllocationsPersistent, nextRelated,
         by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
           Fir.Wasm.boxResultKind_uint32_tobject] using valueRelated,
         semanticStep⟩
   | uint64 value =>
-      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension,
+        closureAllocationsPersistent, nextRelated,
         by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
           Fir.Wasm.boxResultKind_uint64_tobject] using valueRelated,
         semanticStep⟩
   | usize value =>
-      exact ⟨nextRuntime, sourceValue, nextWitness, extension, nextRelated,
+      exact ⟨nextRuntime, sourceValue, nextWitness, extension,
+        closureAllocationsPersistent, nextRelated,
         by simpa only [BoxedScalar.kind, BoxedScalarKind.semanticType,
           Fir.Wasm.boxResultKind_usize_tobject] using valueRelated,
         semanticStep⟩
@@ -3205,15 +3235,18 @@ theorem naturalLiteralStep_of_refines
       .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       naturalLiteralStep value initial [] =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         (literal runtime (.nat value)).1 ∧
       PhysicalValueRel nextWitness .tobject
         (.i32 (UInt32.ofNat word.value)) (literal runtime (.nat value)).2 := by
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateNatural runtimeRelated allocated
-  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    .word32 valueRelated⟩
   · simp [naturalLiteralStep, replaceHeap, clearFailure, allocated]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
 
@@ -3227,15 +3260,18 @@ theorem stringLiteralStep_of_refines
       .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       stringLiteralStep value initial [] =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         (literal runtime (.str value)).1 ∧
       PhysicalValueRel nextWitness .object
         (.i32 (UInt32.ofNat word.value)) (literal runtime (.str value)).2 := by
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateString runtimeRelated allocated
-  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    .word32 valueRelated⟩
   · simp [stringLiteralStep, replaceHeap, clearFailure, allocated]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
 
@@ -3290,6 +3326,7 @@ theorem allocCtorEmptyStep_of_refines
       .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       allocCtorStep info fieldKinds resultKind initial physicalArgs =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness runtime ∧
@@ -3298,13 +3335,15 @@ theorem allocCtorEmptyStep_of_refines
         (.object (.tagged (UInt64.ofNat info.cidx))) ∧
       allocCtor runtime info semanticFields =
         .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) := by
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, exactRelated,
       semanticStep⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty runtimeRelated
       arity semanticArity empty tagFits allocated
   have valueRelated := taggedConstructorResult_of_refines empty resultRefines
     exactRelated
-  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated,
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    .word32 valueRelated,
     semanticStep⟩
   · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
@@ -3330,6 +3369,7 @@ theorem allocCtorEmptyStep_of_refines_with_capacity
       .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       allocCtorStep info fieldKinds resultKind initial physicalArgs =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness runtime ∧
@@ -3341,14 +3381,15 @@ theorem allocCtorEmptyStep_of_refines_with_capacity
       allocCtor runtime info semanticFields =
         .ok (runtime, .object (.tagged (UInt64.ofNat info.cidx))) ∧
       MappedHeaderCapacityTransport initial.host.runtime.heap heap witness := by
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, exactRelated,
       semanticStep, capacityTransport⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
       runtimeRelated arity semanticArity empty tagFits allocated
   have valueRelated := taggedConstructorResult_of_refines empty resultRefines
     exactRelated
-  refine ⟨nextWitness, extension, ?_, ?_, valueRelated, .word32 valueRelated,
-    semanticStep, capacityTransport⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    valueRelated, .word32 valueRelated, semanticStep, capacityTransport⟩
   · simp [allocCtorStep, argsLength, decoded, allocated, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
 
@@ -5886,6 +5927,7 @@ theorem reuseStep_none_empty_of_refines
       updateHeader fields.toArray = .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
@@ -5900,13 +5942,14 @@ theorem reuseStep_none_empty_of_refines
     unfold reuseObject at reused
     rw [if_pos (by decide)] at reused
     exact reused
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
-      semanticAllocation⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, exactRelated, semanticAllocation⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty runtimeRelated
       arity semanticArity empty tagFits allocated
   have valueRelated := taggedConstructorResult_of_refines empty resultRefines
     exactRelated
-  refine ⟨nextWitness, extension, ?_, ?_, .word32 valueRelated, ?_⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    .word32 valueRelated, ?_⟩
   · simp [reuseStep, argsLength, decoded, reused, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
   · simpa [reuse] using semanticAllocation
@@ -5932,6 +5975,7 @@ theorem reuseStep_none_empty_of_refines_with_capacity
       updateHeader fields.toArray = .ok (heap, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
         .Return [.i32 (UInt32.ofNat word.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
@@ -5949,14 +5993,15 @@ theorem reuseStep_none_empty_of_refines_with_capacity
     unfold reuseObject at reused
     rw [if_pos (by decide)] at reused
     exact reused
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, exactRelated,
-      semanticAllocation, capacityTransport⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, exactRelated, semanticAllocation,
+      capacityTransport⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.allocateConstructorEmpty_with_capacity
       runtimeRelated arity semanticArity empty tagFits allocated
   have valueRelated := taggedConstructorResult_of_refines empty resultRefines
     exactRelated
-  refine ⟨nextWitness, extension, ?_, ?_, valueRelated, .word32 valueRelated, ?_,
-    capacityTransport⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent, ?_, ?_,
+    valueRelated, .word32 valueRelated, ?_, capacityTransport⟩
   · simp [reuseStep, argsLength, decoded, reused, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
   · simpa [reuse] using semanticAllocation
@@ -5993,6 +6038,7 @@ theorem reuseStep_none_nonempty_of_refines
     let nextWitness := witness.bindConstructor runtime.nextLocation address info
       fieldKinds
     witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       reuseStep info updateHeader fieldKinds resultKind initial physicalArgs =
         .Return [.i32 (UInt32.ofNat address.value)] (replaceHeap initial heap) ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
@@ -6016,7 +6062,9 @@ theorem reuseStep_none_nonempty_of_refines
       scalarBytesFit allocated
   have valueRelated := objectConstructorResult_of_refines nonempty resultRefines
     exactRelated
-  refine ⟨extension, ?_, ?_, .word32 valueRelated, ?_⟩
+  refine ⟨extension,
+    ClosureAllocationsPersistent.bindConstructor witness runtime.nextLocation
+      address info fieldKinds, ?_, ?_, .word32 valueRelated, ?_⟩
   · simp [reuseStep, argsLength, decoded, reused, replaceHeap, clearFailure]
   · simpa [replaceHeap, clearFailure] using nextRuntimeRelated
   · simpa [reuse] using
@@ -11124,6 +11172,7 @@ theorem letStepSimulates_box
       (.i32 (UInt32.ofNat word.value)) = some updated) :
     ∃ nextRuntime sourceValue nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         nextRuntime ∧
       PhysicalValueRel nextWitness resultKind
@@ -11136,7 +11185,8 @@ theorem letStepSimulates_box
   subst kind
   subst resultKind
   obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
-      nextRuntimeRelated, valueRelated, semanticStep⟩ :=
+      closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
+      semanticStep⟩ :=
     FirTalos.Concrete.ConcreteRuntimeRel.boxScalarAtResultKind
       initialRelated.1 boxed
   obtain ⟨operation, _, _⟩ :=
@@ -11150,7 +11200,8 @@ theorem letStepSimulates_box
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt physicalRelated targetSet
   refine ⟨nextRuntime, sourceValue, nextWitness, extension,
-    nextRuntimeRelated, physicalRelated, ?_, initialRelated, nextState, ?_⟩
+    closureAllocationsPersistent, nextRuntimeRelated, physicalRelated, ?_,
+    initialRelated, nextState, ?_⟩
   · unfold FirTalos.Correctness.SourceLetResult
     simp [evalLetValue, valueEq]
     have scalarLookup : lookupValue sourceEnv scalarId =
@@ -11417,7 +11468,7 @@ theorem codeWP_box_let
     simp [instructions, instruction, scalarFound', callFound]
     rfl
   obtain ⟨nextRuntime, sourceValue, nextWitness, extension,
-      nextRuntimeRelated, valueRelated, step⟩ :=
+      _closureAllocationsPersistent, nextRuntimeRelated, valueRelated, step⟩ :=
     letStepSimulates_box (context := context) kindEq resultKindEq valueEq
       sourceLookup initialRelated resultFound resultKindAt hScalar boxed hImp hSat hi
       hContract hParams hResults targetSet
@@ -12650,6 +12701,7 @@ theorem letStepSimulates_naturalLiteral
       locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) = some updated) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         (literal sourceRuntime (.nat value)).1 ∧
       PhysicalValueRel nextWitness .tobject
@@ -12658,15 +12710,15 @@ theorem letStepSimulates_naturalLiteral
         sourceRuntime (literal sourceRuntime (.nat value)).1 sourceEnv
         (literal sourceRuntime (.nat value)).2 initial (replaceHeap initial heap)
         locals updated resultIndex witness nextWitness := by
-  obtain ⟨nextWitness, extension, operation, nextRuntimeRelated,
-      valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, operation,
+      nextRuntimeRelated, valueRelated⟩ :=
     naturalLiteralStep_of_refines initialRelated.1 allocated
   have failureClear : (replaceHeap initial heap).host.failure? = none := by
     simp [replaceHeap, clearFailure]
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt valueRelated targetSet
-  refine ⟨nextWitness, extension, nextRuntimeRelated, valueRelated,
-    ?_, initialRelated, nextState, ?_⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent,
+    nextRuntimeRelated, valueRelated, ?_, initialRelated, nextState, ?_⟩
   · unfold FirTalos.Correctness.SourceLetResult
     simp [evalLetValue, valueEq]
     rfl
@@ -12730,7 +12782,8 @@ theorem codeWP_naturalLiteral_let
         .ok [.call id] := by
     simp [instructions, instruction, callFound]
     rfl
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+  obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated, step⟩ :=
     letStepSimulates_naturalLiteral (context := context) valueEq initialRelated
       resultFound resultKindAt allocated hImp hSat hi hContract hParams hResults
       targetSet
@@ -12769,6 +12822,7 @@ theorem letStepSimulates_stringLiteral
       locals.set? resultIndex (.i32 (UInt32.ofNat word.value)) = some updated) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       ConcreteRuntimeRel (replaceHeap initial heap).host.runtime nextWitness
         (literal sourceRuntime (.str value)).1 ∧
       PhysicalValueRel nextWitness .object
@@ -12777,15 +12831,15 @@ theorem letStepSimulates_stringLiteral
         sourceRuntime (literal sourceRuntime (.str value)).1 sourceEnv
         (literal sourceRuntime (.str value)).2 initial (replaceHeap initial heap)
         locals updated resultIndex witness nextWitness := by
-  obtain ⟨nextWitness, extension, operation, nextRuntimeRelated,
-      valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, operation,
+      nextRuntimeRelated, valueRelated⟩ :=
     stringLiteralStep_of_refines initialRelated.1 allocated
   have failureClear : (replaceHeap initial heap).host.failure? = none := by
     simp [replaceHeap, clearFailure]
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt valueRelated targetSet
-  refine ⟨nextWitness, extension, nextRuntimeRelated, valueRelated,
-    ?_, initialRelated, nextState, ?_⟩
+  refine ⟨nextWitness, extension, closureAllocationsPersistent,
+    nextRuntimeRelated, valueRelated, ?_, initialRelated, nextState, ?_⟩
   · unfold FirTalos.Correctness.SourceLetResult
     simp [evalLetValue, valueEq]
     rfl
@@ -12849,7 +12903,8 @@ theorem codeWP_stringLiteral_let
         .ok [.call id] := by
     simp [instructions, instruction, callFound]
     rfl
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+  obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated, step⟩ :=
     letStepSimulates_stringLiteral (context := context) valueEq initialRelated
       resultFound resultKindAt allocated hImp hSat hi hContract hParams hResults
       targetSet

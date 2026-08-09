@@ -91,6 +91,7 @@ theorem allocateConstructor_empty_liveHeapRel_extends
     (allocated : allocateConstructor state info fields = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness runtime ∧
       ValueRel nextWitness .tagged (.word32 word)
         (.object (.tagged (UInt64.ofNat info.cidx))) ∧
@@ -104,10 +105,11 @@ theorem allocateConstructor_empty_liveHeapRel_extends
     simp only [Bind.bind, Except.bind] at allocated
     rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])] at allocated
     simpa [UInt32.toNat_ofNat_of_lt' tagFits] using allocated
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated⟩ :=
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated⟩ :=
     encodeTagged_liveHeapRel_extends state result witness runtime
       (UInt64.ofNat info.cidx) word related encoded
-  exact ⟨nextWitness, extension, heapRelated,
+  exact ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
     valueRelated.tobject_tagged_to_tagged,
     allocCtor_empty_eq runtime info semanticFields semanticArity empty⟩
 
@@ -126,6 +128,7 @@ theorem allocateConstructor_empty_liveHeapRel_extends_with_capacity
     (allocated : allocateConstructor state info fields = .ok (result, word)) :
     ∃ nextWitness,
       witness.Extends nextWitness ∧
+      ClosureAllocationsPersistent witness nextWitness ∧
       LiveHeapRel result nextWitness runtime ∧
       ValueRel nextWitness .tagged (.word32 word)
         (.object (.tagged (UInt64.ofNat info.cidx))) ∧
@@ -140,11 +143,12 @@ theorem allocateConstructor_empty_liveHeapRel_extends_with_capacity
     simp only [Bind.bind, Except.bind] at allocated
     rw [if_pos (by simp [empty.1.1, empty.1.2, empty.2])] at allocated
     simpa [UInt32.toNat_ofNat_of_lt' tagFits] using allocated
-  obtain ⟨nextWitness, extension, heapRelated, valueRelated,
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
+      valueRelated,
       capacityTransport⟩ :=
     encodeTagged_liveHeapRel_extends_with_capacity state result witness runtime
       (UInt64.ofNat info.cidx) word related encoded
-  exact ⟨nextWitness, extension, heapRelated,
+  exact ⟨nextWitness, extension, closureAllocationsPersistent, heapRelated,
     valueRelated.tobject_tagged_to_tagged,
     allocCtor_empty_eq runtime info semanticFields semanticArity empty,
     capacityTransport⟩

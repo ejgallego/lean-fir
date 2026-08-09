@@ -3737,6 +3737,17 @@ theorem ClosureAllocationsAbiAligned.ofDescriptorsEq
   rw [descriptorsEq] at found
   exact aligned found
 
+/-- Any operation that only preserves or removes closure allocation
+descriptors preserves the program-indexed closure ABI invariant. -/
+theorem ClosureAllocationsAbiAligned.ofPersistent
+    {program : Fir.LeanIR.ImpureProgram}
+    {before after : RefinementWitness}
+    (aligned : ClosureAllocationsAbiAligned program before)
+    (persistent : ClosureAllocationsPersistent before after) :
+    ClosureAllocationsAbiAligned program after := by
+  intro address function arity captureKinds found
+  exact aligned (persistent found)
+
 /-- Generic descriptor-extension law. A newly shadowing descriptor preserves
 closure ABI alignment exactly when, if it is a closure descriptor, its own
 recorded ABI is compatible with the source program. -/

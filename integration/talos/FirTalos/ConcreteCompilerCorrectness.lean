@@ -4404,6 +4404,7 @@ theorem constructorNonemptyStep_of_budget
               nextStore.host.runtime.globals.staticLayout =
                   initial.host.runtime.globals.staticLayout ∧
               witness.Extends nextWitness ∧
+              ClosureAllocationsPersistent witness nextWitness ∧
               ConcreteRuntimeRel nextStore.host.runtime nextWitness nextRuntime ∧
               nextStore.host.failure? = none ∧
               PhysicalValueRel nextWitness resultKind
@@ -4437,8 +4438,8 @@ theorem constructorNonemptyStep_of_budget
       decoded arity semanticArity fieldKindsSize fieldKindsValid
       fieldsRelatedArray nonempty tagFits objectFieldsFit usizeFieldsFit
       scalarBytesFit resultRefines budget allocationFits
-  obtain ⟨nextWitness, extension, operation, nextRuntimeRelated,
-      physicalRelated, capacityRelated, capacityTransport,
+  obtain ⟨nextWitness, extension, closureAllocationsPersistent, operation,
+      nextRuntimeRelated, physicalRelated, capacityRelated, capacityTransport,
       expectedSourceStep⟩ :=
     allocCtorNonemptyStep_of_capacityEvidence runtimeRelated argsLength decoded
       arity semanticArity fieldKindsSize fieldKindsValid fieldsRelatedArray
@@ -4454,8 +4455,8 @@ theorem constructorNonemptyStep_of_budget
   subst sourceValue
   refine ⟨replaceHeap initial heap, address, nextWitness, operation, ?_, ?_,
     ?_, extension.closureDispatch, extension.closureDescriptors, ?_, ?_,
-    extension, nextRuntimeRelated, ?_, physicalRelated, capacityRelated, ?_,
-    ?_⟩
+    extension, closureAllocationsPersistent, nextRuntimeRelated, ?_,
+    physicalRelated, capacityRelated, ?_, ?_⟩
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
   · simp [replaceHeap, clearFailure]
@@ -8010,6 +8011,8 @@ structure RuntimeStepTransports
     (witness nextWitness : RefinementWitness) : Prop
     extends ClosureTablesTransport targetStore nextStore witness nextWitness where
   witnessTransport : WitnessTransport witness nextWitness
+  closureAllocationsPersistent :
+    ClosureAllocationsPersistent witness nextWitness
   capacity :
     HeaderCapacityTransport targetStore.host.runtime.heap
       nextStore.host.runtime.heap witness
@@ -8028,6 +8031,7 @@ theorem RuntimeStepTransports.refl
     RuntimeStepTransports runtime runtime store store witness witness := {
   toClosureTablesTransport := ClosureTablesTransport.refl store witness
   witnessTransport := WitnessTransport.refl witness
+  closureAllocationsPersistent := ClosureAllocationsPersistent.refl witness
   capacity :=
     HeaderCapacityTransport.refl store.host.runtime.heap witness
   ordinary := OrdinaryPersistenceTransport.refl runtime
@@ -8048,6 +8052,7 @@ theorem RuntimeStepTransports.clearFailure
     hostDescriptorsPreserved := rfl
     witnessDescriptorsPreserved := rfl }
   witnessTransport := WitnessTransport.refl witness
+  closureAllocationsPersistent := ClosureAllocationsPersistent.refl witness
   capacity := HeaderCapacityTransport.refl store.host.runtime.heap witness
   ordinary := OrdinaryPersistenceTransport.refl runtime
   sourceGlobals := rfl
@@ -8065,6 +8070,8 @@ theorem RuntimeStepTransports.replaceHeap
       nextWitness.closureDispatch = witness.closureDispatch)
     (witnessDescriptors :
       nextWitness.closureDescriptors = witness.closureDescriptors)
+    (closureAllocationsPersistent :
+      ClosureAllocationsPersistent witness nextWitness)
     (capacity :
       HeaderCapacityTransport store.host.runtime.heap heap witness)
     (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
@@ -8077,6 +8084,7 @@ theorem RuntimeStepTransports.replaceHeap
     hostDescriptorsPreserved := rfl
     witnessDescriptorsPreserved := witnessDescriptors }
   witnessTransport
+  closureAllocationsPersistent
   capacity
   ordinary
   sourceGlobals
@@ -8163,7 +8171,8 @@ theorem EffectStepTransports.replaceHeap
       (replaceHeap store heap) witness witness := {
   toRuntimeStepTransports :=
     RuntimeStepTransports.replaceHeap (WitnessTransport.refl witness) rfl rfl
-      capacity ordinary sourceGlobals }
+      (ClosureAllocationsPersistent.refl witness) capacity ordinary
+      sourceGlobals }
 
 /--
 Transport-strengthened no-result effect condition.
@@ -12830,7 +12839,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_naturalLiteral
           (budgeted.1.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.naturalLiteralCall callFound
-      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+      obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+          nextRuntimeRelated, valueRelated, step⟩ :=
         letStepSimulates_naturalLiteral (context := context) valueEq stateRelated
           resultFound resultKindAt allocated imported spec.hostsSatisfy
           inBounds contracted params results targetSet
@@ -12929,7 +12939,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_stringLiteral
           (budgeted.1.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.stringLiteralCall callFound
-      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+      obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+          nextRuntimeRelated, valueRelated, step⟩ :=
         letStepSimulates_stringLiteral (context := context) valueEq stateRelated
           resultFound resultKindAt allocated imported spec.hostsSatisfy
           inBounds contracted params results targetSet
@@ -13028,7 +13039,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefines_nonemptyConstructor
   obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
       _hostDispatchPreserved, hostDescriptorsPreserved,
       _witnessDispatchPreserved, witnessDescriptorsPreserved, _wasmGlobals,
-      _hostStaticLayout, extension, nextRuntimeRelated, failureClear,
+      _hostStaticLayout, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, failureClear,
       valueRelated, _capacityValue, _capacityTransport, remainingBudget⟩ :=
     constructorNonemptyStep_of_budget stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
@@ -13674,7 +13686,8 @@ theorem ConcreteSupportedExport.directLetRuntimeRefinesWithCost_box
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.boxCall callFound
       obtain ⟨actualRuntime, actualValue, nextWitness, extension,
-          nextRuntimeRelated, valueRelated, step⟩ :=
+          _closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
+          step⟩ :=
         letStepSimulates_box (context := context) kindEq resultKindEq valueEq
           sourceLookup stateRelated resultFound resultKindAt hScalar boxed imported
           spec.hostsSatisfy inBounds contracted params results targetSet
@@ -14027,6 +14040,8 @@ theorem DirectLetStepTransports.replaceHeap
       nextWitness.closureDispatch = witness.closureDispatch)
     (witnessDescriptors :
       nextWitness.closureDescriptors = witness.closureDescriptors)
+    (closureAllocationsPersistent :
+      ClosureAllocationsPersistent witness nextWitness)
     (capacity :
       HeaderCapacityTransport store.host.runtime.heap heap witness)
     (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
@@ -14034,7 +14049,8 @@ theorem DirectLetStepTransports.replaceHeap
     DirectLetStepTransports sourceRuntime nextRuntime store
       (replaceHeap store heap) witness nextWitness :=
   RuntimeStepTransports.replaceHeap witnessTransport witnessDispatch
-    witnessDescriptors capacity ordinary sourceGlobals
+    witnessDescriptors closureAllocationsPersistent capacity ordinary
+    sourceGlobals
 
 /--
 Certificate-free compiler composition for one successful capacity-validated
@@ -14251,8 +14267,9 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
           simpa [tokenEq] using tokenLookup
         exact ordinaryTokens tokenId available location cell tracked
           tokenLookup' found
-  obtain ⟨heap, word, nextWitness, operation, transport, nextRuntimeRelated,
-      valueRelated, capacityValue, witnessDispatchPreserved,
+  obtain ⟨heap, word, nextWitness, operation, transport,
+      closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
+      capacityValue, witnessDispatchPreserved,
       witnessDescriptorsPreserved,
       capacityTransport, remainingBudget⟩ :=
     reuseStep_of_capacityEvidence related.stateRelated.1 argsLength decoded
@@ -14307,7 +14324,8 @@ theorem ConcreteSupportedFunction.reuseLetStep_of_capacity
     by simp [replaceHeap, clearFailure],
     by simp [replaceHeap, clearFailure], witnessDescriptorsPreserved,
     DirectLetStepTransports.replaceHeap transport witnessDispatchPreserved
-      witnessDescriptorsPreserved capacityTransport
+      witnessDescriptorsPreserved closureAllocationsPersistent
+      capacityTransport
       sourceTransports.2 sourceTransports.1,
     transfer, nextCapacity, nextOrdinary, nextFrameAligned, by
       change heap.AddressSpaceBudget
@@ -15303,7 +15321,8 @@ theorem
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.boxCall callFound
       obtain ⟨actualRuntime, actualValue, nextWitness, extension,
-          nextRuntimeRelated, valueRelated, step⟩ :=
+          closureAllocationsPersistent, nextRuntimeRelated, valueRelated,
+          step⟩ :=
         letStepSimulates_box (context := context) kindEq resultKindEq valueEq
           sourceLookup related.stateRelated resultFound resultKindAt hScalar boxed imported
           spec.hostsSatisfy inBounds contracted params results targetSet
@@ -15348,7 +15367,8 @@ theorem
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
         DirectLetStepTransports.replaceHeap
           (WitnessTransport.ofExtension extension) extension.closureDispatch
-          extension.closureDescriptors capacityTransport
+          extension.closureDescriptors closureAllocationsPersistent
+          capacityTransport
           (box_ordinaryPersistenceTransport semanticBox)
           (box_preserves_globals semanticBox),
         transfer, nextRelated, nextOrdinary, nextFrame, by
@@ -15425,7 +15445,8 @@ theorem
           (frameAligned.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.naturalLiteralCall callFound
-      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+      obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+          nextRuntimeRelated, valueRelated, step⟩ :=
         letStepSimulates_naturalLiteral (context := context) valueEq
           related.stateRelated resultFound resultKindAt allocated imported
           spec.hostsSatisfy inBounds contracted params results targetSet
@@ -15476,7 +15497,8 @@ theorem
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
         DirectLetStepTransports.replaceHeap
           (WitnessTransport.ofExtension extension) extension.closureDispatch
-          extension.closureDescriptors capacityTransport
+          extension.closureDescriptors closureAllocationsPersistent
+          capacityTransport
           (literal_ordinaryPersistenceTransport sourceRuntime (.nat value))
           (literal_preserves_globals sourceRuntime (.nat value)),
         transfer, nextRelated, nextOrdinary, nextFrame, by
@@ -15553,7 +15575,8 @@ theorem
           (frameAligned.validIndex resultFound)
       obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
         spec.stringLiteralCall callFound
-      obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+      obtain ⟨nextWitness, extension, closureAllocationsPersistent,
+          nextRuntimeRelated, valueRelated, step⟩ :=
         letStepSimulates_stringLiteral (context := context) valueEq
           related.stateRelated resultFound resultKindAt allocated imported
           spec.hostsSatisfy inBounds contracted params results targetSet
@@ -15606,7 +15629,8 @@ theorem
         by simp [replaceHeap, clearFailure], extension.closureDescriptors,
         DirectLetStepTransports.replaceHeap
           (WitnessTransport.ofExtension extension) extension.closureDispatch
-          extension.closureDescriptors capacityTransport
+          extension.closureDescriptors closureAllocationsPersistent
+          capacityTransport
           (literal_ordinaryPersistenceTransport sourceRuntime (.str value))
           (literal_preserves_globals sourceRuntime (.str value)),
         transfer, nextRelated, nextOrdinary, nextFrame, by
@@ -15897,8 +15921,9 @@ theorem
   obtain ⟨nextStore, word, nextWitness, operation, externalsPreserved,
       hostDispatchPreserved, hostDescriptorsPreserved,
       witnessDispatchPreserved, witnessDescriptorsPreserved, wasmGlobals,
-      hostStaticLayout, extension, nextRuntimeRelated, failureClear,
-      valueRelated, capacityValue, capacityTransport, remainingBudget⟩ :=
+      hostStaticLayout, extension, closureAllocationsPersistent,
+      nextRuntimeRelated, failureClear, valueRelated, capacityValue,
+      capacityTransport, remainingBudget⟩ :=
     constructorNonemptyStep_of_budget related.stateRelated.1 physicalArity
       argumentsRelated semanticStep semanticArity operationFacts.1.1.symm
       operationFacts.1.2 nonempty tagFits' objectFieldsFit usizeFieldsFit
@@ -15953,6 +15978,7 @@ theorem
         hostDescriptorsPreserved := hostDescriptorsPreserved
         witnessDescriptorsPreserved := witnessDescriptorsPreserved }
       witnessTransport := WitnessTransport.ofExtension extension
+      closureAllocationsPersistent := closureAllocationsPersistent
       capacity := capacityTransport
       ordinary := allocCtor_ordinaryPersistenceTransport semanticStep
       sourceGlobals := allocCtor_preserves_globals semanticStep
@@ -24730,7 +24756,8 @@ theorem ConcreteSupportedExport.correctNaturalLiteralReturn
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.naturalLiteralCall callFound
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+  obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated, step⟩ :=
     letStepSimulates_naturalLiteral (context := context) valueEq stateRelated
       resultFound resultKindAt allocated imported spec.hostsSatisfy inBounds
       contracted params results targetSet
@@ -24867,7 +24894,8 @@ theorem ConcreteSupportedExport.correctStringLiteralReturn
   obtain ⟨updated, targetSet⟩ := localSetReady resultFound
   obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
     spec.stringLiteralCall callFound
-  obtain ⟨nextWitness, extension, nextRuntimeRelated, valueRelated, step⟩ :=
+  obtain ⟨nextWitness, extension, _closureAllocationsPersistent,
+      nextRuntimeRelated, valueRelated, step⟩ :=
     letStepSimulates_stringLiteral (context := context) valueEq stateRelated
       resultFound resultKindAt allocated imported spec.hostsSatisfy inBounds
       contracted params results targetSet
