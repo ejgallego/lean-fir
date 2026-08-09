@@ -1,5 +1,6 @@
 import FirTalos.ConcreteTraceSimulation
 import FirTalos.Correctness.ResumableWasm
+import FirTalos.Correctness.StructuredWasmMachine
 
 /-!
 # Concrete W6 resumable Wasm machine
@@ -28,6 +29,21 @@ def concreteResumableWasmMachine
     (concreteResumableWasmMachine module env).store state = state.store :=
   rfl
 
+/-- The frame-stack target that exposes progress inside emitted calls and
+structured control. -/
+def concreteStructuredWasmMachine
+    (module : Wasm.Module) (env : Wasm.HostEnv Host) :
+    ConcreteResumableMachine where
+  State := StructuredWasmState Host
+  step := StructuredWasmStep module env
+  store := StructuredWasmState.store
+
+@[simp] theorem concreteStructuredWasmMachine_store
+    (module : Wasm.Module) (env : Wasm.HostEnv Host)
+    (state : StructuredWasmState Host) :
+    (concreteStructuredWasmMachine module env).store state = state.store :=
+  rfl
+
 /-- The exact compiler proof object now has a concrete instruction-boundary
 target.  This abbreviation keeps module and host selection explicit at the
 public theorem boundary. -/
@@ -35,6 +51,6 @@ def ConcreteGeneratedTraceSimulation
     (externals : Fir.LeanIR.Impure.ExternalImpl) (module : Wasm.Module)
     (env : Wasm.HostEnv Host) : Type :=
   ConcreteRankedTraceSimulation externals
-    (concreteResumableWasmMachine module env)
+    (concreteStructuredWasmMachine module env)
 
 end FirTalos.Concrete

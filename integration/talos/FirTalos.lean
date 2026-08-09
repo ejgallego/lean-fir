@@ -13,6 +13,7 @@ import FirTalos.Correctness.Execution
 import FirTalos.Correctness.WeakSimulation
 import FirTalos.Correctness.ResumableWasm
 import FirTalos.Correctness.StructuredWasmFrames
+import FirTalos.Correctness.StructuredWasmMachine
 import FirTalos.Correctness.Lowering
 import FirTalos.Correctness.Composition
 import FirTalos.Correctness.Semantics

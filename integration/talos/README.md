@@ -486,14 +486,13 @@ the generated `.ret` exit are therefore exactly successful `Wasm.run`
 results. The concrete packaging is the actual target accepted by
 `ConcreteRankedTraceSimulation`.
 
-This checkpoint is deliberately only an outer-instruction boundary. Talos
-calls and structured control remain atomic inside `execOne`, so it does not
-yet expose an infinite path for divergence inside a call or loop. The next W6
-slice reifies the emitted subset's call/control frames and proves that its
-finite terminal paths collapse to this checked instruction-boundary/Talos
-result. `OutOfFuel` is still never used as a trace checkpoint, and no caller
-will pass the relation as a correctness certificate in the final export
-theorem.
+That checkpoint alone is deliberately only an outer-instruction boundary:
+Talos calls and structured control remain atomic inside `execOne`. The
+structured machine below now reifies those emitted call/control frames; its
+remaining obligation is to prove every finite terminal stack path collapses
+to this checked instruction-boundary/Talos result. `OutOfFuel` is still never
+used as a trace checkpoint, and no caller will pass the relation as a
+correctness certificate in the final export theorem.
 
 `FirTalos.Correctness.StructuredWasmFrames` now supplies the first local
 collapse laws for that refinement. The adapter inventory reduces the relevant
@@ -502,8 +501,14 @@ indexed branches, `.ret`, and ordinary atomic instructions. A finite internal
 callee ending at generated `.ret` reconstructs the caller's exact Talos call;
 completed block fallthrough and `br 0`, loop fallthrough, and either selected
 conditional body reconstruct their exact outer instruction step. The next
-slice turns these laws into an explicit frame stack and adds loop restart and
-outward branch propagation.
+layer, `StructuredWasmMachine`, now provides the explicit stack: its state
+retains the store, running/breaking/returning/halted control, and block, loop,
+or call frames. It exposes internal call entry, structured-body entry and
+exit, loop restart, outward branch propagation, return unwinding, and
+top-level halting; ordinary instructions and imported calls still execute
+through Talos `execOne`. `ConcreteGeneratedTraceSimulation` now targets this
+machine. The next theorem folds finite terminal stack paths through the local
+collapse laws to the checked instruction-boundary/Talos result.
 
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine

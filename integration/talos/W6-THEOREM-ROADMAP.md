@@ -1172,10 +1172,13 @@ acceptance tests pass.
    preservation. The emitted grammar inventory and local collapse laws are
    already checked: finite internal calls ending at `.ret`, block fallthrough
    and `br 0`, loop fallthrough, and either conditional branch reconstruct the
-   exact outer Talos step. Next package them as an explicit stack with loop
-   restart and outward branch propagation. Add the backward direction only
-   when the supported target transition surface is closed enough for a useful
-   weak bisimulation.
+   exact outer Talos step. The explicit running/breaking/returning/halted
+   machine and its label/loop/call stack are now implemented, including loop
+   restart and outward branch/return propagation; the concrete simulation
+   target selects it. Next prove finite terminal stack-path collapse to the
+   checked Talos boundary, then instantiate source-step cases and the rank.
+   Add the backward direction only when the supported target transition
+   surface is closed enough for a useful weak bisimulation.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

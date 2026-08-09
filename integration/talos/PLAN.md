@@ -5788,14 +5788,13 @@ residual `exec` above it. The fallthrough, general return, and compiler-emitted
 `concreteResumableWasmMachine` packages this state and step relation for
 `ConcreteRankedTraceSimulation`.
 
-That boundary does not pretend to solve divergence inside an atomic Talos
-`execOne`: calls, blocks, and loops still need a reified control/frame stack
-for their internal progress to form a target path. W6 next defines that
-emitted-subset structured machine and proves its finite terminal paths collapse
-to the checked instruction-boundary/Talos theorem. It then constructs the
-compiler relation and rank from lowering/adaptation plus the existing runtime
-operation laws. The current terminating whole-export theorem becomes a
-corollary of that stronger relation; it is not discarded or repackaged as a
+That boundary alone does not solve divergence inside an atomic Talos
+`execOne`. The emitted-subset machine below now supplies the reified
+call/control stack; the remaining adequacy proof collapses its finite terminal
+paths to the checked instruction-boundary/Talos theorem. W6 then constructs
+the compiler relation and rank from lowering/adaptation plus the existing
+runtime operation laws. The current terminating whole-export theorem becomes
+a corollary of that stronger relation; it is not discarded or repackaged as a
 certificate.
 
 The adapter inventory and first collapse layer are now checked in
@@ -5807,6 +5806,16 @@ selected conditional body back to their outer Talos instruction step. The
 next implementation slice packages these laws into an explicit frame stack
 and adds loop restart plus outward branch propagation before the compiler
 relation is instantiated.
+
+That explicit stack is now implemented in `StructuredWasmMachine`. Its
+control distinguishes running code, branches in flight, returns in flight,
+and halted values; its frames cover labels, loops, and direct calls. Ordinary
+instructions and imported calls delegate to Talos `execOne`, while internal
+calls, structured entry/exit, loop restart, outward branching, return
+unwinding, and halting are genuine target steps. The concrete ranked-simulation
+alias now selects this structured machine. The next proof folds finite terminal
+stack paths through the local collapse laws to the already checked
+instruction-boundary `exec`/`run` adequacy result.
 
 ## Parallel agent packages
 
