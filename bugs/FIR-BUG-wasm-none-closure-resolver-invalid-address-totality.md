@@ -84,7 +84,7 @@ none
 
 ## Resolution and regression
 
-Fixed by `7fee30a2`. `ClosureCandidateAdapterCase` now carries only static
+Fixed by `9f6c5a05`. `ClosureCandidateAdapterCase` now carries only static
 compiler, adapter, and host-resolution facts, and
 `SaturatedClosureCandidateAdapterResolver` enumerates only those rows.
 `ClosureCandidateAdapterCase.execute_of_refines` derives a nonmatching
