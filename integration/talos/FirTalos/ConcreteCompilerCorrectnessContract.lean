@@ -151,16 +151,18 @@ store, witness, execution, or translation certificate is an input.
 example
     {sourceExternals : ExternalImpl}
     {DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop}
-    {LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
     {CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
-    {EffectSupported : EffectSupportedPredicate}
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
     {facts resultFacts : ReuseCapacityFacts}
@@ -4034,6 +4036,40 @@ example
     (adapted : FirTalos.adapt sourceModule = .ok target) :
     ConcreteGeneratedDeclarationFamily program sourceModule target :=
   ConcreteGeneratedDeclarationFamily.ofSupportedPipeline lowered adapted
+
+/--
+An already exposed canonical `lowerDecl` row is selected verbatim by the
+production pipeline. This is the static identity needed to apply a nested
+hereditary induction hypothesis without transporting it to an arbitrary
+callee context.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {resultKind : AbiKind}
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (row :
+      LoweredInternalDeclaration caller.program caller.cachedDeclarations
+        declaration sourceCode sourceFunction)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    Nonempty (ConcreteGeneratedInternalDeclaration program declaration
+      row.context sourceCode sourceModule sourceFunction target) :=
+  ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+    callerProgram callerCaches lowered adapted declarationFound row
+      resultClassified
 
 /--
 A cache-aware direct-declaration implementation supplies the interprocedural

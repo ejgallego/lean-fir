@@ -4332,6 +4332,111 @@ theorem DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
     ⟨⟨nextBaseInvariant, callee.cacheTable, nextClosureTables⟩, nextEntry⟩⟩
 
 /--
+Exact declaration-local data computed by one successful production
+`lowerDecl` call.
+
+This is deliberately a view of the executable compiler, not a second lowering
+relation. Keeping the declaration-local context explicit lets a hereditary
+source derivation name exactly the context that production selection will
+recover, rather than merely an arbitrary context coherent with its caller.
+-/
+structure LoweredInternalDeclaration
+    (program : Fir.LeanIR.ImpureProgram)
+    (cachedDeclarations : Array Name)
+    (declaration : LCNF.Decl .impure)
+    (sourceCode : LCNF.Code .impure)
+    (sourceFunction : Fir.Wasm.Function) where
+  paramLocals : Fir.Wasm.LocalKinds
+  bodyLocals : Fir.Wasm.LocalKinds
+  symbolicBody : List Fir.Wasm.Instruction
+  abiResults : Array AbiKind
+  bodyEq : declaration.value = .code sourceCode
+  paramsAdded :
+    Fir.Wasm.addDeclarationParams program declaration = .ok paramLocals
+  localsCollected :
+    Fir.Wasm.collectLocals [] sourceCode = .ok bodyLocals
+  bodyCompiled :
+    Fir.Wasm.compileCode {
+        program
+        localKinds := paramLocals.reverse ++ bodyLocals.reverse
+        cachedDeclarations } sourceCode = .ok symbolicBody
+  resultsCompiled :
+    Fir.Wasm.resultKinds declaration.type = .ok abiResults
+  sourceFunctionEq :
+    sourceFunction = {
+      name := declaration.name
+      params := paramLocals.reverse.toArray
+      results := abiResults
+      locals := bodyLocals.reverse.toArray
+      body := symbolicBody }
+
+/-- The canonical binding row shared by symbolic compilation and adaptation. -/
+def LoweredInternalDeclaration.localKinds
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) : Fir.Wasm.LocalKinds :=
+  row.paramLocals.reverse ++ row.bodyLocals.reverse
+
+/-- The exact declaration-local context used by production lowering. -/
+def LoweredInternalDeclaration.context
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) : Fir.Wasm.Context := {
+  program
+  localKinds := row.localKinds
+  cachedDeclarations }
+
+/-- The selected source function body is compiled in its canonical context. -/
+theorem LoweredInternalDeclaration.compileCode
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+    Fir.Wasm.compileCode row.context sourceCode =
+      .ok sourceFunction.body := by
+  change
+    Fir.Wasm.compileCode {
+        program
+        localKinds := row.localKinds
+        cachedDeclarations } sourceCode = .ok sourceFunction.body
+  have bodyEq : sourceFunction.body = row.symbolicBody := by
+    simpa using congrArg Fir.Wasm.Function.body row.sourceFunctionEq
+  rw [bodyEq]
+  exact row.bodyCompiled
+
+/-- A canonical lowered declaration shares exactly the module-wide context
+fields with the caller. -/
+theorem LoweredInternalDeclaration.contextsCoherent
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction)
+    {caller : Fir.Wasm.Context}
+    (callerProgram : caller.program = program)
+    (callerCaches : caller.cachedDeclarations = cachedDeclarations) :
+    DeclarationContextsCoherent caller row.context := {
+  program := callerProgram
+  cachedDeclarations := callerCaches }
+
+/--
 Source/static admission for one saturated internal named call.
 
 The relation retains the actual `compileArgs` and `evalArgs` equations because
@@ -4557,9 +4662,9 @@ Unlike `ReuseCapacityBudgetedCodeEvaluates.callLet`, the direct-call
 constructor does not hide the callee behind an arbitrary support predicate.
 It contains the admitted source/static call site, a finite derivation of the
 callee body at empty entry facts, and a finite derivation of the caller
-continuation. Recursive calls may use their independently computed coherent
-compiler context, but the derivation contains no target program, store,
-witness, execution, or translation certificate.
+continuation. Recursive calls use the exact declaration-local context exposed
+by the executable source lowerer; the derivation contains no target program,
+store, witness, execution, or translation certificate.
 
 External calls and lazy paths remain explicit source steps for now. Saturated
 closure dispatch and hereditary lazy misses will receive analogous nested
@@ -4568,16 +4673,18 @@ constructors after the direct-call induction is closed.
 inductive ReuseCapacityDirectHereditaryCodeEvaluates
     (externals : ExternalImpl)
     (DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
     (ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop)
-    (LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop)
     (CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
-    (EffectSupported : EffectSupportedPredicate)
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate)
     (letCost : LCNF.LetDecl .impure → Nat) :
     Fir.Wasm.Context → ReuseCapacityFacts → RuntimeState → Env →
       LCNF.Code .impure → ReuseCapacityFacts → RuntimeState → Env → Value →
@@ -4589,7 +4696,7 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         context facts sourceRuntime sourceEnv (.return result) facts
         sourceRuntime sourceEnv sourceValue 0
   | letValue
-      (supported : DirectSupported facts decl)
+      (supported : DirectSupported context facts decl)
       (sourceStep :
         SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
           sourceValue)
@@ -4607,8 +4714,8 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         (letCost decl + continuationCost)
   | externalLet
       (supported :
-        ExternalSupported sourceRuntime sourceEnv decl continuation nextRuntime
-          sourceValue stepCost)
+        ExternalSupported context sourceRuntime sourceEnv decl continuation
+          nextRuntime sourceValue stepCost)
       (sourceStep :
         SourceExternalLetResult context externals sourceRuntime sourceEnv decl
           continuation nextRuntime sourceValue)
@@ -4625,12 +4732,15 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
   | directCallLet
+      {calleeFunction : Fir.Wasm.Function}
       (site : DirectInternalCallSite context decl sourceEnv)
-      (contexts : DeclarationContextsCoherent context calleeContext)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          site.sourceDeclaration site.calleeCode calleeFunction)
       (callee :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost calleeContext [] sourceRuntime site.calleeEnv site.calleeCode
+          letCost row.context [] sourceRuntime site.calleeEnv site.calleeCode
           calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost)
       (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
       (continued :
@@ -4647,8 +4757,8 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
   | lazyLet
       (path : LazyCachePath)
       (supported :
-        LazySupported path sourceRuntime sourceEnv decl continuation nextRuntime
-          sourceValue stepCost)
+        LazySupported context path sourceRuntime sourceEnv decl continuation
+          nextRuntime sourceValue stepCost)
       (sourceStep :
         SourceLazyLetResult path context externals sourceRuntime sourceEnv decl
           continuation nextRuntime sourceValue)
@@ -4665,7 +4775,7 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
   | caseOf
-      (supported : CaseSupported sourceRuntime sourceEnv cases selected)
+      (supported : CaseSupported context sourceRuntime sourceEnv cases selected)
       (sourceStep : SourceCaseResult sourceRuntime sourceEnv cases selected)
       (continued :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
@@ -4678,7 +4788,8 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
         resultRuntime resultEnv resultValue requiredBytes
   | effect
       (supported :
-        EffectSupported sourceRuntime sourceEnv code continuation nextRuntime)
+        EffectSupported context sourceRuntime sourceEnv code continuation
+          nextRuntime)
       (sourceStep :
         SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
           continuation)
@@ -4696,31 +4807,35 @@ inductive ReuseCapacityDirectHereditaryCodeEvaluates
 inductive ReuseCapacityDirectHereditaryCallSupported
     (externals : ExternalImpl)
     (DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
     (ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop)
-    (LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop)
     (CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop)
-    (EffectSupported : EffectSupportedPredicate)
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate)
     (letCost : LCNF.LetDecl .impure → Nat)
     (context : Fir.Wasm.Context)
     (sourceRuntime : RuntimeState) (sourceEnv : Env)
     (decl : LCNF.LetDecl .impure) (_continuation : LCNF.Code .impure)
     (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat) : Prop where
   | intro
-      {calleeContext : Fir.Wasm.Context}
+      {calleeFunction : Fir.Wasm.Function}
       {calleeResultFacts : ReuseCapacityFacts}
       {calleeResultEnv : Env}
       (site : DirectInternalCallSite context decl sourceEnv)
-      (contexts : DeclarationContextsCoherent context calleeContext)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          site.sourceDeclaration site.calleeCode calleeFunction)
       (callee :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported LazySupported CaseSupported EffectSupported
-          letCost calleeContext [] sourceRuntime site.calleeEnv site.calleeCode
+          letCost row.context [] sourceRuntime site.calleeEnv site.calleeCode
           calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost) :
       ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
@@ -4731,16 +4846,18 @@ inductive ReuseCapacityDirectHereditaryCallSupported
 theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
     {externals : ExternalImpl}
     {DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop}
-    {LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
     {CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
-    {EffectSupported : EffectSupportedPredicate}
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
     {facts resultFacts : ReuseCapacityFacts}
@@ -4753,27 +4870,28 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
         context facts sourceRuntime sourceEnv sourceCode resultFacts
         resultRuntime resultEnv resultValue requiredBytes) :
-    ReuseCapacityBudgetedCodeEvaluates context externals DirectSupported
-      ExternalSupported
+    ReuseCapacityBudgetedCodeEvaluates context externals
+      (DirectSupported context) (ExternalSupported context)
       (ReuseCapacityDirectHereditaryCallSupported externals DirectSupported
         ExternalSupported LazySupported CaseSupported EffectSupported letCost
         context)
-      LazySupported CaseSupported EffectSupported letCost facts sourceRuntime
-      sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
-      requiredBytes := by
+      (LazySupported context) (CaseSupported context)
+      (EffectSupported context) letCost facts sourceRuntime sourceEnv sourceCode
+      resultFacts resultRuntime resultEnv resultValue requiredBytes := by
   induction evaluation with
   | ret sourceLookup => exact .ret sourceLookup
   | letValue supported sourceStep transfer _ ih =>
       exact .letValue supported sourceStep transfer ih
   | externalLet supported sourceStep transfer _ ih =>
       exact .externalLet supported sourceStep transfer ih
-  | @directCallLet context decl sourceEnv calleeContext sourceRuntime
+  | @directCallLet context decl sourceEnv calleeFunction sourceRuntime
       calleeResultFacts nextRuntime calleeResultEnv sourceValue stepCost facts
       nextFacts continuation resultFacts resultRuntime resultEnv resultValue
-      continuationCost site contexts callee transfer continued calleeIH
-      continuedIH =>
+      continuationCost site row callee transfer continued calleeIH continuedIH =>
+      have contexts : DeclarationContextsCoherent context row.context :=
+        row.contextsCoherent rfl rfl
       exact .callLet
-        (.intro site contexts callee)
+        (.intro site row callee)
         (site.sourceCallLetResult contexts calleeIH.sourceResult)
         transfer continuedIH
   | lazyLet path supported sourceStep transfer _ ih =>
@@ -4787,16 +4905,18 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.toBudgeted
 theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
     {externals : ExternalImpl}
     {DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop}
-    {LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
     {CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
-    {EffectSupported : EffectSupportedPredicate}
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
     {facts resultFacts : ReuseCapacityFacts}
@@ -4817,16 +4937,18 @@ theorem ReuseCapacityDirectHereditaryCodeEvaluates.sourceResult
 theorem ReuseCapacityDirectHereditaryCallSupported.sourceStep
     {externals : ExternalImpl}
     {DirectSupported :
-      ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
-      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
-        RuntimeState → Value → Nat → Prop}
-    {LazySupported :
-      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
         LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
     {CaseSupported :
-      RuntimeState → Env → LCNF.Cases .impure → LCNF.Code .impure → Prop}
-    {EffectSupported : EffectSupportedPredicate}
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
     {letCost : LCNF.LetDecl .impure → Nat}
     {context : Fir.Wasm.Context}
     {sourceRuntime nextRuntime : RuntimeState}
@@ -4841,8 +4963,9 @@ theorem ReuseCapacityDirectHereditaryCallSupported.sourceStep
     SourceCallLetResult context externals sourceRuntime sourceEnv decl
       continuation nextRuntime sourceValue := by
   cases supported with
-  | intro site contexts callee =>
-      exact site.sourceCallLetResult contexts callee.sourceResult
+  | intro site row callee =>
+      exact site.sourceCallLetResult (row.contextsCoherent rfl rfl)
+        callee.sourceResult
 
 /--
 Source-facing family of saturated internal named calls.
@@ -7618,112 +7741,6 @@ structure ConcreteSupportedDeclaration
   localsAligned : LocalLayoutAligned context sourceFunction
   singleResult : targetFunction.results.length = 1
 
-/--
-Exact declaration-local data computed by one successful production
-`lowerDecl` call.
-
-This is deliberately a view of the executable compiler, not a second lowering
-relation: `exists_of_lowerDecl` below obtains every field by unfolding the
-actual `lowerDecl` result.  Keeping the declaration-local context explicit is
-what prevents recursive proofs from reusing the caller's local and join rows.
--/
-structure LoweredInternalDeclaration
-    (program : Fir.LeanIR.ImpureProgram)
-    (cachedDeclarations : Array Name)
-    (declaration : LCNF.Decl .impure)
-    (sourceCode : LCNF.Code .impure)
-    (sourceFunction : Fir.Wasm.Function) where
-  paramLocals : Fir.Wasm.LocalKinds
-  bodyLocals : Fir.Wasm.LocalKinds
-  symbolicBody : List Fir.Wasm.Instruction
-  abiResults : Array AbiKind
-  bodyEq : declaration.value = .code sourceCode
-  paramsAdded :
-    Fir.Wasm.addDeclarationParams program declaration = .ok paramLocals
-  localsCollected :
-    Fir.Wasm.collectLocals [] sourceCode = .ok bodyLocals
-  bodyCompiled :
-    Fir.Wasm.compileCode {
-        program
-        localKinds := paramLocals.reverse ++ bodyLocals.reverse
-        cachedDeclarations } sourceCode = .ok symbolicBody
-  resultsCompiled :
-    Fir.Wasm.resultKinds declaration.type = .ok abiResults
-  sourceFunctionEq :
-    sourceFunction = {
-      name := declaration.name
-      params := paramLocals.reverse.toArray
-      results := abiResults
-      locals := bodyLocals.reverse.toArray
-      body := symbolicBody }
-
-/-- The canonical binding row shared by symbolic compilation and adaptation. -/
-def LoweredInternalDeclaration.localKinds
-    {program : Fir.LeanIR.ImpureProgram}
-    {cachedDeclarations : Array Name}
-    {declaration : LCNF.Decl .impure}
-    {sourceCode : LCNF.Code .impure}
-    {sourceFunction : Fir.Wasm.Function}
-    (row :
-      LoweredInternalDeclaration program cachedDeclarations declaration
-        sourceCode sourceFunction) : Fir.Wasm.LocalKinds :=
-  row.paramLocals.reverse ++ row.bodyLocals.reverse
-
-/-- The exact declaration-local context used by production lowering. -/
-def LoweredInternalDeclaration.context
-    {program : Fir.LeanIR.ImpureProgram}
-    {cachedDeclarations : Array Name}
-    {declaration : LCNF.Decl .impure}
-    {sourceCode : LCNF.Code .impure}
-    {sourceFunction : Fir.Wasm.Function}
-    (row :
-      LoweredInternalDeclaration program cachedDeclarations declaration
-        sourceCode sourceFunction) : Fir.Wasm.Context := {
-  program
-  localKinds := row.localKinds
-  cachedDeclarations }
-
-/-- The selected source function body is the output compiled in its own
-declaration context. -/
-theorem LoweredInternalDeclaration.compileCode
-    {program : Fir.LeanIR.ImpureProgram}
-    {cachedDeclarations : Array Name}
-    {declaration : LCNF.Decl .impure}
-    {sourceCode : LCNF.Code .impure}
-    {sourceFunction : Fir.Wasm.Function}
-    (row :
-      LoweredInternalDeclaration program cachedDeclarations declaration
-        sourceCode sourceFunction) :
-    Fir.Wasm.compileCode row.context sourceCode =
-      .ok sourceFunction.body := by
-  change
-    Fir.Wasm.compileCode {
-        program
-        localKinds := row.localKinds
-        cachedDeclarations } sourceCode = .ok sourceFunction.body
-  have bodyEq : sourceFunction.body = row.symbolicBody := by
-    simpa using congrArg Fir.Wasm.Function.body row.sourceFunctionEq
-  rw [bodyEq]
-  exact row.bodyCompiled
-
-/-- A canonical lowered declaration shares only module-wide context fields
-with its caller; declaration-local kinds and joins remain independent. -/
-theorem LoweredInternalDeclaration.contextsCoherent
-    {program : Fir.LeanIR.ImpureProgram}
-    {cachedDeclarations : Array Name}
-    {declaration : LCNF.Decl .impure}
-    {sourceCode : LCNF.Code .impure}
-    {sourceFunction : Fir.Wasm.Function}
-    (row :
-      LoweredInternalDeclaration program cachedDeclarations declaration
-        sourceCode sourceFunction)
-    {caller : Fir.Wasm.Context}
-    (callerProgram : caller.program = program)
-    (callerCaches : caller.cachedDeclarations = cachedDeclarations) :
-    DeclarationContextsCoherent caller row.context := {
-  program := callerProgram
-  cachedDeclarations := callerCaches }
-
 /-- Name-directed lookup and numeric lookup select the same typed entry when
 they traverse the same canonical binding row. -/
 private theorem findFVar?_kind_of_findLocalKind?
@@ -7838,6 +7855,23 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
                     bodyCompiled := bodyResult
                     resultsCompiled := resultsResult
                     sourceFunctionEq := lowered.symm }⟩
+
+/-- A lowering view replays to the exact executable `lowerDecl` result. -/
+theorem LoweredInternalDeclaration.lowerDecl
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+  Fir.Wasm.lowerDecl program cachedDeclarations declaration =
+      .ok (some sourceFunction) := by
+  unfold Fir.Wasm.lowerDecl
+  simp only [row.bodyEq, row.paramsAdded, row.localsCollected,
+    row.bodyCompiled, row.resultsCompiled, Bind.bind, Except.bind, pure,
+    Except.pure, row.sourceFunctionEq]
 
 /-- An internal source declaration cannot produce the `none` branch reserved
 for external imports when `lowerDecl` succeeds. -/
@@ -9087,6 +9121,93 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     parameterIdsUnique
     parametersAdded := row.paramsAdded
     sourceParameters }⟩⟩
+
+/--
+Production selection at an already exposed canonical lowering row.
+
+The hereditary source derivation carries this `LoweredInternalDeclaration`.
+Determinism of the executable `filterMapM lowerDecl` table puts that exact
+function in the generated symbolic module, and adaptation selects its exact
+concrete row. Consequently the recursive induction hypothesis and production
+callee package have definitionally the same declaration-local context; no
+context cast, target execution, or translation certificate is needed.
+-/
+theorem
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {resultKind : AbiKind}
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (row :
+      LoweredInternalDeclaration caller.program caller.cachedDeclarations
+        declaration sourceCode sourceFunction)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    Nonempty (ConcreteGeneratedInternalDeclaration program declaration
+      row.context sourceCode sourceModule sourceFunction target) := by
+  have ordinaryLowering : Fir.Wasm.lower program = .ok sourceModule :=
+    LazyCacheGeneratedEnvironment.lower_of_lowerSupported lowered
+  have functionsEq :=
+    LoweredInternalDeclaration.functions_of_lower ordinaryLowering
+  have mappedList :
+      program.decls.toList.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        .ok sourceModule.functions.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [functionsEq]
+    rfl
+  have declarationMember : declaration ∈ program.decls.toList := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    have member : declaration ∈ program.decls := by
+      rw [← selected]
+      exact Array.getElem_mem inBounds
+    simpa using member
+  have rowSelected :
+      Fir.Wasm.lowerDecl program (Fir.Wasm.cachedDeclarationNames program)
+          declaration = .ok (some sourceFunction) := by
+    simpa only [callerProgram, callerCaches] using row.lowerDecl
+  have sourceMember : sourceFunction ∈ sourceModule.functions.toList :=
+    exceptListFilterMapM_mem_of_mem mappedList declarationMember rowSelected
+  obtain ⟨sourceFunctionIndex, sourceFunctionFoundList⟩ :=
+    List.getElem?_of_mem sourceMember
+  have sourceFunctionFound :
+      sourceModule.functions[sourceFunctionIndex]? = some sourceFunction := by
+    simpa using sourceFunctionFoundList
+  have sourceSingleResult : sourceFunction.results.size = 1 :=
+    row.singleResult_of_abiKind resultClassified
+  obtain ⟨generated⟩ :=
+    ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
+      sourceFunctionIndex sourceFunctionFound row.compileCode row.localsAligned
+      sourceSingleResult adapted
+  have sourceParameters :
+      sourceFunction.params = row.paramLocals.reverse.toArray := by
+    simpa using congrArg Fir.Wasm.Function.params row.sourceFunctionEq
+  have parameterIdsUnique :=
+    declarationParameterIdsUnique_of_lowerSupported lowered declarationFound
+  have parametersAdded :
+      Fir.Wasm.addDeclarationParams program declaration =
+        .ok row.paramLocals := by
+    simpa only [callerProgram] using row.paramsAdded
+  exact ⟨{
+    toConcreteGeneratedDeclaration := generated
+    parameterLocals := row.paramLocals
+    parameterIdsUnique
+    parametersAdded
+    sourceParameters }⟩
 
 /--
 Module-wide production declaration family.

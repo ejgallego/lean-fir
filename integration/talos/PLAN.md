@@ -5694,6 +5694,25 @@ cache-aware execution package. That removes the current opaque
 `DirectInternalCallDeclarationInduction` premise for direct named calls.
 Saturated closure dispatch and lazy misses remain subsequent constructors.
 
+W6.6hq tightens the recursive source boundary before that induction step.
+Every hereditary direct-call node now carries the exact
+`LoweredInternalDeclaration` produced by the executable source lowerer, and
+its nested callee derivation is indexed by that row's canonical context.
+Admission predicates are context-indexed, so each recursive body uses its own
+direct, external, lazy, case, and effect compiler policy rather than silently
+reusing its caller's local context.
+
+`exists_ofSupportedPipelineAtLowered` proves that the exact row carried by the
+source derivation occurs in the real `lowerSupported`/`adapt` output. The
+remaining numeric call-index identity exposed
+`FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness`:
+`ConcreteSupportedExport` currently drops the phase boundary's
+`Program.NamesUnique` fact, even though import-first named-call resolution can
+disagree with source lookup on duplicate internal/external names. The next
+isolated contract slice retains that existing source well-formedness fact,
+proves exact call-index selection, and then closes the hereditary production
+call law by its nested induction hypothesis.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:
