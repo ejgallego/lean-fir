@@ -6,9 +6,9 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 691e00b93ccd78a300a5ad03f3039e87793a9d5e on main
-functional-head: fb2c922a1b94a01c146fbc6072e5aa01c2ea0d96
-contract-base: 691e00b93ccd78a300a5ad03f3039e87793a9d5e on main
+base: 0efe9753dc605039992eead05cc4ece2d2568c95 on main
+functional-head: 84a85ced1afef26dbce263a8d5eaeb3c749cdca9
+contract-base: 0efe9753dc605039992eead05cc4ece2d2568c95 on main
 clean-at-update: true
 slice: Replay Lean 4.32 postponed final-LCNF module groups through the upstream-aligned private target-module environment and capture the real Illuminate.HitScene.query closure without copying Illuminate code; add the pinned HitScene source probe and classify the remaining admission frontier
 files: Fir/Wasm/Emit/CompilerPrivate.lean; Fir/Wasm/Emit/Source.lean; integration/illuminate-hit-scene/; bugs/FIR-BUG-wasm-none-closed-vec2-constant-admission.md; bugs/FIR-BUG-wasm-none-endpoint-partial-application-admission.md; this mailbox
@@ -18,7 +18,7 @@ bug-cards: fixed FIR-BUG-wasm-none-closed-vec2-constant-admission; candidate FIR
 blockers: HitScene artifact generation is waiting at one shared compiler-admission frontier: Illuminate.endpointToCenter._closed_1 partially applies an object-parameter function to a compiler-generated boxed Float whose declaration result is typed as tobject. FIR requires actual.refines expected at partial application even though ordinary calls and joins accept the common Lean object-family representation. No answer is currently needed from Illuminate or Verso
 artifacts: no HitScene Wasm package yet; probe inventory contains 159 reachable final-LCNF declarations and 34 externals, including Float.abs, Float.sqrt, Float.sin, Float.cos, Float.acos, Float.atan2, Float.cbrt, and Float.floor; exact diagnostic files are generated under integration/illuminate-hit-scene/_build and intentionally ignored
 measurements: source capture and lowering probe completes in approximately 7.3 seconds on the current worktree; no execution-performance claim is made before resident math and external-engine acceptance exist
-handoff: integration may fast-forward the green wasm/generation stack through functional head fb2c922a and its containing mailbox commit, then synthesize the checkpoint into coordination/BOARD.md. For the dependent HitScene milestone, integration should open a shared-contract queue record for FIR-BUG-wasm-none-endpoint-partial-application-admission, prefer precise boxed-result propagation if it preserves existing refinement premises, and notify W6 before any alternative that broadens closure capture/projection compatibility
+handoff: integration may fast-forward the green wasm/generation stack through functional head 84a85ced and its containing mailbox commit, then synthesize the checkpoint into coordination/BOARD.md. The HitScene integration lease is active and W6 has been notified; prefer precise boxed-result propagation if it preserves existing refinement premises, and stop for W6 review before any alternative that broadens closure capture/projection compatibility
 next: after the shared admission repair lands and W7 rebases, confirm the 159-declaration closure has zero unsupported source declarations; then implement the eight resident Float/math operations without JavaScript Math imports, publish the module-owned-memory HitScene package, and run the 301-query plus 10000-query bounded-frontier acceptance suite
 ```
 
