@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: ef8a16eb on main
-functional-head: 115fd2a1
-contract-base: ef8a16eb on main; derived closure-resolver packaging and finite whole-export correctness are linked/accepted; the two intervening internal/unofficial and Apache-2.0 licensing documentation commits change no semantic contract
+state: active
+base: b4b33102 on main
+functional-head: none yet
+contract-base: b4b33102 on main; ranked finite-trace simulation boundary is linked/accepted; no shared semantic or runtime contract is queued
 clean-at-update: true
-slice: Added a heterogeneous observation-aware weak-simulation framework with exact finite-path composition and ranked zero-step stuttering; specialized it to deterministic LCNF ExecSteps and W6 concrete world/event traces; proved every finite source prefix transports to a related finite target prefix without a termination premise; fixed the explicit resumable-Wasm interface required for the compiler theorem
-files: integration/talos/FirTalos/Correctness/WeakSimulation.lean; integration/talos/FirTalos/ConcreteTraceSimulation.lean; integration/talos/FirTalos.lean; integration/talos/PLAN.md; integration/talos/README.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
-contracts: none; adds proof-local framework and theorem interfaces without changing source semantics, symbolic Wasm ABI/instructions, concrete layout/runtime operations, resident helpers, or artifacts
-checks: Lean Beam save FirTalos.Correctness.WeakSimulation passed with 0 errors and 1 linter warning (source a06bb4c92fece73c); Lean Beam save FirTalos.ConcreteTraceSimulation passed with 0 errors and 0 warnings (source 6b282fdc38c769d6); full make check on immediately preceding documentation-only base ec1c015c passed (642 unique cases, 1844/1844 comparisons equal, 0 findings, 113 bug cards, trusted-assumption policy unchanged); final ef8a16eb post-license-rebase git diff --check passed; final lake build FirTalos.Correctness.WeakSimulation FirTalos.ConcreteTraceSimulation FirTalos passed (3127 jobs); make talos-setup passed at Talos a01d01c778b794dd00956748a067b6793c2c9f9b; final make talos-check passed (3127 jobs)
+slice: Define a structured resumable Wasm configuration for the emitted subset and prove finite terminating adequacy to Talos Wasm.run, preserving the state needed by the ranked finite-prefix simulation rather than treating OutOfFuel as resumable
+files: coordination/lanes/wasm-proof.md; anticipated proof-owned modules under integration/talos/FirTalos/Correctness/ and integration/talos/FirTalos/
+contracts: none anticipated; this slice should relate proof-local structured execution to the existing Talos evaluator without changing source semantics, symbolic Wasm instructions, concrete runtime layout, resident helpers, or artifacts
+checks: pending; Lean edits will use Lean Beam, followed by the focused dependency cone, git diff --check, make check, make talos-setup, and make talos-check
 bug-cards: none
 blockers: none
-handoff: Land functional-head 115fd2a1 plus this ready mailbox; the finite-prefix theorem is checked and does not misrepresent Talos OutOfFuel as a resumable state
-next: Define the structured resumable Wasm configuration for the emitted subset, prove finite terminating adequacy with Talos Wasm.run, and then construct the compiler relation/rank from the existing W6 operation laws
+handoff: none; active slice
+next: Inspect the Talos evaluator state/result surface, choose the smallest faithful emitted-subset configuration, and prove its terminating-run bridge before compiler instantiation
 ```
