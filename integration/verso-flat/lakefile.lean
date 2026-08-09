@@ -19,4 +19,3 @@ lean_lib «VersoFlatSource» where
 
 @[default_target]
 lean_lib «VersoFirFlat»
-

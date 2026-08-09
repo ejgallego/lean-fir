@@ -113,4 +113,3 @@ source = source.replaceAll("production prettyM module", "production Flat prettyM
 mkdirSync(dirname(outputPath), { recursive: true });
 writeFileSync(outputPath, source);
 console.log(`wrote ${Buffer.byteLength(source)} bytes to ${outputPath}`);
-

@@ -36,4 +36,3 @@ def main : IO UInt32 := do
 end VersoFirFlat.Oracle
 
 def main : IO UInt32 := VersoFirFlat.Oracle.main
-

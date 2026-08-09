@@ -133,4 +133,3 @@ console.log(`native/Wasm differential: PASS (${cases.length} cases)`);
     /unknown Format kind/);
   console.log("timing and malformed-input contract: PASS");
 }
-

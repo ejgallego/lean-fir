@@ -55,4 +55,3 @@ console.log(JSON.stringify({
   textBytes: 2,
   events: 2,
 }));
-

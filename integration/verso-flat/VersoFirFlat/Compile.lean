@@ -53,4 +53,3 @@ def compileResidentModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
   return result.bind linkResidentRuntime
 
 end VersoFirFlat.Compile
-
