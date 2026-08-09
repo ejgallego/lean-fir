@@ -11,7 +11,7 @@ function equal(actual, expected, message) {
 
 function prepareConstructor(memory, address) {
   const view = new DataView(memory.buffer);
-  const header = [1, 2, 1, 56, 7, 2, 0, 2];
+  const header = [1, 2, 1, 64, 7, 2, 0, 16];
   header.forEach((value, index) =>
     view.setUint32(address + 4 * index, value, true));
   view.setUint32(address + 32, 11, true);
@@ -37,6 +37,10 @@ export async function checkResidentSetters(bytes) {
     "resident object-set export is missing");
   equal(typeof exports.resident_set_scalar, "function",
     "resident scalar-set export is missing");
+  equal(typeof exports.resident_set_float32, "function",
+    "resident Float32-set export is missing");
+  equal(typeof exports.resident_set_float, "function",
+    "resident Float-set export is missing");
 
   const address = 1024;
   prepareConstructor(exports.memory, address);
@@ -56,6 +60,16 @@ export async function checkResidentSetters(bytes) {
     "resident scalar setter wrote the wrong byte");
   equal(view.getUint32(0, true), 0xdecafbad,
     "resident scalar setter failed to restore scratch");
+  exports.resident_set_float32(address, -13.25);
+  equal(view.getFloat32(address + 52, true), -13.25,
+    "resident Float32 setter changed the physical value");
+  equal(view.getUint32(0, true), 0xdecafbad,
+    "resident Float32 setter failed to restore scratch");
+  exports.resident_set_float(address, -0);
+  equal(view.getBigUint64(address + 56, true), 0x8000000000000000n,
+    "resident Float setter did not preserve negative-zero bits");
+  equal(view.getUint32(0, true), 0xdecafbad,
+    "resident Float setter failed to restore scratch");
 
   const host = new ConcreteHost();
   const { exports: concrete } = await WebAssembly.instantiate(module, {});
