@@ -19,6 +19,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-UPSTREAM-GENERIC-OBJECT-FAMILY-ABI`.
+- Integration owner: `wasm-gen`; the user assigned the W7 owner the dynamic
+  integration lease for this compiler/generation consolidation.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`.
+- Published stack: isolated shared contract `bd7a5e55`, W7 consumer
+  `a13fa2ad`, Illuminate source-inventory ratchet `e5a8612b`, and ready
+  mailbox `dfe6da0b`, based directly on `main` at `cdb8c4f3`.
+- Lease boundary: satisfied. Compiler call, result, and symbolic-stack
+  admission now follow Lean's generic physical object-family convention:
+  `object`, `tagged`, and `tobject` are mutually call-compatible, while scalar
+  and erased lanes remain exact. The directional semantic/proof refinement
+  relation is unchanged. W7 no longer repairs final-LCNF kinds by application
+  name, the `prettyM` facade has a concrete state without `unsafeCast`, and
+  generic resident Array and weak-Inhabited results preserve their captured
+  `tobject` kind. W6 consumes these stable signatures after rebasing its next
+  checkpoint; no concrete layout or runtime representation changed.
+- Artifact identity: PrettyFormat styled
+  `c928d30adb3d39f7409e7091b4e1f13289aac35c02b34d761062c8a8f3e74b60`
+  (117,389 bytes) and plain
+  `84939d58da4e75f48f1791947edc5ce462842b0bc24b984ffb4d1842751d0be2`
+  (113,311 bytes). Illuminate v3 is
+  `a4de0ec22d50c5070dbfa90969dc95c41be6f747955f60c8f9620baeafefbfa5`
+  (50,211 bytes), and v4 is
+  `1c3064d4ee5b9ea0f96055b03e50e8477d29ce6f2313c23c9dcfc83d314eecd8`
+  (55,527 bytes); both retain zero imports and their reviewed six-function
+  live-player export surface.
+- Validation: Lean Beam zero-error checkpoint; `git diff --check`; complete
+  `make check` with 642 unique cases and 1,844/1,844 equal comparisons; all
+  3,125 `make talos-check` jobs; the complete deterministic PrettyFormat
+  artifact gate; and the Illuminate v3/v4 gate against clean Illuminate
+  `b233ce7` and corrected `Player.lean` source hash `e1f98f9d`, with two
+  deterministic publications, all 106 checked-in traces including duplicate
+  frame-zero initialization, and flat frontiers in both 10,000-dispatch tests.
+
+## Previous completed integration lease
+
 - Milestone: `W6-RECURSIVE-PRODUCTION-CLOSURE-PROOF-BOUNDARY`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler-proof boundary.
@@ -569,6 +606,17 @@ candidate hashes in the lane and contract tables remain historical provenance
 until their stacks land and must not be used as current feature-branch
 identities.
 
+- `W7-UPSTREAM-GENERIC-OBJECT-FAMILY-ABI` is linked/accepted through isolated
+  shared contract `bd7a5e55`, W7 consumer `a13fa2ad`, Illuminate inventory
+  ratchet `e5a8612b`, and ready mailbox `dfe6da0b`, based directly on `main` at
+  `cdb8c4f3`. Named calls, control results, and symbolic stack admission now
+  use Lean's generic object-family physical ABI instead of application-specific
+  final-LCNF repairs. The semantic/proof refinement relation remains
+  directional, scalar and erased lanes remain exact, and no concrete layout
+  changed. The complete root, 3,125-job Talos, PrettyFormat, and Illuminate
+  gates pass; Illuminate v3/v4 retain zero imports, all 106 checked-in traces
+  agree, and both 10,000-dispatch tests retain flat post-rewind frontiers.
+
 - `W6-RECURSIVE-PRODUCTION-CLOSURE-PROOF-BOUNDARY` is linked/accepted
   through W6 functional head `cd8cd485` and ready mailbox `f6a09d46`, based
   directly on `main` at `a8f8ec0d`. The target induction is now explicit:
@@ -1086,7 +1134,7 @@ moving global snapshot hash.
 | Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | released | Ready mailbox `f6a09d46`, functional head `cd8cd485`, on base `a8f8ec0d`, states the exact generated-row target induction for recursive production closure evaluation, its derived closure-ABI form, and the module-wide executable resolver boundary. | No shared semantic or runtime contract changed; resolver metadata is not a behavior certificate. The complete root and 3,125-job Talos gates pass. Next is the structural induction proof and recursive public export theorem. |
-| W7 generation | generation owner | `wasm/generation` | ready | Ready mailbox `6f5b5b5c`, with existing W7 functional head `4404aba0`, consumes accepted contract base `b1713877`. The public compiler emits and V8 executes all 32 scalar-closure cases with 96/96 comparisons equal and zero findings. | No W7 implementation, artifact, ABI, or helper contract changed; this is an acceptance-only consumption slice. |
+| W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `dfe6da0b`, functional head `e5a8612b`, on base `cdb8c4f3`, replaces application-specific final-LCNF kind repairs with the generic Lean object-family call ABI and publishes reviewed PrettyFormat and Illuminate v3/v4 artifacts. | Shared contract `bd7a5e55` makes `object`, `tagged`, and `tobject` compiler-call compatible without changing directional semantic refinement or concrete layout. W6 rebases and consumes the stable generic Array/weak-Inhabited `tobject` signatures in its next proof checkpoint. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
 
@@ -1098,6 +1146,7 @@ moving global snapshot hash.
 | Resident allocator, constructors, and styled `prettyM` through immediate Naturals | `64831f6` | `40f41c0` | generation-ready | W6 owner at the later contract bridge | styled Wasm `5d14b3fd2b1eb93de344ee69c6117e539eeed320c857248eb0fd4691b9d9e5d2` |
 | Standalone immediate-Natural and UTF-8 String literals | `64831f6` | current W6 object layouts | generation-ready | W6 owner | Wasm `ab63fa578576748ff3ea8230986cf908d7285c54bc840bb60fec5fc7fa978473` |
 | Bit-exact float source probes and styled zero-import `prettyM` package | W7 ready head `fdaa8bd1`; package source `56d18362` | landed closure proof/runtime stack `229640de` | linked/accepted | W6 float and closure refinements landed | styled Wasm `e7ccd1ac678900e0f6583a0d2251b0ef4d43de0b388d18033bbc86344eed4af7` |
+| Generic object-family calls and resident Array/weak-Inhabited results | `a13fa2ad` | shared call-ABI contract `bd7a5e55` | generation-ready | W6 owner for the later concrete refinement bridge | styled PrettyFormat `c928d30adb3d39f7409e7091b4e1f13289aac35c02b34d761062c8a8f3e74b60`; Illuminate v3 `a4de0ec22d50c5070dbfa90969dc95c41be6f747955f60c8f9620baeafefbfa5`; v4 `1c3064d4ee5b9ea0f96055b03e50e8477d29ce6f2313c23c9dcfc83d314eecd8` |
 
 ## Contract queue
 
@@ -1119,6 +1168,7 @@ moving global snapshot hash.
 | `WASM-DECLARATION-PARAMETER-UNIQUENESS` | integration/W6 proof | W6, W7, validation | released | queue/card `03547684`; isolated contract `dfa8153e`; bug card `FIR-BUG-wasm-none-duplicate-declaration-parameters` | Adds duplicate-free same-scope declaration parameters to `supportedDecl`. This aligns validator parameter kinds with the deduplicating symbolic-local row and prevents an accepted program from lowering to an invalid call signature. Existing well-formed generated programs are unaffected; consumers rebase after landing. |
 | `WASM-DECLARATION-NAME-UNIQUENESS` | W6 proof | W6 compiler-correctness clients | released | isolated proof contract `b6030300`; functional proof `f215c995`; bug card `FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness` | Retains the existing phase-level `Program.NamesUnique` fact at `ConcreteSupportedExport`, proving that source lookup, symbolic function selection, and adapter numeric lookup identify the same internal declaration. No lowering, validator, ABI, runtime, or interpreter behavior changes. |
 | `CLOSURE-PROJECTION-KIND-REFINEMENT` | W6 proof/runtime | W6 compiler correctness, W7 resident projection, validation | released | functional head `625d4883`; ready mailbox `22d15cf3`; bug card `FIR-BUG-wasm-none-closure-projection-kind-refinement` | A closure retains its captured argument's precise descriptor kind, while generated callee entry may request the wider target-parameter kind. Live and post-application projection accept exactly `actualKind.refines expectedKind`, read at the actual descriptor kind, and preserve the physical lane while widening `PhysicalValueRel`. W7's resident helper already loads the same raw slot and requires no implementation change. |
+| `WASM-LEAN-OBJECT-FAMILY-CALL-ABI` | W7/shared lowering | W6, W7, validation, artifact clients | released | isolated contract `bd7a5e55`; W7 consumer `a13fa2ad`; package ratchet `e5a8612b` | Follows Lean's generic call representation: `object`, `tagged`, and `tobject` are mutually compatible at named-call, result, and symbolic-stack boundaries, while scalar and erased lanes stay exact. Directional semantic/proof refinement and every concrete layout remain unchanged. W7 removes caller-name repairs and preserves captured `tobject` helper results; W6 rebases before proving the stable signatures. |
 | `ARGUMENT-ALIAS-MATERIALIZATION` | integration/validation | W7, V8 adapter, W6 refinement | active | `181a098f` | Adds a canonical target-sorted root-to-later-argument alias graph to every corpus descriptor. LCNF allocates each root once and retains one owned reference per aliased argument; malformed, chained, non-heap, schema-mismatched, and datum-mismatched graphs fail closed. The V8 adapter requires one compiler-manifest heap location per root with exact initial multiplicity and tests reference counts two and three plus two independent roots. W7 should thread `argumentAliases` through compiler invocation only after its current slice, then admit the three queued alias fixtures; W6 owns any later concrete refinement, not this validation implementation. |
 | `NATIVE-TERMINATION-SUPERVISION` | integration/validation | native adapter, LCNF adapter, W7/V8, Talos runners | active | `6fef4802`; divergence `6f0487ee`; typed policy `9e00c614`; source exit `8618f1f1` | Adds `timeoutMs` plus the backend-neutral `processTermination` enum: `protocol`, `timeoutDivergence`, or `sourceExit`. Native timeout is a typed backend timeout unless opted into divergence; ordinary nonzero status and signals remain crashes unless an exact source-exit fixture opts in, and signals always remain crashes. LCNF promotes only same-step, well-typed `Source.exitNat` terminal evidence under `sourceExit`, without changing the canonical interpreter result theorem. The divergence fixture pins 256 steps; source-exit fixtures pin statuses zero/seven and one exact external step. Retained V8 evidence excludes both. W7 or Talos should consume this policy only when admitting corresponding real-engine cases; no compiler-side work is requested now. |
 | `EFFECTFUL-NATIVE-ORACLE` | integration/validation | native and direct-native adapters; future V8/Talos adapter authors | active | `b3f4f5d9` | Replaces `Case.native : Unit → ValidationDatum` with a delayed `Unit → IO ValidationDatum` action and makes semantic effect/stderr drains independent of a successful return value. Existing pure fixtures lift explicitly and the current 699 source plus 9 direct observations pass. This is the foundation for comparing true Lean `IO.Error` exceptions and source output; it changes no descriptor, compiler ABI, canonical interpreter theorem, or W6/W7 implementation surface. |
