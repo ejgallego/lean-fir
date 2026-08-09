@@ -4368,11 +4368,11 @@ example
     sourceExternals
 
 /-- The first lazy-cache production boundary is likewise compiler-derived.
-The caller supplies the generated cache layout and the source result-kind
-policy for coherent declaration contexts, but no target execution for a hit,
-a miss, or its initializer. Ordinary recursive callees may contain this lazy
-family; the initializer derivation itself uses the complete production
-fragment without nested lazy lookups. -/
+The caller supplies the generated cache layout, but no target execution for a
+hit, a miss, or its initializer. The non-heap publication restriction is local
+evidence in each admitted source miss. Ordinary recursive callees may contain
+this lazy family; the initializer derivation itself uses the complete
+production fragment without nested lazy lookups. -/
 example
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
@@ -4387,11 +4387,7 @@ example
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
-    (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resultKinds :
-      ∀ {calleeContext : Fir.Wasm.Context},
-        DeclarationContextsCoherent context calleeContext →
-          LazyCacheInternalResultKindsNonHeap calleeContext) :
+    (generated : LazyCacheGeneratedEnvironment context sourceModule) :
     DirectHereditaryGeneratedDeclarationInduction program sourceModule target
       hosts sourceExternals
       (fun context => ReuseBudgetedDirectSupported context)
@@ -4402,7 +4398,7 @@ example
       (fun context =>
         OwnershipTagAndAllFieldMutationEffectSupported context) :=
   spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
-    contextCaches sourceExternals generated resultKinds
+    contextCaches sourceExternals generated
 
 /-- The mixed production case law is attached to any generated function, not
 only a named export. A body may select among default-only, object-constructor,

@@ -7677,6 +7677,9 @@ Source-only hereditary admission for compiler-generated internal lazy calls.
 A hit retains the ordinary static nullary-call facts. A miss additionally
 retains the exact declaration-local row selected by production lowering and a
 finite source derivation of the initializer body from the empty environment.
+The first admitted miss family also records that its exact result ABI kind is
+neither `.object` nor `.tobject`, which is the local source-side condition
+needed for heap-neutral cache publication.
 The initializer derivation may use a separately chosen recursive fragment;
 this makes one lazy layer compositional without placing a target execution or
 a recursive target-correctness theorem in the source premise.
@@ -7736,6 +7739,8 @@ inductive LazyCacheInternalHereditarySupported
           sourceDeclaration calleeCode calleeFunction)
       (resultClassified :
         Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+      (notObject : resultKind ≠ .object)
+      (notTObject : resultKind ≠ .tobject)
       (callee :
         ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
           ExternalSupported InitializerLazySupported CaseSupported
@@ -11965,7 +11970,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resultKinds : LazyCacheInternalResultKindsNonHeap context)
     (declarations :
       DirectHereditaryGeneratedDeclarationInduction program sourceModule target
         hosts sourceExternals DirectSupported ExternalSupported
@@ -12015,7 +12019,7 @@ theorem
   | @miss sourceRuntime nextRuntime callRuntime sourceEnv calleeResultEnv decl
       continuation sourceValue stepCost declaration sourceDeclaration
       resultKind calleeCode calleeFunction calleeResultFacts call loweredRow
-      resultClassified calleeEvaluation =>
+      resultClassified notObject notTObject calleeEvaluation =>
       rcases call with
         ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
       have programEq : context.program = program := spec.contextProgram
@@ -12056,7 +12060,6 @@ theorem
           LazyCacheInternalMissSupported context decl declaration
             sourceDeclaration resultKind calleeCode :=
         .intro (.intro valueEq kindEq targetEq paramsEq resultCompiled) bodyEq
-      obtain ⟨notObject, notTObject⟩ := resultKinds missSupported
       have publication :
           LazyCacheInternalPublicationInduction context sourceModule
             target.wasmModule hosts.env sourceExternals facts sourceRuntime
@@ -12116,11 +12119,7 @@ theorem
       rootContext.cachedDeclarations =
         Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
-    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule)
-    (resultKinds :
-      ∀ {context : Fir.Wasm.Context},
-        DeclarationContextsCoherent rootContext context →
-          LazyCacheInternalResultKindsNonHeap context) :
+    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule) :
     DirectHereditaryGeneratedOperationLaws program sourceModule target hosts
       sourceExternals
       (fun context => ReuseBudgetedDirectSupported context)
@@ -12169,8 +12168,8 @@ theorem
         (labels := []) (entryRuntime := entryRuntime)
         (entryStore := entryStore) (entryWitness := entryWitness)
         row.contextCaches (generated.ofCoherent contexts)
-        (resultKinds contexts) initializerDeclarations supported stepFits
-        invariant sourceStep valueCompiled valueAdapted resultFound
+        initializerDeclarations supported stepFits invariant sourceStep
+        valueCompiled valueAdapted resultFound
   · intro declaration context sourceCode sourceFunction row
     exact (row.toSupportedFunction spec).caseRuntimeRefines_productionCases
   · intro declaration context sourceCode sourceFunction row entryRuntime
@@ -12198,11 +12197,7 @@ theorem
       rootContext.cachedDeclarations =
         Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
-    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule)
-    (resultKinds :
-      ∀ {context : Fir.Wasm.Context},
-        DeclarationContextsCoherent rootContext context →
-          LazyCacheInternalResultKindsNonHeap context) :
+    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule) :
     DirectHereditaryGeneratedDeclarationInduction program sourceModule target
       hosts sourceExternals
       (fun context => ReuseBudgetedDirectSupported context)
@@ -12215,7 +12210,7 @@ theorem
   DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
     spec.programNamesUnique spec.lowered spec.adapted
     (spec.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_pureExternal_effects_oneLazy
-      contextCaches sourceExternals generated resultKinds)
+      contextCaches sourceExternals generated)
 
 /-- Compiler-generated declarations in the direct/no-calls fragment satisfy
 the recursive declaration contract solely from the production operation
@@ -12557,11 +12552,7 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
-    (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resultKinds :
-      ∀ {calleeContext : Fir.Wasm.Context},
-        DeclarationContextsCoherent context calleeContext →
-          LazyCacheInternalResultKindsNonHeap calleeContext) :
+    (generated : LazyCacheGeneratedEnvironment context sourceModule) :
     DirectDeclarationCallImplementationWithCache context sourceModule
       sourceFunction labels target.wasmModule hosts.env sourceExternals
       (ReuseCapacityDirectHereditaryCallSupported sourceExternals
@@ -12576,7 +12567,7 @@ theorem
     spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
     spec.adapted spec.localsAligned
     (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
-      contextCaches sourceExternals generated resultKinds)
+      contextCaches sourceExternals generated)
 
 /-- Certificate-free partial correctness for a generated root export whose
 finite source derivation contains supported direct operations and recursively
@@ -12989,10 +12980,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resultKinds :
-      ∀ {calleeContext : Fir.Wasm.Context},
-        DeclarationContextsCoherent context calleeContext →
-          LazyCacheInternalResultKindsNonHeap calleeContext)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -13027,8 +13014,6 @@ theorem
         spec.targetFunctionIndex initial resultStore initialWitness
         resultWitness parameters resultKind resultValue physical
         requiredBytes := by
-  have rootContexts : DeclarationContextsCoherent context context :=
-    ⟨rfl, rfl⟩
   exact
     spec.toSupportedDeclaration
       |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
@@ -13039,9 +13024,9 @@ theorem
           sourceExternals)
         (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
           (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_pureExternal_effects_oneLazy
-            contextCaches sourceExternals generated resultKinds))
+            contextCaches sourceExternals generated))
         (spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
-          contextCaches generated (resultKinds rootContexts)
+          contextCaches generated
           (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
             sourceExternals))
         spec.caseRuntimeRefines_productionCases
@@ -13073,10 +13058,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resultKinds :
-      ∀ {calleeContext : Fir.Wasm.Context},
-        DeclarationContextsCoherent context calleeContext →
-          LazyCacheInternalResultKindsNonHeap calleeContext)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -13112,7 +13093,7 @@ theorem
         (RefinedReturnPost resultRuntime resultValue resultKind callerTail) := by
   obtain ⟨resultStore, resultWitness, physical, result⟩ :=
     spec.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates_reuseBudgetedDirect_pureExternal_effects_oneLazy
-      contextCaches generated resultKinds evaluation invariant parameterCount
+      contextCaches generated evaluation invariant parameterCount
   have successful := result.declaration.capacityPreserving.successful
   exact ⟨successful.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
     successful.terminatesWith callerTail⟩
