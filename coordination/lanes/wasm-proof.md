@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 18af585a on main
+state: active
+base: eb3395b6 on main
 functional-head: 7943fdfa
 contract-base: 18af585a on main; existing concrete heap refinement, runtime-step transport, cache-frame, and closure ABI-alignment contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: Adds proof-only ClosureAllocationsPersistent and a corresponding Runt
 checks: PASS Lean Beam update/sync/save checkpoints for all changed proof modules and FirTalos.ConcreteRuntimeExamples; PASS lake build FirTalos.ConcreteReuseCapacityCacheCorrectness (3103 jobs); PASS forced lake build FirTalos.ConcreteRuntimeExamples (3098 jobs); PASS git diff --check; PASS make check (642 unique validation cases, 1844/1844 comparisons equal, zero findings); PASS make talos-setup at a01d01c; PASS make talos-check (3125 jobs)
 bug-cards: none
 blockers: none
-handoff: ready for fast-forward integration as the transport foundation for deriving DirectHereditaryGeneratedDeclarationAbiInduction from compiler operation laws
+handoff: closure-allocation persistence is linked/accepted on main at eb3395b6; the lane is extending the external-operation proof boundary from that clean base
 next: strengthen concrete external-operation correctness with the same persistence fact, then lift direct/effect/external generated laws to the closure-ABI frame and derive the global ABI induction
 ```
