@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-closure-resolver-invalid-address-totality
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -84,4 +84,14 @@ none
 
 ## Resolution and regression
 
-unresolved
+Fixed by `7fee30a2`. `ClosureCandidateAdapterCase` now carries only static
+compiler, adapter, and host-resolution facts, and
+`SaturatedClosureCandidateAdapterResolver` enumerates only those rows.
+`ClosureCandidateAdapterCase.execute_of_refines` derives a nonmatching
+read-only return or matching ownership-consuming return at the actual mapped
+live closure address; `executeAll_of_refines` reconstructs the dynamic list
+without changing its symbolic enumeration. The invalid universally dynamic
+resolver was removed, and both the one-layer and fully recursive export proofs
+now consume the static boundary. The successful elaboration of those theorems
+in `ConcreteReuseCapacityCacheCorrectness.lean` is the permanent proof
+regression.
