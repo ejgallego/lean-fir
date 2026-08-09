@@ -139,10 +139,12 @@ def projectClosureCapture (state : MemoryState) (dispatch : ClosureDispatchTable
     throw (.target .closureMetadataMismatch)
   unless index < fixed do
     throw (.target (.closureCaptureIndexOutOfBounds index fixed))
-  unless metadata.captureKinds[index]? == some kind do
+  let some actualKind := metadata.captureKinds[index]? |
+    throw (.target .closureMetadataMismatch)
+  unless actualKind.refines kind do
     throw (.target .closureMetadataMismatch)
   liftMemory <| state.memory.readClosureCapture
-    (closureCaptureAddress object.value index) kind
+    (closureCaptureAddress object.value index) actualKind
 
 /-- Snapshot every statically typed closure capture before application may
 release the closure header. Unlike the ownership decoder, this retains scalar
@@ -220,7 +222,9 @@ def ClosureApplication.project (application : ClosureApplication)
     throw (.target .closureMetadataMismatch)
   unless index < fixed do
     throw (.target (.closureCaptureIndexOutOfBounds index fixed))
-  unless application.captureKinds[index]? == some kind do
+  let some actualKind := application.captureKinds[index]? |
+    throw (.target .closureMetadataMismatch)
+  unless actualKind.refines kind do
     throw (.target .closureMetadataMismatch)
   let some lane := application.captures[index]? |
     throw (.target .closureMetadataMismatch)

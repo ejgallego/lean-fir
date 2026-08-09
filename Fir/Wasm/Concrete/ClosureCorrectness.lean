@@ -142,10 +142,9 @@ theorem ClosureObjectRel.project
   simp only [Bind.bind, Except.bind]
   rw [if_pos metadataCheck]
   rw [if_pos indexCheck]
-  rw [show (metadata.captureKinds[index]? == some kind) = true by
-    rw [kindCheck]
-    cases kind <;> decide]
-  simp only [if_true]
+  rw [kindCheck]
+  simp only [show kind.refines kind = true by cases kind <;> decide,
+    ↓reduceIte]
   exact congrArg liftMemory read
 
 /-- A concrete application snapshot carries every fixed argument in its
@@ -160,6 +159,7 @@ structure ClosureApplicationRel (witness : RefinementWitness)
   functionEq : application.function = function
   arityEq : application.arity = arity
   captureKindsEq : application.captureKinds = captureKinds
+  captureKindsSize : captureKinds.size = semantic.size
   capturesSize : application.captures.size = semantic.size
   captures : ∀ (index : Nat) (kind : AbiKind) (value : Value),
     captureKinds[index]? = some kind →
@@ -168,8 +168,45 @@ structure ClosureApplicationRel (witness : RefinementWitness)
       application.captures[index]? = some lane ∧
         ValueRel witness kind lane value
 
-/-- Projection from an application snapshot returns the exact physical lane
-related to the corresponding semantic fixed argument. -/
+/-- Projection from an application snapshot may widen the captured lane along
+the compiler's ABI refinement order. The physical bits are unchanged; only a
+precise `object` or `tagged` capture may widen to `tobject`. -/
+theorem ClosureApplicationRel.project_of_refines
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {address : Word32} {function : Lean.Name} {arity : Nat}
+    {captureKinds : Array AbiKind} {semantic : Array Value}
+    (related : ClosureApplicationRel witness application address function arity
+      captureKinds semantic)
+    (index : Nat) (actualKind expectedKind : AbiKind) (value : Value)
+    (kindAt : captureKinds[index]? = some actualKind)
+    (kindRefines : actualKind.refines expectedKind = true)
+    (valueAt : semantic[index]? = some value) :
+    ∃ lane,
+      application.project address function arity semantic.size index expectedKind =
+        .ok lane ∧
+      ValueRel witness actualKind lane value := by
+  obtain ⟨lane, laneAt, laneRelated⟩ :=
+    related.captures index actualKind value kindAt valueAt
+  obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
+  have applicationKindAt :
+      application.captureKinds[index]? = some actualKind := by
+    rw [related.captureKindsEq]
+    exact kindAt
+  refine ⟨lane, ?_, laneRelated⟩
+  unfold ClosureApplication.project
+  simp only [related.objectEq, related.functionEq, related.arityEq,
+    related.capturesSize, beq_self_eq_true, Bind.bind, Except.bind]
+  rw [if_pos (by
+    change ((address.value == address.value) && true && true && true) = true
+    simp)]
+  rw [if_pos indexLt]
+  rw [applicationKindAt]
+  simp only [kindRefines, ↓reduceIte]
+  rw [laneAt]
+  rfl
+
+/-- Exact-kind projection is the reflexive specialization of ABI-refining
+application projection. -/
 theorem ClosureApplicationRel.project
     {witness : RefinementWitness} {application : ClosureApplication}
     {address : Word32} {function : Lean.Name} {arity : Nat}
@@ -183,27 +220,8 @@ theorem ClosureApplicationRel.project
       application.project address function arity semantic.size index kind =
         .ok lane ∧
       ValueRel witness kind lane value := by
-  obtain ⟨lane, laneAt, laneRelated⟩ :=
-    related.captures index kind value kindAt valueAt
-  obtain ⟨indexLt, _⟩ := Array.getElem?_eq_some_iff.mp valueAt
-  have applicationKindAt : application.captureKinds[index]? = some kind := by
-    rw [related.captureKindsEq]
-    exact kindAt
-  refine ⟨lane, ?_, laneRelated⟩
-  unfold ClosureApplication.project
-  simp only [related.objectEq, related.functionEq, related.arityEq,
-    related.capturesSize, beq_self_eq_true, true_and, ↓reduceIte,
-    Bind.bind, Except.bind]
-  rw [if_pos (by
-    change ((address.value == address.value) && true && true && true) = true
-    simp)]
-  rw [if_pos indexLt]
-  rw [show (application.captureKinds[index]? == some kind) = true by
-    rw [applicationKindAt]
-    cases kind <;> decide]
-  simp only [↓reduceIte]
-  rw [laneAt]
-  rfl
+  exact related.project_of_refines index kind kind value kindAt
+    (by cases kind <;> decide) valueAt
 
 /-- Pointwise related closure slots can be read into one exact ordered
 snapshot. The explicit list theorem is the induction boundary used by
@@ -313,6 +331,7 @@ theorem ClosureObjectRel.readCaptures
     functionEq := rfl
     arityEq := rfl
     captureKindsEq := rfl
+    captureKindsSize := related.captureKindsSize
     capturesSize := by simpa using lanesSize
     captures := ?_ }⟩
   intro index kind value kindAt valueAt

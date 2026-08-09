@@ -289,6 +289,56 @@ theorem ConcreteSupportedFunction.cacheSetCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment specializes to the exact typed closure-capture
+projection contract emitted by `compileFixedClosureFields`. Successful host
+resolution constructively rules out the unrepresented floating kinds. -/
+theorem ConcreteSupportedFunction.closureProjCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
+    {function : Lean.Name} {arity fixed index : Nat} {kind : AbiKind}
+    {id : Nat}
+    (found :
+      callIndex? sourceModule
+          (.runtime (.closureProj function arity fixed index kind)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (closureProjContract function arity fixed index kind) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  obtain ⟨_, actualContract, _, actualContractFound, _⟩ :=
+    spec.hostsSatisfy id inBounds
+  have resolvedSome :
+      resolvedContract? (.closureProj function arity fixed index kind) =
+        some actualContract :=
+    contracted.symm.trans actualContractFound
+  simp only [resolvedContract?, hostFn?] at resolvedSome contracted
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = closureProjStep function arity fixed index kind initial args)
+    split at resolvedSome
+    · rename_i represented
+      simpa only [represented, if_true, Option.map_some, closureProjFn]
+        using contracted
+    · simp at resolvedSome
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- Resolver/adaptor alignment specializes to the exact concrete natural
 literal contract expected by the allocation refinement theorem. -/
 theorem ConcreteSupportedFunction.naturalLiteralCall

@@ -1433,4 +1433,28 @@ private def closureStore : Wasm.Store Host := {
       | _ => false
   | _ => false
 
+private def refiningClosureStore : Wasm.Store Host := {
+  emptyHostStore with
+  host := { emptyHostStore.host with
+    closureDispatch := #[closureTarget]
+    closureDescriptors := #[#[.tagged]] } }
+
+-- A closure retains the captured argument's precise descriptor kind, while
+-- generated callee entry projects at the wider parameter kind. The concrete
+-- host accepts exactly the compiler's `tagged ≤ tobject` refinement and
+-- preserves the physical wasm32 word.
+#guard match partialApplyStep closureTarget 2 1 #[.tagged] .object
+    refiningClosureStore [.i32 3] with
+  | .Return [.i32 object] store =>
+      match closureMatchesStep closureTarget 2 1 store [.i32 object] with
+      | .Return [.i32 matched] matchedStore =>
+          match closureProjStep closureTarget 2 1 0 .tobject matchedStore
+              [.i32 object] with
+          | .Return [.i32 captured] projectedStore =>
+              matched == 1 && captured == 3 &&
+                projectedStore.host.failure?.isNone
+          | _ => false
+      | _ => false
+  | _ => false
+
 end FirTalos.Concrete

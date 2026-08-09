@@ -3817,6 +3817,39 @@ theorem closureProjStep_of_refines
     simp only
     rw [Word32.ofUInt32_ofNat_value, projected]
 
+/-- Generated closure projection may request the callee parameter's wider ABI
+kind while the immutable closure descriptor retains the captured argument's
+more precise kind. This is exactly the compiler's `AbiKind.refines` boundary;
+the physical Wasm lane is unchanged. -/
+theorem closureProjStep_of_capture_refines
+    {initial : Wasm.Store Host} {witness : RefinementWitness}
+    {application : ClosureApplication} {address : Word32}
+    {function : Lean.Name} {arity fixed index : Nat}
+    {captures : Array Value} {captureKinds : Array AbiKind}
+    {actualKind expectedKind : AbiKind} {value : Value}
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      function arity captureKinds captures)
+    (fixedSize : captures.size = fixed)
+    (kindAt : captureKinds[index]? = some actualKind)
+    (kindRefines : actualKind.refines expectedKind = true)
+    (valueAt : captures[index]? = some value) :
+    ∃ lane,
+      closureProjStep function arity fixed index expectedKind initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [physicalOfLane lane] (clearFailure initial) ∧
+      PhysicalValueRel witness expectedKind (physicalOfLane lane) value := by
+  obtain ⟨lane, projected, valueRelated⟩ :=
+    applicationRelated.project_of_refines index actualKind expectedKind value
+      kindAt kindRefines valueAt
+  rw [fixedSize] at projected
+  refine ⟨lane, ?_, (physicalOfLane_related valueRelated).ofRefines kindRefines⟩
+  · unfold closureProjStep
+    simp only [clearFailure]
+    rw [applicationFound]
+    simp only
+    rw [Word32.ofUInt32_ofNat_value, projected]
+
 /-- A successful semantic heap-cell replacement changes only the heap field. -/
 theorem setCell_heapOnly
     {before after : RuntimeState} {location : Location} {cell : HeapCell}
