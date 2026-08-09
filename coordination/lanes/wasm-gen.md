@@ -21,3 +21,32 @@ measurements: eight balanced rounds x 240 samples on two dashboard workloads pre
 handoff: integration may land isolated generation helper commit 157d712a followed by Illuminate consumer commit 2c38a309 and the containing ready mailbox commit from wasm/generation; verify the clean worktree, synthesize the accepted result into coordination/BOARD.md, and publish the accepted scalar-tick head on a named ejgallego/lean-fir branch without opening a pull request as requested by Illuminate's FIR_STATE_SYNC_HANDOFF.md
 next: first build the separate Verso FIR Wasm Flat artifact requested by /home/egallego/lean/verso-slides/.worktrees/vir-pretty-prototype/handoffs/fir-wasm-flat-runtime/AGENT_TASK.md without replacing PrettyTrace. A disposable exact-source probe found two distinct prerequisites: (1) shared FIR admission/lowering must use Lean-compatible object-family transfer for join arguments and admit a box whose declared result is either generic tobject or its exact boxResultKind; W7 must file a bug card and route that isolated contract commit through integration/W6; (2) the handed-off Verso StateM source captures 147 declarations but leaves 13 compiler-generated Id/StateT lambda bodies unavailable from final LCNF, because recompiling their source ancestors produces different generated names. The clean source-side remedy is an explicit reducible RenderedM monad and MonadPrettyFormat dictionary plus a local Nat-indexed tail-recursive chunk join, preserving the public formatRenderedForRuntime semantics while avoiding generic StateT/USize wrappers. That disposable source shape compiles under Lean 4.32 to 120 declarations with only 24 reviewed Array/Nat/Int/String/fallback externals; its remaining resident frontier is exactly box UInt8 -> tagged and unbox UInt8/UInt32. Coordinate the source change with the Verso owner before implementing the generic resident scalar-box helpers. After the Flat artifact, evaluate Illuminate's independent FIR_STATE_SYNC_HANDOFF.md experiment: update persistent PlayerState inside Wasm or return an equivalent compact state/result ABI, keep generic dispatch and pure structured entries as oracles, and measure output decode separately from state synchronization without moving work into an unmeasured phase
 ```
+
+## Illuminate request — timing-free production dispatch (2026-08-09)
+
+Illuminate requests a v5 selection-player package that separates the
+production scalar-tick path from adapter diagnostics. The full handoff
+is published on `ejgallego/illuminate` branch `feat/vir-performance` at
+commit `56b9f99b5cfecdeb340bdf120f6dd1a7ef227f20`:
+
+```text
+/home/egallego/lean/illuminate/.worktrees/vir-performance/
+  FIR_UNTIMED_DISPATCH_HANDOFF.md
+```
+
+Preferred API: timing-free `dispatchTick(player, timestamp)` plus
+diagnostic `dispatchTickTimed(player, timestamp)` in the same package,
+both using the same compiled scalar-tick semantics. The fast path must
+omit clock calls and timing/memory object construction while retaining
+ownership checks, exact rewind, poisoning, bit-exact timestamps, zero
+tick scratch, zero imports, and module-owned memory. Keep generic
+dispatch as the oracle and do not combine this experiment with the
+resident-state ABI request.
+
+Illuminate's 24-observation same-runtime RAF matrix cannot resolve the
+host observer cost: every on/off range crosses 1x and every time-delta
+range crosses zero. The handoff therefore requires an interleaved,
+fixed-event timed/untimed benchmark with warmup, action-digest checks,
+median, and p95. Illuminate will map detailed mode off/on to the new
+fast/timed methods and run the consumer acceptance suite. Keep work on
+a named `ejgallego/lean-fir` branch and do not open a PR.
