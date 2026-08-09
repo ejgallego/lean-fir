@@ -6069,6 +6069,277 @@ theorem SaturatedClosureCallResolution.targetName
     (Array.find?_eq_some_iff_getElem.mp resolution.targetFound).1
   simpa [Fir.LeanIR.Program.findDecl?] using selected
 
+/-- Successful `Option` traversal preserves list length. Kept near closure
+resolution because both source-entry reconstruction and generated parameter
+rows consume the same executable classifier fact. -/
+private theorem optionListMapM_length
+    {α β : Type} {f : α → Option β} {xs : List α} {ys : List β}
+    (mapped : xs.mapM f = some ys) : ys.length = xs.length := by
+  induction xs generalizing ys with
+  | nil =>
+      have ysEq : ys = [] := by simpa using mapped.symm
+      subst ys
+      rfl
+  | cons head tail ih =>
+      cases headResult : f head with
+      | none => simp [List.mapM_cons, headResult] at mapped
+      | some value =>
+          cases tailResult : tail.mapM f with
+          | none => simp [List.mapM_cons, headResult, tailResult] at mapped
+          | some values =>
+              have ysEq : ys = value :: values := by
+                simpa [List.mapM_cons, headResult, tailResult] using mapped.symm
+              subst ys
+              simp [ih tailResult]
+
+/-- Successful closure-target parameter classification preserves source
+declaration arity. -/
+theorem SaturatedClosureCallResolution.parameterKinds_size
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution :
+      SaturatedClosureCallResolution context sourceRuntime site) :
+    resolution.parameterKinds.size = resolution.target.params.size := by
+  have known := resolution.parametersKnown
+  unfold Fir.Wasm.declarationParameterKinds? at known
+  rw [Array.mapM_eq_mapM_toList] at known
+  cases listKnown :
+      resolution.target.params.toList.mapM
+        (Fir.Wasm.declarationParamKind? context.program resolution.target) with
+  | none => simp [listKnown] at known
+  | some listKinds =>
+      have parameterKindsEq :
+          resolution.parameterKinds = listKinds.toArray := by
+        simpa [listKnown] using known.symm
+      rw [parameterKindsEq]
+      simpa using optionListMapM_length listKnown
+
+/-- Source-only hereditary admission for one exactly saturated closure call.
+
+The successful semantic application equation exposes the runtime *after*
+closure ownership has been consumed. The nested finite callee derivation
+starts from that runtime in the exact declaration-local lowering context.
+There is no target candidate, address, matcher execution, or Wasm theorem in
+this boundary. -/
+inductive SaturatedClosureHereditaryCallSupported
+    (externals : ExternalImpl)
+    (DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop)
+    (CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate)
+    (letCost : LCNF.LetDecl .impure → Nat)
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState) (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure) (_continuation : LCNF.Code .impure)
+    (nextRuntime : RuntimeState) (sourceValue : Value) (stepCost : Nat) : Prop where
+  | intro
+      (callRuntime : RuntimeState)
+      (calleeFunction : Fir.Wasm.Function)
+      (calleeResultFacts : ReuseCapacityFacts)
+      (calleeResultEnv : Env)
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      (resolution :
+        SaturatedClosureCallResolution context sourceRuntime site)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          resolution.target resolution.calleeCode calleeFunction)
+      (application :
+        Fir.LeanIR.Impure.takeClosureApplication sourceRuntime
+            resolution.location =
+          .ok (callRuntime, resolution.function, resolution.arity,
+            resolution.captures))
+      (callee :
+        ReuseCapacityDirectHereditaryCodeEvaluates externals DirectSupported
+          ExternalSupported LazySupported CaseSupported EffectSupported
+          letCost row.context resolution.targetResultKind [] callRuntime
+          resolution.calleeEnv resolution.calleeCode calleeResultFacts
+          nextRuntime calleeResultEnv sourceValue stepCost) :
+      SaturatedClosureHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context sourceRuntime sourceEnv decl _continuation nextRuntime
+        sourceValue stepCost
+
+/-- The hereditary closure payload reconstructs the exact ordinary source
+call step, including the ownership-changing application prefix. -/
+theorem SaturatedClosureHereditaryCallSupported.sourceStep
+    {externals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (supported :
+      SaturatedClosureHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost) :
+    SourceCallLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue := by
+  rcases supported with
+    ⟨callRuntime, calleeFunction, calleeResultFacts, calleeResultEnv, site,
+      resolution, row, application, callee⟩
+  have semanticArgumentSize :
+      site.semanticArgs.size = site.args.size := by
+    have evaluated := site.argumentsEvaluated
+    unfold evalArgs at evaluated
+    rw [Array.mapM_eq_mapM_toList] at evaluated
+    cases listResult :
+        site.args.toList.mapM (evalArg sourceEnv) with
+    | error fault =>
+        rw [listResult] at evaluated
+        contradiction
+    | ok results =>
+        rw [listResult] at evaluated
+        have valuesEq : results.toArray = site.semanticArgs :=
+          Except.ok.inj evaluated
+        rw [← valuesEq]
+        simpa using
+          listMapM_length_of_ok_for_directCall site.args.toList
+            (evalArg sourceEnv) results listResult
+  have applicationArgumentSize :
+      (resolution.captures ++ site.semanticArgs).size =
+        resolution.target.params.size := by
+    rw [Array.size_append, semanticArgumentSize,
+      ← site.argumentKinds_size, ← resolution.parameterKinds_size]
+    exact resolution.saturated
+  have callArgs :
+      (resolution.captures ++ site.semanticArgs).extract 0
+          resolution.target.params.size =
+        resolution.captures ++ site.semanticArgs := by
+    rw [← applicationArgumentSize]
+    exact Array.extract_size
+  have extraArgs :
+      (resolution.captures ++ site.semanticArgs).extract
+          resolution.target.params.size
+          (resolution.captures ++ site.semanticArgs).size =
+        #[] := by
+    simp [← applicationArgumentSize]
+  have semanticArgumentsPositive : 0 < site.semanticArgs.size := by
+    rw [semanticArgumentSize]
+    exact Array.size_pos_iff.mpr
+      (Array.isEmpty_eq_false_iff.mp site.nonempty)
+  have semanticArgumentsNonempty : site.semanticArgs.isEmpty = false :=
+    Array.isEmpty_eq_false_iff.mpr
+      (Array.size_pos_iff.mp semanticArgumentsPositive)
+  have applicationArgumentsPositive :
+      0 < (resolution.captures ++ site.semanticArgs).size := by
+    simp only [Array.size_append]
+    omega
+  have applicationArgumentsNonempty :
+      (resolution.captures ++ site.semanticArgs).isEmpty = false := by
+    exact Array.isEmpty_eq_false_iff.mpr
+      (Array.size_pos_iff.mp applicationArgumentsPositive)
+  have staged :
+      executeStep externals {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } =
+        .next {
+          program := context.program
+          control := .invokeValue site.sourceClosure site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } := by
+    simp [executeStep, coreStep, evalLetValue, lookupValue, site.valueEq,
+      site.sourceLookup, site.argumentsEvaluated, semanticArgumentsNonempty,
+      pushBindFrame, Bind.bind, Except.bind, pure, Except.pure]
+  have entered :
+      executeStep externals {
+          program := context.program
+          control := .invokeValue site.sourceClosure site.semanticArgs
+          env := sourceEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := sourceRuntime } =
+        .next {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } := by
+    simp [executeStep, coreStep, invokeClosure,
+      resolution.sourceClosureEq, application, invokeDecl,
+      resolution.targetFound, applicationArgumentSize, callArgs, extraArgs,
+      applicationArgumentsNonempty, resolution.parametersBound,
+      resolution.bodyEq]
+  have callerResult :=
+    (row.contextsCoherent rfl rfl).sourceCodeResult callee.sourceResult
+  rcases callerResult with ⟨calleeCount, resultEnv, calleeSteps⟩
+  have protectedSteps :
+      ExecSteps externals calleeCount {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } {
+          program := context.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } := by
+    simpa [sourceCodeState, sourceYieldState, withFrameSuffix] using
+      (FirTalos.Correctness.ExecSteps.withFrameSuffix calleeSteps
+        (suffix := [.bind decl.fvarId continuation sourceEnv []]))
+  have resumed :
+      executeStep externals {
+          program := context.program
+          control := .yielded sourceValue
+          env := resultEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := nextRuntime } =
+        .next {
+          program := context.program
+          control := .code continuation
+          env := bind sourceEnv decl.fvarId sourceValue
+          runtime := nextRuntime } := by
+    simp [executeStep, coreStep]
+  have callPrefix :
+      ExecSteps externals 2 {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          runtime := sourceRuntime } {
+          program := context.program
+          control := .code resolution.calleeCode
+          env := resolution.calleeEnv
+          frames := [.bind decl.fvarId continuation sourceEnv []]
+          runtime := callRuntime } :=
+    .step staged (.step entered (.refl _))
+  obtain ⟨withCalleeCount, withCallee⟩ :=
+    FirTalos.Correctness.ExecSteps.trans callPrefix protectedSteps
+  obtain ⟨count, steps⟩ :=
+    FirTalos.Correctness.ExecSteps.trans withCallee
+      (.step resumed (.refl _))
+  exact ⟨count, steps⟩
+
 /--
 Exact source resolution constructively supplies a compiler-emitted saturated
 candidate with the semantic function/arity/fixed matcher identity.
@@ -8816,27 +9087,6 @@ private theorem declarationParamFold_exact
               simp only [Bind.bind, Except.bind]
               rw [insertEq, tailRun]
               simp [List.reverse_cons, List.append_assoc]
-
-/-- Successful `Option` traversal preserves list length. -/
-private theorem optionListMapM_length
-    {α β : Type} {f : α → Option β} {xs : List α} {ys : List β}
-    (mapped : xs.mapM f = some ys) : ys.length = xs.length := by
-  induction xs generalizing ys with
-  | nil =>
-      have ysEq : ys = [] := by simpa using mapped.symm
-      subst ys
-      rfl
-  | cons head tail ih =>
-      cases headResult : f head with
-      | none => simp [List.mapM_cons, headResult] at mapped
-      | some value =>
-          cases tailResult : tail.mapM f with
-          | none => simp [List.mapM_cons, headResult, tailResult] at mapped
-          | some values =>
-              have ysEq : ys = value :: values := by
-                simpa [List.mapM_cons, headResult, tailResult] using mapped.symm
-              subst ys
-              simp [ih tailResult]
 
 /-- The emitted symbolic parameter row is exactly the source declaration row
 paired, in source order, with the validator's effective ABI kinds. -/

@@ -4503,6 +4503,43 @@ example
   SaturatedClosureCallImplementationWithCache.ofInternalCompilerResolved spec
     induction
 
+/-- The ownership-aware hereditary closure boundary is source-only. A finite
+callee derivation begins at the runtime produced by semantic closure
+application, and reconstructs the complete caller-visible source call step;
+no target candidate, matcher result, address, or target execution is stored in
+the payload. -/
+example
+    {externals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : LCNF.LetDecl .impure}
+    {continuation : LCNF.Code .impure}
+    {sourceValue : Value}
+    {stepCost : Nat}
+    (supported :
+      SaturatedClosureHereditaryCallSupported externals DirectSupported
+        ExternalSupported LazySupported CaseSupported EffectSupported letCost
+        context sourceRuntime sourceEnv decl continuation nextRuntime
+        sourceValue stepCost) :
+    SourceCallLetResult context externals sourceRuntime sourceEnv decl
+      continuation nextRuntime sourceValue :=
+  supported.sourceStep
+
 /--
 The saturated closure address is recovered canonically from source resolution,
 local-layout alignment, and the ordinary concrete state relation. Executable
