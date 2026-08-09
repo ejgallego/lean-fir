@@ -127,6 +127,7 @@ structure ConcreteSupportedExport
     (hosts : ResolvedHosts)
     (exportName : String) where
   programSupported : Fir.Wasm.WasmSupported program
+  programNamesUnique : program.NamesUnique
   contextProgram : context.program = program
   lowered : Fir.Wasm.lowerSupported program = .ok sourceModule
   sourceFunctionIndex : Nat

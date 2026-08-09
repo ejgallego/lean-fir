@@ -9,6 +9,23 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
+/-- The concrete generated-export boundary retains the phase invariant needed
+to identify source declarations with their unique generated call targets. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction target hosts exportName) :
+    program.NamesUnique :=
+  spec.programNamesUnique
+
 /-- The validator's ABI subtyping decision is sufficient to reinterpret an
 already-related concrete argument row at the generated callee's exact
 parameter kinds; no target execution or translation certificate is needed. -/
