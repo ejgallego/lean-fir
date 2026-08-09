@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-generic-object-join-admission
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-09
 reproduction: Fir/Wasm/WellFormed.lean
-regression: none
+regression: Fir/Wasm/Examples.lean
 ---
 
 # Summary
@@ -75,4 +75,10 @@ none
 
 ## Resolution and regression
 
-unresolved
+Join support checking and lowering now use the same `AbiKind.leanCompatible`
+relation already used by ordinary compiler-produced calls, results, and the
+symbolic stack. The focused regression lowers and validates a coarse
+`tobject` argument passed to a precise `object` join, while existing scalar
+and erased mismatch regressions remain rejected. The former guard-specific
+negative case is retained as a positive regression showing that an unrelated
+sharing guard does not define the generic object-family calling convention.

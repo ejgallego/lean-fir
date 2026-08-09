@@ -443,6 +443,27 @@ def supportedBoxRoundtripProgram : Fir.LeanIR.ImpureProgram :=
 
 #guard supportedProgram supportedBoxRoundtripProgram
 
+/-- Lean may retain the exact tagged result selected for a boxed `UInt8`. -/
+def supportedPreciseUInt8BoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedPreciseUInt8Box #[param s u8Type] taggedType (.code <|
+      .let (letDecl boxed taggedType (.box u8Type s)) <|
+      .return boxed)] }
+
+/-- Lean 4.32's Float boxes have the exact heap-object result kind. -/
+def supportedPreciseFloatBoxProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `supportedPreciseFloatBox
+      #[param s LCNF.ImpureType.float] objType (.code <|
+        .let (letDecl boxed objType (.box LCNF.ImpureType.float s)) <|
+        .return boxed)] }
+
+#guard supportedProgram supportedPreciseUInt8BoxProgram
+#guard supportedProgram supportedPreciseFloatBoxProgram
+#guard match lowerSupported supportedPreciseUInt8BoxProgram with
+  | .ok module =>
+      module.runtimeOperations.contains (.box .uint8 .tagged) &&
+        (validateModule module).isOk
+  | .error _ => false
+
 def supportedIsSharedProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedIsShared #[param x LCNF.ImpureType.tobject] u8Type (.code <|
       .let (letDecl r u8Type (.isShared x)) (.return r))] }
@@ -517,6 +538,14 @@ def abiJoinProgram : Fir.LeanIR.ImpureProgram :=
       .jp (.mk j `abiJoin #[param p objType] objType (.return p))
         (.jmp j #[.fvar x]))] }
 
+/-- Join transfer uses Lean's generic physical object-family ABI, just like
+ordinary calls and returns. The source compiler may retain a coarse `tobject`
+annotation on the argument and a precise heap-object annotation on the join. -/
+def abiGenericObjectJoinProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[decl `main #[param x tobjectType] objType (.code <|
+      .jp (.mk j `abiGenericObjectJoin #[param p objType] objType (.return p))
+        (.jmp j #[.fvar x]))] }
+
 def guardedResetJoinDecl : LCNF.FunDecl .impure :=
   .mk j `guardedResetJoin #[param p tobjectType, param u u8Type]
     objType guardedResetJoinBody
@@ -544,17 +573,20 @@ def guardedTObjectResetJoinProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl c u8Type (.isShared x)) <|
       .jp guardedTObjectResetJoinDecl guardedResetJoinContinuation)] }
 
-def mismatchedGuardObjectJoinContinuation : LCNF.Code .impure :=
+def genericObjectJoinWithUnrelatedGuardContinuation : LCNF.Code .impure :=
   .cases (.mk ``Bool objType c #[
     .ctorAlt falseInfo (.jmp j #[.fvar y, .fvar c]),
     .ctorAlt trueInfo (.jmp j #[.erased, .fvar c])])
 
-/-- A guard for one `tobject` cannot refine a different fast-path argument. -/
-def mismatchedGuardObjectJoinProgram : Fir.LeanIR.ImpureProgram :=
+/-- The unrelated sharing guard does not constrain a generic object-family
+join transfer. Source typing carries the semantic fact; the join uses Lean's
+common physical object ABI. -/
+def genericObjectJoinWithUnrelatedGuardProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main
       #[param x tobjectType, param y tobjectType, param z objType] objType (.code <|
       .let (letDecl c u8Type (.isShared x)) <|
-      .jp guardedTObjectResetJoinDecl mismatchedGuardObjectJoinContinuation)] }
+      .jp guardedTObjectResetJoinDecl
+        genericObjectJoinWithUnrelatedGuardContinuation)] }
 
 /-- A guarded optional object may be deleted before inspecting its sharing guard. -/
 def guardedDeleteJoinDecl : LCNF.FunDecl .impure :=
@@ -710,9 +742,13 @@ def oversizedAllocatedTagProgram : Fir.LeanIR.ImpureProgram :=
 #guard supportedProgram abiCaseProgram
 #guard supportedProgram scalarUInt8CaseProgram
 #guard supportedProgram abiJoinProgram
+#guard supportedProgram abiGenericObjectJoinProgram
+#guard match lowerSupported abiGenericObjectJoinProgram with
+  | .ok module => (validateModule module).isOk
+  | .error _ => false
 #guard supportedProgram guardedResetJoinProgram
 #guard supportedProgram guardedTObjectResetJoinProgram
-#guard !supportedProgram mismatchedGuardObjectJoinProgram
+#guard supportedProgram genericObjectJoinWithUnrelatedGuardProgram
 #guard supportedProgram guardedDeleteJoinProgram
 #guard !supportedProgram guardedDeleteThenReturnJoinProgram
 #guard !supportedProgram unknownJoinProgram

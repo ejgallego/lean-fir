@@ -1073,8 +1073,8 @@ def compileJump (context : Context) (fvarId : FVarId) (args : Array (LCNF.Arg .i
           else
             pure compiled
       | arg, _ => compileArg context arg
-    unless actual.refines expected do
-      throw (.malformed "jump argument does not refine its join parameter ABI")
+    unless actual.leanCompatible expected do
+      throw (.malformed "jump argument is not Lean-compatible with its join parameter ABI")
     return instructions ++ argument
   let assignments := decl.params.toList.reverse.map fun param => .localSet param.fvarId
   return arguments ++ assignments ++ [.br fvarId]

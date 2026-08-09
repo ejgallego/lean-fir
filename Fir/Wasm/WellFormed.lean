@@ -180,9 +180,10 @@ def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
   | .box type scalarId =>
       let scalarKind ← findLocalKind? locals scalarId
       let annotationKind ← abiValueKind? type
+      let resultKind := boxResultKind type .tobject
       if annotationKind == scalarKind && supportedBoxScalarKind scalarKind &&
-          declared == .tobject then
-        some (boxResultKind type declared)
+          (declared == .tobject || declared == resultKind) then
+        some resultKind
       else
         none
   | .unbox objectId =>
@@ -304,7 +305,7 @@ def supportedJumpArgs (locals : LocalKinds) (facts : SupportedCaseFacts)
     (decl.params.zip args).all fun pair =>
       match joinParamAbiKind? decl pair.fst, supportedArgKind? locals pair.snd with
       | some expected, some actual =>
-          actual.refines expected ||
+          actual.leanCompatible expected ||
             (actual == .erased && expected == .object &&
               guardedErasedJoinArgumentSafe facts sharing decl args pair.fst) ||
             (actual == .tobject && expected == .object &&

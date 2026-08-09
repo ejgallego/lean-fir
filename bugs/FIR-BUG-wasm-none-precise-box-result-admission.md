@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-precise-box-result-admission
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-09
 reproduction: Fir/Wasm/WellFormed.lean
-regression: none
+regression: Fir/Wasm/Examples.lean
 ---
 
 # Summary
@@ -73,4 +73,10 @@ none
 
 ## Resolution and regression
 
-unresolved
+The support checker now computes the precise result from
+`boxResultKind type .tobject` and accepts either the compiler's generic
+`tobject` declaration or exactly that result. Focused regressions accept and
+lower the precise tagged `UInt8` form and accept the heap-only Float form.
+The pre-existing malformed `UInt64 → object` case remains rejected, ensuring
+that the rule does not admit an arbitrary declared kind for scalar families
+whose representation is not statically precise.
