@@ -446,6 +446,16 @@ runtime. Float setters remain an explicit resolver/runtime fragment gate.
 applications and the literal/constructor/projection recursive APIs on the
 certificate-free boundary, including the new structural theorem, under
 `make talos-check`.
+`ConcreteSupportedExport.correct_reuseCapacityProductionHereditary` is the
+current finite whole-export endpoint. Its source derivation may contain
+arbitrarily nested generated named calls and exactly saturated closure calls.
+The theorem derives the matching terminating Wasm export run, final runtime,
+and semantic return value without a target execution, translation
+certificate, or caller-supplied closure-resolver package. At each real closure
+dispatch, successful numeric adaptation is inverted into the compiler's exact
+candidate list; matcher import and concrete host-contract alignment follow
+from the supported pipeline, while matcher outcomes follow dynamically from
+the related live closure.
 Existing certificate-shaped modules are retained only as internal sources of
 operation and invariant lemmas while projection/allocation instances of the
 concrete direct-runtime law, control-flow, calls, externals, caches, and faults

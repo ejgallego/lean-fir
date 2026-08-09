@@ -289,6 +289,45 @@ theorem ConcreteSupportedFunction.cacheSetCall
   · change imp.results.length = 1 at results
     exact results
 
+/-- Resolver/adaptor alignment specializes to the exact closure matcher
+contract emitted by the compiler's candidate chain.  Unlike dynamic closure
+selection, this theorem contains only static import and host-contract facts. -/
+theorem ConcreteSupportedFunction.closureMatchesCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
+    {function : Lean.Name} {arity fixed id : Nat}
+    (found :
+      callIndex? sourceModule
+          (.runtime (.closureMatches function arity fixed)) = some id) :
+    ∃ imp,
+      target.wasmModule.imports[id]? = some imp ∧
+        id < target.wasmModule.imports.length ∧
+        hosts.spec.contracts[id]? =
+          some (closureMatchesContract function arity fixed) ∧
+        imp.params.length = 1 ∧
+        imp.results.length = 1 := by
+  obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+    spec.runtimeCallsAligned found
+  refine ⟨imp, imported, inBounds, ?_, ?_, ?_⟩
+  · change
+      hosts.spec.contracts[id]? =
+        some (fun initial args result =>
+          result = closureMatchesStep function arity fixed initial args)
+    simpa only [resolvedContract?, hostFn?, Option.map_some,
+      closureMatchesFn] using contracted
+  · change imp.params.length = 1 at params
+    exact params
+  · change imp.results.length = 1 at results
+    exact results
+
 /-- Resolver/adaptor alignment specializes to the exact typed closure-capture
 projection contract emitted by `compileFixedClosureFields`. Successful host
 resolution constructively rules out the unrepresented floating kinds. -/

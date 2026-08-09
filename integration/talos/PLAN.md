@@ -5740,6 +5740,29 @@ of the final whole-export partial-correctness result. Saturated closure and
 lazy-miss constructors remain subsequent extensions of the same source
 derivation.
 
+The current W6 recursive checkpoint closes those subsequent constructors and
+the public finite whole-export theorem. The structural relation now admits
+arbitrary finite nesting of generated named calls and exactly saturated
+closure calls, selects every callee through the real lowering/adaptation row,
+and derives the target run by induction on the finite source execution.
+`ConcreteSupportedExport.correct_reuseCapacityProductionHereditary` returns
+the same semantic value and runtime through the declared result ABI and
+accepts no target execution or translation certificate.
+
+Closure candidate packaging is now internal as well. A first version made a
+static resolver promise successful matcher execution for every arbitrary
+store and address; invalid addresses correctly trap, so that premise was
+uninhabitable. The repaired boundary keeps only static compiler, adapter, and
+host facts, derives matcher miss/hit behavior at the actual related live
+address, and records the discrepancy as
+`FIR-BUG-wasm-none-closure-resolver-invalid-address-totality`. The final
+packaging step inverts successful adaptation of the actual nested candidate
+chain, reconstructs the exact flat-map enumeration and every matcher
+import/contract row, and discharges the resolver environment from the public
+theorem. The remaining major proof direction is the separately stated
+finite-trace/weak-simulation extension for divergence; it does not require a
+termination proof for source programs.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

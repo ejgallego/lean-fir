@@ -8486,7 +8486,12 @@ def SaturatedClosureCandidateAdapterResolver
     (hosts : ResolvedHosts) : Prop :=
   ∀ {decl : LCNF.LetDecl .impure}
       {sourceEnv : Env}
-      (site : SaturatedClosureCallSite context decl sourceEnv),
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      {targetDispatch : Wasm.Program},
+    instructions sourceModule callerFunction labels
+        (compileClosureDispatch context decl.fvarId site.closureId
+          site.resultKind site.argumentCode site.argumentKinds) =
+      .ok targetDispatch →
     ∃ candidates : List
         (ClosureCandidateAdapterCase sourceModule callerFunction labels
           targetModule.wasmModule hosts.spec site.closureId),
@@ -8495,6 +8500,163 @@ def SaturatedClosureCandidateAdapterResolver
             site.closureId site.resultKind site.argumentCode
             site.argumentKinds target) =
         candidates.map (·.source)
+
+/-- Every row in the compiler's complete closure-candidate enumeration has
+the matcher identity written by `compileClosureCandidateAt`. -/
+private theorem compilerClosureCandidate_matcher
+    {program : Fir.LeanIR.ImpureProgram}
+    {declId closureId : FVarId}
+    {resultKind : AbiKind}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds : Array AbiKind}
+    {candidate : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction}
+    (member : candidate ∈ program.decls.toList.flatMap (fun target =>
+      compileClosureCandidatesForTarget program declId closureId resultKind
+        argumentCode argumentKinds target)) :
+    ∃ function arity fixed,
+      candidate.1 = [
+        .localGet closureId,
+        .call (.runtime (.closureMatches function arity fixed))] := by
+  obtain ⟨target, _targetMember, generatedMember⟩ :=
+    List.mem_flatMap.mp member
+  unfold compileClosureCandidatesForTarget at generatedMember
+  cases parameterKindsFound : declarationParameterKinds? program target with
+  | none => simp [parameterKindsFound] at generatedMember
+  | some parameterKinds =>
+      simp only [parameterKindsFound] at generatedMember
+      split at generatedMember
+      · simp at generatedMember
+      · obtain ⟨fixed, _fixedMember, compiled⟩ :=
+          List.mem_filterMap.mp generatedMember
+        exact ⟨target.name, parameterKinds.size, fixed,
+          compileClosureCandidateAt_matcher compiled⟩
+
+/-- Successful adaptation of the compiler's nested candidate chain packages
+every raw source row into the static proof-facing adapter record. -/
+private theorem closureCandidateAdapters_of_adaptedChain
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List FVarId}
+    {closureId : FVarId}
+    (sources : List
+      (List Fir.Wasm.Instruction × List Fir.Wasm.Instruction))
+    (matcher : ∀ source ∈ sources,
+      ∃ function arity fixed,
+        source.1 = [
+          .localGet closureId,
+          .call (.runtime (.closureMatches function arity fixed))])
+    {targetChain : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels
+          (compileClosureCandidateChain sources) = .ok targetChain) :
+    ∃ candidates : List
+        (ClosureCandidateAdapterCase sourceModule sourceFunction labels
+          target.wasmModule hosts.spec closureId),
+      sources = candidates.map (·.source) := by
+  induction sources generalizing targetChain with
+  | nil => exact ⟨[], rfl⟩
+  | cons source sources ih =>
+      obtain ⟨function, arity, fixed, sourceMatcher⟩ :=
+        matcher source (by simp)
+      have chainEq :
+          compileClosureCandidateChain (source :: sources) =
+            source.1 ++ [
+              .ifElse source.2 (compileClosureCandidateChain sources)] := rfl
+      rw [chainEq] at adapted
+      obtain ⟨targetMatcher, targetIf, matcherAdapted, ifAdapted,
+          _targetChainEq⟩ := instructions_append_eq_ok adapted
+      cases bodyAdapted :
+          instructions sourceModule sourceFunction labels source.2 with
+      | error error =>
+          simp [instructions, instruction, bodyAdapted, Bind.bind,
+            Except.bind] at ifAdapted
+      | ok targetBody =>
+          cases restAdapted :
+              instructions sourceModule sourceFunction labels
+                (compileClosureCandidateChain sources) with
+          | error error =>
+              simp [instructions, instruction, bodyAdapted, restAdapted,
+                Bind.bind, Except.bind] at ifAdapted
+          | ok targetRest =>
+              rw [sourceMatcher] at matcherAdapted
+              have matcherAdapted' :
+                  instructions sourceModule sourceFunction labels
+                      ([.localGet closureId] ++ [
+                        .call (.runtime
+                          (.closureMatches function arity fixed))]) =
+                    .ok targetMatcher := by
+                simpa using matcherAdapted
+              obtain ⟨_targetLocal, matcherIndex, _localAdapted, matcherFound,
+                  _targetMatcherEq⟩ :=
+                instructions_append_call_eq matcherAdapted'
+              obtain ⟨imp, importFound, importInBounds, contractFound,
+                  parameterCount, resultCount⟩ :=
+                spec.closureMatchesCall matcherFound
+              obtain ⟨candidates, sourcesEq⟩ := ih
+                (fun candidate member =>
+                  matcher candidate (by simp [member])) restAdapted
+              let candidate :
+                  ClosureCandidateAdapterCase sourceModule sourceFunction
+                    labels target.wasmModule hosts.spec closureId := {
+                source
+                targetBody
+                function
+                arity
+                fixed
+                matcherIndex
+                imp
+                sourceMatcher
+                bodyAdapted
+                matcherFound
+                importFound
+                importInBounds
+                contractFound
+                parameterCount
+                resultCount }
+              refine ⟨candidate :: candidates, ?_⟩
+              simp only [List.map_cons, candidate]
+              rw [← sourcesEq]
+
+/-- The supported lowering/adapter/host pipeline constructs the complete
+static resolver once the actual dispatch adapter equation is exposed at its
+program point. -/
+theorem ConcreteSupportedFunction.saturatedClosureCandidateAdapterResolver
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction target hosts)
+    {labels : List FVarId} :
+    SaturatedClosureCandidateAdapterResolver context sourceModule
+      sourceFunction labels target hosts := by
+  intro decl sourceEnv site targetDispatch dispatchAdapted
+  let sources := context.program.decls.toList.flatMap (fun target =>
+    compileClosureCandidatesForTarget context.program decl.fvarId
+      site.closureId site.resultKind site.argumentCode site.argumentKinds
+      target)
+  have dispatchEq :
+      compileClosureDispatch context decl.fvarId site.closureId
+          site.resultKind site.argumentCode site.argumentKinds =
+        compileClosureCandidateChain sources ++ [.localGet decl.fvarId] := rfl
+  rw [dispatchEq] at dispatchAdapted
+  obtain ⟨targetChain, _targetResult, chainAdapted, _resultAdapted,
+      _targetDispatchEq⟩ := instructions_append_eq_ok dispatchAdapted
+  obtain ⟨candidates, sourcesEq⟩ :=
+    closureCandidateAdapters_of_adaptedChain spec sources
+      (fun candidate member => compilerClosureCandidate_matcher member)
+      chainAdapted
+  exact ⟨candidates, sourcesEq⟩
 
 /-- Execute one static candidate at the actual related source closure.
 
@@ -11197,6 +11359,18 @@ def SupportedFunctionSaturatedClosureCandidateAdapterResolvers
         sourceFunction target hosts →
       SaturatedClosureCandidateAdapterResolver context sourceModule
         sourceFunction [] target hosts
+
+/-- The uniform resolver environment is a theorem of the supported pipeline,
+not an additional public compiler-correctness premise. -/
+theorem supportedFunctionSaturatedClosureCandidateAdapterResolvers_ofPipeline
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts} :
+    SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
+      sourceModule target hosts := by
+  intro context sourceCode sourceFunction spec
+  exact spec.saturatedClosureCandidateAdapterResolver
 
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
@@ -14840,9 +15014,6 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         (fun context => ProductionCasesSupported context)
         (fun context =>
           OwnershipTagAndAllFieldMutationEffectSupported context))
-    (resolvers :
-      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
-        sourceModule target hosts)
     {context : Fir.Wasm.Context}
     {functionCode code : LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
@@ -15295,7 +15466,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         abiInvariant.cacheFrame.resolveClosureAddress site resolution
           closureFound closureKindAt
       obtain ⟨staticCandidates, staticCandidatesEq⟩ :=
-        resolvers functionSpec site
+        functionSpec.saturatedClosureCandidateAdapterResolver site
+          valueAdapted
       obtain ⟨candidates, executedSources⟩ :=
         ClosureCandidateAdapterCase.executeAll_of_refines staticCandidates
           abiInvariant.cacheFrame.stateRelated.stateRelated.1
@@ -15628,8 +15800,9 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
         codeWP_effect step continuationWP, resultInvariant, failureClear,
         valueRelated⟩
 
-/-- The production operation laws and static supported-function resolver family
-close the fully recursive declaration induction constructively. -/
+/-- The production operation laws close the fully recursive declaration
+induction constructively; closure resolver rows are derived from each actual
+dispatch adapter equation. -/
 theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
@@ -15651,9 +15824,7 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
         (fun context => ProductionCasesSupported context)
         (fun context =>
           OwnershipTagAndAllFieldMutationEffectSupported context))
-    (resolvers :
-      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
-        sourceModule target hosts) :
+    :
     ProductionHereditaryGeneratedDeclarationInduction program sourceModule
       target hosts sourceExternals := by
   intro declaration context sourceCode sourceFunction resultKind row
@@ -15673,7 +15844,7 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
   obtain ⟨resultStore, resultLocals, resultWitness, physical, exactWP,
       resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-      operationLaws resolvers (row.toSupportedFunction spec) row.contextCaches
+      operationLaws (row.toSupportedFunction spec) row.contextCaches
       (operationLaws.productionAt row) evaluation row.bodyAdapted
       invariant.closureAbi initialEntry
   have body :
@@ -15737,9 +15908,9 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
     obtain ⟨slackStore, slackLocals, slackWitness, slackPhysical, slackWP,
         slackInvariant, _, _⟩ :=
       codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-        operationLaws resolvers (row.toSupportedFunction spec)
-        row.contextCaches (operationLaws.productionAt row) evaluation
-        row.bodyAdapted invariant.closureAbi slackEntry
+        operationLaws (row.toSupportedFunction spec) row.contextCaches
+        (operationLaws.productionAt row) evaluation row.bodyAdapted
+        invariant.closureAbi slackEntry
     have resultEq := exactWP.exactReturn_unique slackWP
     rw [resultEq.1]
     simpa [slack] using slackInvariant.1.budget
@@ -16186,9 +16357,9 @@ theorem
 /-- Fully recursive generated-declaration correctness for the current
 production fragment.
 
-The only additional input beyond the proved operation families is executable
-closure-candidate enumeration for every generated row. Recursive target
-behavior is obtained from the finite source derivation itself. -/
+Closure-candidate enumeration and adaptation are derived at each actual
+dispatch site. Recursive target behavior is obtained from the finite source
+derivation itself. -/
 theorem
     ConcreteSupportedExport.productionHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
     {program : Fir.LeanIR.ImpureProgram}
@@ -16205,16 +16376,12 @@ theorem
       rootContext.cachedDeclarations =
         Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
-    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule)
-    (resolvers :
-      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
-        sourceModule target hosts) :
+    (generated : LazyCacheGeneratedEnvironment rootContext sourceModule) :
     ProductionHereditaryGeneratedDeclarationInduction program sourceModule
       target hosts sourceExternals :=
   ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws spec
     (spec.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_pureExternal_effects_oneLazy
       contextCaches sourceExternals generated)
-    resolvers
 
 /-- The exported root has the same local production laws as generated rows.
 
@@ -16487,9 +16654,10 @@ theorem
 /-- Certificate-free ownership-aware runtime law for saturated closure calls.
 
 The source payload supplies the semantic ownership transition and finite
-callee derivation. The static resolver supplies only the actual adapted
-candidate rows. From those inputs this theorem executes the matchers at the
-related live closure address and derives first-match selection,
+callee derivation. The supported compiler pipeline reconstructs the actual
+adapted candidate rows from the dispatch equation at this program point.
+From those inputs this theorem executes the matchers at the related live
+closure address and derives first-match selection,
 the post-consumption matcher frame, the exact generated argument body, the
 related callee parameter row, and the recursive generated declaration result.
 The ordinary declaration induction is sufficient: its cumulative
@@ -16525,9 +16693,6 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
       callerFunction target hosts exportName)
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
-    (resolver :
-      SaturatedClosureCandidateAdapterResolver context sourceModule
-        callerFunction labels target hosts)
     (declarations :
       DirectHereditaryGeneratedDeclarationInduction program sourceModule target
         hosts sourceExternals DirectSupported ExternalSupported LazySupported
@@ -16583,7 +16748,9 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
   obtain ⟨address, closureLocal, mapped⟩ :=
     abiInvariant.cacheFrame.resolveClosureAddress site resolution closureFound
       closureKindAt
-  obtain ⟨staticCandidates, staticCandidatesEq⟩ := resolver site
+  obtain ⟨staticCandidates, staticCandidatesEq⟩ :=
+    spec.toConcreteSupportedFunction.saturatedClosureCandidateAdapterResolver
+      site valueAdapted
   obtain ⟨candidates, executedSources⟩ :=
     ClosureCandidateAdapterCase.executeAll_of_refines staticCandidates
       abiInvariant.cacheFrame.stateRelated.stateRelated.1
@@ -16718,9 +16885,9 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
 declaration theorem.
 
 The generated declaration induction, including its closure-ABI preservation,
-is derived from lowering, adaptation, and the production operation laws. The
-remaining resolver is static compiler metadata: it enumerates the actual
-adapted dispatch candidates and does not certify matcher or callee behavior. -/
+is derived from lowering, adaptation, and the production operation laws.
+Static candidate enumeration and adaptation are reconstructed from the actual
+dispatch equation rather than supplied by the caller. -/
 theorem
     ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
     {program : Fir.LeanIR.ImpureProgram}
@@ -16738,9 +16905,6 @@ theorem
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (sourceExternals : ExternalImpl)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolver :
-      SaturatedClosureCandidateAdapterResolver context sourceModule
-        callerFunction labels target hosts)
     {entryRuntime : RuntimeState}
     {entryStore : Wasm.Store Host}
     {entryWitness : RefinementWitness} :
@@ -16759,7 +16923,7 @@ theorem
         (ConcreteReuseCapacityCacheAbiFrame context sourceModule callerFunction
           sourceExternals)
         entryRuntime entryStore entryWitness) :=
-  spec.saturatedClosureCallRuntimeRefines_hereditary contextCaches resolver
+  spec.saturatedClosureCallRuntimeRefines_hereditary contextCaches
     (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
       contextCaches sourceExternals generated)
 
@@ -16787,9 +16951,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolver :
-      SaturatedClosureCandidateAdapterResolver context sourceModule
-        sourceFunction [] target hosts)
     {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -16865,7 +17026,7 @@ theorem
             sourceFunction sourceExternals)
           sourceRuntime initial initialWitness) :=
     spec.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
-      contextCaches sourceExternals generated resolver
+      contextCaches sourceExternals generated
   have closureCalls :
       ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
         sourceFunction [] target.wasmModule hosts.env sourceExternals
@@ -17618,9 +17779,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolver :
-      SaturatedClosureCandidateAdapterResolver context sourceModule
-        sourceFunction [] target hosts)
     {sourceExternals : ExternalImpl}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime : RuntimeState}
@@ -17656,7 +17814,7 @@ theorem
   obtain ⟨resultStore, resultWitness, resultKind, physical, result,
       _resultAbi⟩ :=
     spec.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates_productionClosures
-      contextCaches generated resolver evaluation invariant parameterCount
+      contextCaches generated evaluation invariant parameterCount
   have successful := result.declaration.capacityPreserving.successful
   exact ⟨successful.sourceEvaluates, resultKind,
     spec.targetFunctionIndex, spec.exported,
@@ -17664,11 +17822,12 @@ theorem
 
 /-- Whole-export declaration correctness for fully recursive production code.
 
-The root uses its own local operation laws and closure resolver.  Whenever the
+The root uses its own local operation laws. Whenever the
 finite source derivation enters a generated named or closure callee, the same
-structural proof selects the callee's laws and resolver from the actual
-compiler row.  Thus the target execution is derived uniformly from the source
-derivation; it is never supplied as a premise. -/
+structural proof selects the callee's laws from the actual compiler row and
+derives its closure candidates from the actual adapter equation. Thus the
+target execution is derived uniformly from the source derivation; it is never
+supplied as a premise. -/
 theorem
     ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityProductionHereditaryCodeEvaluates
     {program : Fir.LeanIR.ImpureProgram}
@@ -17684,9 +17843,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolvers :
-      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
-        sourceModule target hosts)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -17734,7 +17890,7 @@ theorem
   obtain ⟨resultStore, resultLocals, resultWitness, physical, exactWP,
       resultInvariant, failureClear, valueRelated⟩ :=
     codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-      generatedLaws resolvers spec.toConcreteSupportedFunction contextCaches
+      generatedLaws spec.toConcreteSupportedFunction contextCaches
       rootLaws evaluation spec.bodyAdapted invariant.closureAbi initialEntry
   have body :
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
@@ -17797,7 +17953,7 @@ theorem
     obtain ⟨slackStore, slackLocals, slackWitness, slackPhysical, slackWP,
         slackInvariant, _, _⟩ :=
       codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated spec
-        generatedLaws resolvers spec.toConcreteSupportedFunction contextCaches
+        generatedLaws spec.toConcreteSupportedFunction contextCaches
         rootLaws evaluation spec.bodyAdapted invariant.closureAbi slackEntry
     have resultEq := exactWP.exactReturn_unique slackWP
     rw [resultEq.1]
@@ -17828,8 +17984,10 @@ theorem
 For every admitted finite source execution, invoking the generated Wasm export
 terminates with the same runtime and semantic value under the declared result
 ABI.  Named calls and exactly saturated closure calls may nest to arbitrary
-finite depth.  The theorem assumes compiler-derived resolver metadata but no
-target execution, translation certificate, or program-termination oracle. -/
+finite depth. Candidate enumeration, numeric adaptation, and matcher host
+alignment are derived internally from the supported compiler pipeline; the
+theorem assumes no target execution, translation certificate, resolver
+package, or program-termination oracle. -/
 theorem
     ConcreteSupportedExport.correct_reuseCapacityProductionHereditary
     {program : Fir.LeanIR.ImpureProgram}
@@ -17845,9 +18003,6 @@ theorem
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
     (generated : LazyCacheGeneratedEnvironment context sourceModule)
-    (resolvers :
-      SupportedFunctionSaturatedClosureCandidateAdapterResolvers program
-        sourceModule target hosts)
     {sourceExternals : ExternalImpl}
     {resultKind : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
@@ -17876,7 +18031,7 @@ theorem
         (RefinedReturnPost resultRuntime resultValue resultKind callerTail) := by
   obtain ⟨resultStore, resultWitness, physical, result, _resultAbi⟩ :=
     spec.budgetedDeclarationWithCache_of_reuseCapacityProductionHereditaryCodeEvaluates
-      contextCaches generated resolvers evaluation invariant parameterCount
+      contextCaches generated evaluation invariant parameterCount
   have successful := result.declaration.capacityPreserving.successful
   exact ⟨successful.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
     successful.terminatesWith callerTail⟩
