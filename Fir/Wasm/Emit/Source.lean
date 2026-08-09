@@ -3,6 +3,7 @@ import Fir.Wasm.Emit.BitExactFloat
 import Fir.Wasm.Emit.CompilerPrivate
 import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.WellFormed
+import Lean.CoreM
 
 namespace Fir.Wasm.Emit.Source
 
@@ -33,6 +34,15 @@ private partial def environmentDeclarationAncestor? (env : Environment) (name : 
     none
   else
     environmentDeclarationAncestor? env name.getPrefix
+
+private partial def sourceDeclarationAncestor? (env : Environment) (name : Name) :
+    CoreM (Option Name) := do
+  if name.isAnonymous then return none
+  if let some moduleIdx := env.getModuleIdxFor? name then
+    if env.header.moduleData[moduleIdx]!.constNames.contains name &&
+        (← LCNF.getImpureSignature? name).isSome then
+      return some name
+  sourceDeclarationAncestor? env name.getPrefix
 
 private def addUniqueName (names : Array Name) (name : Name) : Array Name :=
   if names.contains name then names else names.push name
@@ -315,6 +325,185 @@ def compileEntrySeparatelyInternalized (entry : Name)
     Fir.Validation.Lcnf.compileEntry entry
   let dependencies ← discoveredSourceRoots entryArtifact retainedExternalNames #[entry]
   compileEntrySeparatelyInternalizedAux entry retainedExternalNames entryArtifact dependencies
+
+private def initializePersistentExtension {α β σ} [Inhabited σ]
+    (extension : PersistentEnvExtension α β σ) (env : Environment) : IO Environment := do
+  let state := extension.toEnvExtension.getState env
+  let initialized ← extension.addImportedFn state.importedEntries { env, opts := {} }
+  return extension.toEnvExtension.setState (asyncMode := .sync) env
+    { state with state := initialized }
+
+private def importPrivateModuleEnvironment (moduleName : Name)
+    (options : Options) : IO Environment := do
+  let imports : Array Lean.Import := #[
+    { module := moduleName, importAll := true, isMeta := true }]
+  let environment ← Lean.withImporting do
+    let (_, state) ← Lean.importModulesCore (globalLevel := .private) imports |>.run
+    let state := Fir.Wasm.Emit.CompilerPrivate.setTargetRuntimePhase state moduleName
+    Lean.finalizeImport (leakEnv := true) (loadExts := false)
+      (level := .exported) state imports options
+  let environment := environment.setMainModule moduleName
+  let environment ← initializePersistentExtension Lean.Compiler.CSimp.ext.ext environment
+  let environment ← initializePersistentExtension Meta.instanceExtension.ext environment
+  let environment ← initializePersistentExtension classExtension environment
+  let environment ← initializePersistentExtension Meta.Match.Extension.extension environment
+  let some moduleIndex := environment.getModuleIdx? moduleName |
+    throw <| IO.userError s!"deferred final-LCNF target module `{moduleName}` is unavailable"
+  let externals := LCNF.impureSigExt.getModuleEntries environment moduleIndex |>.filter
+    (isExtern environment ·.name)
+  let environment := externals.foldl (fun environment declaration =>
+    LCNF.setDeclPublic (LCNF.impureSigExt.addEntry environment declaration)
+      declaration.name) environment
+  let state := Lean.IR.declMapExt.toEnvExtension.getState environment
+  let unbox : Name → Name
+    | .str functionName "_boxed" => functionName
+    | name => name
+  let localState := state.importedEntries[moduleIndex]!.foldl
+    (fun (declarations, declarationsByName) declaration =>
+      if isExtern environment (unbox declaration.name) then
+        (declaration :: declarations, declarationsByName.insert declaration.name declaration)
+      else
+        (declarations, declarationsByName)) state.state
+  let environment := Lean.IR.declMapExt.toEnvExtension.setState
+    (asyncMode := .sync) environment { state with state := localState }
+  let some environment :=
+      Fir.Wasm.Emit.CompilerPrivate.setTargetDirectImports environment moduleIndex |
+    throw <| IO.userError s!"deferred target module `{moduleName}` has no module data"
+  return environment
+
+private def installFinalImpureCaptureDirect : CoreM Unit := do
+  let (installers, manager) := LCNF.passManagerExt.getState (← getEnv)
+  let impurePasses ← finalImpureCaptureInstaller.install manager.impurePasses
+  modifyEnv fun environment => LCNF.passManagerExt.setState environment
+    (installers, { manager with impurePasses })
+
+private def artifactFromCapturedModule (entry : Name) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let capturedGroups := finalImpureCaptureExt.getState (← getEnv)
+  let mut localDecls : Array (LCNF.Decl .impure) := #[]
+  for group in capturedGroups do
+    for declaration in group do
+      localDecls := appendCapturedDecl localDecls declaration
+  unless localDecls.any (·.name == entry) do
+    throwError "deferred final-LCNF module capture did not contain entry `{entry}`"
+  let localNames : NameSet := localDecls.foldl (init := {}) fun names declaration =>
+    names.insert declaration.name
+  let environment ← getEnv
+  let mut referencedNames : Array Name := #[]
+  for declaration in localDecls do
+    let mut references := match declaration.value with
+      | .code code => collectCodeReferences #[] code
+      | .extern _ => #[]
+    if let some initializer := getBuiltinInitFnNameFor? environment declaration.name <|>
+        getInitFnNameFor? environment declaration.name then
+      references := addUniqueName references initializer
+    for reference in references do
+      unless localNames.contains reference do
+        referencedNames := addUniqueName referencedNames reference
+  let mut externalDecls : Array (LCNF.Decl .impure) := #[]
+  for name in referencedNames do
+    let some signature ← LCNF.getImpureSignature? name |
+      throwError "deferred final-LCNF reference `{name}` has no signature"
+    let data := getExternAttrData? environment name |>.getD { entries := [.opaque] }
+    externalDecls := externalDecls.push (capturedExternDecl signature data)
+  let program : Fir.LeanIR.ImpureProgram := { decls := localDecls ++ externalDecls }
+  return {
+    entry
+    program
+    externalNames := externalDecls.map (·.name)
+    forms := Fir.Validation.Lcnf.collectForms program }
+
+private def replayDeferredModuleFinalCaptured (moduleName entry : Name)
+    (options : Options) : CoreM Fir.Validation.Lcnf.Artifact := do
+  let environment ← getEnv
+  let some moduleIndex := environment.getModuleIdx? moduleName |
+    throwError "deferred final-LCNF target module `{moduleName}` is unavailable"
+  let groups := LCNF.postponedCompileDeclsExt.getModuleEntries environment moduleIndex
+  if groups.isEmpty then
+    throwError "module `{moduleName}` has no deferred compiler groups"
+  modifyEnv (LCNF.postponedCompileDeclsExt.setState ·
+    (groups.foldl (fun state group =>
+      group.declNames.foldl (·.insert · group) state) {}))
+  resetFinalImpureCapture
+  resetSpecializationCache
+  installFinalImpureCaptureDirect
+  for group in groups do
+    for declaration in group.declNames do
+      LCNF.resumeCompilation declaration options
+  artifactFromCapturedModule entry
+
+private def compileDeferredModuleFinalCaptured (moduleName entry : Name) :
+    CoreM (Option Fir.Validation.Lcnf.Artifact) := do
+  let options := compiler.inLeanIR.set (← getOptions) true
+  let environment ← Lean.Core.liftIOCore <|
+    importPrivateModuleEnvironment moduleName options
+  let some moduleIndex := environment.getModuleIdx? moduleName |
+    throwError "deferred final-LCNF target module `{moduleName}` is unavailable"
+  if (LCNF.postponedCompileDeclsExt.getModuleEntries environment moduleIndex).isEmpty then
+    return none
+  let context ← read
+  let artifact ← Lean.Core.liftIOCore <|
+    (replayDeferredModuleFinalCaptured moduleName entry options).toIO'
+      { context with options } { env := environment }
+  return some artifact
+
+private def sourceModuleFor? (environment : Environment) (name : Name) :
+    CoreM (Option (Name × Name)) := do
+  let some sourceRoot ← sourceDeclarationAncestor? environment name | return none
+  let some moduleIndex := environment.getModuleIdxFor? sourceRoot | return none
+  return some (environment.header.moduleNames[moduleIndex]!, sourceRoot)
+
+private partial def compileEntryDeferredModulesInternalizedAux (entry : Name)
+    (retainedExternalNames : Array String) (environment : Environment)
+    (pending : Array (Name × Name × Bool)) (seenModules : Array Name)
+    (artifacts : Array Fir.Validation.Lcnf.Artifact) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let some (moduleName, sourceRoot, required) := pending[0]? | do
+    let merged ← mergeSeparatelyCompiledArtifacts entry artifacts
+    match pruneUnreachableDeclarations merged with
+    | .ok artifact => return artifact
+    | .error message => throwError message
+  let pending := pending.extract 1 pending.size
+  if seenModules.contains moduleName then
+    return ← compileEntryDeferredModulesInternalizedAux entry retainedExternalNames
+      environment pending seenModules artifacts
+  let some artifact ← compileDeferredModuleFinalCaptured moduleName sourceRoot | do
+    if required then
+      throwError "entry module `{moduleName}` has no deferred compiler groups; build its source view with `compiler.postponeCompile=true`"
+    return ← compileEntryDeferredModulesInternalizedAux entry retainedExternalNames
+      environment pending (seenModules.push moduleName) artifacts
+  let discoveryArtifact ← match pruneUnreachableDeclarations artifact with
+    | .ok artifact => pure artifact
+    | .error message => throwError message
+  let mut additions : Array (Name × Name × Bool) := #[]
+  for externalName in discoveryArtifact.externalNames do
+    if retainedExternalNames.contains externalName.toString then continue
+    let some sourceModule ← sourceModuleFor? environment externalName | continue
+    unless seenModules.contains sourceModule.1 || pending.any (·.1 == sourceModule.1) ||
+        additions.any (·.1 == sourceModule.1) do
+      additions := additions.push (sourceModule.1, sourceModule.2, false)
+  compileEntryDeferredModulesInternalizedAux entry retainedExternalNames environment
+    (pending ++ additions) (seenModules.push moduleName) (artifacts.push artifact)
+
+/--
+Compile the exact deferred declaration groups stored for every recursively
+required source module, in the same order used by Lean's `leanir` driver, then
+retain the entry's named-call closure. This preserves private specialization,
+closed-term, and mutual-group identities while FIR consumes final LCNF rather
+than the IR subsequently emitted by Lean.
+
+Every source module intended for internalization must have been built with
+`compiler.postponeCompile=true`, which records replay groups in its private
+olean data. Prebuilt Lean/runtime modules without such groups remain explicit
+external declarations.
+-/
+def compileEntryModuleWiseInternalized (entry : Name)
+    (retainedExternalNames : Array String := #[]) :
+    CoreM Fir.Validation.Lcnf.Artifact := do
+  let environment ← getEnv
+  let some (moduleName, sourceRoot) ← sourceModuleFor? environment entry |
+    throwError "entry `{entry}` has no source module"
+  compileEntryDeferredModulesInternalizedAux entry retainedExternalNames environment
+    #[(moduleName, sourceRoot, true)] #[] #[]
 
 /--
 Compile an entry and its recursively discovered source dependencies as one
