@@ -15,30 +15,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
-- Milestone: `W7-FLAT-PUBLICATION`.
+- No cross-lane integration lease is active.
+
+## Latest completed integration lease
+
+- Milestone: `W7-FLAT-PUBLICATION` shared compiler admission.
 - Integration owner: `wasm-gen`; the user assigned the W7 owner the temporary
   integration lease for the two shared compiler-admission repairs required by
   the separate Verso Flat artifact.
 - Integration branch/worktree: `integration/flat-publication` in
   `.worktrees/integration-flat-publication`, based directly on `main` at
   `f47ee553`.
-- Contract queue: `FIR-BUG-wasm-none-generic-object-join-admission` aligns
-  local-join transfers with the existing Lean-compatible object-family call
-  ABI; `FIR-BUG-wasm-none-precise-box-result-admission` admits only the generic
-  `tobject` declaration or the exact `boxResultKind type .tobject` selected by
-  lowering. Scalar and erased lanes remain exact; concrete layouts and runtime
-  helper signatures do not change.
-- Consumers: W7 rebases before committing the Flat resident helpers and
-  package. W6 is notified of the stable join/box admission surface and may
-  adapt the compiler proof in parallel; proof completion does not block the
-  generation-ready executable package. Validation receives focused malformed
-  scalar/object regressions and the unchanged root corpus.
-- Lease boundary: land only the two isolated admission repairs, their focused
-  regressions, bug-card resolutions, and green integration evidence. Rebase
-  `wasm/generation` after the main fast-forward; all Flat resident-runtime and
-  package files remain W7-owned and land separately.
+- Published stack: active-slice record `a5024916`, bug-card record
+  `d18cf57d`, and functional head `05f8c385`.
+- Lease boundary: satisfied. Local joins now use the same Lean-compatible
+  object-family transfer relation as calls. Boxing accepts either generic
+  `tobject` or exactly the representation selected by
+  `boxResultKind type .tobject`; scalar and erased lanes remain exact, and the
+  malformed UInt64-to-object case remains rejected. A former object-sharing
+  guard negative fixture is intentionally positive because both branches use
+  the common object ABI. No concrete layout, runtime helper signature, or W6
+  proof file changed.
+- Validation: Lean Beam zero-error/zero-warning saves for all three changed
+  modules; focused 13-job `Fir.Wasm.Examples` build; `git diff --check`;
+  complete `make check` with 642 unique cases and 1,844/1,844 equal
+  comparisons; Talos pinned at `a01d01c`; all 3,137 `make talos-check` jobs;
+  and the complete deterministic resident-artifact gate, including 44/44
+  readiness cases, 15/15 source probes, and the 601-case V8 matrix.
 
-## Latest completed integration lease
+## Previous completed integration lease
 
 - Milestone: `W6-EMITTED-WASM-FRAME-STACK-MACHINE`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
