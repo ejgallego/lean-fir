@@ -249,16 +249,16 @@ private def getBody (useDefault : Bool) : List Instruction :=
     .ifElse
       (elementAddress ++ [
         .localGet sourceCursorLocal,
-        .i32Load .object 0,
+        .i32Load .tobject 0,
         .ret])
-      (if useDefault then [.localGetObject defaultParam, .ret]
+      (if useDefault then [.localGet defaultParam, .ret]
        else [.unreachable])]
 
 private def getBangFunction (declaration : Name) : Function := {
   name := externalName declaration
   params := #[(erasedParam, .erased), (defaultParam, .tobject),
     (arrayParam, .object), (indexParam, .tobject)]
-  results := #[.object]
+  results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32)]
   body := getBody true }
@@ -273,7 +273,7 @@ def getBorrowedFunction : Function := {
   name := externalName `Array.getInternalBorrowed
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .tobject), (proofParam, .erased)]
-  results := #[.object]
+  results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32)]
   body := getBody false }
@@ -282,7 +282,7 @@ def ugetBorrowedFunction : Function := {
   name := externalName `Array.ugetBorrowed
   params := #[(erasedParam, .erased), (arrayParam, .object),
     (indexParam, .usize), (proofParam, .erased)]
-  results := #[.object]
+  results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32)]
   body := requireArray arrayParam ++ loadSize arrayParam ++ [
@@ -295,7 +295,7 @@ def ugetBorrowedFunction : Function := {
     .i32WrapI64 .uint32,
     .localSet indexLocal] ++ elementAddress ++ [
     .localGet sourceCursorLocal,
-    .i32Load .object 0,
+    .i32Load .tobject 0,
     .ret] }
 
 def ugetFunction : Function := {
@@ -572,18 +572,18 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
       declaration == `Array.get!Internal then
     some {
       params := #[.erased, .tobject, .object, .tobject]
-      results := #[.object] }
+      results := #[.tobject] }
   else if declaration == `Array.emptyWithCapacity ||
       declaration == `Array.mkEmpty then
     some { params := #[.erased, .tobject], results := #[.object] }
   else if declaration == `Array.getInternalBorrowed then
     some {
       params := #[.erased, .object, .tobject, .erased]
-      results := #[.object] }
+      results := #[.tobject] }
   else if declaration == `Array.ugetBorrowed then
     some {
       params := #[.erased, .object, .usize, .erased]
-      results := #[.object] }
+      results := #[.tobject] }
   else if declaration == `Array.uget then
     some {
       params := #[.erased, .object, .usize, .erased]

@@ -61,16 +61,12 @@ run_cmd do
     unless artifact.externalNames.any fun name => name.toString == required do
       throwError "raw Format helper inventory lost {required}"
   let unsupported := program.decls.filter fun decl => !Fir.Wasm.supportedDecl program decl
-  unless unsupported.size == 1 do
-    throwError "raw Format facade has {unsupported.size} unsupported declarations, expected one"
-  unless unsupported.any fun decl => decl.name.toString.contains "panic" do
-    throwError "raw Format facade no longer records the unreachable panic specialization"
+  unless unsupported.isEmpty do
+    throwError "upstream-compatible raw Format facade retained unsupported declarations: {unsupported.map (·.name)}"
   match Fir.Wasm.validateSupported program with
-  | .error (.unsupportedCode name) =>
-      unless name.toString.contains "panic" do
-        throwError "raw Format facade failed first at an unexpected declaration: {name}"
-  | .error error => throwError "raw Format facade failed with an unexpected error: {repr error}"
-  | .ok _ => throwError "raw Format facade unexpectedly passed before its refinement fix"
+  | .error error =>
+      throwError "upstream-compatible raw Format facade failed admission: {repr error}"
+  | .ok _ => pure ()
 
 run_cmd do
   let impureDeclsBefore ← liftCoreM Lean.Compiler.LCNF.getLocalImpureDecls

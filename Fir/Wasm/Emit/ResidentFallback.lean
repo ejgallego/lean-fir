@@ -44,7 +44,7 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
   else if declaration == `instInhabitedOfMonad._redArg then
     some {
       params := #[.object, .tobject]
-      results := #[.object] }
+      results := #[.tobject] }
   else
     none
 
@@ -59,7 +59,7 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   else if declaration == `instInhabitedOfMonad._redArg then
     some {
       params := #[object, tobject]
-      result := object }
+      result := tobject }
   else
     none
 
@@ -78,7 +78,7 @@ def inhabitedFunction : Function := {
   params := #[
     (inhabitedMonadParam, .object),
     (inhabitedDefaultParam, .tobject)]
-  results := #[.object]
+  results := #[.tobject]
   locals := #[]
   body := [.unreachable] }
 

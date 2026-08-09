@@ -40,9 +40,9 @@ lake --keep-toolchain \
 
 ## Expected semantics
 
-The generated specializations should retain heap-only object kinds at their
-monomorphic Array and product-projection sites, allowing the real final-LCNF
-bodies to pass the supported Wasm boundary.
+FIR should accept the coarse final-LCNF object-family annotations through the
+same representation-compatible call path used by upstream Lean, while
+keeping scalar and ownership-specific distinctions explicit.
 
 ## Actual behavior
 
@@ -73,35 +73,35 @@ declarations above.
 
 ## Semantic impact
 
-Without checked monomorphic kind recovery, FIR cannot emit the real captured
-specialization closure. Retaining the former handwritten resident helpers
+Without the generic object-family call path, FIR cannot emit the real captured
+specialization closure. Retaining the former application-specific recovery
 would hide this compiler-boundary discrepancy.
 
 ## Classification and triage
 
-This is the same erased generic-result ABI class as the existing checked
-Illuminate Array refinement, newly observable because final specialization
-bodies are now available. Any recovery must enumerate the exact generated
-families and call-site counts and fail closed on closure drift.
+This is the same erased generic-result ABI class as the original Illuminate
+Array issue, newly observable because final specialization bodies are
+available. The resolution belongs to the generic compiler calling convention,
+not an inventory of generated family names.
 
 ## Workaround
 
-The Illuminate source boundary performs a checked monomorphic-kind recovery
-over exactly 23 sites: the existing Nat-indexed Array reads, three
-`Array.ugetBorrowed` results in the generated validation family, and the two
-heap-only fields projected from `replayTrace`'s generated loop accumulator.
-It checks every original erased kind, caller family, target declaration, and
-site count before changing any result to `object`; closure drift fails the
-build.
+The original source boundary performed a checked monomorphic-kind recovery
+over the exact Illuminate caller inventory. That workaround has been removed.
 
 ## Upstream tracking
 
-none
+Current upstream Lean's direct final-LCNF C emitter assigns `object`,
+`tagged`, and `tobject` the same `lean_object*` calling representation and
+emits ordinary assignments at calls and returns. FIR's compatibility boundary
+now follows that generic rule without reconstructing erased application
+types.
 
 ## Resolution and regression
 
-The real 115-declaration final-LCNF closure now passes supported lowering and
-retains 25 generated specializations as source functions. The complete module
-has zero imports and exactly four public functions. The deterministic package
-gate, packaged 11-call smoke, and all 105 local legacy/FIR differential traces
-pass.
+The real final-LCNF closure now passes supported lowering without any
+Illuminate-specific transform. Generic Array reads retain their upstream
+`tobject` results, the resident Array implementation exposes the matching
+generic signature, and object-family calls use the shared Lean-compatible
+boundary. The v3 and v4 complete modules retain zero imports, their six public
+functions, and their exact accepted Wasm hashes.

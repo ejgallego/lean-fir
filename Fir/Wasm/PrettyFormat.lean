@@ -28,12 +28,12 @@ macro_rules
         /--
         A local concrete state monad keeps `prettyM` monomorphic without
         retaining the generic cross-module `Id`/`StateT` implementation as
-        part of the Wasm runtime surface. The state uses `Nat` as a raw
-        `tobject` carrier so final LCNF does not forget that a state recovered
-        from a polymorphic product field is heap-backed. Only values created
-        from the facade state below inhabit this carrier.
+        part of the Wasm runtime surface. FIR follows upstream Lean's generic
+        final-LCNF object-family calling convention, so the concrete state can
+        remain explicit even when a polymorphic product projection is
+        represented as `tobject`.
         -/
-        abbrev $renderM (α : Type) := Nat → α × Nat
+        abbrev $renderM (α : Type) := $state → α × $state
 
         @[reducible] def $monad : Monad $renderM where
           pure value := fun raw => (value, raw)
@@ -41,23 +41,19 @@ macro_rules
             let (value, raw) := action raw
             next value raw
 
-        @[reducible] unsafe def $pretty : Std.Format.MonadPrettyFormat $renderM where
-          pushOutput string := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+        @[reducible] def $pretty : Std.Format.MonadPrettyFormat $renderM where
+          pushOutput string := fun state =>
+            ((), {
               out := String.Internal.append state.out string
-              column := state.column + String.Internal.length string } : $state))
-          pushNewline indent := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+              column := state.column + String.Internal.length string })
+          pushNewline indent := fun state =>
+            ((), {
               out := String.Internal.append state.out
                 (String.Internal.pushn "\n" ' ' indent)
-              column := indent } : $state))
-          currColumn := fun raw =>
-            let state : $state := unsafeCast raw
-            (state.column, raw)
-          startTag _ := fun raw => ((), raw)
-          endTags _ := fun raw => ((), raw)
+              column := indent })
+          currColumn := fun state => (state.column, state)
+          startTag _ := fun state => ((), state)
+          endTags _ := fun state => ((), state)
 
         /--
         Low-level JavaScript-facing rendering facade. Its semantic Wasm ABI is
@@ -68,12 +64,10 @@ macro_rules
         `Format`; this function deliberately introduces no second format AST
         or marshaling layer.
         -/
-        unsafe def $name (format : Std.Format) (width indent column : Nat) : String :=
+        def $name (format : Std.Format) (width indent column : Nat) : String :=
           let action : $renderM Unit :=
             @Std.Format.prettyM $renderM format width indent $monad $pretty
-          let initial : Nat := unsafeCast ({ column } : $state)
-          let result : $state := unsafeCast (action initial).2
-          result.out
+          (action { column }).2.out
         end)
 
 /--
@@ -121,7 +115,7 @@ macro_rules
           eventsRev : List $event := []
           column : Nat := 0
 
-        abbrev $renderM (α : Type) := Nat → α × Nat
+        abbrev $renderM (α : Type) := $state → α × $state
 
         @[reducible] def $monad : Monad $renderM where
           pure value := fun raw => (value, raw)
@@ -129,39 +123,33 @@ macro_rules
             let (value, raw) := action raw
             next value raw
 
-        @[reducible] unsafe def $pretty : Std.Format.MonadPrettyFormat $renderM where
-          pushOutput string := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+        @[reducible] def $pretty : Std.Format.MonadPrettyFormat $renderM where
+          pushOutput string := fun state =>
+            ((), {
               out := String.Internal.append state.out string
               eventsRev :=
                 ({ kind := 0, text := string, value := 0 } : $event) ::
                   state.eventsRev
-              column := state.column + String.Internal.length string } : $state))
-          pushNewline indent := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+              column := state.column + String.Internal.length string })
+          pushNewline indent := fun state =>
+            ((), {
               out := String.Internal.append state.out
                 (String.Internal.pushn "\n" ' ' indent)
               eventsRev :=
                 ({ kind := 1, text := "", value := indent } : $event) ::
                   state.eventsRev
-              column := indent } : $state))
-          currColumn := fun raw =>
-            let state : $state := unsafeCast raw
-            (state.column, raw)
-          startTag tag := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+              column := indent })
+          currColumn := fun state => (state.column, state)
+          startTag tag := fun state =>
+            ((), {
               state with eventsRev :=
                 ({ kind := 2, text := "", value := tag } : $event) ::
-                  state.eventsRev } : $state))
-          endTags count := fun raw =>
-            let state : $state := unsafeCast raw
-            ((), unsafeCast ({
+                  state.eventsRev })
+          endTags count := fun state =>
+            ((), {
               state with eventsRev :=
                 ({ kind := 3, text := "", value := count } : $event) ::
-                  state.eventsRev } : $state))
+                  state.eventsRev })
 
         /--
         Low-level JavaScript-facing styled rendering facade. Its semantic Wasm
@@ -173,11 +161,10 @@ macro_rules
         The trace records the exact incremental text/newline/tag protocol;
         callers may project `text` only when styling is intentionally ignored.
         -/
-        unsafe def $name (format : Std.Format) (width indent column : Nat) : $trace :=
+        def $name (format : Std.Format) (width indent column : Nat) : $trace :=
           let action : $renderM Unit :=
             @Std.Format.prettyM $renderM format width indent $monad $pretty
-          let initial : Nat := unsafeCast ({ column } : $state)
-          let result : $state := unsafeCast (action initial).2
+          let result := (action { column }).2
           { text := result.out, eventsRev := result.eventsRev }
         end)
 

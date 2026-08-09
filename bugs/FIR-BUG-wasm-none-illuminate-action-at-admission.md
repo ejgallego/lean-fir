@@ -37,9 +37,9 @@ lake --keep-toolchain \
 
 ## Expected semantics
 
-The pure, monomorphic source closure should pass FIR's supported-lowering
-validator, or identify a precise unsupported final-LCNF instruction that can
-be implemented and tested independently.
+The pure source closure should pass through the same object-family calling
+representation as upstream Lean's final-LCNF emitter, without reconstructing
+application-specific erased types.
 
 ## Actual behavior
 
@@ -59,9 +59,9 @@ capture and lowering failure.
 
 ## Semantic impact
 
-Without exact result recovery, the complete Illuminate trace closure cannot
-be emitted as Wasm, so the native third participant cannot join Illuminate's
-105 differential traces.
+Without object-family call compatibility, the complete Illuminate trace
+closure cannot be emitted as Wasm, so the native participant cannot join the
+differential traces.
 
 ## Classification and triage
 
@@ -73,17 +73,21 @@ same fail-closed inventory.
 
 ## Workaround
 
-The Illuminate capture applies a fail-closed monomorphic ABI recovery. It
-checks the exact four Array target declarations, all 23 expected sites, and
-the original `tobject` signatures before changing target, call, and two
-accumulator-projection results to `object`.
+The original package applied a fail-closed monomorphic ABI recovery tied to
+the exact Illuminate Array targets and caller inventory. That workaround has
+been removed.
 
 ## Upstream tracking
 
-none
+Current upstream Lean emits final LCNF directly and maps `object`, `tagged`,
+and `tobject` to the same `lean_object*` call/control-flow representation in
+`Lean.Compiler.LCNF.EmitC`; it does not recover caller-specific kinds.
 
 ## Resolution and regression
 
-The checked recovery admits the full 115-declaration final-LCNF closure. The
-lowered base module is emitted successfully; resident-runtime closure is
-tracked separately from this lowering bug.
+FIR now mirrors upstream's object-family compatibility at compiler-produced
+named-call, return, and symbolic-stack boundaries while retaining directional
+`AbiKind.refines` for runtime proof contracts. The unmodified Illuminate
+capture passes lowering, and the application-specific recovery code has been
+deleted. Both v3 and v4 resident artifacts remain byte-identical to the
+previous accepted packages.

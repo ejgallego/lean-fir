@@ -10,16 +10,11 @@ private def selectionEntries : Array Name := #[
   ``Illuminate.AnimationPlayer.initialSelectionLive,
   ``Illuminate.AnimationPlayer.transitionSelectionLive]
 
-/-- Capture the real selection-only entries and apply the checked Lean 4.32
-array-read ABI recovery shared with the accepted live player. -/
+/-- Capture the real selection-only entries without application-specific ABI repair. -/
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Validation.Lcnf.Artifact) := do
-  let source ← Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized
-    selectionEntries
-  match IlluminateFirNative.Compile.refineMonomorphicArrayGetsWithSelectionValidation
-      source 1 with
-  | .ok source => return .ok source
-  | .error message => return .error (.manifest message)
+  return .ok (← Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized
+    selectionEntries)
 
 private def configureSelectionModule
     (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :

@@ -204,14 +204,16 @@ run_cmd do
   let moduleArtifact ← match result with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to compile Format facade: {repr error}"
-  unless moduleArtifact.module.closureDispatch.size == 38 &&
+  -- The direct concrete-state facade retains these compiler-generated closure
+  -- targets and descriptor shapes without rewriting their final-LCNF kinds.
+  unless moduleArtifact.module.closureDispatch.size == 40 &&
       moduleArtifact.module.closureDispatch ==
         Fir.Wasm.collectClosureDispatch moduleArtifact.module.runtimeOperations do
-    throwError "compiler Format closure-dispatch inventory changed"
-  unless moduleArtifact.module.closureDescriptors.size == 14 &&
+    throwError "compiler Format closure-dispatch inventory changed ({moduleArtifact.module.closureDispatch.size}): {repr moduleArtifact.module.closureDispatch}"
+  unless moduleArtifact.module.closureDescriptors.size == 19 &&
       moduleArtifact.module.closureDescriptors ==
         Fir.Wasm.collectClosureDescriptors moduleArtifact.module.runtimeOperations do
-    throwError "compiler Format closure-descriptor inventory changed"
+    throwError "compiler Format closure-descriptor inventory changed ({moduleArtifact.module.closureDescriptors.size}): {repr moduleArtifact.module.closureDescriptors}"
   match ← moduleArtifact.write "_build/source-pretty-format-module.wasm" with
   | .ok () => pure ()
   | .error error => throwError "failed to write reusable Format module: {repr error}"

@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-pretty-state-refinement
-status: confirmed
+status: fixed
 classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -33,10 +33,9 @@ lake build Fir.Wasm.Emit.SourceExamples
 
 ## Expected semantics
 
-The support gate should retain enough exact provenance to recognize that the
-projected state is a `Fir.Wasm.PrettyFormat.State` constructor and therefore a
-heap object at the recursive call. Unrelated `tobject` values must remain
-unable to satisfy an `object` parameter.
+The support gate should mirror upstream Lean's object-family calling
+representation for compiler-produced calls while continuing to reject
+unrelated scalar lanes.
 
 ## Actual behavior
 
@@ -69,10 +68,9 @@ The complete internalized artifact executes in V8 and agrees with native
 
 ## Semantic impact
 
-The direct concrete-state facade cannot generate executable Wasm for Lean's
-standard pretty-printing algorithm even though it has a fully known
-four-object input ABI and object result ABI. The raw-carrier facade avoids the
-generic provenance gap without weakening admission for unrelated values.
+Without upstream-compatible object-family calls, the direct concrete-state
+facade cannot generate executable Wasm for Lean's standard pretty-printing
+algorithm even though it has a fully known input and result ABI.
 
 ## Classification and triage
 
@@ -82,19 +80,20 @@ projection before the recursive named call.
 
 ## Workaround
 
-The Wasm `prettyM` facade uses `Nat` as a raw `tobject` state carrier and
-confines the conversion to `unsafeCast` at the local formatting-state
-boundary. This preserves the ordinary low-level `Format` input representation
-without asking final LCNF to recover heap provenance from the polymorphic
-product projection. The generic provenance gap remains fail-closed.
+The original Wasm facade used `Nat` as a raw `tobject` state carrier and
+confined the conversion to `unsafeCast`. That workaround has been removed.
 
 ## Upstream tracking
 
-none
+Current upstream Lean's direct final-LCNF emitter maps every object-family
+kind to `lean_object*` at calls, assignments, and returns. FIR now mirrors
+that generic calling rule while preserving the semantic kind annotations used
+by ownership operations and proofs.
 
 ## Resolution and regression
 
-The generic adapter issue remains unresolved. `Fir/Wasm/Emit/SourceExamples.lean`
-guards the raw facade inventory and proves that only the unreachable panic
-specialization needs the separate checked refinement; the artifact fixture
-then executes the resulting renderer from JavaScript.
+Both plain and styled facades now thread their concrete state structures
+directly, with no `unsafeCast` or raw `Nat` carrier. The untouched final-LCNF
+closure has zero unsupported declarations, including the former panic/weak
+specialization site, and passes the focused source build. The resident
+artifact gate retains the native/V8 differential execution check.
