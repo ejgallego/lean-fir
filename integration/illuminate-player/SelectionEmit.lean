@@ -21,9 +21,8 @@ run_cmd do
   | .ok () => pure ()
   | .error error => throwError "failed to write base selection player: {repr error}"
   let artifact ← match
-      IlluminateFirNative.Compile.internalizeExistingRuntimeForExports base #[
-        ``Illuminate.AnimationPlayer.initialSelectionLive,
-        ``Illuminate.AnimationPlayer.transitionSelectionLive] with
+      IlluminateFirNative.Compile.internalizeExistingRuntimeForExports base
+        IlluminateFirNative.SelectionCompile.selectionPublicExports with
     | .ok artifact => pure artifact
     | .error error => throwError "failed to link selection runtime: {repr error}"
   match ← artifact.write "_build/illuminate-selection-player-resident.wasm" with

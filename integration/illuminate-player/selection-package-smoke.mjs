@@ -5,6 +5,7 @@ import { readFile } from "node:fs/promises";
 import {
   createIlluminateSelectionPlayerAdapter,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
@@ -23,12 +24,15 @@ assert.equal(build.capabilities.inputLayout.version,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION);
 assert.equal(build.capabilities.ownership.version,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION);
+assert.equal(build.capabilities.hotEvent.version,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION);
 
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), []);
 assert.deepEqual(WebAssembly.Module.exports(module), [
   { name: "Illuminate.AnimationPlayer.initialSelectionLive", kind: "function" },
   { name: "Illuminate.AnimationPlayer.transitionSelectionLive", kind: "function" },
+  { name: "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact", kind: "function" },
   { name: "fir_heap_frontier", kind: "function" },
   { name: "fir_heap_set_frontier", kind: "function" },
   { name: "fir_heap_rewind", kind: "function" },
@@ -110,6 +114,29 @@ for (const event of events) {
   assert.equal(result.memory.postRewindFrontier,
     created.memory.persistentCheckpoint);
 }
+
+const genericTickPlayer = adapter.createPlayer(animation);
+const scalarTickPlayer = adapter.createPlayer(animation);
+assert.equal(genericTickPlayer.ok && scalarTickPlayer.ok, true);
+for (const timestamp of [adjacentFloat(50, -1), 50,
+  adjacentFloat(50, 1), 300.125]) {
+  const generic = adapter.dispatch(genericTickPlayer.player,
+    { kind: "tick", timestamp });
+  const scalar = adapter.dispatchTick(scalarTickPlayer.player, timestamp);
+  assert.equal(generic.ok && scalar.ok, true, generic.error ?? scalar.error);
+  assert.deepEqual(scalar.action, generic.action);
+  assert.equal(scalar.scheduleNextFrame, generic.scheduleNextFrame);
+  assert.ok(generic.memory.scratchBytes > 0);
+  assert.ok(generic.memory.scratchAllocationCalls > 0);
+  assert.equal(scalar.memory.scratchBytes, 0);
+  assert.equal(scalar.memory.scratchAllocationCalls, 0);
+  assert.equal(scalar.memory.frontierAfterEncode,
+    scalar.memory.persistentCheckpoint);
+  assert.equal(scalar.memory.postRewindFrontier,
+    scalar.memory.persistentCheckpoint);
+}
+adapter.disposePlayer(genericTickPlayer.player);
+adapter.disposePlayer(scalarTickPlayer.player);
 adapter.disposePlayer(created.player);
 adapter.disposePlayer(created.player);
 assert.throws(() => adapter.dispatch(created.player, { kind: "advance" }),
@@ -155,12 +182,18 @@ const steady = adapter.createPlayer({
 });
 assert.equal(steady.ok, true, steady.error);
 assert.equal(adapter.dispatch(steady.player, { kind: "advance" }).ok, true);
+const malformedTick = adapter.dispatchTick(steady.player, Number.POSITIVE_INFINITY);
+assert.equal(malformedTick.ok, false);
+assert.match(malformedTick.error, /timestamp must be finite/);
+assert.equal(malformedTick.memory.postRewindFrontier,
+  steady.memory.persistentCheckpoint);
 const checkpoint = steady.memory.persistentCheckpoint;
 let peak = checkpoint;
 for (let index = 0; index < 10_000; ++index) {
-  const tick = adapter.dispatch(steady.player,
-    { kind: "tick", timestamp: index / 7 });
+  const tick = adapter.dispatchTick(steady.player, index / 7);
   assert.equal(tick.ok, true, tick.error);
+  assert.equal(tick.memory.scratchBytes, 0);
+  assert.equal(tick.memory.scratchAllocationCalls, 0);
   assert.equal(tick.memory.postRewindFrontier, checkpoint);
   peak = Math.max(peak, tick.memory.peakFrontier);
 }
@@ -186,6 +219,12 @@ assert.deepEqual(measured.timings, {
   totalMs: 15,
   overheadMs: 8,
 });
+const timedTick = timed.dispatchTick(measured.player, 0.125);
+assert.equal(timedTick.ok, true, timedTick.error);
+for (const phase of ["encodeMs", "executeMs", "decodeMs", "rewindMs"]) {
+  assert.equal(timedTick.timings[phase], 1);
+}
+assert.equal(timedTick.timings.overheadMs, timedTick.timings.totalMs - 4);
 timed.disposePlayer(measured.player);
 
 console.log(JSON.stringify({
@@ -197,6 +236,7 @@ console.log(JSON.stringify({
   persistentAllocations: created.memory.persistentAllocationCalls,
   pages: created.memory.pagesAfter,
   ticks: 10_000,
+  hotEventScratchBytes: 0,
   checkpoint,
   peak,
 }));

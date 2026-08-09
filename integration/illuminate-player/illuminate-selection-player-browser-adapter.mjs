@@ -6,9 +6,12 @@ export const ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION =
   "lean-4.32-Illuminate.Animation.SelectionAnimation/v4";
 export const ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.persistent-checkpoint/v2";
+export const ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION =
+  "fir.illuminate-player.hot-event/v1";
 
 const PAGE_BYTES = 65536;
 const HEAP_BASE = 1024;
+const FLOAT64_BITS = new DataView(new ArrayBuffer(8));
 const HEADER_BYTES = 32;
 const SLOT_BYTES = 8;
 const MAX_UINT32 = 0xffffffff;
@@ -57,6 +60,13 @@ function defaultNow() {
 function elapsed(now, started) {
   const value = now() - started;
   return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function float64Bits(value, label) {
+  requireCondition(typeof value === "number" && Number.isFinite(value),
+    `${label} must be finite`);
+  FLOAT64_BITS.setFloat64(0, value, true);
+  return FLOAT64_BITS.getBigUint64(0, true);
 }
 
 function requireObject(value, label) {
@@ -438,10 +448,9 @@ class Encoder {
         return this.ctor(4, [this.natural(event.frame,
           `${label}.frame`)], new Uint8Array(0), label);
       case "tick": {
-        requireCondition(typeof event.timestamp === "number" &&
-          Number.isFinite(event.timestamp), `${label}.timestamp must be finite`);
         const bytes = new Uint8Array(8);
-        new DataView(bytes.buffer).setFloat64(0, event.timestamp, true);
+        new DataView(bytes.buffer).setBigUint64(0,
+          float64Bits(event.timestamp, `${label}.timestamp`), true);
         return this.ctor(5, [], bytes, label);
       }
       default: fail(`${label}.kind ${String(event.kind)} is unsupported`);
@@ -797,6 +806,9 @@ function validateBuild(build) {
   requireCondition(build.capabilities?.ownership?.version ===
     ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
   "BUILD.json has the wrong ownership version");
+  requireCondition(build.capabilities?.hotEvent?.version ===
+    ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
+  "BUILD.json has the wrong hot-event version");
 }
 
 function errorMessage(error) {
@@ -813,6 +825,7 @@ function instanceState(module, now, maximumNodes) {
   const required = [
     "Illuminate.AnimationPlayer.initialSelectionLive",
     "Illuminate.AnimationPlayer.transitionSelectionLive",
+    "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact",
     "fir_heap_frontier",
     "fir_heap_set_frontier",
     "fir_heap_rewind",
@@ -829,6 +842,9 @@ function instanceState(module, now, maximumNodes) {
       instance.exports["Illuminate.AnimationPlayer.initialSelectionLive"],
     transitionLive:
       instance.exports["Illuminate.AnimationPlayer.transitionSelectionLive"],
+    transitionTickLiveBits:
+      instance.exports[
+        "IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact"],
     frontier: instance.exports.fir_heap_frontier,
     setFrontier: instance.exports.fir_heap_set_frontier,
     rewindFrontier: instance.exports.fir_heap_rewind,
@@ -876,6 +892,7 @@ function invalidatePlayer(state, status) {
   state.memory = undefined;
   state.initialLive = undefined;
   state.transitionLive = undefined;
+  state.transitionTickLiveBits = undefined;
   state.frontier = undefined;
   state.setFrontier = undefined;
   state.rewindFrontier = undefined;
@@ -883,6 +900,91 @@ function invalidatePlayer(state, status) {
   state.selectionAddress = 0;
   state.checkpoint = 0;
   state.stateSlot = undefined;
+}
+
+function dispatchCore(owner, player, operation, encode, execute) {
+  const adapter = ADAPTER_STATE.get(owner);
+  const state = PLAYER_STATE.get(player);
+  requireCondition(adapter !== undefined && player?.[PLAYER] === owner &&
+    state?.owner === owner,
+    `${operation} requires this adapter's player handle`);
+  requireCondition(state.status === "active",
+    `player is ${state.status ?? "invalid"}`);
+  const totalStarted = adapter.now();
+  const timings = { encodeMs: 0, executeMs: 0, decodeMs: 0, rewindMs: 0 };
+  const memory = {
+    persistentCheckpoint: state.checkpoint,
+    frontierBefore: undefined,
+    frontierAfterEncode: undefined,
+    frontierAfterExecute: undefined,
+    peakFrontier: undefined,
+    frontierBeforeRewind: undefined,
+    clearedBytes: 0,
+    postRewindFrontier: undefined,
+    scratchBytes: 0,
+    scratchAllocationCalls: 0,
+    pagesBefore: state.memory.buffer.byteLength / PAGE_BYTES,
+    pagesAfter: undefined,
+  };
+  let phase = "encode";
+  let decoded;
+  let failure;
+  try {
+    memory.frontierBefore = readFrontier(state);
+    requireCondition(memory.frontierBefore === state.checkpoint,
+      `${operation} began at ${memory.frontierBefore}, expected ${state.checkpoint}`);
+    const encodeStarted = adapter.now();
+    const encoded = encode(state);
+    timings.encodeMs = elapsed(adapter.now, encodeStarted);
+    memory.frontierAfterEncode = readFrontier(state);
+    memory.scratchBytes = encoded.scratchBytes;
+    memory.scratchAllocationCalls = encoded.scratchAllocationCalls;
+
+    phase = "execute";
+    const executeStarted = adapter.now();
+    const physicalResult = u32(execute(state, encoded.argument));
+    timings.executeMs = elapsed(adapter.now, executeStarted);
+    memory.frontierAfterExecute = readFrontier(state);
+    memory.peakFrontier = Math.max(memory.frontierAfterEncode,
+      memory.frontierAfterExecute);
+
+    phase = "decode";
+    const decodeStarted = adapter.now();
+    decoded = decodeLiveSelectionTransition(new DataView(state.memory.buffer),
+      physicalResult, state.stateSlot, `${operation} result`);
+    timings.decodeMs = elapsed(adapter.now, decodeStarted);
+    phase = "done";
+  } catch (error) {
+    failure = errorMessage(error);
+    if (phase === "execute" || phase === "decode") state.status = "poisoned";
+  } finally {
+    try {
+      const rewound = rewind(state, state.checkpoint, adapter.now);
+      timings.rewindMs = rewound.rewindMs;
+      memory.frontierBeforeRewind = rewound.frontierBeforeRewind;
+      memory.clearedBytes = rewound.clearedBytes;
+      memory.postRewindFrontier = rewound.postRewindFrontier;
+    } catch (error) {
+      failure = errorMessage(error);
+      state.status = "poisoned";
+    }
+  }
+  memory.pagesAfter = state.memory?.buffer.byteLength / PAGE_BYTES;
+  const totalMs = elapsed(adapter.now, totalStarted);
+  const measured = Object.values(timings).reduce((sum, value) => sum + value, 0);
+  const final = {
+    timings: Object.freeze({
+      ...timings,
+      totalMs,
+      overheadMs: totalMs - measured,
+    }),
+    memory: Object.freeze(memory),
+  };
+  if (failure !== undefined) {
+    if (state.status === "poisoned") invalidatePlayer(state, "poisoned");
+    return { ok: false, error: failure, ...final };
+  }
+  return { ok: true, ...decoded, ...final };
 }
 
 export class IlluminateSelectionPlayerAdapter {
@@ -1034,91 +1136,30 @@ export class IlluminateSelectionPlayerAdapter {
   }
 
   dispatch(player, event) {
-    const adapter = ADAPTER_STATE.get(this);
-    const state = PLAYER_STATE.get(player);
-    requireCondition(adapter !== undefined && player?.[PLAYER] === this &&
-      state?.owner === this, "dispatch requires this adapter's player handle");
-    requireCondition(state.status === "active",
-      `player is ${state.status ?? "invalid"}`);
-    const totalStarted = adapter.now();
-    const timings = { encodeMs: 0, executeMs: 0, decodeMs: 0, rewindMs: 0 };
-    const memory = {
-      persistentCheckpoint: state.checkpoint,
-      frontierBefore: undefined,
-      frontierAfterEncode: undefined,
-      frontierAfterExecute: undefined,
-      peakFrontier: undefined,
-      frontierBeforeRewind: undefined,
-      clearedBytes: 0,
-      postRewindFrontier: undefined,
-      scratchBytes: 0,
-      scratchAllocationCalls: 0,
-      pagesBefore: state.memory.buffer.byteLength / PAGE_BYTES,
-      pagesAfter: undefined,
-    };
-    let phase = "encode";
-    let decoded;
-    let failure;
-    try {
-      memory.frontierBefore = readFrontier(state);
-      requireCondition(memory.frontierBefore === state.checkpoint,
-        `dispatch began at ${memory.frontierBefore}, expected ${state.checkpoint}`);
+    return dispatchCore(this, player, "transitionSelectionLive", (state) => {
       const writer = new Encoder({ fir_heap_alloc: state.allocate },
         state.memory, state.encoder, { persistent: false });
-      const encodeStarted = adapter.now();
       const eventAddress = writer.event(event, "event");
-      timings.encodeMs = elapsed(adapter.now, encodeStarted);
-      memory.frontierAfterEncode = readFrontier(state);
-      memory.scratchBytes = writer.bytes;
-      memory.scratchAllocationCalls = writer.allocations;
-
-      phase = "execute";
-      const executeStarted = adapter.now();
-      const physicalResult = u32(state.transitionLive(
+      return {
+        argument: i32(eventAddress),
+        scratchBytes: writer.bytes,
+        scratchAllocationCalls: writer.allocations,
+      };
+    }, (state, eventAddress) => state.transitionLive(
         i32(state.selectionAddress), i32(state.stateSlot.stateAddress),
-        i32(eventAddress)));
-      timings.executeMs = elapsed(adapter.now, executeStarted);
-      memory.frontierAfterExecute = readFrontier(state);
-      memory.peakFrontier = Math.max(memory.frontierAfterEncode,
-        memory.frontierAfterExecute);
+        eventAddress));
+  }
 
-      phase = "decode";
-      const decodeStarted = adapter.now();
-      decoded = decodeLiveSelectionTransition(new DataView(state.memory.buffer),
-        physicalResult, state.stateSlot, "transitionSelectionLive result");
-      timings.decodeMs = elapsed(adapter.now, decodeStarted);
-      phase = "done";
-    } catch (error) {
-      failure = errorMessage(error);
-      if (phase === "execute" || phase === "decode") state.status = "poisoned";
-    } finally {
-      try {
-        const rewound = rewind(state, state.checkpoint, adapter.now);
-        timings.rewindMs = rewound.rewindMs;
-        memory.frontierBeforeRewind = rewound.frontierBeforeRewind;
-        memory.clearedBytes = rewound.clearedBytes;
-        memory.postRewindFrontier = rewound.postRewindFrontier;
-      } catch (error) {
-        failure = errorMessage(error);
-        state.status = "poisoned";
-      }
-    }
-    memory.pagesAfter = state.memory?.buffer.byteLength / PAGE_BYTES;
-    const totalMs = elapsed(adapter.now, totalStarted);
-    const measured = Object.values(timings).reduce((sum, value) => sum + value, 0);
-    const final = {
-      timings: Object.freeze({
-        ...timings,
-        totalMs,
-        overheadMs: totalMs - measured,
+  dispatchTick(player, timestamp) {
+    return dispatchCore(this, player, "transitionSelectionTickLive",
+      () => ({
+        argument: float64Bits(timestamp, "timestamp"),
+        scratchBytes: 0,
+        scratchAllocationCalls: 0,
       }),
-      memory: Object.freeze(memory),
-    };
-    if (failure !== undefined) {
-      if (state.status === "poisoned") invalidatePlayer(state, "poisoned");
-      return { ok: false, error: failure, ...final };
-    }
-    return { ok: true, ...decoded, ...final };
+      (state, timestampBits) => state.transitionTickLiveBits(
+        i32(state.selectionAddress), i32(state.stateSlot.stateAddress),
+        timestampBits));
   }
 
   disposePlayer(player) {

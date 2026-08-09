@@ -7,6 +7,7 @@ import { createIlluminatePlayerAdapter } from
 import {
   createIlluminateSelectionPlayerAdapter,
   ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
+  ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
@@ -38,6 +39,7 @@ const v4 = await load("illuminate-selection-player-resident",
   createIlluminateSelectionPlayerAdapter, { capabilities: {
     browserAdapter: { apiVersion:
       ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
+    hotEvent: { version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION },
     inputLayout: { version: ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION },
     ownership: { version: ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION },
   } });

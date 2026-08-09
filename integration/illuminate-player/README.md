@@ -191,18 +191,37 @@ SHA256SUMS
 smoke.mjs
 ```
 
-The adapter API remains `createPlayer`, `dispatch`, `disposePlayer`, and
-`replayTrace`, at capability `fir.illuminate-player.browser/v4`. Returned
-actions contain frame, step, segment, local frame, segment-change, and playback
-only. Consumers materialize patches from their original `pmap` and
-`params[localFrame]`; the adapter neither reads nor transfers those values.
+The adapter API exposes `createPlayer`, generic `dispatch`, constructor-specific
+`dispatchTick`, `disposePlayer`, and `replayTrace`, at capability
+`fir.illuminate-player.browser/v4`. `dispatchTick(player, timestamp)` uses the
+`fir.illuminate-player.hot-event/v1` capability: JavaScript transports the
+binary64 bits over an `i64` parameter and Wasm constructs `PlayerEvent.tick`
+before calling the same real Illuminate transition. Generic `dispatch` remains
+the semantic oracle and handles all six constructors. Returned actions contain
+frame, step, segment, local frame, segment-change, and playback only. Consumers
+materialize patches from their original `pmap` and `params[localFrame]`; the
+adapter neither reads nor transfers those values.
 
 The v4 package preserves the v3 persistent-checkpoint ownership protocol:
 one shared compiled module, one instance per opaque player, a retained compact
 selection graph and fixed state slot below the checkpoint, and cleared/re-wound
 event and result scratch after every call. Its source and package smokes enforce
 the 16 KiB/400-allocation/one-page creation bounds and a flat frontier across
-10,000 ticks.
+10,000 scalar ticks. The hot path has zero host-encoded event bytes and zero
+host resident-allocation calls; result scratch is still cleared and rewound.
+
+The selection package exports the two generic source entries, the bit-exact
+tick façade, and the four allocator operations:
+
+```text
+Illuminate.AnimationPlayer.initialSelectionLive
+Illuminate.AnimationPlayer.transitionSelectionLive
+IlluminateFirNative.transitionSelectionTickLive._fir_bit_exact
+fir_heap_frontier
+fir_heap_set_frontier
+fir_heap_rewind
+fir_heap_alloc
+```
 
 Against an Illuminate checkout that has generated
 `test_output/anim-comparison.html`, the package-level dashboard check and the
@@ -211,6 +230,7 @@ order-balanced phase benchmark are:
 ```sh
 ILLUMINATE_ROOT=/path/to/illuminate node check-selection-dashboard.mjs
 ILLUMINATE_ROOT=/path/to/illuminate node selection-benchmark.mjs
+ILLUMINATE_ROOT=/path/to/illuminate node selection-hot-event-benchmark.mjs
 ```
 
 The dashboard check compares v4 after host-side patch-row materialization with
@@ -218,6 +238,9 @@ v3 at every segment boundary, step, and final frame of all 16 examples. The
 benchmark excludes a warmup, alternates v3/v4 order for at least seven rounds,
 records raw samples and median/p95/MAD summaries, and writes
 `_build/illuminate-selection-benchmark.json`.
+The hot-event benchmark compares generic tagged-event encoding with
+`dispatchTick` in balanced order on the same package and writes
+`_build/illuminate-selection-hot-event-benchmark.json`.
 
 ## Benchmarking
 
