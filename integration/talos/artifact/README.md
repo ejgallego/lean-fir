@@ -1,6 +1,6 @@
 # FIR Wasm artifact lane
 
-This package turns the supported W3--W5 semantic FIR corpus into deterministic WebAssembly 1.0
+This package turns the supported semantic FIR corpus into deterministic WebAssembly 1.0
 binary artifacts, then runs those artifacts in standard Node and browser
 `WebAssembly` engines with both the established semantic FIR host and an
 incrementally widened concrete wasm32 linear-memory host.
@@ -33,7 +33,8 @@ through the current FIR/Talos semantic oracle and writes its comparable observat
 the artifacts. The Node runner compares V8 directly with those live results; no expected
 semantic observations are frozen in the emitter.
 
-The concrete runners currently execute 43 closed artifacts through raw scalar
+The concrete runners execute every fixture in the checked
+`CONCRETE_FIXTURES` registry through raw scalar
 lanes, wasm32 tagged words, checked 32-byte object headers, eight-byte semantic
 slots, natural, UTF-8 string, and constructor allocation, cases/projection, ordinary and
 recursive direct calls, single/multi-stage closure application, object/tag
@@ -47,10 +48,8 @@ logical-location map and allocation descriptors are observation-only data;
 runtime imports exchange physical words and consult the byte-level heap. Node
 and a Fetch-only browser Worker import the same host, explicit foreign
 registry, and fixture inventory. Missing foreign implementations fail with a
-structured reject-by-default fault. Packed initial constructors and other
-initial heap kinds stay on the semantic runner until their concrete
-counterparts join this explicit allowlist; unsupported runtime operations are
-still rejected while constructing the concrete import object.
+structured reject-by-default fault. Unsupported runtime operations and initial
+heap kinds are rejected while constructing the concrete import object.
 
 The concrete host also reconstructs the object-field constructor, arbitrary-
 precision natural, and UTF-8 string subset of `initialRuntime`. It reserves physical addresses
@@ -255,16 +254,16 @@ semantics just to check this corpus.
 
 The check also writes a deterministic, fail-closed concrete-switch readiness
 report into each temporary artifact directory and byte-compares the two
-copies. The current emitted corpus is fully classified and concrete-resolvable:
-43 fixtures match the live FIR oracle, and the historical `mutation` fixture
-retains its one exact expected concrete-layout fault. Two previously omitted
-but already executable fixtures, `reference-counting` and `delete-fault`, are
-part of that oracle-matched corpus.
+copies. The emitted corpus is fully classified and concrete-resolvable: every
+registered fixture is compared with the live FIR oracle, while the historical
+`mutation` fixture additionally retains its one exact expected concrete-layout
+fault. `reference-counting` and `delete-fault` remain ordinary members of that
+registry rather than special cases.
 
-The same report preflights all 13 compiler-produced source artifacts, and all
-13 are concrete-resolvable. A shared Node/browser inventory gate also executes
-all 11 invocation manifests and both invocation-free modules through the
-concrete memory ABI, checking frozen results and exact initial-heap round trips.
+The same report preflights every compiler-produced source artifact named by
+`CONCRETE_SOURCE_PROBES`. A shared Node/browser inventory gate executes all
+invocation manifests and invocation-free modules through the concrete memory
+ABI, checking frozen results and exact initial-heap round trips.
 The historical concrete registry executes all five integer, five natural,
 eight UTF-8/string, and two unreachable-fallback declarations from the
 pre-resident frontier; focused tests cover immediate/heap integer boundaries,
@@ -277,12 +276,11 @@ all-constructor `prettyM` manifest now round-trips its 23-cell initial heap and
 executes concretely in Node and the browser. Every module-local import site is
 mapped to its runtime operation and current `W6-COVERAGE.md` cell. This is an
 artifact/readiness audit: it deliberately does not claim W6 proof completion.
-The shared validation product gate now executes 65 of 95 compiler-produced
-cases through concrete wasm32 memory in both Node and the browser, comparing
-each result and projected Nat effect with the canonical V8 observation. The
-remaining 30 cases fail closed against an explicit inventory because they all
-contain initial `ByteArray` objects; some additionally require the matching
-concrete `ByteArray` external family.
+The shared validation product gate executes every selected compiler-produced
+case that does not cross the explicit initial-`ByteArray` boundary through
+concrete wasm32 memory, comparing each result and projected effect with the
+canonical V8 observation. The exact blocked-case inventory is checked, and
+the gate fails if a case is neither executed nor classified there.
 
 A standalone report can be generated after the source and artifact manifests
 exist with:
@@ -817,14 +815,12 @@ make -C ../../.. validate-v8
 
 Setting `FIR_BROWSER` on `check.sh` runs both the reusable `prettyM` Worker and
 the complete shared-product Worker. It also materializes the live-oracle
-artifact corpus under `_build`, then runs the same 43 concrete artifacts, one
-default external rejection, and one expected failure used by Node through a
-third Worker. That Worker also executes the concrete initial-runtime
-complete 13-probe compiler source inventory—including both initial-runtime
-`prettyM` invocations and the invocation-free raw-layout module—through the
-same concrete checkers used by Node. The shared-product Worker independently
-executes the 548 non-`ByteArray` products through the concrete host after their
-semantic executions and verifies the exact 33-case blocker inventory.
+artifact corpus under `_build`, then runs the same `CONCRETE_FIXTURES`,
+`DEFAULT_EXTERNAL_FAULTS`, `EXPECTED_CONCRETE_FAULTS`, and
+`CONCRETE_SOURCE_PROBES` inventories used by Node through a third Worker. The
+shared-product Worker independently executes every nonblocked validation
+product through the concrete host after its semantic execution and verifies
+the exact blocked-case inventory.
 
 A repository-local alternate validation directory can be supplied as the
 second argument for focused semantic-product runs. After a browser-enabled

@@ -4,6 +4,10 @@ FIR has two native paths from Lean's final saved impure LCNF to an executable
 WebAssembly artifact. They share the compiler checkpoint, but they deliberately
 do not share a lowering, runtime, or artifact-loading contract.
 
+The thin [build-example catalog](build-examples.md) lists the accepted
+consumer packages and points to the authoritative fixture registries. It does
+not duplicate their inventories.
+
 Here, **native Wasm generation** means that the repository produces a `.wasm`
 artifact directly from Lean compiler output. It does not mean the host-native
 executables used as differential-test oracles.
