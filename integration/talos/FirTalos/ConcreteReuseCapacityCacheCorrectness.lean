@@ -4051,8 +4051,11 @@ theorem ConcreteReuseCapacityCacheFrame.closureMatchesStep_hit
       next.host.closureApplication? = some application ∧
       ClosureApplicationRel witness application address function arity
         captureKinds captures ∧
-      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
-        facts remainingBytes nextRuntime sourceEnv next locals witness := by
+      ClosureMatchStoreFrame initial next ∧
+        HeaderCapacityTransport initial.host.runtime.heap
+            next.host.runtime.heap witness ∧
+          ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+            facts remainingBytes nextRuntime sourceEnv next locals witness := by
   rcases invariant with
     ⟨⟨⟨⟨related, ordinary, aligned, budget⟩, integer, natural,
       scalar⟩, descriptors⟩, cache, closureTables⟩
@@ -4099,7 +4102,7 @@ theorem ConcreteReuseCapacityCacheFrame.closureMatchesStep_hit
     dispatch := closureTables.dispatch.trans storeFrame.dispatch.symm
     descriptors := storeFrame.descriptors.trans closureTables.descriptors }
   exact ⟨next, application, captureKinds, concrete, snapshot,
-    applicationRelated,
+    applicationRelated, storeFrame, capacity,
     ⟨⟨⟨⟨nextRelated, nextOrdinary, aligned, nextBudget⟩, nextInteger,
       nextNatural, nextScalar⟩, nextDescriptors⟩, nextCache,
       nextClosureTables⟩⟩
@@ -4154,9 +4157,12 @@ theorem ConcreteReuseCapacityCacheFrame.selectedClosureMatcher
         selected.nextStore.host.closureApplication? = some application ∧
         ClosureApplicationRel witness application address function arity
           captureKinds captures ∧
-        ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
-          facts remainingBytes callRuntime sourceEnv selected.nextStore locals
-          witness := by
+        ClosureMatchStoreFrame initial selected.nextStore ∧
+          HeaderCapacityTransport initial.host.runtime.heap
+              selected.nextStore.host.runtime.heap witness ∧
+            ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+              facts remainingBytes callRuntime sourceEnv selected.nextStore locals
+              witness := by
   have matchedEq :=
     selected.matched_eq_of_refines invariant.stateRelated.1.1
       invariant.2.2.dispatch invariant.2.2.descriptors.symm mapped found live
@@ -4172,7 +4178,7 @@ theorem ConcreteReuseCapacityCacheFrame.selectedClosureMatcher
     rw [matchedEq, identityFalse] at selectedMatches
     simp at selectedMatches
   obtain ⟨next, application, captureKinds, concrete, snapshot,
-      applicationRelated, nextInvariant⟩ :=
+      applicationRelated, storeFrame, capacity, nextInvariant⟩ :=
     invariant.closureMatchesStep_hit mapped found live objectEq identityTrue
       sharedCapacity semanticOperation
   have matchedOne : selected.matched = 1 := by
@@ -4188,7 +4194,7 @@ theorem ConcreteReuseCapacityCacheFrame.selectedClosureMatcher
     injection concrete
   subst next
   exact ⟨identityTrue, application, captureKinds, snapshot,
-    applicationRelated, nextInvariant⟩
+    applicationRelated, storeFrame, capacity, nextInvariant⟩
 
 /--
 The canonical cache frame also supplies the complete first-matching split for
@@ -6130,6 +6136,176 @@ theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationExact
     witnessDescriptorsPreserved, nextTransfer,
     ⟨nextBaseInvariant, callee.cacheTable, nextClosureTables⟩⟩
 
+/-- Ownership-aware cache-frame closure composition.
+
+The selected matcher establishes the exact post-consumption caller frame;
+capture projection and the hereditary callee run from that store/runtime. The
+result reconstructs the ordinary outer `let` frame while threading the
+callee's evolved cache table and immutable closure-table transport. -/
+theorem ConcreteReuseCapacityCacheFrame.ofSaturatedClosureDeclarationConsumed
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv calleeEnv : Env}
+    {calleeCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex closureIndex remainingBytes stepCost : Nat}
+    {closureId : FVarId} {address : Word32}
+    {initialWitness resultWitness : RefinementWitness}
+    {argumentTarget : Wasm.Program}
+    {physicalArgs : List Wasm.Value}
+    {resultKind : AbiKind} {physical : Wasm.Value}
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes sourceRuntime sourceEnv initial
+        locals initialWitness)
+    (stepFits : stepCost ≤ remainingBytes)
+    (before : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (selected :
+      ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address)
+    (suffix : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (postMatcher :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+        sourceExternals facts remainingBytes callRuntime sourceEnv
+        selected.nextStore locals initialWitness)
+    (sourceStep :
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hClosure :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (hSat : hostEnv.Satisfies module spec)
+    (beforeNonmatching :
+      ∀ candidate, candidate ∈ before →
+        candidate.matched = (0 : UInt32))
+    (selectedMatches : (selected.matched != 0) = true)
+    (matcherCapacity :
+      HeaderCapacityTransport initial.host.runtime.heap
+        selected.nextStore.host.runtime.heap initialWitness)
+    (matcherFrame : ClosureMatchStoreFrame initial selected.nextStore)
+    (assembled :
+      ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+        selected.nextStore locals)
+    (selectedBodyEq :
+      selected.targetBody =
+        argumentTarget ++ [.call functionIndex, .localSet resultIndex])
+    (callee :
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache calleeContext
+        sourceModule calleeFunction module hostEnv sourceExternals callRuntime
+        nextRuntime calleeEnv calleeCode targetFunction functionIndex
+        selected.nextStore afterCall initialWitness resultWitness
+        physicalArgs.reverse resultKind sourceValue physical stepCost)
+    (targetSet :
+      locals.set? resultIndex physical = some updated)
+    (transfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId)) :
+    CallLetStepSimulates context callerFunction module hostEnv sourceExternals
+          decl continuation
+          (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+            [.localGet resultIndex])
+          sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall
+          locals updated resultIndex initialWitness resultWitness ∧
+      afterCall.host.externals = initial.host.externals ∧
+        afterCall.host.closureDescriptors =
+            initial.host.closureDescriptors ∧
+          resultWitness.closureDescriptors =
+              initialWitness.closureDescriptors ∧
+            reuseCapacityLetFacts? facts decl =
+                some (eraseReuseCapacityFact facts decl.fvarId) ∧
+              ConcreteReuseCapacityCacheFrame sourceModule callerFunction
+                sourceExternals (eraseReuseCapacityFact facts decl.fvarId)
+                (remainingBytes - stepCost) nextRuntime
+                (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+                resultWitness := by
+  have capacityStep :
+      ReuseCapacityCallLetStepSimulates facts
+        (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+        hostEnv sourceExternals decl continuation
+        (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+          [.localGet resultIndex])
+        sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall locals
+        updated resultIndex initialWitness resultWitness :=
+    ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclarationConsumed
+      before selected suffix sourceStep invariant.1.1.1.1 resultFound
+      resultKindAt hClosure hSat beforeNonmatching selectedMatches
+      matcherCapacity assembled selectedBodyEq
+      callee.declaration.capacityPreserving targetSet
+  rcases postMatcher with
+    ⟨⟨⟨⟨postRelated, postOrdinary, postFrameAligned, postBudget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      postDescriptorAgreement⟩, _postCache, postClosureTables⟩
+  have nextOrdinary :
+      ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) := by
+    simpa using
+      postOrdinary.eraseBind callee.declaration.ordinaryTransport
+  have lengths := FirTalos.Correctness.locals_lengths_of_set? targetSet
+  have nextFrameAligned :
+      ConcreteLocalFrameAligned callerFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+        resultWitness :=
+    ⟨lengths.1.trans postFrameAligned.1,
+      lengths.2.trans postFrameAligned.2⟩
+  have nextBudget :
+      afterCall.host.runtime.heap.AddressSpaceBudget
+        (remainingBytes - stepCost) :=
+    callee.declaration.residualBudget stepFits postBudget
+  have nextDescriptorAgreement :
+      afterCall.host.closureDescriptors =
+        resultWitness.closureDescriptors :=
+    callee.declaration.hostDescriptorsPreserved.trans
+      (postDescriptorAgreement.trans
+        callee.declaration.witnessDescriptorsPreserved.symm)
+  have nextBaseInvariant :
+      ConcreteReuseCapacityPureExternalOwnershipFrame callerFunction
+        sourceExternals (eraseReuseCapacityFact facts decl.fvarId)
+        (remainingBytes - stepCost) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+        resultWitness :=
+    ⟨⟨⟨capacityStep.nextRelated, nextOrdinary, nextFrameAligned,
+          nextBudget⟩,
+        by
+          rw [callee.declaration.externalsPreserved]
+          exact integerImplementation,
+        by
+          rw [callee.declaration.externalsPreserved]
+          exact naturalImplementation,
+        by
+          rw [callee.declaration.externalsPreserved]
+          exact scalarImplementation⟩,
+      nextDescriptorAgreement⟩
+  have nextClosureTables :
+      ClosureTablesAgree afterCall resultWitness :=
+    callee.declaration.toClosureTablesTransport.agree postClosureTables
+  exact ⟨capacityStep.ordinary,
+    callee.declaration.externalsPreserved.trans matcherFrame.externals,
+    callee.declaration.hostDescriptorsPreserved.trans matcherFrame.descriptors,
+    callee.declaration.witnessDescriptorsPreserved, transfer,
+    ⟨nextBaseInvariant, callee.cacheTable, nextClosureTables⟩⟩
+
 /--
 Uniform cache-aware implementation condition for saturated generated closure
 dispatch.
@@ -6947,7 +7123,7 @@ theorem SaturatedClosureCallResolution.argumentsAssembly
     {context : Fir.Wasm.Context}
     {decl : LCNF.LetDecl .impure}
     {sourceEnv : Env}
-    {sourceRuntime : RuntimeState}
+    {sourceRuntime stateRuntime : RuntimeState}
     {site : SaturatedClosureCallSite context decl sourceEnv}
     (resolution : SaturatedClosureCallResolution context sourceRuntime site)
     {sourceCode : LCNF.Code .impure}
@@ -6976,7 +7152,7 @@ theorem SaturatedClosureCallResolution.argumentsAssembly
     (applicationFound : initial.host.closureApplication? = some application)
     (applicationRelated : ClosureApplicationRel witness application address
       resolution.function resolution.arity captureKinds resolution.captures)
-    (stateRelated : StateRelated sourceFunction sourceRuntime sourceEnv initial
+    (stateRelated : StateRelated sourceFunction stateRuntime sourceEnv initial
       locals witness)
     (failureClear : clearFailure initial = initial) :
     ∃ physicalArgs,
@@ -7299,6 +7475,392 @@ theorem SaturatedClosureCallResolution.candidateSource_exists
   apply List.mem_filterMap.mpr
   exact
     ⟨resolution.captures.size, List.mem_range.mpr fixedInRange, compiled⟩
+
+/-- Every successful closure-candidate constructor exposes the matcher row
+determined by its source declaration, parameter arity, and fixed count. -/
+private theorem compileClosureCandidateAt_matcher
+    {declId closureId : FVarId} {resultKind : AbiKind}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds parameterKinds : Array AbiKind}
+    {target : LCNF.Decl .impure} {fixed : Nat}
+    {candidate : List Fir.Wasm.Instruction × List Fir.Wasm.Instruction}
+    (compiled :
+      Fir.Wasm.compileClosureCandidateAt declId closureId resultKind
+        argumentCode argumentKinds target parameterKinds fixed =
+          some candidate) :
+    candidate.1 = [
+      .localGet closureId,
+      .call (.runtime
+        (.closureMatches target.name parameterKinds.size fixed))] := by
+  unfold Fir.Wasm.compileClosureCandidateAt at compiled
+  split at compiled <;> simp_all
+  split at compiled
+  · split at compiled
+    · simp at compiled
+    · simp at compiled
+      simpa using (congrArg Prod.fst compiled.2).symm
+  · simp only [Option.bind_eq_some_iff] at compiled
+    rcases compiled with ⟨_, targetResult, _, result⟩
+    split at result
+    · simp at result
+    · simp at result
+      simpa using (congrArg Prod.fst result).symm
+
+/-- Top-level name uniqueness identifies two declaration-table members with
+the same name. Kept at the closure-candidate boundary so selected compiler
+rows can be recovered without accepting a target-body certificate. -/
+private theorem declaration_eq_of_programNamesUnique
+    {program : Fir.LeanIR.ImpureProgram}
+    {left right : LCNF.Decl .impure}
+    (unique : program.NamesUnique)
+    (leftMem : left ∈ program.decls.toList)
+    (rightMem : right ∈ program.decls.toList)
+    (namesEq : left.name = right.name) :
+    left = right := by
+  have go :
+      ∀ (declarations : List (LCNF.Decl .impure)) {left right},
+        (declarations.Pairwise fun left right => left.name ≠ right.name) →
+          left ∈ declarations → right ∈ declarations →
+            left.name = right.name → left = right := by
+    intro declarations left right unique leftMem rightMem namesEq
+    induction declarations with
+    | nil => simp at leftMem
+    | cons head tail ih =>
+        simp only [List.pairwise_cons] at unique
+        rcases unique with ⟨headFresh, tailUnique⟩
+        rcases List.mem_cons.mp leftMem with rfl | leftTail
+        · rcases List.mem_cons.mp rightMem with rfl | rightTail
+          · rfl
+          · exact False.elim ((headFresh right rightTail) namesEq)
+        · rcases List.mem_cons.mp rightMem with rfl | rightTail
+          · exact False.elim ((headFresh left leftTail) namesEq.symm)
+          · exact ih tailUnique leftTail rightTail
+  exact go program.decls.toList unique leftMem rightMem namesEq
+
+/-- A selected executable candidate with the resolved semantic matcher
+identity has the exact saturated source body emitted for that declaration.
+The proof inverts the real compiler enumeration and uses production name
+uniqueness; no candidate-body equality is supplied by the caller. -/
+theorem SaturatedClosureCallResolution.candidateSource_eq_of_identity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host}
+    {closureIndex : Nat} {address : Word32}
+    {candidate : ClosureCandidateCase sourceModule sourceFunction labels
+      targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+      address}
+    {candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels
+        targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+        address)}
+    (candidatesEq :
+      context.program.decls.toList.flatMap (fun target =>
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId site.resultKind site.argumentCode site.argumentKinds
+          target) = candidates.map (·.source))
+    (candidateMem : candidate ∈ candidates)
+    (identity :
+      (resolution.function == candidate.function &&
+        resolution.arity == candidate.arity &&
+        resolution.captures.size == candidate.fixed) = true) :
+    candidate.source =
+      ([.localGet site.closureId,
+        .call (.runtime (.closureMatches resolution.function resolution.arity
+          resolution.captures.size))],
+       Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+          resolution.arity resolution.captures.size resolution.parameterKinds ++
+        site.argumentCode ++
+        [.call (.declaration resolution.function), .localSet decl.fvarId]) := by
+  have sourceMem :
+      candidate.source ∈
+        context.program.decls.toList.flatMap (fun target =>
+          Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+            site.closureId site.resultKind site.argumentCode site.argumentKinds
+            target) := by
+    rw [candidatesEq]
+    exact List.mem_map.mpr ⟨candidate, candidateMem, rfl⟩
+  obtain ⟨target, targetMem, generatedMem⟩ := List.mem_flatMap.mp sourceMem
+  unfold Fir.Wasm.compileClosureCandidatesForTarget at generatedMem
+  cases parameterKindsFound :
+      Fir.Wasm.declarationParameterKinds? context.program target with
+  | none => simp [parameterKindsFound] at generatedMem
+  | some targetParameterKinds =>
+      simp only [parameterKindsFound] at generatedMem
+      split at generatedMem
+      · simp at generatedMem
+      · obtain ⟨fixed, _, compiled⟩ := List.mem_filterMap.mp generatedMem
+        have generatedMatcher := compileClosureCandidateAt_matcher compiled
+        have matcherLists :
+            ([.localGet site.closureId,
+              .call (.runtime (.closureMatches target.name
+                targetParameterKinds.size fixed))] :
+                List Fir.Wasm.Instruction) =
+              [.localGet site.closureId,
+                .call (.runtime (.closureMatches candidate.function
+                  candidate.arity candidate.fixed))] :=
+          generatedMatcher.symm.trans candidate.sourceMatcher
+        have operationEq :
+            Fir.Wasm.RuntimeOp.closureMatches target.name
+                targetParameterKinds.size fixed =
+              .closureMatches candidate.function candidate.arity
+                candidate.fixed := by
+          have callsEq :=
+            congrArg (fun xs : List Fir.Wasm.Instruction => xs[1]?)
+              matcherLists
+          simpa using callsEq
+        obtain ⟨targetName, targetArity, targetFixed⟩ :=
+          Fir.Wasm.RuntimeOp.closureMatches.inj operationEq
+        simp only [Bool.and_eq_true] at identity
+        have functionIdentity : resolution.function = candidate.function :=
+          beq_iff_eq.mp identity.1.1
+        have arityIdentity : resolution.arity = candidate.arity :=
+          beq_iff_eq.mp identity.1.2
+        have fixedIdentity :
+            resolution.captures.size = candidate.fixed :=
+          beq_iff_eq.mp identity.2
+        have resolvedTargetMem :
+            resolution.target ∈ context.program.decls.toList := by
+          obtain ⟨index, indexLt, targetAt, _⟩ :=
+            (Array.find?_eq_some_iff_getElem.mp resolution.targetFound).2
+          have member :
+              resolution.target ∈ context.program.decls := by
+            rw [← targetAt]
+            exact Array.getElem_mem indexLt
+          simpa using member
+        have targetNameEq : target.name = resolution.target.name :=
+          targetName.trans
+            (functionIdentity.symm.trans resolution.targetName.symm)
+        have contextNamesUnique : context.program.NamesUnique := by
+          rw [spec.contextProgram]
+          exact spec.programNamesUnique
+        have targetEq : target = resolution.target :=
+          declaration_eq_of_programNamesUnique contextNamesUnique targetMem
+            resolvedTargetMem targetNameEq
+        subst target
+        have parameterKindsEq :
+            targetParameterKinds = resolution.parameterKinds := by
+          rw [resolution.parametersKnown] at parameterKindsFound
+          exact (Option.some.inj parameterKindsFound).symm
+        subst targetParameterKinds
+        have fixedEq : fixed = resolution.captures.size :=
+          targetFixed.trans fixedIdentity.symm
+        rw [fixedEq] at compiled
+        have argumentPositive : 0 < site.argumentKinds.size := by
+          exact Array.size_pos_iff.mpr
+            (Array.isEmpty_eq_false_iff.mp site.argumentKinds_nonempty)
+        have fixedLt :
+            resolution.captures.size < resolution.parameterKinds.size := by
+          have saturated := resolution.saturated
+          omega
+        let expected :
+            List Fir.Wasm.Instruction × List Fir.Wasm.Instruction :=
+          ([.localGet site.closureId,
+            .call (.runtime (.closureMatches resolution.function
+              resolution.arity resolution.captures.size))],
+           Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+              resolution.arity resolution.captures.size
+                resolution.parameterKinds ++
+            site.argumentCode ++
+            [.call (.declaration resolution.function),
+              .localSet decl.fvarId])
+        have expectedCompiled :
+            Fir.Wasm.compileClosureCandidateAt decl.fvarId site.closureId
+                site.resultKind site.argumentCode site.argumentKinds
+                resolution.target resolution.parameterKinds
+                resolution.captures.size = some expected := by
+          simp [Fir.Wasm.compileClosureCandidateAt, expected,
+            resolution.saturated, resolution.argumentsRefine,
+            resolution.targetResult, resolution.targetResultRefines,
+            resolution.targetName, resolution.arityEq, fixedLt]
+        rw [expectedCompiled] at compiled
+        have sourceEq : expected = candidate.source :=
+          Option.some.inj compiled
+        simpa [expected] using sourceEq.symm
+
+/-- The selected candidate's real adapter equation determines the numeric
+declaration call, destination local, and adapted capture/argument prefix for
+the resolved saturated source body. -/
+theorem SaturatedClosureCallResolution.candidateBody_of_identity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime : RuntimeState}
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host}
+    {closureIndex resultIndex : Nat} {address : Word32}
+    {candidate : ClosureCandidateCase sourceModule sourceFunction labels
+      targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+      address}
+    {candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels
+        targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+        address)}
+    (candidatesEq :
+      context.program.decls.toList.flatMap (fun target =>
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId site.resultKind site.argumentCode site.argumentKinds
+          target) = candidates.map (·.source))
+    (candidateMem : candidate ∈ candidates)
+    (identity :
+      (resolution.function == candidate.function &&
+        resolution.arity == candidate.arity &&
+        resolution.captures.size == candidate.fixed) = true)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex) :
+    ∃ functionIndex argumentTarget,
+      callIndex? sourceModule (.declaration resolution.function) =
+          some functionIndex ∧
+        instructions sourceModule sourceFunction labels
+            (Fir.Wasm.compileFixedClosureFields site.closureId
+              resolution.target resolution.arity resolution.captures.size
+                resolution.parameterKinds ++ site.argumentCode) =
+          .ok argumentTarget ∧
+        candidate.targetBody =
+          argumentTarget ++ [.call functionIndex, .localSet resultIndex] := by
+  have sourceEq := resolution.candidateSource_eq_of_identity site spec
+    candidatesEq candidateMem identity
+  have sourceBodyEq :
+      candidate.source.2 =
+        Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+            resolution.arity resolution.captures.size
+              resolution.parameterKinds ++
+          site.argumentCode ++
+          [.call (.declaration resolution.function),
+            .localSet decl.fvarId] :=
+    congrArg Prod.snd sourceEq
+  have bodyAdapted := candidate.bodyAdapted
+  rw [sourceBodyEq] at bodyAdapted
+  obtain ⟨targetCall, targetSet, callAdapted, setAdapted, targetEq⟩ :=
+    instructions_append_eq_ok
+      (left :=
+        Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+            resolution.arity resolution.captures.size
+              resolution.parameterKinds ++
+          site.argumentCode ++
+          [.call (.declaration resolution.function)])
+      (right := [.localSet decl.fvarId]) (by
+        simpa [List.append_assoc] using bodyAdapted)
+  obtain ⟨argumentTarget, functionIndex, argumentAdapted, callFound,
+      targetCallEq⟩ := instructions_append_declaration_call_eq callAdapted
+  have localFound :
+      findFVar?
+          (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+          decl.fvarId = some resultIndex := by
+    simpa [functionBindings] using resultFound
+  have targetSetEq : targetSet = [.localSet resultIndex] := by
+    have adaptedEq :
+        (Except.ok [.localSet resultIndex] : Except AdapterError Wasm.Program) =
+          .ok targetSet := by
+      simpa [instructions, instruction, localFound, Bind.bind, Except.bind,
+        pure, Except.pure] using setAdapted
+    exact (Except.ok.inj adaptedEq).symm
+  subst targetCall
+  subst targetSet
+  exact ⟨functionIndex, argumentTarget, callFound, argumentAdapted, by
+    simpa [List.append_assoc] using targetEq⟩
+
+/-- Compiler selection, post-matcher refinement, and allocation ABI alignment
+construct the complete generated callee-entry operand row for the selected
+candidate. The only remaining interprocedural premise is correctness of the
+resolved declaration at these related parameters. -/
+theorem SaturatedClosureCallResolution.candidateArguments_of_identity
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    {sourceRuntime callRuntime : RuntimeState}
+    (site : SaturatedClosureCallSite context decl sourceEnv)
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureIndex resultIndex : Nat} {address : Word32}
+    {captureKinds : Array AbiKind}
+    {candidate : ClosureCandidateCase sourceModule sourceFunction labels
+      targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+      address}
+    {candidates : List
+      (ClosureCandidateCase sourceModule sourceFunction labels
+        targetModule.wasmModule hosts.spec initial site.closureId closureIndex
+        address)}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) site.closureId =
+        some closureIndex)
+    (closureLocal :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (candidatesEq :
+      context.program.decls.toList.flatMap (fun target =>
+        Fir.Wasm.compileClosureCandidatesForTarget context.program decl.fvarId
+          site.closureId site.resultKind site.argumentCode site.argumentKinds
+          target) = candidates.map (·.source))
+    (candidateMem : candidate ∈ candidates)
+    (identity :
+      (resolution.function == candidate.function &&
+        resolution.arity == candidate.arity &&
+        resolution.captures.size == candidate.fixed) = true)
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) decl.fvarId =
+        some resultIndex)
+    (applicationFound :
+      candidate.nextStore.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds resolution.captures)
+    (stateRelated :
+      StateRelated sourceFunction callRuntime sourceEnv candidate.nextStore
+        locals witness)
+    (failureClear : clearFailure candidate.nextStore = candidate.nextStore) :
+    ∃ functionIndex argumentTarget physicalArgs,
+      callIndex? sourceModule (.declaration resolution.function) =
+          some functionIndex ∧
+        ClosureArgumentAssembly targetModule.wasmModule hosts.env
+          argumentTarget physicalArgs candidate.nextStore locals ∧
+        ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+          physicalArgs (resolution.captures ++ site.semanticArgs).toList ∧
+        candidate.targetBody =
+          argumentTarget ++ [.call functionIndex, .localSet resultIndex] := by
+  obtain ⟨functionIndex, argumentTarget, callFound, argumentAdapted,
+      bodyEq⟩ :=
+    resolution.candidateBody_of_identity site spec candidatesEq candidateMem
+      identity resultFound
+  obtain ⟨physicalArgs, assembled, related⟩ :=
+    resolution.argumentsAssembly spec aligned closureFound closureLocal
+      argumentAdapted applicationFound applicationRelated stateRelated
+      failureClear
+  exact ⟨functionIndex, argumentTarget, physicalArgs, callFound, assembled,
+    related, bodyEq⟩
 
 /--
 An exact compiler-candidate enumeration contains the semantic matcher

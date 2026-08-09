@@ -966,6 +966,117 @@ theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclaration
         initialRelated.stateRelated.clearFailure beforeNonmatching
         selectedMatches (by simpa [selectedStore] using selectedBody)
 
+/-- Ownership-aware saturated closure composition.
+
+Unlike the compatibility theorem above, the selected matcher may consume the
+source closure. Its concrete successor store therefore becomes the entry store
+for capture projection and the generated declaration call. The outer source
+step still describes the complete source call, so no target execution trace or
+unchanged-store shortcut is required. -/
+theorem ReuseCapacityCallLetStepSimulates.ofSaturatedClosureDeclarationConsumed
+    {facts : ReuseCapacityFacts}
+    {context : Fir.Wasm.Context}
+    {calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {spec : Wasm.HostSpec Host}
+    {sourceExternals : ExternalImpl}
+    {decl : LCNF.LetDecl .impure} {continuation : LCNF.Code .impure}
+    {sourceRuntime callRuntime nextRuntime : RuntimeState}
+    {sourceEnv calleeEnv : Env}
+    {calleeCode : LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {initial afterCall : Wasm.Store Host}
+    {locals updated : Wasm.Locals}
+    {resultIndex closureIndex : Nat}
+    {closureId : FVarId} {address : Word32}
+    {initialWitness resultWitness : RefinementWitness}
+    {argumentTarget : Wasm.Program}
+    {physicalArgs : List Wasm.Value}
+    {resultKind : AbiKind} {physical : Wasm.Value}
+    (before : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (selected :
+      ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address)
+    (suffix : List
+      (ClosureCandidateCase sourceModule callerFunction labels module spec
+        initial closureId closureIndex address))
+    (sourceStep :
+      SourceCallLetResult context sourceExternals sourceRuntime sourceEnv decl
+        continuation nextRuntime sourceValue)
+    (initialRelated :
+      ReuseCapacityStateRelated facts callerFunction sourceRuntime sourceEnv
+        initial locals initialWitness)
+    (resultFound :
+      findFVar? (functionBindings callerFunction) decl.fvarId =
+        some resultIndex)
+    (resultKindAt :
+      (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+        some resultKind)
+    (hClosure :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (hSat : hostEnv.Satisfies module spec)
+    (beforeNonmatching :
+      ∀ candidate, candidate ∈ before →
+        candidate.matched = (0 : UInt32))
+    (selectedMatches : (selected.matched != 0) = true)
+    (matcherCapacity :
+      HeaderCapacityTransport initial.host.runtime.heap
+        selected.nextStore.host.runtime.heap initialWitness)
+    (assembled :
+      ClosureArgumentAssembly module hostEnv argumentTarget physicalArgs
+        selected.nextStore locals)
+    (selectedBodyEq :
+      selected.targetBody =
+        argumentTarget ++ [.call functionIndex, .localSet resultIndex])
+    (callee :
+      CapacityPreservingSuccessfulDeclaration calleeContext sourceModule
+        calleeFunction module hostEnv sourceExternals callRuntime nextRuntime
+        calleeEnv calleeCode targetFunction functionIndex selected.nextStore
+        afterCall initialWitness resultWitness physicalArgs.reverse resultKind
+        sourceValue physical)
+    (targetSet :
+      locals.set? resultIndex physical = some updated) :
+    ReuseCapacityCallLetStepSimulates facts
+      (eraseReuseCapacityFact facts decl.fvarId) context callerFunction module
+      hostEnv sourceExternals decl continuation
+      (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+        [.localGet resultIndex])
+      sourceRuntime nextRuntime sourceEnv sourceValue initial afterCall locals
+      updated resultIndex initialWitness resultWitness := by
+  refine ReuseCapacityCallLetStepSimulates.ofErase initialRelated ?_
+    resultFound (localUpdate_of_set? targetSet) callee.witnessTransport
+    (HeaderCapacityTransport.transAcross matcherCapacity
+      (WitnessTransport.refl initialWitness) callee.capacityTransport)
+  refine ⟨sourceStep, initialRelated.stateRelated, ?_, ?_⟩
+  · exact initialRelated.stateRelated.bindAfterTransport
+      callee.witnessTransport callee.successful.runtimeRelated
+      callee.successful.failureClear resultFound resultKindAt
+      callee.successful.valueRelated targetSet
+  · intro rest Q tail continued
+    have selectedBody :
+        Wasm.wp module selected.targetBody
+          (closureDispatchSelectedPost module hostEnv tail before.length
+            (.localGet resultIndex :: .localSet resultIndex :: rest) Q)
+          selected.nextStore { locals with values := tail } hostEnv := by
+      rw [selectedBodyEq]
+      apply wp_directCallBody_of_assembly assembled
+        (callee.successful.terminatesWithExact tail) targetSet
+      apply (Wasm.wp_nil).2
+      apply closureDispatchSelectedPost_fallthrough before.length
+      exact wp_closureDispatchResult targetSet continued
+    simpa [List.append_assoc] using
+      wp_compileClosureDispatch_of_selected before selected suffix
+        (.localSet resultIndex :: rest) Q hClosure hSat
+        initialRelated.stateRelated.clearFailure beforeNonmatching
+        selectedMatches selectedBody
+
 /--
 The underapplication sibling of `ofSaturatedClosureDeclaration`.
 
