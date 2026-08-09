@@ -4677,9 +4677,11 @@ example
   exists_first_nonzero matched values existsMatch
 
 /--
-The production compiler-generated non-heap lazy family is available over the
-fixed-entry cache frame. Misses thread the recursively evolved table and use
+The production compiler-generated non-heap lazy family is a generated-function
+law, not an export law. Misses thread the recursively evolved table and use
 heap-neutral publication to preserve the hereditary ordinaryness transport.
+The recursive initializer theorem remains the next boundary to derive from a
+nested source derivation.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -4690,11 +4692,10 @@ example
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (resultKinds : LazyCacheInternalResultKindsNonHeap context)

@@ -7315,13 +7315,13 @@ Structural compiler-derived internal lazy-cache miss.
 
 The source support relation supplies only the nullary declaration and its
 body. Production lowering/adaptation chooses the cache, declaration, and
-publication-call indices. `ConcreteSupportedExport` then supplies the exact
+publication-call indices. `ConcreteSupportedFunction` then supplies the exact
 resolved publication contract and destination layout, while the recursive
 program induction supplies the hereditary callee result at the selected
 declaration index. No target execution or numeric-index certificate is a
 premise.
 -/
-theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
+theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
     {facts : ReuseCapacityFacts}
     {program : Fir.LeanIR.ImpureProgram}
     (context : Fir.Wasm.Context)
@@ -7330,11 +7330,10 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
     (labels : List FVarId)
     (targetModule : AdaptedModule)
     (hosts : ResolvedHosts)
-    (exportName : String)
     {callerCode : LCNF.Code .impure}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        callerFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        callerFunction targetModule hosts)
     (sourceExternals : ExternalImpl)
     {decl : LCNF.LetDecl .impure}
     {continuation : LCNF.Code .impure}
@@ -7919,11 +7918,10 @@ theorem LazyCacheImplementation.ofInternalCompiler
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (declarations :
@@ -7946,9 +7944,9 @@ theorem LazyCacheImplementation.ofInternalCompiler
           valueCompiled valueAdapted resultFound rfl
   | miss call =>
       exact
-        BudgetedCapacityPreservingLazyStep.miss_of_supportedExportCompiler
+        BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
           context sourceModule sourceFunction labels targetModule hosts
-          exportName spec sourceExternals call generated sourceStep invariant
+          spec sourceExternals call generated sourceStep invariant
           valueCompiled valueAdapted resultFound
           (LazyCacheInternalPublicationInduction.toMissInduction
             (resultId := decl.fvarId)
@@ -7973,11 +7971,10 @@ theorem
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (resultKinds : LazyCacheInternalResultKindsNonHeap context)
@@ -8111,7 +8108,7 @@ contains only `LazyCacheInternalSupported`, while target execution is derived
 from the supported export, generated cache environment, and the uniform
 declaration induction.
 -/
-theorem ConcreteSupportedExport.internalLazyRuntimeRefines
+theorem ConcreteSupportedFunction.internalLazyRuntimeRefines
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {callerCode : LCNF.Code .impure}
@@ -8120,11 +8117,10 @@ theorem ConcreteSupportedExport.internalLazyRuntimeRefines
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (declarations :
@@ -8146,7 +8142,7 @@ Clients provide only the recursive hereditary declaration theorem and the
 source result-kind policy. Publication disjointness, retained-token transport,
 and the complete compiler-generated hit/miss implementation are derived.
 -/
-theorem ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines
+theorem ConcreteSupportedFunction.internalNonHeapLazyRuntimeRefines
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {callerCode : LCNF.Code .impure}
@@ -8155,11 +8151,10 @@ theorem ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (resultKinds : LazyCacheInternalResultKindsNonHeap context)
@@ -8185,7 +8180,7 @@ table and publish their own non-heap result, and both paths extend every
 fixed-entry representation transport.
 -/
 theorem
-    ConcreteSupportedExport.internalNonHeapLazyRuntimeRefines_entryRelativeCache
+    ConcreteSupportedFunction.internalNonHeapLazyRuntimeRefines_entryRelativeCache
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context}
     {callerCode : LCNF.Code .impure}
@@ -8194,11 +8189,10 @@ theorem
     {labels : List FVarId}
     {targetModule : AdaptedModule}
     {hosts : ResolvedHosts}
-    {exportName : String}
     {sourceExternals : ExternalImpl}
     (spec :
-      ConcreteSupportedExport program context callerCode sourceModule
-        sourceFunction targetModule hosts exportName)
+      ConcreteSupportedFunction program context callerCode sourceModule
+        sourceFunction targetModule hosts)
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (resultKinds : LazyCacheInternalResultKindsNonHeap context)
