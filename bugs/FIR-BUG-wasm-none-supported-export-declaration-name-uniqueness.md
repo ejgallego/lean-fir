@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: f0ee6857e6d175cf5bdf6c1be9342c9a3a51bdb4
@@ -85,4 +85,16 @@ none
 
 ## Resolution and regression
 
-open
+`ConcreteSupportedExport` now retains the `Program.NamesUnique` fact from the
+phase boundary. `ConcreteGeneratedInternalDeclaration.callIndexEq` is derived
+from the real `lower`/`adapt` runs: source-name uniqueness preserves a unique
+symbolic function table and rules out an external import shadowing the
+source-selected internal declaration. The production hereditary named-call
+law consumes that equality internally and exposes no numeric-index premise.
+
+`ConcreteCompilerCorrectnessContract.lean` guards all three boundaries: the
+phase invariant is present on a supported export, every selected internal row
+has its exact call-index equation, and the preferred named-call theorem takes
+only the nested finite source correctness obligation. Raw `lowerSupported`
+remains a low-level API for already checked phase input; duplicate-name raw
+programs cannot construct the concrete compiler-correctness boundary.

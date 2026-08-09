@@ -5713,6 +5713,33 @@ isolated contract slice retains that existing source well-formedness fact,
 proves exact call-index selection, and then closes the hereditary production
 call law by its nested induction hypothesis.
 
+W6.6hr closes the production named-call selection seam. The supported-export
+contract retains the phase's `Program.NamesUnique` invariant. Successful real
+lowering maps unique source declaration names to a unique symbolic function
+table; runtime imports have no declaration key, and a distinct external
+declaration cannot shadow the source-selected internal row. Consequently
+`ConcreteGeneratedInternalDeclaration.callIndexEq` identifies the adapter's
+executable numeric lookup with that exact generated row.
+
+`DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler`
+now consumes the hereditary call payload directly. It recovers the production
+callee row at the exact `LoweredInternalDeclaration` context, constructs the
+callee entry frame from related arguments, invokes correctness of the nested
+finite source derivation, and reinterprets its result at the caller ABI. The
+call site supplies no target index, target execution, or translation
+certificate. `FIR-BUG-wasm-none-supported-export-declaration-name-uniqueness`
+is fixed at the compiler-correctness boundary.
+
+The remaining direct-call slice proves
+`DirectHereditaryGeneratedDeclarationInduction` itself by structural induction
+over `ReuseCapacityDirectHereditaryCodeEvaluates`, using the generated-row
+direct/external/case/effect operation families and this new recursive call law.
+That theorem, rather than the compatibility
+`DirectInternalCallDeclarationInduction`, is the direct named-call component
+of the final whole-export partial-correctness result. Saturated closure and
+lazy-miss constructors remain subsequent extensions of the same source
+derivation.
+
 ## Parallel agent packages
 
 After W0 lands, use file-level ownership to minimize conflicts:

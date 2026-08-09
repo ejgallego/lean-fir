@@ -7873,6 +7873,19 @@ theorem LoweredInternalDeclaration.lowerDecl
     row.bodyCompiled, row.resultsCompiled, Bind.bind, Except.bind, pure,
     Except.pure, row.sourceFunctionEq]
 
+/-- Production declaration lowering preserves the source declaration name. -/
+theorem LoweredInternalDeclaration.sourceFunctionName
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction) :
+    sourceFunction.name = declaration.name := by
+  simpa using congrArg Fir.Wasm.Function.name row.sourceFunctionEq
+
 /-- An internal source declaration cannot produce the `none` branch reserved
 for external imports when `lowerDecl` succeeds. -/
 theorem lowerDecl_some_of_code
@@ -8012,6 +8025,9 @@ structure ConcreteGeneratedInternalDeclaration
     Fir.Wasm.addDeclarationParams program declaration = .ok parameterLocals
   sourceParameters :
     sourceFunction.params = parameterLocals.reverse.toArray
+  callIndexEq :
+    callIndex? sourceModule (.declaration declaration.name) =
+      some targetFunctionIndex
 
 /-- The validator's count-based parameter check gives the proof-facing
 `Nodup` fact for the source parameter names. -/
@@ -8846,6 +8862,427 @@ private theorem exceptListFilterMapM_mem_of_mem
                   · exact List.mem_cons_of_mem headValue
                       (ih tailResult tailMember selected)
 
+/-- Every row emitted by a successful `filterMapM` comes from an exact input
+row selected by the executable traversal. -/
+private theorem exceptListFilterMapM_source_of_mem
+    {α β ε : Type} {f : α → Except ε (Option β)}
+    {xs : List α} {ys : List β} {y : β}
+    (mapped : xs.filterMapM f = .ok ys)
+    (member : y ∈ ys) :
+    ∃ x ∈ xs, f x = .ok (some y) := by
+  induction xs generalizing ys y with
+  | nil =>
+      simp only [List.filterMapM_nil, pure, Except.pure,
+        Except.ok.injEq] at mapped
+      subst ys
+      simp at member
+  | cons head tail ih =>
+      cases headResult : f head with
+      | error error =>
+          simp only [List.filterMapM_cons, headResult, Bind.bind,
+            Except.bind] at mapped
+          contradiction
+      | ok headOption =>
+          cases tailResult : tail.filterMapM f with
+          | error error =>
+              cases headOption <;>
+                simp only [List.filterMapM_cons, headResult, Bind.bind,
+                  Except.bind, tailResult] at mapped <;>
+                contradiction
+          | ok mappedTail =>
+              cases headOption with
+              | none =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, Except.ok.injEq] at mapped
+                  subst ys
+                  obtain ⟨x, xMem, selected⟩ := ih tailResult member
+                  exact ⟨x, by simp [xMem], selected⟩
+              | some headValue =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, pure, Except.pure,
+                    Except.ok.injEq] at mapped
+                  subst ys
+                  rcases List.mem_cons.mp member with rfl | tailMember
+                  · exact ⟨head, by simp, headResult⟩
+                  · obtain ⟨x, xMem, selected⟩ := ih tailResult tailMember
+                    exact ⟨x, by simp [xMem], selected⟩
+
+/-- A successful `filterMapM` that preserves keys also preserves uniqueness of
+those keys. -/
+private theorem exceptListFilterMapM_map_nodup
+    {α β ε κ : Type} [DecidableEq κ]
+    {f : α → Except ε (Option β)} {inputKey : α → κ}
+    {outputKey : β → κ} {xs : List α} {ys : List β}
+    (mapped : xs.filterMapM f = .ok ys)
+    (unique : (xs.map inputKey).Nodup)
+    (keyPreserved : ∀ {x y}, f x = .ok (some y) →
+      outputKey y = inputKey x) :
+    (ys.map outputKey).Nodup := by
+  induction xs generalizing ys with
+  | nil =>
+      simp only [List.filterMapM_nil, pure, Except.pure,
+        Except.ok.injEq] at mapped
+      subst ys
+      simp
+  | cons head tail ih =>
+      simp only [List.map_cons, List.nodup_cons] at unique
+      rcases unique with ⟨headFresh, tailUnique⟩
+      cases headResult : f head with
+      | error error =>
+          simp only [List.filterMapM_cons, headResult, Bind.bind,
+            Except.bind] at mapped
+          contradiction
+      | ok headOption =>
+          cases tailResult : tail.filterMapM f with
+          | error error =>
+              cases headOption <;>
+                simp only [List.filterMapM_cons, headResult, Bind.bind,
+                  Except.bind, tailResult] at mapped <;>
+                contradiction
+          | ok mappedTail =>
+              cases headOption with
+              | none =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, Except.ok.injEq] at mapped
+                  subst ys
+                  exact ih tailResult tailUnique
+              | some headValue =>
+                  simp only [List.filterMapM_cons, headResult, Bind.bind,
+                    Except.bind, tailResult, pure, Except.pure,
+                    Except.ok.injEq] at mapped
+                  subst ys
+                  simp only [List.map_cons, List.nodup_cons]
+                  refine ⟨?_, ih tailResult tailUnique⟩
+                  intro outputMem
+                  obtain ⟨tailValue, tailValueMem, outputEq⟩ :=
+                    List.mem_map.mp outputMem
+                  obtain ⟨tailInput, tailInputMem, tailSelected⟩ :=
+                    exceptListFilterMapM_source_of_mem tailResult
+                      tailValueMem
+                  apply headFresh
+                  apply List.mem_map.mpr
+                  refine ⟨tailInput, tailInputMem, ?_⟩
+                  rw [← keyPreserved headResult, ← keyPreserved tailSelected]
+                  exact outputEq
+
+/-- Name-unique source declarations lower to a name-unique symbolic function
+table. This is a compiler-derived invariant of the real `filterMapM lowerDecl`
+run, not an independent target certificate. -/
+theorem LoweredInternalDeclaration.functionNamesNodup
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source) :
+    (source.functions.toList.map (·.name)).Nodup := by
+  have mappedArray := LoweredInternalDeclaration.functions_of_lower lowered
+  have mappedList :
+      program.decls.toList.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        .ok source.functions.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [mappedArray]
+    rfl
+  have sourceNamesUnique :
+      (program.decls.toList.map (·.name)).Nodup := by
+    rw [List.nodup_iff_pairwise_ne, List.pairwise_map]
+    exact namesUnique
+  apply exceptListFilterMapM_map_nodup mappedList sourceNamesUnique
+  intro declaration sourceFunction selected
+  cases valueEq : declaration.value with
+  | extern metadata =>
+      simp [Fir.Wasm.lowerDecl, valueEq, pure, Except.pure] at selected
+  | code sourceCode =>
+      obtain ⟨row⟩ :=
+        LoweredInternalDeclaration.exists_of_lowerDecl valueEq selected
+      exact row.sourceFunctionName
+
+/-- In a name-unique symbolic function table, an exact array row is also the
+row selected by the adapter's executable name lookup. -/
+private theorem functionFindIdx?_eq_some_of_namesNodup
+    {functions : Array Fir.Wasm.Function}
+    {index : Nat} {sourceFunction : Fir.Wasm.Function} {name : Name}
+    (namesNodup : (functions.toList.map (·.name)).Nodup)
+    (found : functions[index]? = some sourceFunction)
+    (nameEq : sourceFunction.name = name) :
+    functions.findIdx? (·.name == name) = some index := by
+  obtain ⟨indexLt, functionAt⟩ := Array.getElem?_eq_some_iff.mp found
+  apply Array.findIdx?_eq_some_iff_getElem.mpr
+  refine ⟨indexLt, ?_, ?_⟩
+  · rw [functionAt, nameEq]
+    simp
+  · intro earlier earlierLt
+    intro earlierMatches
+    have earlierName : functions[earlier].name = name :=
+      beq_iff_eq.mp earlierMatches
+    have earlierArrayFound :
+        functions[earlier]? = some functions[earlier] :=
+      Array.getElem?_eq_getElem (Nat.lt_trans earlierLt indexLt)
+    have indexListFound :
+        (functions.toList.map (·.name))[index]? = some name := by
+      rw [List.getElem?_map]
+      have foundList : functions.toList[index]? = some sourceFunction := by
+        simpa using found
+      rw [foundList]
+      simp [nameEq]
+    have earlierListFound :
+        (functions.toList.map (·.name))[earlier]? = some name := by
+      rw [List.getElem?_map]
+      have earlierList :
+          functions.toList[earlier]? = some functions[earlier] := by
+        simpa using earlierArrayFound
+      rw [earlierList]
+      simp [earlierName]
+    have indicesEq : earlier = index := by
+      apply (List.getElem?_inj
+        (by simpa using Nat.lt_trans earlierLt indexLt) namesNodup).mp
+      rw [earlierListFound, indexListFound]
+    omega
+
+/-- Top-level declaration-name uniqueness makes the source declaration table
+injective on its members. -/
+private theorem declaration_eq_of_namesUnique
+    {declarations : List (LCNF.Decl .impure)}
+    {left right : LCNF.Decl .impure}
+    (unique :
+      declarations.Pairwise fun left right => left.name ≠ right.name)
+    (leftMem : left ∈ declarations)
+    (rightMem : right ∈ declarations)
+    (namesEq : left.name = right.name) :
+    left = right := by
+  induction declarations with
+  | nil => simp at leftMem
+  | cons head tail ih =>
+      simp only [List.pairwise_cons] at unique
+      rcases unique with ⟨headFresh, tailUnique⟩
+      rcases List.mem_cons.mp leftMem with rfl | leftTail
+      · rcases List.mem_cons.mp rightMem with rfl | rightTail
+        · rfl
+        · exact False.elim ((headFresh right rightTail) namesEq)
+      · rcases List.mem_cons.mp rightMem with rfl | rightTail
+        · exact False.elim ((headFresh left leftTail) namesEq.symm)
+        · exact ih tailUnique leftTail rightTail
+
+/-- Successful lowering exposes the exact runtime-import prefix and external
+declaration traversal used to construct the symbolic import table. -/
+theorem LoweredInternalDeclaration.imports_of_lower
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    (lowered : Fir.Wasm.lower program = .ok source) :
+    ∃ externalImports,
+      source.imports =
+          (Fir.Wasm.collectRuntimeOps source.functions).mapIdx
+              Fir.Wasm.runtimeImport ++ externalImports ∧
+        (program.decls.filterMapM (fun declaration =>
+            match declaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport declaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) :
+          Except Fir.Wasm.CompileError (Array Fir.Wasm.Import)) =
+            Except.ok externalImports := by
+  unfold Fir.Wasm.lower at lowered
+  dsimp only at lowered
+  generalize functionsEq :
+      program.decls.filterMapM
+          (Fir.Wasm.lowerDecl program
+            (Fir.Wasm.cachedDeclarationNames program)) =
+        functionsResult at lowered
+  cases functionsResult with
+  | error error => contradiction
+  | ok functions =>
+      simp only [Bind.bind, Except.bind] at lowered
+      by_cases operations :
+          (Fir.Wasm.collectRuntimeOps functions).all
+              Fir.Wasm.RuntimeOp.abiWellFormed = true
+      · simp only [operations, ↓reduceIte] at lowered
+        generalize externalEq :
+            (program.decls.filterMapM (fun declaration =>
+                match declaration.value with
+                | .extern _ => do
+                    match Fir.Wasm.externalImport declaration with
+                    | .ok import_ => return some import_
+                    | .error error =>
+                        throw (Fir.Wasm.CompileError.abi error)
+                | .code _ => pure none) :
+              Except Fir.Wasm.CompileError (Array Fir.Wasm.Import)) =
+                externalResult at lowered
+        cases externalResult with
+        | error error => contradiction
+        | ok externalImports =>
+            simp only [pure, Except.pure, Except.ok.injEq] at lowered
+            subst source
+            exact ⟨externalImports, rfl, rfl⟩
+      · simp [operations] at lowered
+
+/-- A successfully constructed external import retains its source declaration
+name in the symbolic import key. -/
+private theorem externalImport_declaration?
+    {declaration : LCNF.Decl .impure} {import_ : Fir.Wasm.Import}
+    (imported : Fir.Wasm.externalImport declaration = .ok import_) :
+    import_.declaration? = some declaration.name := by
+  unfold Fir.Wasm.externalImport at imported
+  cases signatureResult :
+      Fir.Wasm.ExternalTypes.signature {
+        params := declaration.params.map (·.type)
+        result := declaration.type } with
+  | error error =>
+      simp [signatureResult] at imported
+  | ok signature =>
+      simp only [signatureResult, Bind.bind, Except.bind, pure, Except.pure,
+        Except.ok.injEq] at imported
+      subst import_
+      rfl
+
+/-- Successful source lookup fixes the selected declaration's name. -/
+private theorem declarationName_of_findDecl?
+    {program : Fir.LeanIR.ImpureProgram}
+    {name : Name} {declaration : LCNF.Decl .impure}
+    (found : program.findDecl? name = some declaration) :
+    declaration.name = name := by
+  have selected := (Array.find?_eq_some_iff_getElem.mp found).1
+  simpa [Fir.LeanIR.Program.findDecl?] using selected
+
+/-- A name-unique internal source declaration cannot be shadowed by the
+runtime/external import prefix produced by the same lowering run. -/
+theorem LoweredInternalDeclaration.findImportTarget?_eq_none
+    {program : Fir.LeanIR.ImpureProgram}
+    {source : Fir.Wasm.Module}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode) :
+    findImportTarget? source (.declaration declarationName) = none := by
+  obtain ⟨externalImports, importsEq, externalMappedArray⟩ :=
+    LoweredInternalDeclaration.imports_of_lower lowered
+  have externalMappedList :
+      (program.decls.toList.filterMapM (fun sourceDeclaration =>
+            match sourceDeclaration.value with
+            | .extern _ => do
+                match Fir.Wasm.externalImport sourceDeclaration with
+                | .ok import_ => return some import_
+                | .error error =>
+                    throw (Fir.Wasm.CompileError.abi error)
+            | .code _ => pure none) :
+        Except Fir.Wasm.CompileError (List Fir.Wasm.Import)) =
+          Except.ok externalImports.toList := by
+    rw [← Array.toList_filterMapM]
+    rw [externalMappedArray]
+    rfl
+  have declarationMember : declaration ∈ program.decls.toList := by
+    obtain ⟨_, index, inBounds, selected, _⟩ :=
+      Array.find?_eq_some_iff_getElem.mp declarationFound
+    have member : declaration ∈ program.decls := by
+      rw [← selected]
+      exact Array.getElem_mem inBounds
+    simpa using member
+  have declarationNameEq : declaration.name = declarationName :=
+    declarationName_of_findDecl? declarationFound
+  cases importFound :
+      findImportTarget? source (.declaration declarationName) with
+  | none => rfl
+  | some importIndex =>
+      exfalso
+      obtain ⟨importInBounds, importMatches, _⟩ :=
+        Array.findIdx?_eq_some_iff_getElem.mp importFound
+      let import_ := source.imports[importIndex]
+      have importName : import_.declaration? = some declarationName :=
+        beq_iff_eq.mp importMatches
+      have importMember : import_ ∈ source.imports :=
+        Array.getElem_mem importInBounds
+      rw [importsEq] at importMember
+      rcases Array.mem_append.mp importMember with
+        runtimeMember | externalMember
+      · obtain ⟨operationIndex, operationInBounds, runtimeEq⟩ :=
+          Array.exists_of_mem_mapIdx runtimeMember
+        have noDeclaration : import_.declaration? = none := by
+          rw [← runtimeEq]
+          rfl
+        rw [noDeclaration] at importName
+        contradiction
+      · have externalMemberList : import_ ∈ externalImports.toList := by
+          simpa using externalMember
+        obtain ⟨externalDeclaration, externalDeclarationMember, selected⟩ :=
+          exceptListFilterMapM_source_of_mem externalMappedList
+            externalMemberList
+        cases externalValue : externalDeclaration.value with
+        | code externalCode =>
+            simp [externalValue, pure, Except.pure] at selected
+        | extern metadata =>
+            cases importedEq :
+                Fir.Wasm.externalImport externalDeclaration with
+            | error error =>
+                simp [externalValue, importedEq] at selected
+            | ok externalImport =>
+                simp only [externalValue, importedEq, pure, Except.pure,
+                  Except.ok.injEq, Option.some.injEq] at selected
+                subst externalImport
+                have externalImportName :=
+                  externalImport_declaration? importedEq
+                have externalNameEq :
+                    externalDeclaration.name = declarationName := by
+                  rw [externalImportName] at importName
+                  exact Option.some.inj importName
+                have declarationsEq : externalDeclaration = declaration :=
+                  declaration_eq_of_namesUnique namesUnique
+                    externalDeclarationMember declarationMember
+                    (externalNameEq.trans declarationNameEq.symm)
+                subst externalDeclaration
+                rw [bodyEq] at externalValue
+                contradiction
+
+/-- The numeric declaration-call target selected by the adapter is exactly
+the concrete generated function row obtained from the same production
+lowering/adaptation run. -/
+theorem ConcreteGeneratedDeclaration.internalCallIndex
+    {program rowProgram : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {context : Fir.Wasm.Context}
+    {source : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (generated : ConcreteGeneratedDeclaration context sourceCode source
+      sourceFunction target)
+    (row : LoweredInternalDeclaration rowProgram cachedDeclarations
+      declaration sourceCode sourceFunction)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lower program = .ok source)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (bodyEq : declaration.value = .code sourceCode) :
+    callIndex? source (.declaration declarationName) =
+      some generated.targetFunctionIndex := by
+  have noImport :=
+    LoweredInternalDeclaration.findImportTarget?_eq_none namesUnique lowered
+      declarationFound bodyEq
+  have namesNodup :=
+    LoweredInternalDeclaration.functionNamesNodup namesUnique lowered
+  have sourceName : sourceFunction.name = declarationName :=
+    row.sourceFunctionName.trans
+      (declarationName_of_findDecl? declarationFound)
+  have functionIndex :
+      source.functions.findIdx? (·.name == declarationName) =
+        some generated.sourceFunctionIndex :=
+    functionFindIdx?_eq_some_of_namesNodup namesNodup
+      generated.sourceFunctionFound sourceName
+  change
+    (findImportTarget? source (.declaration declarationName) <|>
+      findFunctionTarget? source declarationName) =
+        some generated.targetFunctionIndex
+  rw [noImport]
+  unfold findFunctionTarget?
+  rw [functionIndex]
+  simp [generated.targetFunctionIndex_eq]
+
 /-- Select the exact symbolic function row and declaration-local lowering view
 for any internal declaration found in a successfully lowered program. -/
 theorem LoweredInternalDeclaration.exists_of_lower
@@ -9085,6 +9522,7 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok target)
     (declarationFound :
@@ -9115,12 +9553,17 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
     simpa using congrArg Fir.Wasm.Function.params row.sourceFunctionEq
   have parameterIdsUnique :=
     declarationParameterIdsUnique_of_lowerSupported lowered declarationFound
+  have callIndexEq :=
+    generated.internalCallIndex row namesUnique ordinaryLowering
+      declarationFound bodyEq
+  have declarationNameEq := declarationName_of_findDecl? declarationFound
   exact ⟨row.context, sourceFunction, contexts, ⟨{
     toConcreteGeneratedDeclaration := generated
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded := row.paramsAdded
-    sourceParameters }⟩⟩
+    sourceParameters
+    callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩⟩
 
 /--
 Production selection at an already exposed canonical lowering row.
@@ -9146,6 +9589,7 @@ theorem
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok target)
     (declarationFound :
@@ -9202,12 +9646,17 @@ theorem
       Fir.Wasm.addDeclarationParams program declaration =
         .ok row.paramLocals := by
     simpa only [callerProgram] using row.paramsAdded
+  have callIndexEq :=
+    generated.internalCallIndex row namesUnique ordinaryLowering
+      declarationFound (by simpa only [callerProgram] using row.bodyEq)
+  have declarationNameEq := declarationName_of_findDecl? declarationFound
   exact ⟨{
     toConcreteGeneratedDeclaration := generated
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded
-    sourceParameters }⟩
+    sourceParameters
+    callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩
 
 /--
 Module-wide production declaration family.
@@ -9252,6 +9701,7 @@ theorem ConcreteGeneratedDeclarationFamily.ofSupportedPipeline
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
     {target : AdaptedModule}
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok target) :
     ConcreteGeneratedDeclarationFamily program sourceModule target := by
@@ -9259,8 +9709,8 @@ theorem ConcreteGeneratedDeclarationFamily.ofSupportedPipeline
     callerCaches declarationFound bodyEq resultClassified
   exact
     ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
-      callerProgram callerCaches lowered adapted declarationFound bodyEq
-      resultClassified
+      callerProgram callerCaches namesUnique lowered adapted declarationFound
+      bodyEq resultClassified
 
 /-- Every supported export exposes its export-independent declaration body. -/
 def ConcreteSupportedExport.toSupportedDeclaration
@@ -9594,5 +10044,214 @@ theorem
         evaluation calleeFrameForCall directRuntimeRefines externalRuntimeRefines
         callRuntimeRefines lazyRuntimeRefines caseRuntimeRefines
         effectRuntimeRefines (row.targetParameterCount site argumentsRelated)
+
+/-- Recover the ordinary ABI classifier hidden by the source-facing direct
+classifier. -/
+private theorem abiKind?_eq_ok_some_of_directAbiKind?_eq_some
+    {type : Expr} {kind : AbiKind}
+    (classified : Fir.Wasm.directAbiKind? type = some kind) :
+    Fir.Wasm.abiKind? type = .ok (some kind) := by
+  unfold Fir.Wasm.directAbiKind? at classified
+  cases result : Fir.Wasm.abiKind? type with
+  | error error => simp [result] at classified
+  | ok optional =>
+      cases optional with
+      | none => simp [result] at classified
+      | some actual =>
+          simp only [result, Option.some.injEq] at classified
+          subst actual
+          rfl
+
+/--
+Recursive semantic obligation for compiler-generated internal declarations.
+
+The dynamic index is a finite hereditary source derivation. The static row is
+selected from the production lowering/adaptation pipeline, while the entry
+frame and parameters are the ordinary concrete declaration interface. No
+target execution or translation certificate occurs in the premise.
+-/
+def DirectHereditaryGeneratedDeclarationInduction
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl)
+    (DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop)
+    (CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate) : Prop :=
+  ∀ {declaration : LCNF.Decl .impure}
+      {context : Fir.Wasm.Context}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {resultKind : AbiKind}
+      (row : ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target)
+      (_resultClassified :
+        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
+      {resultFacts : ReuseCapacityFacts}
+      {sourceRuntime resultRuntime : RuntimeState}
+      {sourceEnv resultEnv : Env}
+      {resultValue : Value} {requiredBytes : Nat}
+      (_evaluation :
+        ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+          DirectSupported ExternalSupported LazySupported CaseSupported
+          EffectSupported directLetAllocationCost context [] sourceRuntime
+          sourceEnv sourceCode resultFacts resultRuntime resultEnv resultValue
+          requiredBytes)
+      {initial : Wasm.Store Host}
+      {initialWitness : RefinementWitness}
+      {parameters : List Wasm.Value},
+    ConcreteReuseCapacityCacheFrame sourceModule sourceFunction sourceExternals
+          [] requiredBytes sourceRuntime sourceEnv initial
+          (row.targetFunction.toLocals parameters.reverse) initialWitness →
+      parameters.length = row.targetFunction.numParams →
+        ∃ resultStore resultWitness physical,
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+            sourceModule sourceFunction target.wasmModule hosts.env
+            sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+            row.targetFunction row.targetFunctionIndex initial resultStore
+            initialWitness resultWitness parameters resultKind resultValue
+            physical requiredBytes
+
+/--
+The production named-call implementation consumes the hereditary source
+payload directly.
+
+The exact lowerer row carried by the source derivation is recovered in the
+real module, and `callIndexEq` identifies it with the adapter-selected numeric
+target. The recursive declaration premise is asked only for the nested finite
+source derivation at the generated callee entry; callers provide neither an
+index equation nor a target execution certificate.
+-/
+theorem
+    DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (contextProgram : context.program = program)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (callerLocalsAligned : LocalLayoutAligned context callerFunction)
+    (declarations :
+      DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+        hosts sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      callerFunction labels target.wasmModule hosts.env sourceExternals
+      (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+        DirectSupported ExternalSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost context) := by
+  subst program
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported stepFits sourceStep invariant valueCompiled
+    valueAdapted resultFound
+  rcases supported with ⟨site, loweredRow, calleeEvaluation⟩
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (site.argumentCode ++
+          [.call (.declaration site.declaration)]) := by
+    simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+      site.kindEq, site.argumentsCompiled, site.declarationFound,
+      site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
+  have valueCodeEq :
+      valueCode =
+        site.argumentCode ++ [.call (.declaration site.declaration)] := by
+    rw [expectedCompiled] at valueCompiled
+    exact (Except.ok.inj valueCompiled).symm
+  subst valueCode
+  obtain ⟨targetArguments, functionIndex, argumentsAdapted, callFound,
+      targetValueEq⟩ :=
+    instructions_append_declaration_call_eq valueAdapted
+  subst targetValue
+  obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
+    constructorArgsReady_of_compileArgs callerLocalsAligned
+      site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+      invariant.1.1.1.1.stateRelated
+  have assembled :
+      ClosureArgumentAssembly target.wasmModule hosts.env targetArguments
+        physicalArgs initial locals :=
+    ClosureArgumentAssembly.ofConstructorArgsReady argumentsReady
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    callerLocalsAligned site.resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  have declarationFound :
+      context.program.findDecl? site.declaration =
+        some site.sourceDeclaration :=
+    site.declarationFound
+  have resultClassified :
+      Fir.Wasm.abiKind? site.sourceDeclaration.type =
+        .ok (some site.calleeResultKind) :=
+    abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.calleeResult
+  obtain ⟨generatedRow⟩ :=
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+      rfl contextCaches namesUnique lowered adapted declarationFound
+      loweredRow resultClassified
+  have calleeFrame :=
+    invariant.generatedDirectCalleeEntryAtCost site generatedRow
+      argumentsRelated stepFits
+  obtain ⟨afterCall, resultWitness, physical, calleeResult⟩ :=
+    declarations generatedRow resultClassified calleeEvaluation
+      (by simpa using calleeFrame)
+      (generatedRow.targetParameterCount site argumentsRelated)
+  have declarationNameEq :
+      site.sourceDeclaration.name = site.declaration :=
+    declarationName_of_findDecl? site.declarationFound
+  have exactCallIndex :
+      callIndex? sourceModule (.declaration site.declaration) =
+        some generatedRow.targetFunctionIndex := by
+    simpa [declarationNameEq] using generatedRow.callIndexEq
+  rw [exactCallIndex] at callFound
+  have functionIndexEq : generatedRow.targetFunctionIndex = functionIndex :=
+    Option.some.inj callFound
+  subst functionIndex
+  obtain ⟨updated, targetSet, _⟩ :=
+    invariant.1.1.1.2.2.1.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := afterCall)
+      (nextWitness := resultWitness)
+      (physical := physical) resultFound
+  refine
+    ⟨loweredRow.context, _, site.calleeEnv, site.calleeCode,
+      generatedRow.targetFunction, generatedRow.targetFunctionIndex,
+      targetArguments, afterCall, updated, resultWitness, physicalArgs,
+      site.resultKind, physical, loweredRow.contextsCoherent rfl rfl,
+      rfl, resultKindAt, assembled,
+      calleeResult.ofRefines site.calleeResultRefines, targetSet, ?_⟩
+  simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
 
 end FirTalos.Concrete

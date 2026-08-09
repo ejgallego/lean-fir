@@ -58,6 +58,22 @@ example
     Fir.Wasm.declarationParameterIdsUnique declaration = true :=
   row.parameterIdsUnique
 
+/-- A generated internal declaration carries the compiler-proved identity
+between its source name and exact unified Wasm call index. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target) :
+    callIndex? sourceModule (.declaration declaration.name) =
+      some row.targetFunctionIndex :=
+  row.callIndexEq
+
 /-- The real lowerer's front-insert/reverse implementation is exposed as the
 source-order declaration parameter row at the proof boundary. -/
 example
@@ -4049,10 +4065,12 @@ example
     {program : Fir.LeanIR.ImpureProgram}
     {sourceModule : Fir.Wasm.Module}
     {target : AdaptedModule}
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok target) :
     ConcreteGeneratedDeclarationFamily program sourceModule target :=
-  ConcreteGeneratedDeclarationFamily.ofSupportedPipeline lowered adapted
+  ConcreteGeneratedDeclarationFamily.ofSupportedPipeline namesUnique lowered
+    adapted
 
 /--
 An already exposed canonical `lowerDecl` row is selected verbatim by the
@@ -4073,6 +4091,7 @@ example
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (namesUnique : program.NamesUnique)
     (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
     (adapted : FirTalos.adapt sourceModule = .ok target)
     (declarationFound :
@@ -4085,8 +4104,8 @@ example
     Nonempty (ConcreteGeneratedInternalDeclaration program declaration
       row.context sourceCode sourceModule sourceFunction target) :=
   ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
-    callerProgram callerCaches lowered adapted declarationFound row
-      resultClassified
+    callerProgram callerCaches namesUnique lowered adapted declarationFound
+      row resultClassified
 
 /--
 A cache-aware direct-declaration implementation supplies the interprocedural
@@ -4144,6 +4163,54 @@ example
       (DirectInternalCallSupported context) :=
   DirectDeclarationCallImplementationWithCache.ofInternalCompiler spec
     declarations
+
+/--
+The preferred production named-call boundary consumes correctness of nested
+finite source derivations. The compiler reconstructs the exact callee row,
+numeric call index, entry frame, and caller-facing result refinement; neither
+an index equation nor a target execution is a call-site premise.
+-/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (spec :
+      ConcreteSupportedExport program context callerCode sourceModule
+        callerFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (declarations :
+      DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+        hosts sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      callerFunction labels target.wasmModule hosts.env sourceExternals
+      (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+        DirectSupported ExternalSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost context) :=
+  DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
+    spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
+      spec.adapted spec.localsAligned declarations
 
 /--
 The saturated closure path derives the adapted dispatch from the exact
