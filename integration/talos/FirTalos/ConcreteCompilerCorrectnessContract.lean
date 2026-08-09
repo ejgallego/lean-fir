@@ -58,6 +58,23 @@ example
     Fir.Wasm.declarationParameterIdsUnique declaration = true :=
   row.parameterIdsUnique
 
+/-- Recursive clients retain the exact program and canonical cache-name table
+used to construct every production-generated declaration context. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target) :
+    context.program = program ∧
+      context.cachedDeclarations =
+        Fir.Wasm.cachedDeclarationNames program :=
+  ⟨row.contextProgram, row.contextCaches⟩
+
 /-- A generated internal declaration carries the compiler-proved identity
 between its source name and exact unified Wasm call index. -/
 example
@@ -4214,6 +4231,41 @@ example
   DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
     spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
       spec.adapted spec.localsAligned declarations
+
+/-- The generated declaration induction is itself derived from the finite
+source evaluation and uniform production operation laws. Recursive clients do
+not supply a target execution or a module-wide correctness certificate. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (operationLaws :
+      DirectHereditaryGeneratedOperationLaws program sourceModule target hosts
+        sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals DirectSupported ExternalSupported LazySupported
+      CaseSupported EffectSupported :=
+  DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws namesUnique
+    lowered adapted operationLaws
 
 /--
 The saturated closure path derives the adapted dispatch from the exact

@@ -8525,6 +8525,9 @@ structure ConcreteGeneratedInternalDeclaration
     (target : AdaptedModule)
     extends ConcreteGeneratedDeclaration context sourceCode sourceModule
       sourceFunction target where
+  contextProgram : context.program = program
+  contextCaches :
+    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program
   parameterLocals : Fir.Wasm.LocalKinds
   parameterIdsUnique :
     Fir.Wasm.declarationParameterIdsUnique declaration = true
@@ -10066,6 +10069,8 @@ theorem ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipeline
   have declarationNameEq := declarationName_of_findDecl? declarationFound
   exact ⟨row.context, sourceFunction, contexts, ⟨{
     toConcreteGeneratedDeclaration := generated
+    contextProgram := rfl
+    contextCaches := rfl
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded := row.paramsAdded
@@ -10159,6 +10164,13 @@ theorem
   have declarationNameEq := declarationName_of_findDecl? declarationFound
   exact ⟨{
     toConcreteGeneratedDeclaration := generated
+    contextProgram := by
+      change caller.program = program
+      exact callerProgram
+    contextCaches := by
+      change caller.cachedDeclarations =
+        Fir.Wasm.cachedDeclarationNames program
+      exact callerCaches
     parameterLocals := row.paramLocals
     parameterIdsUnique
     parametersAdded
@@ -10872,6 +10884,484 @@ structure DirectHereditaryGeneratedOperationLaws
           entryRuntime entryStore entryWitness facts)
 
 /--
+The structural hereditary theorem specialized to actual generated declaration
+rows. Its caller-slack quantifier is part of the induction motive, so a nested
+direct callee can supply both its exact execution and the residual-budget law
+required by the enclosing call.
+-/
+theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adaptedModule : FirTalos.adapt sourceModule = .ok target)
+    (operationLaws :
+      DirectHereditaryGeneratedOperationLaws program sourceModule target hosts
+        sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported)
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {functionCode code : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      functionCode sourceModule sourceFunction target)
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime entryRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {resultValue : Value} {requiredBytes slack : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+        DirectSupported ExternalSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost context expectedResult facts
+        sourceRuntime sourceEnv code resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    {targetCode : Wasm.Program}
+    {initial entryStore : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    (codeAdapted :
+      CodeAdapted context sourceModule sourceFunction [] code targetCode)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness facts (requiredBytes + slack)
+        sourceRuntime sourceEnv initial locals witness) :
+    ∃ resultStore resultLocals resultWitness physical,
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+          sourceRuntime sourceEnv code targetCode initial locals witness []
+          (ExactReturnControlPost resultStore physical) ∧
+        ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          entryRuntime entryStore entryWitness resultFacts slack resultRuntime
+          resultEnv resultStore resultLocals resultWitness ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness expectedResult physical resultValue := by
+  induction evaluation generalizing declaration functionCode sourceFunction
+      targetCode initial locals witness entryRuntime entryStore entryWitness
+      slack with
+  | ret sourceLookup resultCompiled resultRefines =>
+      exact codeWP_of_reuseCapacityDirectHereditaryReturn_withSlack
+        sourceLookup resultCompiled resultRefines codeAdapted row.localsAligned
+        (by simpa only [Nat.zero_add] using invariant)
+        (fun related => related.1.stateRelated)
+  | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
+      nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
+      resultValue continuationCost supported sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq codeAdapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          directLetAllocationCost decl ≤
+            (directLetAllocationCost decl + continuationCost) + slack :=
+        by omega
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, _directTransports, producedTransfer,
+          nextInvariant⟩ :=
+        operationLaws.direct row supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        have budgetEq :
+            directLetAllocationCost decl + continuationCost + slack -
+                directLetAllocationCost decl =
+              continuationCost + slack := by
+          omega
+        simpa only [budgetEq] using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih row continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @externalLet context sourceRuntime sourceEnv decl continuation nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult resultFacts
+      resultRuntime resultEnv resultValue continuationCost supported sourceStep
+      transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq codeAdapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
+        by omega
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        operationLaws.external row supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        have budgetEq :
+            stepCost + continuationCost + slack - stepCost =
+              continuationCost + slack := by
+          omega
+        simpa only [budgetEq] using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih row continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_externalLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @directCallLet context decl sourceEnv sourceRuntime calleeResultFacts
+      nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
+      expectedResult continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction site loweredRow callee transfer continued
+      calleeIH continuedIH =>
+      have programEq : context.program = program := row.contextProgram
+      subst program
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq codeAdapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          stepCost ≤ (stepCost + continuationCost) + slack := by
+        omega
+      have sourceStep :
+          SourceCallLetResult context sourceExternals sourceRuntime sourceEnv
+            decl continuation nextRuntime sourceValue :=
+        site.sourceCallLetResult (loweredRow.contextsCoherent rfl rfl)
+          callee.sourceResult
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (site.argumentCode ++
+              [.call (.declaration site.declaration)]) := by
+        simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+          site.kindEq, site.argumentsCompiled, site.declarationFound,
+          site.nonCached, Bind.bind, Except.bind, pure, Except.pure]
+      have valueCodeEq :
+          valueCode =
+            site.argumentCode ++ [.call (.declaration site.declaration)] := by
+        rw [expectedCompiled] at valueCompiled
+        exact (Except.ok.inj valueCompiled).symm
+      subst valueCode
+      obtain ⟨targetArguments, functionIndex, argumentsAdapted, callFound,
+          targetValueEq⟩ :=
+        instructions_append_declaration_call_eq valueAdapted
+      subst targetValue
+      obtain ⟨physicalArgs, argumentsReady, _, argumentsRelated⟩ :=
+        constructorArgsReady_of_compileArgs row.localsAligned
+          site.argumentsCompiled argumentsAdapted site.argumentsEvaluated
+          invariant.1.stateRelated.stateRelated
+      have assembled :
+          ClosureArgumentAssembly target.wasmModule hosts.env targetArguments
+            physicalArgs initial locals :=
+        ClosureArgumentAssembly.ofConstructorArgsReady argumentsReady
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        row.localsAligned site.resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      have declarationFound :
+          context.program.findDecl? site.declaration =
+            some site.sourceDeclaration :=
+        site.declarationFound
+      have resultClassified :
+          Fir.Wasm.abiKind? site.sourceDeclaration.type =
+            .ok (some site.calleeResultKind) :=
+        abiKind?_eq_ok_some_of_directAbiKind?_eq_some site.calleeResult
+      obtain ⟨generatedRow⟩ :=
+        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+          rfl row.contextCaches namesUnique lowered adaptedModule declarationFound
+          loweredRow resultClassified
+      have calleeFrame :=
+        invariant.1.generatedDirectCalleeEntryAtCost site generatedRow
+          argumentsRelated stepFits
+      have calleeEntry :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals)
+            sourceRuntime initial witness [] (stepCost + 0) sourceRuntime
+            site.calleeEnv initial
+            (generatedRow.targetFunction.toLocals physicalArgs) witness := by
+        exact ⟨by simpa using calleeFrame,
+          ReuseCapacityCodeEntryTransports.refl sourceRuntime initial witness⟩
+      obtain ⟨afterCall, calleeLocals, resultWitness, physical, calleeWP,
+          calleeInvariant, calleeFailureClear, calleeValueRelated⟩ :=
+        calleeIH generatedRow generatedRow.bodyAdapted calleeEntry
+      have parameterCount :
+          physicalArgs.reverse.length =
+            generatedRow.targetFunction.numParams :=
+        generatedRow.targetParameterCount site argumentsRelated
+      have calleeBody :
+          DeclarationBodyWP loweredRow.context sourceModule calleeFunction
+            target.wasmModule hosts.env sourceRuntime site.calleeEnv
+            site.calleeCode generatedRow.targetFunction initial afterCall
+            witness physicalArgs.reverse physical := by
+        refine ⟨parameterCount, generatedRow.singleResult,
+          fun callerTail => ?_⟩
+        simp only [List.reverse_reverse]
+        apply calleeWP.conseq
+        intro returnedContinuation returned
+        subst returnedContinuation
+        simp [ConcreteFunctionBodyPost, ExactReturnPost,
+          generatedRow.singleResult, ← parameterCount]
+      have calleeSuccessful :
+          SuccessfulDeclaration loweredRow.context sourceModule calleeFunction
+            target.wasmModule hosts.env sourceExternals sourceRuntime
+            nextRuntime site.calleeEnv site.calleeCode
+            generatedRow.targetFunction generatedRow.targetFunctionIndex
+            initial afterCall witness resultWitness physicalArgs.reverse
+            site.calleeResultKind sourceValue physical := {
+        sourceResult := callee.sourceResult
+        notImport := generatedRow.notImport
+        functionFound := generatedRow.targetFunctionFound
+        body := calleeBody
+        runtimeRelated := calleeInvariant.1.stateRelated.stateRelated.1
+        failureClear := calleeFailureClear
+        valueRelated := calleeValueRelated }
+      have calleeCapacityPreserving :
+          CapacityPreservingSuccessfulDeclaration loweredRow.context
+            sourceModule calleeFunction target.wasmModule hosts.env
+            sourceExternals sourceRuntime nextRuntime site.calleeEnv
+            site.calleeCode generatedRow.targetFunction
+            generatedRow.targetFunctionIndex initial afterCall witness
+            resultWitness physicalArgs.reverse site.calleeResultKind sourceValue
+            physical := {
+        successful := calleeSuccessful
+        witnessTransport := calleeInvariant.2.witness
+        capacityTransport := calleeInvariant.2.capacity }
+      have calleeResidualBudget :
+          ∀ {remainingBytes : Nat},
+            stepCost ≤ remainingBytes →
+              initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
+                afterCall.host.runtime.heap.AddressSpaceBudget
+                  (remainingBytes - stepCost) := by
+        intro remainingBytes calleeFits budget
+        let calleeSlack := remainingBytes - stepCost
+        have budgetEq : stepCost + calleeSlack = remainingBytes := by
+          simp [calleeSlack, Nat.add_sub_of_le calleeFits]
+        have slackFrame :
+            ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              sourceExternals [] (stepCost + calleeSlack) sourceRuntime
+              site.calleeEnv initial
+              (generatedRow.targetFunction.toLocals physicalArgs) witness :=
+          calleeFrame.withBudget (by simpa [budgetEq] using budget)
+        have slackEntry :
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+                sourceExternals)
+              sourceRuntime initial witness [] (stepCost + calleeSlack)
+              sourceRuntime site.calleeEnv initial
+              (generatedRow.targetFunction.toLocals physicalArgs) witness :=
+          ⟨slackFrame,
+            ReuseCapacityCodeEntryTransports.refl sourceRuntime initial witness⟩
+        obtain ⟨slackStore, slackLocals, slackWitness, slackPhysical, slackWP,
+            slackInvariant, _, _⟩ :=
+          calleeIH generatedRow generatedRow.bodyAdapted slackEntry
+        have resultEq := calleeWP.exactReturn_unique slackWP
+        rw [resultEq.1]
+        simpa [calleeSlack] using slackInvariant.1.budget
+      have calleeResult :
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache
+            loweredRow.context sourceModule calleeFunction target.wasmModule
+            hosts.env sourceExternals sourceRuntime nextRuntime site.calleeEnv
+            site.calleeCode generatedRow.targetFunction
+            generatedRow.targetFunctionIndex initial afterCall witness
+            resultWitness physicalArgs.reverse site.calleeResultKind sourceValue
+            physical stepCost := {
+        declaration := {
+          toClosureTablesTransport :=
+            calleeInvariant.2.toClosureTablesTransport
+          capacityPreserving := calleeCapacityPreserving
+          ordinaryTransport := calleeInvariant.2.ordinary
+          externalsPreserved := calleeInvariant.2.externals
+          residualBudget := calleeResidualBudget }
+        cacheTable := calleeInvariant.1.2.1 }
+      have declarationNameEq :
+          site.sourceDeclaration.name = site.declaration :=
+        declarationName_of_findDecl? site.declarationFound
+      have exactCallIndex :
+          callIndex? sourceModule (.declaration site.declaration) =
+            some generatedRow.targetFunctionIndex := by
+        simpa [declarationNameEq] using generatedRow.callIndexEq
+      rw [exactCallIndex] at callFound
+      have functionIndexEq :
+          generatedRow.targetFunctionIndex = functionIndex :=
+        Option.some.inj callFound
+      subst functionIndex
+      obtain ⟨updated, targetSet, _⟩ :=
+        invariant.1.1.1.1.2.2.1.set?
+          (nextRuntime := nextRuntime)
+          (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+          (nextStore := afterCall)
+          (nextWitness := resultWitness)
+          (physical := physical) resultFound
+      have callerResult := calleeResult.ofRefines site.calleeResultRefines
+      have factsTransfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
+      obtain ⟨callStep, externalsPreserved, hostDescriptorsPreserved,
+          witnessDescriptorsPreserved, producedTransfer, nextBaseInvariant⟩ :=
+        invariant.1.1.ofDirectDeclarationCallExact stepFits sourceStep
+          resultFound resultKindAt assembled callerResult.declaration targetSet
+          factsTransfer
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst nextFacts
+      have nextEntry :
+          ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+            afterCall entryWitness resultWitness :=
+        invariant.2.step
+          callerResult.declaration.capacityPreserving.witnessTransport
+          callerResult.declaration.capacityPreserving.capacityTransport
+          callerResult.declaration.ordinaryTransport
+          callerResult.declaration.externalsPreserved
+          callerResult.declaration.toClosureTablesTransport
+      have nextClosureTables : ClosureTablesAgree afterCall resultWitness :=
+        callerResult.declaration.toClosureTablesTransport.agree invariant.1.2.2
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            entryRuntime entryStore entryWitness
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) afterCall updated
+            resultWitness := by
+        have budgetEq :
+            stepCost + continuationCost + slack - stepCost =
+              continuationCost + slack := by
+          omega
+        refine ⟨⟨?_, callerResult.cacheTable, nextClosureTables⟩, nextEntry⟩
+        simpa only [budgetEq] using nextBaseInvariant
+      obtain ⟨resultStore, resultLocals, finalWitness, resultPhysical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        continuedIH row continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, finalWitness, resultPhysical,
+        codeWP_callLet expectedCompiled valueAdapted resultFound callStep
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @lazyLet context sourceRuntime sourceEnv decl continuation nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult resultFacts
+      resultRuntime resultEnv resultValue continuationCost path supported
+      sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq codeAdapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits : stepCost ≤ (stepCost + continuationCost) + slack :=
+        by omega
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        operationLaws.lazy row supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              sourceExternals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        have budgetEq :
+            stepCost + continuationCost + slack - stepCost =
+              continuationCost + slack := by
+          omega
+        simpa only [budgetEq] using nextInvariant
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih row continuationAdapted continuationInvariant
+      subst targetCode
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_lazyLet valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @caseOf context sourceRuntime sourceEnv cases selected expectedResult facts
+      resultFacts resultRuntime resultEnv resultValue requiredBytes supported
+      sourceStep continued ih =>
+      obtain ⟨selectedTarget, selectedAdapted, _selected, lift⟩ :=
+        operationLaws.caseOf row supported sourceStep
+          invariant.1.stateRelated.stateRelated codeAdapted
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih row selectedAdapted invariant
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        lift [] (ExactReturnControlPost resultStore physical)
+          (by
+            intro continuation returned
+            subst continuation
+            rfl)
+          continuationWP,
+        resultInvariant, failureClear, valueRelated⟩
+  | @effect context sourceRuntime sourceEnv code continuation nextRuntime
+      expectedResult facts resultFacts resultRuntime resultEnv resultValue
+      requiredBytes supported sourceStep continued ih =>
+      obtain ⟨targetRest, nextStore, nextWitness, continuationAdapted, step,
+          _externalsPreserved, nextInvariant⟩ :=
+        operationLaws.effect row facts supported sourceStep
+          invariant.1.stateRelated.stateRelated invariant codeAdapted
+      obtain ⟨resultStore, resultLocals, resultWitness, physical,
+          continuationWP, resultInvariant, failureClear, valueRelated⟩ :=
+        ih row continuationAdapted nextInvariant
+      exact ⟨resultStore, resultLocals, resultWitness, physical,
+        codeWP_effect step continuationWP, resultInvariant, failureClear,
+        valueRelated⟩
+
+/--
 Recursive semantic obligation for compiler-generated internal declarations.
 
 The dynamic index is a finite hereditary source derivation. The static row is
@@ -10931,6 +11421,139 @@ def DirectHereditaryGeneratedDeclarationInduction
             row.targetFunction row.targetFunctionIndex initial resultStore
             initialWitness resultWitness parameters resultKind resultValue
             physical requiredBytes
+
+/--
+Production generated-row operation laws close the recursive declaration
+induction constructively.
+
+The proof follows the finite hereditary source tree. At a direct named call,
+the nested induction hypothesis supplies the callee declaration package; the
+compiler equations select its exact generated row and numeric call target.
+No module-wide target theorem, execution certificate, or termination premise
+is assumed.
+-/
+theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState → Value →
+          Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adaptedModule : FirTalos.adapt sourceModule = .ok target)
+    (operationLaws :
+      DirectHereditaryGeneratedOperationLaws program sourceModule target hosts
+        sourceExternals DirectSupported ExternalSupported LazySupported
+        CaseSupported EffectSupported) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals DirectSupported ExternalSupported LazySupported
+      CaseSupported EffectSupported := by
+  intro declaration context sourceCode sourceFunction resultKind row
+    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultValue requiredBytes evaluation initial initialWitness parameters
+    invariant parameterCount
+  have initialEntry :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals)
+        sourceRuntime initial initialWitness [] (requiredBytes + 0)
+        sourceRuntime sourceEnv initial
+        (row.targetFunction.toLocals parameters.reverse) initialWitness := by
+    exact ⟨by simpa using invariant,
+      ReuseCapacityCodeEntryTransports.refl sourceRuntime initial
+        initialWitness⟩
+  obtain ⟨resultStore, resultLocals, resultWitness, physical, exactWP,
+      resultInvariant, failureClear, valueRelated⟩ :=
+    codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
+      namesUnique lowered adaptedModule operationLaws row evaluation
+      row.bodyAdapted initialEntry
+  have body :
+      DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
+        hosts.env sourceRuntime sourceEnv sourceCode row.targetFunction initial
+        resultStore initialWitness parameters physical := by
+    refine ⟨parameterCount, row.singleResult, fun callerTail => ?_⟩
+    apply exactWP.conseq
+    intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, ExactReturnPost, row.singleResult,
+      ← parameterCount]
+  have successful :
+      SuccessfulDeclaration context sourceModule sourceFunction
+        target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
+        sourceEnv sourceCode row.targetFunction row.targetFunctionIndex initial
+        resultStore initialWitness resultWitness parameters resultKind
+        resultValue physical := {
+    sourceResult := evaluation.sourceResult
+    notImport := row.notImport
+    functionFound := row.targetFunctionFound
+    body
+    runtimeRelated := resultInvariant.1.stateRelated.stateRelated.1
+    failureClear
+    valueRelated }
+  have capacityPreserving :
+      CapacityPreservingSuccessfulDeclaration context sourceModule
+        sourceFunction target.wasmModule hosts.env sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode row.targetFunction
+        row.targetFunctionIndex initial resultStore initialWitness resultWitness
+        parameters resultKind resultValue physical := {
+    successful
+    witnessTransport := resultInvariant.2.witness
+    capacityTransport := resultInvariant.2.capacity }
+  have residualBudget :
+      ∀ {remainingBytes : Nat},
+        requiredBytes ≤ remainingBytes →
+          initial.host.runtime.heap.AddressSpaceBudget remainingBytes →
+            resultStore.host.runtime.heap.AddressSpaceBudget
+              (remainingBytes - requiredBytes) := by
+    intro remainingBytes stepFits budget
+    let slack := remainingBytes - requiredBytes
+    have budgetEq : requiredBytes + slack = remainingBytes := by
+      simp [slack, Nat.add_sub_of_le stepFits]
+    have slackFrame :
+        ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+          sourceExternals [] (requiredBytes + slack) sourceRuntime sourceEnv
+          initial (row.targetFunction.toLocals parameters.reverse)
+          initialWitness :=
+      invariant.withBudget (by simpa [budgetEq] using budget)
+    have slackEntry :
+        ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness [] (requiredBytes + slack)
+          sourceRuntime sourceEnv initial
+          (row.targetFunction.toLocals parameters.reverse) initialWitness :=
+      ⟨slackFrame,
+        ReuseCapacityCodeEntryTransports.refl sourceRuntime initial
+          initialWitness⟩
+    obtain ⟨slackStore, slackLocals, slackWitness, slackPhysical, slackWP,
+        slackInvariant, _, _⟩ :=
+      codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
+        namesUnique lowered adaptedModule operationLaws row evaluation
+        row.bodyAdapted slackEntry
+    have resultEq := exactWP.exactReturn_unique slackWP
+    rw [resultEq.1]
+    simpa [slack] using slackInvariant.1.budget
+  exact ⟨resultStore, resultWitness, physical, {
+    declaration := {
+      toClosureTablesTransport := resultInvariant.2.toClosureTablesTransport
+      capacityPreserving
+      ordinaryTransport := resultInvariant.2.ordinary
+      externalsPreserved := resultInvariant.2.externals
+      residualBudget }
+    cacheTable := resultInvariant.1.2.1 }⟩
 
 /--
 The production named-call implementation consumes the hereditary source
