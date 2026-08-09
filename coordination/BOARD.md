@@ -19,6 +19,31 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-CERTIFICATE-FREE-LAZY-EXPORT-CORRECTNESS`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the public compiler-proof boundary.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`.
+- Published stack: hereditary lazy export correctness `1f483a13`, localized
+  lazy publication-kind admission `b8bbe5a7`, and ready mailbox `307ab145`,
+  based directly on `main` through `a8b127dc`.
+- Lease boundary: satisfied. The production generated-operation bundle,
+  declaration induction, recursive named-call implementation, and public
+  partial-correctness theorem now admit concrete lazy-cache hits and misses.
+  A miss selects the actual lowered/adapted nullary initializer and derives
+  its target execution from the nested finite source derivation. Non-heap
+  publication evidence is local to each admitted source miss, so the public
+  theorem requires no target run, recursive callee certificate, or separate
+  module-wide result-kind oracle. No shared semantic Wasm ABI, lowering,
+  validator, adapter, concrete-runtime, cache, closure-table, or interpreter
+  contract changed.
+- Validation: Lean Beam zero-error checkpoints for the proof and contract
+  modules; focused 3,104-job dependency cones; `git diff --check`; complete
+  `make check` with 642 unique cases and 1,844/1,844 equal comparisons; Talos
+  setup at `a01d01c`; and all 3,125 `make talos-check` jobs.
+
+## Previous completed integration lease
+
 - Milestone: `ILLUMINATE-SELECTION-PLAYER-V4`.
 - Integration owner: `wasm-gen`; the user authorized the generation owner to
   continue with the completed W7 selection package.
