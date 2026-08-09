@@ -119,6 +119,11 @@ async function runOne(package_, example, events) {
       totalMs: result.timings.totalMs,
       overheadMs: result.timings.overheadMs ?? null,
       inputBytes: memory.creation?.animationBytes ?? memory.inputBytes,
+      animationObjectCount: memory.creation?.animationObjectCount ?? null,
+      animationAllocationCalls:
+        memory.creation?.animationAllocationCalls ?? null,
+      persistentAllocationCalls:
+        memory.creation?.persistentAllocationCalls ?? null,
       persistentBytes: memory.creation === undefined ? null :
         memory.persistentCheckpoint - memory.creation.frontierBefore,
       scratchPeakBytes: memory.creation === undefined ? null :
@@ -159,6 +164,8 @@ function distribution(values) {
 
 const metrics = ["projectMs", "encodeMs", "prepareMs", "executeMs",
   "decodeMs", "rewindMs", "totalMs", "overheadMs", "inputBytes",
+  "animationObjectCount", "animationAllocationCalls",
+  "persistentAllocationCalls",
   "persistentBytes", "scratchPeakBytes", "postRewindFrontier",
   "frontierGrowthPrepare", "frontierGrowthExecute", "frontierGrowthTotal"];
 

@@ -52,6 +52,16 @@ assert.equal(trace.actions.at(-1).frame, 5);
 const live = adapter.createPlayer(animation);
 assert.equal(live.ok, true);
 assert.equal(JSON.stringify(live.player), "{}");
+assert.equal(live.memory.animationBytes,
+  live.memory.frontierAfterAnimation - live.memory.frontierBefore);
+assert.ok(live.memory.animationObjectCount > 1);
+assert.equal(live.memory.animationAllocationCalls, 1);
+assert.equal(live.memory.stateSlotBytes,
+  live.memory.persistentCheckpoint - live.memory.frontierAfterAnimation);
+assert.equal(live.memory.stateSlotObjectCount,
+  live.memory.stateSlotAllocationCalls);
+assert.equal(live.memory.persistentAllocationCalls,
+  live.memory.animationAllocationCalls + live.memory.stateSlotAllocationCalls);
 for (const event of allEvents) {
   const result = adapter.dispatch(live.player, event);
   assert.equal(result.ok, true, result.error);
@@ -119,6 +129,8 @@ console.log(JSON.stringify({
   steadyTicks: 10_000,
   checkpoint: steady.memory.persistentCheckpoint,
   peakFrontier,
+  animationObjects: live.memory.animationObjectCount,
+  animationAllocationCalls: live.memory.animationAllocationCalls,
   functionImports: 0,
   memoryImports: 0,
 }));

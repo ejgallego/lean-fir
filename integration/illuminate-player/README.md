@@ -75,13 +75,18 @@ Creation reports `instantiateMs`, `projectMs`, `animationEncodeMs`,
 `totalMs`, and residual `overheadMs`. Dispatch reports non-overlapping
 `encodeMs`, `executeMs`, `decodeMs`, and `rewindMs` intervals plus total and
 overhead. Memory diagnostics include the persistent checkpoint, scratch peak,
-bytes cleared, and exact post-rewind frontier.
+bytes cleared, exact post-rewind frontier, logical animation-object count, and
+physical resident allocator-call count.
 
 ## Ownership and bounded reclamation
 
-Animation projection and encoding happen once per player. The recursively
+Animation projection and encoding happen once per player. The adapter first
+measures the exact graph, obtains one contiguous resident allocation, and
+suballocates its Lean objects locally while encoding. The recursively
 persistent animation graph and a fixed 448-byte `PlayerState` slot live below
-the checkpoint. State stays in Wasm: the adapter copies each Lean-produced
+the checkpoint. This removes one JavaScript-to-Wasm allocator call per graph
+object without changing the Lean layout or public adapter contract. State
+stays in Wasm: the adapter copies each Lean-produced
 state into that fixed slot before discarding the transition graph, including
 bit-exact boxed binary64 timestamp bits. It is neither exposed nor rebuilt
 from an application JavaScript object.

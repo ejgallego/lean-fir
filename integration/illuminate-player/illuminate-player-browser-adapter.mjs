@@ -169,12 +169,16 @@ class Encoder {
     this.flags = persistent ? PERSISTENT_LIVE_FLAGS : 2;
     this.refCount = persistent ? 0 : 1;
     this.allocations = 0;
+    this.objects = 0;
     this.bytes = 0;
+    this.reservation = undefined;
+    this.preencodedStrings = new Map();
   }
 
-  allocate(bytes, label) {
+  allocateResident(bytes, label) {
     requireCondition(Number.isSafeInteger(bytes) && bytes >= HEADER_BYTES &&
-      bytes % 8 === 0, `${label} allocation size is invalid`);
+      bytes <= MAX_UINT32 && bytes % 8 === 0,
+    `${label} allocation size is invalid`);
     const address = u32(this.exports.fir_heap_alloc(bytes));
     requireCondition(address >= HEAP_BASE && address % 8 === 0,
       `${label} allocation returned invalid address ${address}`);
@@ -182,8 +186,110 @@ class Encoder {
       `${label} allocation exceeds module memory`);
     new Uint8Array(this.memory.buffer, address, bytes).fill(0);
     this.allocations += 1;
+    return address;
+  }
+
+  reserve(bytes, label) {
+    requireCondition(this.reservation === undefined,
+      `${label} overlaps an active encoder reservation`);
+    const address = this.allocateResident(bytes, label);
+    this.reservation = { cursor: address, end: address + bytes, label };
+  }
+
+  finishReservation() {
+    const reservation = this.reservation;
+    requireCondition(reservation !== undefined,
+      "encoder has no active reservation");
+    requireCondition(reservation.cursor === reservation.end,
+      `${reservation.label} used ${reservation.cursor} of ${reservation.end}`);
+    this.reservation = undefined;
+  }
+
+  allocate(bytes, label) {
+    let address;
+    if (this.reservation === undefined) {
+      address = this.allocateResident(bytes, label);
+    } else {
+      address = this.reservation.cursor;
+      requireCondition(address + bytes <= this.reservation.end,
+        `${label} exceeds ${this.reservation.label}`);
+      this.reservation.cursor += bytes;
+    }
+    this.objects += 1;
     this.bytes += bytes;
     return address;
+  }
+
+  naturalProjectedBytes(value) {
+    return BigInt(value) <= MAX_IMMEDIATE ? 0 : 40;
+  }
+
+  preencodedString(value, label) {
+    const text = string(value, label);
+    let bytes = this.preencodedStrings.get(text);
+    if (bytes === undefined) {
+      bytes = this.encoder.encode(text);
+      this.preencodedStrings.set(text, bytes);
+    }
+    return bytes;
+  }
+
+  stringBytes(value, label) {
+    return align8(HEADER_BYTES + this.preencodedString(value, label).length);
+  }
+
+  ctorBytes(fields, scalarBytes) {
+    if (fields === 0 && scalarBytes === 0) return 0;
+    return align8(HEADER_BYTES + SLOT_BYTES * fields + scalarBytes);
+  }
+
+  arrayBytes(values) {
+    return align8(HEADER_BYTES + SLOT_BYTES * values);
+  }
+
+  paramBindingBytes(binding, label) {
+    const targetBytes = binding.target.kind === "textContent" ? 0 :
+      this.stringBytes(binding.target.name, `${label}.target.name`) +
+        this.ctorBytes(1, 0);
+    return this.naturalProjectedBytes(binding.element) + targetBytes +
+      this.ctorBytes(2, 0);
+  }
+
+  segmentBytes(segment, label) {
+    let bytes = this.arrayBytes(segment.paramMap.length) +
+      this.arrayBytes(segment.params.length) + this.ctorBytes(4, 0) +
+      this.naturalProjectedBytes(segment.startFrame) +
+      this.naturalProjectedBytes(segment.frameCount);
+    segment.paramMap.forEach((binding, index) => {
+      bytes += this.paramBindingBytes(binding,
+        `${label}.paramMap[${index}]`);
+    });
+    segment.params.forEach((row, rowIndex) => {
+      bytes += this.arrayBytes(row.length);
+      row.forEach((value, index) => {
+        bytes += this.stringBytes(value,
+          `${label}.params[${rowIndex}][${index}]`);
+      });
+    });
+    return bytes;
+  }
+
+  stepBytes(step) {
+    return this.naturalProjectedBytes(step.frame) + this.ctorBytes(1, 2);
+  }
+
+  animationBytes(animation) {
+    let bytes = this.arrayBytes(animation.segments.length) +
+      this.arrayBytes(animation.steps.length) + this.ctorBytes(4, 0) +
+      this.naturalProjectedBytes(animation.fps) +
+      this.naturalProjectedBytes(animation.totalFrames);
+    animation.segments.forEach((segment, index) => {
+      bytes += this.segmentBytes(segment, `animation.segments[${index}]`);
+    });
+    animation.steps.forEach((step) => {
+      bytes += this.stepBytes(step);
+    });
+    return bytes;
   }
 
   natural(value, label) {
@@ -212,7 +318,7 @@ class Encoder {
   }
 
   string(value, label) {
-    const bytes = this.encoder.encode(string(value, label));
+    const bytes = this.preencodedString(value, label);
     const allocationBytes = align8(HEADER_BYTES + bytes.length);
     const address = this.allocate(allocationBytes, label);
     const view = new DataView(this.memory.buffer);
@@ -852,7 +958,12 @@ export class IlluminatePlayerAdapter {
       clearedBytes: 0,
       postRewindFrontier: undefined,
       animationBytes: 0,
+      animationObjectCount: 0,
+      animationAllocationCalls: 0,
       stateSlotBytes: 0,
+      stateSlotObjectCount: 0,
+      stateSlotAllocationCalls: 0,
+      persistentObjectCount: 0,
       persistentAllocationCalls: 0,
       pagesBefore: undefined,
       pagesAfter: undefined,
@@ -870,10 +981,15 @@ export class IlluminatePlayerAdapter {
       const writer = new Encoder({ fir_heap_alloc: state.allocate },
         state.memory, state.encoder, { persistent: true });
       const encodeStarted = adapter.now();
+      const animationBytes = writer.animationBytes(projectedAnimation);
+      writer.reserve(animationBytes, "persistent animation arena");
       const animationAddress = writer.animation(projectedAnimation);
+      writer.finishReservation();
       timings.animationEncodeMs = elapsed(adapter.now, encodeStarted);
       memory.frontierAfterAnimation = readFrontier(state);
       memory.animationBytes = writer.bytes;
+      memory.animationObjectCount = writer.objects;
+      memory.animationAllocationCalls = writer.allocations;
       const animationAllocations = writer.allocations;
 
       const stateSlotStarted = adapter.now();
@@ -882,6 +998,11 @@ export class IlluminatePlayerAdapter {
       checkpoint = readFrontier(state);
       memory.persistentCheckpoint = checkpoint;
       memory.stateSlotBytes = writer.bytes - memory.animationBytes;
+      memory.stateSlotObjectCount = writer.objects -
+        memory.animationObjectCount;
+      memory.stateSlotAllocationCalls = writer.allocations -
+        memory.animationAllocationCalls;
+      memory.persistentObjectCount = writer.objects;
       memory.persistentAllocationCalls = writer.allocations;
 
       const executeStarted = adapter.now();

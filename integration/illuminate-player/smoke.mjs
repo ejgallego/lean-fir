@@ -52,6 +52,19 @@ assert.deepEqual(created.action.updates[1],
 assert.equal(created.scheduleNextFrame, false);
 assert.equal(created.memory.postRewindFrontier,
   created.memory.persistentCheckpoint);
+assert.equal(created.memory.animationBytes,
+  created.memory.frontierAfterAnimation - created.memory.frontierBefore);
+assert.ok(created.memory.animationObjectCount > 1);
+assert.equal(created.memory.animationAllocationCalls, 1);
+assert.equal(created.memory.stateSlotBytes,
+  created.memory.persistentCheckpoint - created.memory.frontierAfterAnimation);
+assert.equal(created.memory.stateSlotObjectCount,
+  created.memory.stateSlotAllocationCalls);
+assert.equal(created.memory.persistentObjectCount,
+  created.memory.animationObjectCount + created.memory.stateSlotObjectCount);
+assert.equal(created.memory.persistentAllocationCalls,
+  created.memory.animationAllocationCalls +
+    created.memory.stateSlotAllocationCalls);
 
 const events = [
   { kind: "pause" },
@@ -214,6 +227,8 @@ console.log(JSON.stringify({
   steadyTicks: 10_000,
   steadyCheckpoint: steady.memory.persistentCheckpoint,
   steadyPeak,
+  animationObjects: created.memory.animationObjectCount,
+  animationAllocationCalls: created.memory.animationAllocationCalls,
   functionImports: 0,
   memoryImports: 0,
 }));
