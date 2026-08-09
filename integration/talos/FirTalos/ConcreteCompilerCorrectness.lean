@@ -14571,6 +14571,55 @@ theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.or
       exact right rightSupported stepFits invariant sourceStep valueCompiled
         valueAdapted resultFound
 
+/-- Transport a facts-indexed direct runtime law across pointwise equivalent
+threaded invariant presentations. -/
+theorem ReuseCapacityDirectLetRuntimeRefinesWithCost.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {Supported : ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Old New :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv Supported letCost Old)
+    (toOld : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      New facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        Old facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness)
+    (toNew : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      Old facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        New facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness) :
+    ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv Supported letCost New := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl sourceValue valueCode
+    targetValue targetStore targetLocals resultIndex remainingBytes witness
+    supported stepFits invariant sourceStep valueCompiled valueAdapted
+    resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transports, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      (toOld facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness invariant)
+      sourceStep valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transports, transfer,
+    toNew nextFacts (remainingBytes - letCost decl) nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
+      nextInvariant⟩
+
 /-- A facts-indexed direct law retains any property of the installed external
 handler table because every successful generated direct step preserves that
 table exactly. -/
@@ -16612,6 +16661,57 @@ def ReuseCapacityExternalLetRuntimeRefinesWithCost
                   (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
                   nextWitness
 
+/-- Transport a facts-indexed external runtime law across pointwise equivalent
+threaded invariant presentations. -/
+theorem ReuseCapacityExternalLetRuntimeRefinesWithCost.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Old New :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals ExternalSupported Old)
+    (toOld : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      New facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        Old facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness)
+    (toNew : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      Old facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        New facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness) :
+    ReuseCapacityExternalLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals ExternalSupported New := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      (toOld facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness invariant)
+      sourceStep valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer,
+    toNew nextFacts (remainingBytes - stepCost) nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
+      nextInvariant⟩
+
 /--
 Uniform facts-indexed interprocedural-call runtime law.
 
@@ -16673,6 +16773,100 @@ def ReuseCapacityCallLetRuntimeRefinesWithCost
                 Invariant nextFacts (remainingBytes - stepCost) nextRuntime
                   (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
                   nextWitness
+
+/-- Transport a facts-indexed interprocedural runtime law across pointwise
+equivalent threaded invariant presentations. -/
+theorem ReuseCapacityCallLetRuntimeRefinesWithCost.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {CallSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Old New :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals CallSupported Old)
+    (toOld : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      New facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        Old facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness)
+    (toNew : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      Old facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        New facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness) :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals CallSupported New := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      (toOld facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness invariant)
+      sourceStep valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer,
+    toNew nextFacts (remainingBytes - stepCost) nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
+      nextInvariant⟩
+
+/-- Facts-indexed interprocedural runtime laws compose by source-admission
+disjunction when they share the same successor fact map and invariant. -/
+theorem ReuseCapacityCallLetRuntimeRefinesWithCost.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {Left Right :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (left :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals Left Invariant)
+    (right :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals Right Invariant) :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals
+      (fun sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+          stepCost =>
+        Left sourceRuntime sourceEnv decl continuation nextRuntime sourceValue
+            stepCost ∨
+          Right sourceRuntime sourceEnv decl continuation nextRuntime
+            sourceValue stepCost)
+      Invariant := by
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue targetStore targetLocals resultIndex remainingBytes
+    stepCost witness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  cases supported with
+  | inl leftSupported =>
+      exact left leftSupported stepFits invariant sourceStep valueCompiled
+        valueAdapted resultFound
+  | inr rightSupported =>
+      exact right rightSupported stepFits invariant sourceStep valueCompiled
+        valueAdapted resultFound
 
 /-- The empty call family satisfies the facts-indexed call law vacuously. -/
 theorem reuseCapacityCallLetRuntimeRefinesWithCost_noCalls
@@ -16757,6 +16951,57 @@ def ReuseCapacityLazyLetRuntimeRefinesWithCost
                   Invariant nextFacts (remainingBytes - stepCost) nextRuntime
                     (bind sourceEnv decl.fvarId sourceValue) nextStore
                     nextLocals nextWitness
+
+/-- Transport a facts-indexed lazy-cache runtime law across pointwise
+equivalent threaded invariant presentations. -/
+theorem ReuseCapacityLazyLetRuntimeRefinesWithCost.mapInvariant
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {LazySupported :
+      LazyCachePath → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {Old New :
+      ReuseCapacityFacts → Nat → RuntimeState → Env → Wasm.Store Host →
+        Wasm.Locals → RefinementWitness → Prop}
+    (runtimeRefines :
+      ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv externals LazySupported Old)
+    (toOld : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      New facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        Old facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness)
+    (toNew : ∀ facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness,
+      Old facts remainingBytes sourceRuntime sourceEnv targetStore targetLocals
+          witness →
+        New facts remainingBytes sourceRuntime sourceEnv targetStore
+          targetLocals witness) :
+    ReuseCapacityLazyLetRuntimeRefinesWithCost context sourceModule
+      sourceFunction labels module hostEnv externals LazySupported New := by
+  intro path facts sourceRuntime nextRuntime sourceEnv decl continuation
+    sourceValue valueCode targetValue targetStore targetLocals resultIndex
+    remainingBytes stepCost witness supported stepFits invariant sourceStep
+    valueCompiled valueAdapted resultFound
+  obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+      externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, transfer, nextInvariant⟩ :=
+    runtimeRefines supported stepFits
+      (toOld facts remainingBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness invariant)
+      sourceStep valueCompiled valueAdapted resultFound
+  exact ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
+    externalsPreserved, hostDescriptorsPreserved, witnessDescriptorsPreserved,
+    transfer,
+    toNew nextFacts (remainingBytes - stepCost) nextRuntime
+      (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals nextWitness
+      nextInvariant⟩
 
 /-- The empty lazy-declaration family satisfies the cache law vacuously. -/
 theorem reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy

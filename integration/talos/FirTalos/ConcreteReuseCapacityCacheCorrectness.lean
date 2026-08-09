@@ -3896,6 +3896,66 @@ theorem ConcreteReuseCapacityCacheAbiFrame.closureAbi
     ClosureAllocationsAbiAligned context.program witness :=
   invariant.2
 
+/-- Forget only the program-indexed closure ABI component of an
+entry-relative cache frame. Entry-to-current transports are retained
+unchanged. -/
+theorem ReuseCapacityEntryRelativeFrame.cacheFrame_of_abi
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {currentEnv : Env}
+    {currentLocals : Wasm.Locals}
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+          externals)
+        entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
+        currentEnv currentStore currentLocals currentWitness) :
+    ReuseCapacityEntryRelativeFrame
+      (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+      entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
+      currentEnv currentStore currentLocals currentWitness :=
+  ⟨invariant.1.cacheFrame, invariant.2⟩
+
+/-- Reconstruct the closure-ABI entry-relative frame from the ordinary cache
+frame and ABI alignment at the fixed entry witness.
+
+The cumulative entry transport proves that every closure descriptor visible
+at the current point was already present at entry, so no per-operation ABI
+proof is required. -/
+theorem ReuseCapacityEntryRelativeFrame.abiFrame_of_cache
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {externals : ExternalImpl}
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {currentEnv : Env}
+    {currentLocals : Wasm.Locals}
+    (entryAbi : ClosureAllocationsAbiAligned context.program entryWitness)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
+        currentEnv currentStore currentLocals currentWitness) :
+    ReuseCapacityEntryRelativeFrame
+      (ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals)
+      entryRuntime entryStore entryWitness facts remainingBytes currentRuntime
+      currentEnv currentStore currentLocals currentWitness :=
+  ⟨⟨invariant.1,
+      entryAbi.ofPersistent invariant.2.closureAllocationsPersistent⟩,
+    invariant.2⟩
+
 /-- The canonical cache frame retains the facts-indexed concrete/source state
 relation used by every structural operation family. -/
 theorem ConcreteReuseCapacityCacheFrame.stateRelated
@@ -9551,6 +9611,39 @@ abbrev ProductionHereditaryLazySupported
     (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
     context
 
+/-- The current production interprocedural source boundary.
+
+At the root it admits either a statically named generated declaration or one
+exactly saturated closure application. The selected closure body is itself a
+direct-hereditary derivation, so this boundary covers the scalar-closure
+fixtures while making its present one-closure-layer frontier explicit. -/
+def ProductionHereditaryCallSupported
+    (externals : ExternalImpl)
+    (context : Fir.Wasm.Context)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (decl : LCNF.LetDecl .impure)
+    (continuation : LCNF.Code .impure)
+    (nextRuntime : RuntimeState)
+    (sourceValue : Value)
+    (stepCost : Nat) : Prop :=
+  ReuseCapacityDirectHereditaryCallSupported externals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun context => PureExternalSupported context externals)
+      (fun context => ProductionHereditaryLazySupported externals context)
+      (fun context => ProductionCasesSupported context)
+      (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
+      directLetAllocationCost context sourceRuntime sourceEnv decl continuation
+      nextRuntime sourceValue stepCost ∨
+    SaturatedClosureHereditaryCallSupported externals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun context => PureExternalSupported context externals)
+      (fun context => ProductionHereditaryLazySupported externals context)
+      (fun context => ProductionCasesSupported context)
+      (fun context => OwnershipTagAndAllFieldMutationEffectSupported context)
+      directLetAllocationCost context sourceRuntime sourceEnv decl continuation
+      nextRuntime sourceValue stepCost
+
 /--
 Source-only result-kind policy for the internal lazy fragment whose
 publication safety is representation-derived.
@@ -14844,6 +14937,167 @@ theorem
     (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
       contextCaches sourceExternals generated)
 
+/-- Certificate-free declaration correctness for the current production
+fragment with both generated named calls and saturated closure applications.
+
+The closure runtime law naturally preserves the program-indexed closure ABI
+frame. At one fixed export entry, cumulative closure-allocation persistence
+reconstructs that frame from the ordinary whole-cache frame after every
+non-closure operation. Consequently the generic mixed-code compiler theorem
+can combine the named and closure call families without a second structural
+induction. The result also exposes closure ABI alignment at exit. -/
+theorem
+    ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates_productionClosures
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (resolver :
+      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
+        target hosts)
+    {sourceExternals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context sourceExternals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context sourceExternals)
+        (ProductionHereditaryCallSupported sourceExternals context)
+        (ProductionHereditaryLazySupported sourceExternals context)
+        (ProductionCasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ∃ resultStore resultWitness resultKind physical,
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+          sourceModule sourceFunction target.wasmModule hosts.env
+          sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+          spec.targetFunction spec.targetFunctionIndex initial resultStore
+          initialWitness resultWitness parameters resultKind resultValue
+          physical requiredBytes ∧
+        ClosureAllocationsAbiAligned context.program resultWitness := by
+  have entryAbi :
+      ClosureAllocationsAbiAligned context.program initialWitness :=
+    invariant.closureAbi
+  have directCalls :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+          (fun context => ReuseBudgetedDirectSupported context)
+          (fun context => PureExternalSupported context sourceExternals)
+          (fun context =>
+            ProductionHereditaryLazySupported sourceExternals context)
+          (fun context => ProductionCasesSupported context)
+          (fun context =>
+            OwnershipTagAndAllFieldMutationEffectSupported context)
+          directLetAllocationCost context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness) :=
+    DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+      (DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
+        spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
+        spec.adapted spec.localsAligned
+        (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects_oneLazy
+          contextCaches sourceExternals generated))
+  have closureCallsAbi :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (SaturatedClosureHereditaryCallSupported sourceExternals
+          (fun context => ReuseBudgetedDirectSupported context)
+          (fun context => PureExternalSupported context sourceExternals)
+          (fun context =>
+            ProductionHereditaryLazySupported sourceExternals context)
+          (fun context => ProductionCasesSupported context)
+          (fun context =>
+            OwnershipTagAndAllFieldMutationEffectSupported context)
+          directLetAllocationCost context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheAbiFrame context sourceModule
+            sourceFunction sourceExternals)
+          sourceRuntime initial initialWitness) :=
+    spec.saturatedClosureCallRuntimeRefines_reuseBudgetedDirect_pureExternal_effects_oneLazy
+      contextCaches sourceExternals generated resolver
+  have closureCalls :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (SaturatedClosureHereditaryCallSupported sourceExternals
+          (fun context => ReuseBudgetedDirectSupported context)
+          (fun context => PureExternalSupported context sourceExternals)
+          (fun context =>
+            ProductionHereditaryLazySupported sourceExternals context)
+          (fun context => ProductionCasesSupported context)
+          (fun context =>
+            OwnershipTagAndAllFieldMutationEffectSupported context)
+          directLetAllocationCost context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness) :=
+    closureCallsAbi.mapInvariant
+      (fun _ _ _ _ _ _ _ current => current.abiFrame_of_cache entryAbi)
+      (fun _ _ _ _ _ _ _ current => current.cacheFrame_of_abi)
+  have calls :
+      ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction [] target.wasmModule hosts.env sourceExternals
+        (ProductionHereditaryCallSupported sourceExternals context)
+        (ReuseCapacityEntryRelativeFrame
+          (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+            sourceExternals)
+          sourceRuntime initial initialWitness) := by
+    intro currentFacts currentRuntime nextRuntime currentEnv decl continuation
+      sourceValue valueCode targetValue targetStore targetLocals resultIndex
+      remainingBytes stepCost currentWitness supported stepFits currentInvariant
+      sourceStep valueCompiled valueAdapted resultFound
+    rcases supported with directSupported | closureSupported
+    · exact directCalls directSupported stepFits currentInvariant sourceStep
+        valueCompiled valueAdapted resultFound
+    · exact closureCalls closureSupported stepFits currentInvariant sourceStep
+        valueCompiled valueAdapted resultFound
+  obtain ⟨resultStore, resultWitness, resultKind, physical, result⟩ :=
+    spec.toSupportedDeclaration
+      |>.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates
+        evaluation invariant.cacheFrame
+        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+          sourceExternals)
+        (spec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+          sourceExternals)
+        calls
+        (spec.toConcreteSupportedFunction.internalNonHeapHereditaryLazyRuntimeRefines_entryRelativeCache
+          contextCaches generated
+          (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_pureExternal_effects
+            sourceExternals))
+        spec.caseRuntimeRefines_productionCases
+        (fun _ =>
+          spec.effectRuntimeRefines_reuseOwnershipTagAndAllFieldMutation_pureExternal_entryRelativeCache
+            sourceExternals)
+        parameterCount
+  exact ⟨resultStore, resultWitness, resultKind, physical, result,
+    entryAbi.ofPersistent
+      result.declaration.closureAllocationsPersistent⟩
+
 /-- Saturated named calls in the direct/no-calls fragment are implemented by
 the generated callee selected by the production compiler. The only additional
 root-context fact identifies the compiler's canonical lazy-cache name table;
@@ -15513,6 +15767,73 @@ theorem
       contextCaches generated evaluation invariant parameterCount
   have successful := result.declaration.capacityPreserving.successful
   exact ⟨successful.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
+    successful.terminatesWith callerTail⟩
+
+/-- Public partial correctness for the current production closure frontier.
+
+Every finite source execution assembled solely from the admitted direct,
+external, named-call, saturated-closure, one-layer lazy, case, ownership, and
+mutation families is matched by a terminating invocation of the generated
+Wasm export. The target returns the same semantic value and runtime under one
+concrete result representation; neither a target trace nor a per-call target
+certificate is an input. -/
+theorem
+    ConcreteSupportedExport.correct_reuseBudgetedDirect_pureExternal_effects_oneLazy_productionClosures
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    (resolver :
+      SaturatedClosureCandidateResolver context sourceModule sourceFunction []
+        target hosts)
+    {sourceExternals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityBudgetedCodeEvaluates context sourceExternals
+        (ReuseBudgetedDirectSupported context)
+        (PureExternalSupported context sourceExternals)
+        (ProductionHereditaryCallSupported sourceExternals context)
+        (ProductionHereditaryLazySupported sourceExternals context)
+        (ProductionCasesSupported context)
+        (OwnershipTagAndAllFieldMutationEffectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv sourceCode
+        resultFacts resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ∃ resultKind,
+        ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+          initial (parameters ++ callerTail)
+          (RefinedReturnPost resultRuntime resultValue resultKind callerTail) := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, result,
+      _resultAbi⟩ :=
+    spec.budgetedDeclarationWithCache_of_reuseCapacityBudgetedCodeEvaluates_productionClosures
+      contextCaches generated resolver evaluation invariant parameterCount
+  have successful := result.declaration.capacityPreserving.successful
+  exact ⟨successful.sourceEvaluates, resultKind,
+    spec.targetFunctionIndex, spec.exported,
     successful.terminatesWith callerTail⟩
 
 end FirTalos.Concrete
