@@ -510,6 +510,41 @@ through Talos `execOne`. `ConcreteGeneratedTraceSimulation` now targets this
 machine. The next theorem folds finite terminal stack paths through the local
 collapse laws to the checked instruction-boundary/Talos result.
 
+### Remaining path to the compiler finite-trace theorem
+
+The target statement is a ranked forward simulation constructed by the
+compiler proof itself. For every finite LCNF interpreter prefix—including a
+prefix of a program that never terminates—it produces a finite path in the
+generated structured Wasm machine with the same world and external-event
+trace modulo the concrete address witness. If one source step needs no target
+step, a compiler-derived rank strictly decreases, preventing infinite silent
+stuttering. The caller supplies no simulation relation, target execution,
+translation certificate, closure resolver, or termination premise.
+
+The synchronized W6.7 sequence is:
+
+1. **Complete:** generic ranked finite-prefix transport.
+2. **Complete:** residual-instruction adequacy to Talos `exec`/`Wasm.run`.
+3. **Complete:** emitted frame collapse laws and the explicit structured
+   target machine.
+4. **Next:** prove canonical-entry-to-halted structured terminal adequacy,
+   including reachable frame-stack and arity invariants.
+5. **Largest remaining proof:** construct the compiler relation and silence
+   rank, and prove the step case for every admitted direct, external,
+   lazy/cache, case, effect, named-call, and saturated-closure operation.
+6. **Package:** construct `ConcreteFiniteTraceCorrect` from
+   `ConcreteSupportedExport`, then apply `execSteps` to obtain the public
+   finite-trace theorem.
+7. **Derive:** recover terminating whole-export correctness and state
+   infinite-execution progress/trace preservation. Consider backward weak
+   simulation only after the supported target transition surface is closed.
+
+The first public theorem follows the current production fragment rather than
+claiming all possible LCNF programs. Admission widening and W7 resident-helper
+refinement remain separate work. The detailed obligations and acceptance
+criteria live in `W6-THEOREM-ROADMAP.md`; `PLAN.md` carries the matching
+milestone table.
+
 The plan also defines A0, an independent artifact lane that can run alongside
 the proof and concrete-runtime lanes. A0 owns emitter and external-engine
 runner paths and produces standards-consumable, host-backed Wasm artifacts for

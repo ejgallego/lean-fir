@@ -1145,40 +1145,69 @@ acceptance tests pass.
    move into the direct compiler state relation. Result steps now have one
    common capacity-preserving
    contract with named direct, external, lazy, and call instantiations. The
-   call specialization identifies the remaining callee obligation exactly:
-   the ordinary call simulation plus its destination-local update, witness
-   transport, and retained-header transport. The remaining syntax work is to
-   consume these contracts in the direct operation and callee cases.
-   Successful reuse no longer requires a caller-selected representation
-   branch at the operation layer. Its remaining structural obligations are
-   constructive allocation headroom, ordinary-token provenance, and the
-   shared result-kind gate, not an execution certificate.
-   Structured unreachability remains the shared-contract blocker.
-7. Add the target relational execution/adequacy layer and instantiate the
-   checked weak-simulation boundary. `ObservedWeakSimulation` and its ranked
-   form now provide exact finite-path composition, observation preservation,
-   and the anti-infinite-stuttering premise. The concrete specialization fixes
-   source transitions to deterministic `ExecSteps` and observations to exact
-   world/event traces modulo `ConcreteTraceRel`; its `execSteps` theorem
-   already transports every finite source prefix without assuming source
-   termination. The instruction-boundary target is now concrete: it retains
-   store, locals, and residual program; exact finite paths collapse above one
-   common fuel bound to Talos `exec`, and both fallthrough and generated `.ret`
-   exits recover the exact successful `Wasm.run`. The remaining target work is
-   to reify call and structured-control frames so divergence inside an atomic
-   Talos instruction also produces target progress, prove finite terminal
-   collapse to the checked boundary, construct the compiler relation and rank
-   from lowering/adaptation plus W6 operation laws, and derive divergence
-   preservation. The emitted grammar inventory and local collapse laws are
-   already checked: finite internal calls ending at `.ret`, block fallthrough
-   and `br 0`, loop fallthrough, and either conditional branch reconstruct the
-   exact outer Talos step. The explicit running/breaking/returning/halted
-   machine and its label/loop/call stack are now implemented, including loop
-   restart and outward branch/return propagation; the concrete simulation
-   target selects it. Next prove finite terminal stack-path collapse to the
-   checked Talos boundary, then instantiate source-step cases and the rank.
-   Add the backward direction only when the supported target transition
-   surface is closed enough for a useful weak bisimulation.
+   call specialization identifies the callee obligation exactly: the ordinary
+   call simulation plus its destination-local update, witness transport, and
+   retained-header transport. These pieces now culminate in
+   `correct_reuseCapacityProductionHereditary`, the certificate-free finite
+   whole-export partial-correctness theorem for the current admitted
+   production fragment. Successful reuse does not require a caller-selected
+   representation branch or target execution. Its operation laws and frame
+   transports are inputs to W6.7e; future admission widening remains separate
+   from constructing the simulation for this already admitted fragment.
+7. Complete the target relational execution/adequacy layer and instantiate
+   the checked weak-simulation boundary. The completion ladder is:
+
+   - **W6.7a — generic finite-prefix theory (complete).**
+     `ObservedWeakSimulation` and its ranked form provide exact finite-path
+     composition, observation preservation, and the anti-infinite-stuttering
+     premise. `ConcreteRankedTraceSimulation.execSteps` transports every
+     finite deterministic LCNF `ExecSteps` prefix without assuming source
+     termination, provided the compiler-specific simulation is constructed.
+   - **W6.7b — instruction-boundary Talos adequacy (complete).**
+     The resumable state retains store, locals, and residual program. Finite
+     paths collapse above one common fuel bound to Talos `exec`; fallthrough,
+     return, and the generated `.ret` exit recover exact successful
+     `Wasm.run` results. `OutOfFuel` is not an execution checkpoint.
+   - **W6.7c — emitted frame laws and structured target (complete).**
+     Local laws cover internal calls, block/conditional exits, loop
+     fallthrough, and branches. The explicit running/breaking/returning/halted
+     machine reifies label, loop, and call frames, including loop restart and
+     outward branch/return propagation. `ConcreteGeneratedTraceSimulation`
+     selects this machine.
+   - **W6.7d — structured terminal adequacy (next).** Prove that every finite
+     path from a canonical generated function entry to a halted empty-frame
+     state collapses through the frame laws to the instruction-boundary
+     theorem and hence to the exact Talos `Wasm.run` result. Establish the
+     reachable-frame stack/arity invariant needed by that induction; do not
+     add target execution evidence to a public compiler theorem.
+   - **W6.7e — compiler relation and silence rank (largest remaining
+     milestone).** Define one compiler-derived relation containing compiled
+     residual code, source environment/Wasm locals, concrete heap refinement,
+     structured continuations, world/trace agreement, and the existing
+     closure/ownership/cache/allocation invariants. For every admitted
+     `executeStep`, construct a finite structured target path and restore the
+     relation. A zero-step target match must strictly decrease a structural
+     source rank. Discharge direct, external, lazy/cache, case, effect, named
+     call, and saturated-closure call cases using existing W6 operation laws.
+   - **W6.7f — public certificate-free finite-trace theorem.** From a
+     `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
+     construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
+     and structured-Wasm entries. The caller supplies no simulation relation,
+     target path, translation certificate, resolver package, or termination
+     premise. Applying `execSteps` must yield exact world/event traces modulo
+     the existing concrete address witness for every finite source prefix.
+   - **W6.7g — consequences.** Recover finite whole-export partial correctness
+     as a corollary using W6.7d, then state infinite-source progress/trace
+     preservation from the rank condition. The initial theorem covers the
+     current admitted production fragment; widen admission separately rather
+     than weakening its relation. Add a backward direction only after the
+     supported target transition surface is closed enough for a useful weak
+     bisimulation.
+
+   Thus W6.7d and W6.7e are the two remaining proof-bearing layers; W6.7f and
+   W6.7g are principally public packaging and consequences. W6.7e is the main
+   remaining integration risk because it must restore the complete relation
+   across every source-step family.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.
