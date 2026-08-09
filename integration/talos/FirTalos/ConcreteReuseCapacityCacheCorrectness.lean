@@ -8182,6 +8182,37 @@ def SaturatedClosureDispatchSelectionInduction
                               site.resultKind sourceValue physical stepCost ∧
                             locals.set? resultIndex physical = some updated
 
+/-- Executable adapter/resolver boundary for the compiler's complete closure
+candidate enumeration.
+
+This boundary contains no semantic call result and no callee correctness. It
+only resolves each compiler-produced symbolic candidate into the numeric
+Talos body and the concrete matcher invocation at a supplied store/address.
+The W6 simulation derives first-match selection, post-matcher refinement,
+argument assembly, and callee entry from these cases. -/
+def SaturatedClosureCandidateResolver
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction : Fir.Wasm.Function)
+    (labels : List FVarId)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts) : Prop :=
+  ∀ {decl : LCNF.LetDecl .impure}
+      {sourceEnv : Env}
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      {initial : Wasm.Store Host}
+      {closureIndex : Nat}
+      {address : Word32},
+    ∃ candidates : List
+        (ClosureCandidateCase sourceModule callerFunction labels
+          targetModule.wasmModule hosts.spec initial site.closureId
+          closureIndex address),
+      context.program.decls.toList.flatMap (fun target =>
+          compileClosureCandidatesForTarget context.program decl.fvarId
+            site.closureId site.resultKind site.argumentCode
+            site.argumentKinds target) =
+        candidates.map (·.source)
+
 /--
 Static resolver and hereditary-body induction for saturated closure dispatch,
 with dynamic first-match selection factored out.
@@ -10728,6 +10759,128 @@ private theorem findFVar?_append_eq_some_of_getElem?
           have tailFound := ih tailNodup bindingFound
           simp [findFVar?, different, tailFound]
 
+/-- Exact generated callee-entry local relation for any fully bound
+declaration row.
+
+This is the representation-independent declaration boundary used by both
+named calls and saturated closure calls. It depends only on production
+parameter classification, the semantic `bindParams` result, and a related
+physical parameter row; it does not depend on how the declaration was
+selected. -/
+theorem
+    ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelatedOfBoundParameters
+    {program : Fir.LeanIR.ImpureProgram}
+    {declaration : LCNF.Decl .impure}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (row : ConcreteGeneratedInternalDeclaration program declaration context
+      sourceCode sourceModule sourceFunction target)
+    {parameterKinds : Array AbiKind}
+    {semanticArgs : Array Value}
+    {calleeEnv : Env}
+    (parametersKnown :
+      Fir.Wasm.declarationParameterKinds? program declaration =
+        some parameterKinds)
+    (parametersBound :
+      bindParams declaration.params semanticArgs = .ok calleeEnv)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness parameterKinds.toList physicalArgs
+        semanticArgs.toList) :
+    EnvLocalsRelated witness (functionBindings sourceFunction) calleeEnv
+      (row.targetFunction.toLocals physicalArgs) := by
+  have arityEq : declaration.params.size = semanticArgs.size := by
+    by_contra different
+    have sizeTest :
+        (declaration.params.size == semanticArgs.size) = false :=
+      beq_eq_false_iff_ne.mpr different
+    unfold bindParams at parametersBound
+    simp [sizeTest] at parametersBound
+  have parameterBindings := row.sourceParameterBindings parametersKnown
+  have parameterNamesNodup :=
+    row.sourceParameterNamesNodup parametersKnown
+  have calleeEnvEq :
+      calleeEnv =
+        ((declaration.params.toList.zip semanticArgs.toList).map
+          (fun pair => (pair.fst.fvarId, pair.snd))).reverse := by
+    unfold bindParams at parametersBound
+    have sizeTest :
+        (declaration.params.size == semanticArgs.size) = true :=
+      beq_iff_eq.mpr arityEq
+    simp only [sizeTest, ↓reduceIte] at parametersBound
+    rw [bindParamPairsFold_eq] at parametersBound
+    simpa using (Except.ok.inj parametersBound).symm
+  intro fvar value sourceLookup
+  rw [calleeEnvEq] at sourceLookup
+  obtain ⟨candidate, candidateMember, candidateNames⟩ :=
+    lookup_eq_some_mem sourceLookup
+  have sourceRowMember :
+      (candidate, value) ∈
+        (declaration.params.toList.zip semanticArgs.toList).map
+          (fun pair => (pair.fst.fvarId, pair.snd)) := by
+    simpa using candidateMember
+  obtain ⟨index, rowBound, sourceRowAt⟩ :=
+    List.mem_iff_getElem.mp sourceRowMember
+  have zippedBound : index <
+      (declaration.params.toList.zip semanticArgs.toList).length := by
+    simpa using rowBound
+  have parameterBound : index < declaration.params.toList.length := by
+    simp only [List.length_zip] at zippedBound
+    omega
+  have semanticBound : index < semanticArgs.toList.length := by
+    simp only [List.length_zip] at zippedBound
+    omega
+  rw [List.getElem_map, List.getElem_zip] at sourceRowAt
+  have candidateAt :
+      declaration.params.toList[index].fvarId = candidate :=
+    congrArg Prod.fst sourceRowAt
+  have semanticAt : semanticArgs.toList[index] = value :=
+    congrArg Prod.snd sourceRowAt
+  have semanticFound : semanticArgs.toList[index]? = some value := by
+    rw [List.getElem?_eq_getElem semanticBound, semanticAt]
+  obtain ⟨kind, physical, kindFound, physicalFound, valueRelated⟩ :=
+    argumentsRelated.resolveAt semanticFound
+  obtain ⟨kindBound, kindAt⟩ := List.getElem?_eq_some_iff.mp kindFound
+  have parameterRowBound : index < sourceFunction.params.toList.length := by
+    rw [parameterBindings]
+    simp only [List.length_map, List.length_zip]
+    omega
+  have expectedParameterRowAt :
+      ((declaration.params.toList.zip parameterKinds.toList).map
+          (fun pair => (pair.fst.fvarId, pair.snd)))[index]? =
+        some (candidate, kind) := by
+    apply List.getElem?_eq_some_iff.mpr
+    refine ⟨?_, ?_⟩
+    · simp only [List.length_map, List.length_zip]
+      omega
+    · rw [List.getElem_map, List.getElem_zip, candidateAt, kindAt]
+  have parameterRowAt :
+      sourceFunction.params.toList[index]? = some (candidate, kind) := by
+    rw [parameterBindings]
+    exact expectedParameterRowAt
+  have localFound :
+      findFVar? (functionBindings sourceFunction) fvar = some index := by
+    unfold functionBindings
+    exact findFVar?_append_eq_some_of_getElem? parameterNamesNodup
+      parameterRowAt candidateNames
+  have kindAtBinding :
+      (functionBindings sourceFunction)[index]?.map Prod.snd = some kind := by
+    unfold functionBindings
+    rw [List.getElem?_append_left parameterRowBound, parameterRowAt]
+    rfl
+  obtain ⟨physicalBound, _physicalAt⟩ :=
+    List.getElem?_eq_some_iff.mp physicalFound
+  have physicalAt :
+      (row.targetFunction.toLocals physicalArgs).get index = some physical := by
+    simp only [Wasm.Function.toLocals, Wasm.Locals.get]
+    rw [if_pos physicalBound]
+    exact physicalFound
+  exact ⟨index, kind, physical, localFound, kindAtBinding, physicalAt,
+    valueRelated⟩
+
 /-- Exact generated callee-entry local relation for a saturated direct call.
 The theorem composes production parameter classification/lowering, semantic
 `bindParams`, and the already-related physical argument row. -/
@@ -10982,6 +11135,104 @@ theorem ConcreteReuseCapacityCacheFrame.generatedDirectCalleeEntryAtCost
   (callerFrame.generatedDirectCalleeEntry site row argumentsRelated).withBudget
     (callerFrame.budget.weaken stepFits)
 
+/-- Re-index the ownership-threaded post-matcher frame as the exact generated
+callee entry of a saturated closure call.
+
+The semantic runtime and concrete store are already the matcher successors.
+Only the function-local view changes: caller locals are replaced by the
+generated declaration's parameter frame assembled from captures and ordinary
+arguments. No store-identity assumption is used. -/
+theorem
+    ConcreteReuseCapacityCacheFrame.generatedSaturatedClosureCalleeEntryAtCost
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {callerEnv : Env} {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule} {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes stepCost : Nat}
+    {sourceRuntime callRuntime : RuntimeState}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals} {witness : RefinementWitness}
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes callRuntime callerEnv targetStore callerLocals
+        witness)
+    (site : SaturatedClosureCallSite callerContext callerDecl callerEnv)
+    (resolution :
+      SaturatedClosureCallResolution callerContext sourceRuntime site)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction target)
+    {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+        physicalArgs (resolution.captures ++ site.semanticArgs).toList)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals []
+      stepCost callRuntime resolution.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness := by
+  rcases callerFrame with
+    ⟨⟨⟨⟨callerRelated, _callerOrdinary, _callerAligned, budget⟩,
+      integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, cacheTable, closureTables⟩
+  have entryLocals :
+      EnvLocalsRelated witness (functionBindings calleeFunction)
+        resolution.calleeEnv (row.targetFunction.toLocals physicalArgs) :=
+    row.entryEnvLocalsRelatedOfBoundParameters resolution.parametersKnown
+      resolution.parametersBound argumentsRelated
+  have entryState :
+      StateRelated calleeFunction callRuntime resolution.calleeEnv targetStore
+        (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨callerRelated.1.1, callerRelated.1.2.1, entryLocals⟩
+  have emptyFacts :
+      ReuseCapacityFactsRel [] (functionBindings calleeFunction)
+        resolution.calleeEnv (row.targetFunction.toLocals physicalArgs)
+        targetStore.host.runtime.heap witness := by
+    intro fvarId evidence found
+    simp [findReuseCapacityEvidence?] at found
+  have entryRelated :
+      ReuseCapacityStateRelated [] calleeFunction callRuntime
+        resolution.calleeEnv targetStore
+        (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨entryState, emptyFacts⟩
+  have emptyOrdinary :
+      ReuseTokenOrdinaryRel [] callRuntime resolution.calleeEnv := by
+    intro fvarId available location cell found
+    simp [findReuseCapacityEvidence?] at found
+  have classifiedSize := row.parameterKindsSize resolution.parametersKnown
+  have parameterBindings :=
+    row.sourceParameterBindings resolution.parametersKnown
+  have sourceParameterSize :
+      calleeFunction.params.size = resolution.parameterKinds.size := by
+    have lengths := congrArg List.length parameterBindings
+    simp only [Array.length_toList, List.length_map, List.length_zip] at lengths
+    rw [← classifiedSize] at lengths
+    simpa using lengths
+  have physicalSize :
+      physicalArgs.length = resolution.parameterKinds.size := by
+    simpa using argumentsRelated.physicalLength
+  have parameterFrameSize :
+      (row.targetFunction.toLocals physicalArgs).params.length =
+        calleeFunction.params.size := by
+    simpa [Wasm.Function.toLocals] using
+      physicalSize.trans sourceParameterSize.symm
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  have localFrameSize :
+      (row.targetFunction.toLocals physicalArgs).locals.length =
+        calleeFunction.locals.size := by
+    simp [Wasm.Function.toLocals, signature.2.1]
+  have entryAligned :
+      ConcreteLocalFrameAligned calleeFunction callRuntime
+        resolution.calleeEnv targetStore
+        (row.targetFunction.toLocals physicalArgs) witness :=
+    ⟨parameterFrameSize, localFrameSize⟩
+  exact
+    ⟨⟨⟨⟨entryRelated, emptyOrdinary, entryAligned,
+          budget.weaken stepFits⟩,
+        integerImplementation, naturalImplementation, scalarImplementation⟩,
+      descriptorAgreement⟩, cacheTable, closureTables⟩
+
 /-- Re-index an unchanged caller store as the entry frame of a generated
 nullary initializer. The empty source environment makes the local-value
 relation vacuous, while the production parameter row and adapted signature
@@ -11108,6 +11359,44 @@ theorem ConcreteGeneratedInternalDeclaration.targetParameterCount
   have physicalSize : physicalArgs.length = site.parameterKinds.size := by
     simpa using
       (argumentsRelated.ofKindsRefine site.argumentsRefine).physicalLength
+  have signature :=
+    FirTalos.Correctness.function_preserves_signature row.functionAdapted
+  simp [Wasm.Function.numParams, signature.1, physicalSize,
+    sourceParameterSize]
+
+/-- The assembled capture-plus-argument row of a saturated closure call has
+exactly the adapted generated callee arity. -/
+theorem
+    ConcreteGeneratedInternalDeclaration.targetParameterCount_saturatedClosure
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {callerDecl : LCNF.LetDecl .impure} {callerEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {sourceModule : Fir.Wasm.Module}
+    {calleeFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    (site : SaturatedClosureCallSite callerContext callerDecl callerEnv)
+    (resolution :
+      SaturatedClosureCallResolution callerContext sourceRuntime site)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction target)
+    {witness : RefinementWitness} {physicalArgs : List Wasm.Value}
+    (argumentsRelated :
+      ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+        physicalArgs (resolution.captures ++ site.semanticArgs).toList) :
+    physicalArgs.reverse.length = row.targetFunction.numParams := by
+  have parameterBindings :=
+    row.sourceParameterBindings resolution.parametersKnown
+  have classifiedSize := row.parameterKindsSize resolution.parametersKnown
+  have sourceParameterSize :
+      calleeFunction.params.size = resolution.parameterKinds.size := by
+    have lengths := congrArg List.length parameterBindings
+    simp only [Array.length_toList, List.length_map, List.length_zip] at lengths
+    rw [← classifiedSize] at lengths
+    simpa using lengths
+  have physicalSize :
+      physicalArgs.length = resolution.parameterKinds.size := by
+    simpa using argumentsRelated.physicalLength
   have signature :=
     FirTalos.Correctness.function_preserves_signature row.functionAdapted
   simp [Wasm.Function.numParams, signature.1, physicalSize,
@@ -13503,6 +13792,68 @@ def DirectHereditaryGeneratedDeclarationInduction
             initialWitness resultWitness parameters resultKind resultValue
             physical requiredBytes
 
+/-- Program-indexed strengthening of generated declaration induction needed by
+hereditary closure calls.
+
+The recursive premise is still only the finite source derivation and the
+production generated row. The strengthened frame preserves the invariant
+that every allocated closure descriptor refines the fixed parameter prefix of
+its source declaration, so a later saturated call can assemble captures at
+the generated callee ABI without a per-call certificate. -/
+def DirectHereditaryGeneratedDeclarationAbiInduction
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (target : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (sourceExternals : ExternalImpl)
+    (DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop)
+    (ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop)
+    (LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop)
+    (CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop)
+    (EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate) : Prop :=
+  ∀ {declaration : LCNF.Decl .impure}
+      {context : Fir.Wasm.Context}
+      {sourceCode : LCNF.Code .impure}
+      {sourceFunction : Fir.Wasm.Function}
+      {resultKind : AbiKind}
+      (row : ConcreteGeneratedInternalDeclaration program declaration context
+        sourceCode sourceModule sourceFunction target)
+      (_resultClassified :
+        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
+      {resultFacts : ReuseCapacityFacts}
+      {sourceRuntime resultRuntime : RuntimeState}
+      {sourceEnv resultEnv : Env}
+      {resultValue : Value} {requiredBytes : Nat}
+      (_evaluation :
+        ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+          DirectSupported ExternalSupported LazySupported CaseSupported
+          EffectSupported directLetAllocationCost context resultKind []
+          sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+          resultValue requiredBytes)
+      {initial : Wasm.Store Host}
+      {initialWitness : RefinementWitness}
+      {parameters : List Wasm.Value},
+    ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+          sourceExternals [] requiredBytes sourceRuntime sourceEnv initial
+          (row.targetFunction.toLocals parameters.reverse) initialWitness →
+      parameters.length = row.targetFunction.numParams →
+        ∃ resultStore resultWitness physical,
+          BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+              sourceModule sourceFunction target.wasmModule hosts.env
+              sourceExternals sourceRuntime resultRuntime sourceEnv sourceCode
+              row.targetFunction row.targetFunctionIndex initial resultStore
+              initialWitness resultWitness parameters resultKind resultValue
+              physical requiredBytes ∧
+            ClosureAllocationsAbiAligned program resultWitness
+
 /--
 Production generated-row operation laws close the recursive declaration
 induction constructively.
@@ -14132,6 +14483,217 @@ theorem
       rfl, resultKindAt, assembled,
       calleeResult.ofRefines site.calleeResultRefines, targetSet, ?_⟩
   simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
+
+/-- Certificate-free ownership-aware runtime law for saturated closure calls.
+
+The source payload supplies the semantic ownership transition and finite
+callee derivation. The executable resolver supplies only the actual adapted
+candidate cases. From those inputs this theorem derives first-match selection,
+the post-consumption matcher frame, the exact generated argument body, the
+related callee parameter row, and the recursive generated declaration result.
+No selected-body theorem, argument assembly, unchanged-store equation, or
+target execution is accepted from the caller. -/
+theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {callerCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    {sourceExternals : ExternalImpl}
+    {DirectSupported :
+      Fir.Wasm.Context → ReuseCapacityFacts → LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.LetDecl .impure →
+        LCNF.Code .impure → RuntimeState → Value → Nat → Prop}
+    {LazySupported :
+      Fir.Wasm.Context → LazyCachePath → RuntimeState → Env →
+        LCNF.LetDecl .impure → LCNF.Code .impure → RuntimeState →
+          Value → Nat → Prop}
+    {CaseSupported :
+      Fir.Wasm.Context → RuntimeState → Env → LCNF.Cases .impure →
+        LCNF.Code .impure → Prop}
+    {EffectSupported : Fir.Wasm.Context → EffectSupportedPredicate}
+    (spec : ConcreteSupportedExport program context callerCode sourceModule
+      callerFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (resolver :
+      SaturatedClosureCandidateResolver context sourceModule callerFunction
+        labels target hosts)
+    (declarations :
+      DirectHereditaryGeneratedDeclarationAbiInduction program sourceModule
+        target hosts sourceExternals DirectSupported ExternalSupported
+        LazySupported CaseSupported EffectSupported)
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness} :
+    ReuseCapacityCallLetRuntimeRefinesWithCost context sourceModule
+      callerFunction labels target.wasmModule hosts.env sourceExternals
+      (SaturatedClosureHereditaryCallSupported sourceExternals
+        DirectSupported ExternalSupported LazySupported CaseSupported
+        EffectSupported directLetAllocationCost context)
+      (ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheAbiFrame context sourceModule callerFunction
+          sourceExternals)
+        entryRuntime entryStore entryWitness) := by
+  have contextProgram := spec.contextProgram
+  subst program
+  intro facts sourceRuntime nextRuntime sourceEnv decl continuation sourceValue
+    valueCode targetValue initial locals resultIndex remainingBytes stepCost
+    initialWitness supported stepFits invariant sourceStep valueCompiled
+    valueAdapted resultFound
+  rcases invariant with ⟨abiInvariant, entryTransports⟩
+  rcases supported with
+    ⟨callRuntime, calleeFunction, calleeResultFacts, calleeResultEnv, site,
+      resolution, loweredRow, sharedCapacity, application, calleeEvaluation⟩
+  have expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok (compileClosureDispatch context decl.fvarId site.closureId
+          site.resultKind site.argumentCode site.argumentKinds) := by
+    simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+      site.kindEq, site.closureCompiled, site.argumentsCompiled,
+      site.nonempty, Bind.bind, Except.bind, pure, Except.pure]
+  have valueCodeEq :
+      valueCode =
+        compileClosureDispatch context decl.fvarId site.closureId
+          site.resultKind site.argumentCode site.argumentKinds := by
+    rw [expectedCompiled] at valueCompiled
+    exact (Except.ok.inj valueCompiled).symm
+  subst valueCode
+  obtain ⟨closureIndex, closureFound, closureKindAt⟩ :=
+    spec.localsAligned site.closureCompiled
+  obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+    spec.localsAligned site.resultCompiled
+  rw [resultFound] at alignedResultFound
+  injection alignedResultFound with resultIndexEq
+  subst alignedResultIndex
+  obtain ⟨address, closureLocal, mapped⟩ :=
+    abiInvariant.cacheFrame.resolveClosureAddress site resolution closureFound
+      closureKindAt
+  obtain ⟨candidates, candidatesEq⟩ := resolver site
+  obtain ⟨before, selected, suffix, candidatesSplit, _, beforeNonmatching,
+      selectedMatches, selectedIdentity⟩ :=
+    abiInvariant.cacheFrame.closureCandidates_exists_first_match_of_resolution
+      site resolution closureLocal mapped candidates candidatesEq
+  have selectedMem : selected ∈ candidates := by
+    rw [candidatesSplit]
+    simp
+  obtain ⟨_matcherIdentity, applicationSnapshot, captureKinds,
+      applicationFound, applicationRelated, matcherFrame, matcherCapacity,
+      postMatcher⟩ :=
+    abiInvariant.cacheFrame.selectedClosureMatcher selected mapped
+      resolution.cellFound resolution.cellLive resolution.cellObjectEq
+      selectedMatches sharedCapacity application
+  obtain ⟨functionIndex, argumentTarget, physicalArgs, callFound,
+      assembled, argumentsRelated, selectedBodyEq⟩ :=
+    resolution.candidateArguments_of_identity site
+      spec.toConcreteSupportedFunction
+      abiInvariant.closureAbi closureFound closureLocal candidatesEq selectedMem
+      selectedIdentity resultFound applicationFound applicationRelated
+      postMatcher.stateRelated.1 postMatcher.stateRelated.1.clearFailure
+  have resultClassified :
+      Fir.Wasm.abiKind? resolution.target.type =
+        .ok (some resolution.targetResultKind) :=
+    abiKind?_eq_ok_some_of_directAbiKind?_eq_some resolution.targetResult
+  obtain ⟨generatedRow⟩ :=
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+      rfl contextCaches spec.programNamesUnique spec.lowered spec.adapted
+      resolution.targetFound loweredRow resultClassified
+  have calleeCacheFrame :=
+    postMatcher.generatedSaturatedClosureCalleeEntryAtCost site resolution
+      generatedRow argumentsRelated stepFits
+  have calleeAbi :
+      ClosureAllocationsAbiAligned loweredRow.context.program initialWitness :=
+    abiInvariant.closureAbi
+  have calleeFrame :
+      ConcreteReuseCapacityCacheAbiFrame loweredRow.context sourceModule
+        calleeFunction sourceExternals [] stepCost callRuntime
+        resolution.calleeEnv selected.nextStore
+        (generatedRow.targetFunction.toLocals physicalArgs) initialWitness :=
+    ⟨calleeCacheFrame, calleeAbi⟩
+  obtain ⟨afterCall, resultWitness, physical, calleeResult,
+      resultAbi⟩ :=
+    declarations generatedRow resultClassified calleeEvaluation
+      (by simpa using calleeFrame)
+      (generatedRow.targetParameterCount_saturatedClosure site resolution
+        argumentsRelated)
+  have exactCallIndex :
+      callIndex? sourceModule (.declaration resolution.function) =
+        some generatedRow.targetFunctionIndex := by
+    simpa [resolution.targetName] using generatedRow.callIndexEq
+  rw [exactCallIndex] at callFound
+  have functionIndexEq : generatedRow.targetFunctionIndex = functionIndex :=
+    Option.some.inj callFound
+  subst functionIndex
+  have dispatchAdapted :
+      instructions sourceModule callerFunction labels
+          (compileClosureDispatch context decl.fvarId site.closureId
+            site.resultKind site.argumentCode site.argumentKinds) =
+        .ok
+          (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+            [.localGet resultIndex]) := by
+    have generatedEq := candidatesEq
+    rw [candidatesSplit] at generatedEq
+    exact instructions_compileClosureDispatch (before ++ selected :: suffix)
+      generatedEq closureFound resultFound
+  have targetEq :
+      targetValue =
+        resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+          [.localGet resultIndex] := by
+    rw [dispatchAdapted] at valueAdapted
+    exact (Except.ok.inj valueAdapted).symm
+  subst targetValue
+  obtain ⟨updated, targetSet, _⟩ :=
+    abiInvariant.cacheFrame.1.1.1.2.2.1.set?
+      (nextRuntime := nextRuntime)
+      (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+      (nextStore := afterCall)
+      (nextWitness := resultWitness)
+      (physical := physical) resultFound
+  have callerResult :=
+    calleeResult.ofRefines resolution.targetResultRefines
+  have factsTransfer :
+      reuseCapacityLetFacts? facts decl =
+        some (eraseReuseCapacityFact facts decl.fvarId) := by
+    simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
+  obtain ⟨callStep, externalsPreserved, hostDescriptorsPreserved,
+      witnessDescriptorsPreserved, producedTransfer, nextCacheFrame⟩ :=
+    abiInvariant.cacheFrame.ofSaturatedClosureDeclarationConsumed stepFits
+      before selected suffix postMatcher sourceStep resultFound resultKindAt
+      closureLocal spec.hostsSatisfy beforeNonmatching selectedMatches
+      matcherCapacity matcherFrame assembled selectedBodyEq callerResult
+      targetSet factsTransfer
+  have matcherTables :
+      ClosureTablesTransport initial selected.nextStore initialWitness
+        initialWitness := {
+    hostDispatchPreserved := matcherFrame.dispatch
+    witnessDispatchPreserved := rfl
+    hostDescriptorsPreserved := matcherFrame.descriptors
+    witnessDescriptorsPreserved := rfl }
+  have matcherEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime callRuntime entryStore
+        selected.nextStore entryWitness initialWitness :=
+    entryTransports.step (WitnessTransport.refl initialWitness)
+      matcherCapacity
+      (takeClosureApplication_ordinaryPersistenceTransport application)
+      matcherFrame.externals matcherTables
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        afterCall entryWitness resultWitness :=
+    matcherEntry.step
+      callerResult.declaration.capacityPreserving.witnessTransport
+      callerResult.declaration.capacityPreserving.capacityTransport
+      callerResult.declaration.ordinaryTransport
+      callerResult.declaration.externalsPreserved
+      callerResult.declaration.toClosureTablesTransport
+  exact ⟨afterCall, updated, resultWitness,
+    eraseReuseCapacityFact facts decl.fvarId, callStep, externalsPreserved,
+    hostDescriptorsPreserved, witnessDescriptorsPreserved, producedTransfer,
+    ⟨⟨nextCacheFrame, resultAbi⟩, nextEntry⟩⟩
 
 /-- Saturated named calls in the direct/no-calls fragment are implemented by
 the generated callee selected by the production compiler. The only additional
