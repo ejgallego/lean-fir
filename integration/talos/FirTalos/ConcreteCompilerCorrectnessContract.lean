@@ -4267,6 +4267,60 @@ example
   DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws namesUnique
     lowered adapted operationLaws
 
+/-- The first production recursive fragment constructs its complete generated
+declaration induction from the root pipeline and individual operation
+theorems. No operation bundle or callee correctness premise remains. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (sourceExternals : ExternalImpl) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun _ => NoReuseCapacityExternalsSupported)
+      (fun _ => NoReuseCapacityLazySupported)
+      (fun _ => DefaultOnlyCaseSupported)
+      (fun _ => NoEffectsSupported) :=
+  spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_noCalls
+    sourceExternals
+
+/-- Consequently the root named-call law is also production-derived: callers
+supply the canonical compiler context fact, not target behavior for callees. -/
+example
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (sourceExternals : ExternalImpl) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      sourceFunction labels target.wasmModule hosts.env sourceExternals
+      (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+        (fun context => ReuseBudgetedDirectSupported context)
+        (fun _ => NoReuseCapacityExternalsSupported)
+        (fun _ => NoReuseCapacityLazySupported)
+        (fun _ => DefaultOnlyCaseSupported)
+        (fun _ => NoEffectsSupported)
+        directLetAllocationCost context) :=
+  spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_noCalls
+    contextCaches sourceExternals
+
 /--
 The saturated closure path derives the adapted dispatch from the exact
 compiler candidate enumeration returned by its module-wide selection

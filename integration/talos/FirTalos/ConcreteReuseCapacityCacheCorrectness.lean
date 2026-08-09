@@ -10922,6 +10922,51 @@ structure DirectHereditaryGeneratedOperationLaws
             sourceExternals)
           entryRuntime entryStore entryWitness facts)
 
+/-- The production operation theorems instantiate the generated-row bundle
+for the first recursive fragment: supported direct heap/reuse operations,
+default-only cases, and no external, lazy, or no-result effect nodes.
+
+Each direct law is selected for the exact internal function row. The empty
+families are discharged by their generic impossibility theorems, so this
+constructor contains no per-program target behavior premise. -/
+theorem
+    ConcreteSupportedExport.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_noCalls
+    {program : Fir.LeanIR.ImpureProgram}
+    {rootContext : Fir.Wasm.Context}
+    {rootCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {rootFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program rootContext rootCode sourceModule
+      rootFunction target hosts exportName)
+    (sourceExternals : ExternalImpl) :
+    DirectHereditaryGeneratedOperationLaws program sourceModule target hosts
+      sourceExternals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun _ => NoReuseCapacityExternalsSupported)
+      (fun _ => NoReuseCapacityLazySupported)
+      (fun _ => DefaultOnlyCaseSupported)
+      (fun _ => NoEffectsSupported) := by
+  constructor
+  · intro declaration context sourceCode sourceFunction row entryRuntime
+      entryStore entryWitness
+    exact
+      (row.toSupportedFunction spec).reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+        sourceExternals
+  · intro declaration context sourceCode sourceFunction row entryRuntime
+      entryStore entryWitness
+    exact reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
+  · intro declaration context sourceCode sourceFunction row entryRuntime
+      entryStore entryWitness
+    exact reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
+  · intro declaration context sourceCode sourceFunction row
+    exact caseRuntimeRefines_defaultOnly
+  · intro declaration context sourceCode sourceFunction row entryRuntime
+      entryStore entryWitness facts
+    exact effectRuntimeRefines_noEffects
+
 /--
 The structural hereditary theorem specialized to actual generated declaration
 rows. Its caller-slack quantifier is part of the induction motive, so a nested
@@ -11594,6 +11639,34 @@ theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
       residualBudget }
     cacheTable := resultInvariant.1.2.1 }⟩
 
+/-- Compiler-generated declarations in the direct/no-calls fragment satisfy
+the recursive declaration contract solely from the production operation
+theorems and the successful lowering/adaptation pipeline. -/
+theorem
+    ConcreteSupportedExport.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_noCalls
+    {program : Fir.LeanIR.ImpureProgram}
+    {rootContext : Fir.Wasm.Context}
+    {rootCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {rootFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program rootContext rootCode sourceModule
+      rootFunction target hosts exportName)
+    (sourceExternals : ExternalImpl) :
+    DirectHereditaryGeneratedDeclarationInduction program sourceModule target
+      hosts sourceExternals
+      (fun context => ReuseBudgetedDirectSupported context)
+      (fun _ => NoReuseCapacityExternalsSupported)
+      (fun _ => NoReuseCapacityLazySupported)
+      (fun _ => DefaultOnlyCaseSupported)
+      (fun _ => NoEffectsSupported) :=
+  DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
+    spec.programNamesUnique spec.lowered spec.adapted
+    (spec.directHereditaryGeneratedOperationLaws_reuseBudgetedDirect_noCalls
+      sourceExternals)
+
 /--
 The production named-call implementation consumes the hereditary source
 payload directly.
@@ -11724,5 +11797,171 @@ theorem
       rfl, resultKindAt, assembled,
       calleeResult.ofRefines site.calleeResultRefines, targetSet, ?_⟩
   simp [Fir.Wasm.reuseCapacityLetFacts?, site.valueEq]
+
+/-- Saturated named calls in the direct/no-calls fragment are implemented by
+the generated callee selected by the production compiler. The only additional
+root-context fact identifies the compiler's canonical lazy-cache name table;
+all recursive target correctness is derived internally. -/
+theorem
+    ConcreteSupportedExport.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_noCalls
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (sourceExternals : ExternalImpl) :
+    DirectDeclarationCallImplementationWithCache context sourceModule
+      sourceFunction labels target.wasmModule hosts.env sourceExternals
+      (ReuseCapacityDirectHereditaryCallSupported sourceExternals
+        (fun context => ReuseBudgetedDirectSupported context)
+        (fun _ => NoReuseCapacityExternalsSupported)
+        (fun _ => NoReuseCapacityLazySupported)
+        (fun _ => DefaultOnlyCaseSupported)
+        (fun _ => NoEffectsSupported)
+        directLetAllocationCost context) :=
+  DirectDeclarationCallImplementationWithCache.ofHereditaryInternalCompiler
+    spec.contextProgram contextCaches spec.programNamesUnique spec.lowered
+    spec.adapted spec.localsAligned
+    (spec.directHereditaryGeneratedDeclarationInduction_reuseBudgetedDirect_noCalls
+      sourceExternals)
+
+/-- Certificate-free partial correctness for a generated root export whose
+finite source derivation contains supported direct operations and recursively
+supported saturated named calls, but no external, lazy, or no-result effects.
+
+The theorem returns the exact concrete execution together with resource,
+ownership, immutable-table, and whole-cache transports. Nested callees are
+proved by the compiler-generated declaration induction above; the caller
+does not provide their target executions. -/
+theorem
+    ConcreteSupportedExport.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates_reuseBudgetedDirect_noCalls
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {sourceExternals : ExternalImpl}
+    {resultKind : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+        (fun context => ReuseBudgetedDirectSupported context)
+        (fun _ => NoReuseCapacityExternalsSupported)
+        (fun _ => NoReuseCapacityLazySupported)
+        (fun _ => DefaultOnlyCaseSupported)
+        (fun _ => NoEffectsSupported)
+        directLetAllocationCost context resultKind facts sourceRuntime sourceEnv
+        sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ∃ resultStore resultWitness physical,
+      BudgetedCapacityPreservingSuccessfulDeclarationWithCache context
+        sourceModule sourceFunction target.wasmModule hosts.env sourceExternals
+        sourceRuntime resultRuntime sourceEnv sourceCode spec.targetFunction
+        spec.targetFunctionIndex initial resultStore initialWitness
+        resultWitness parameters resultKind resultValue physical
+        requiredBytes := by
+  exact
+    spec.toSupportedDeclaration
+      |>.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates
+        evaluation invariant
+        (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+          sourceExternals)
+        reuseCapacityExternalLetRuntimeRefinesWithCost_noExternals
+        (DirectDeclarationCallImplementationWithCache.runtimeRefinesEntryRelative
+          (spec.directDeclarationCallImplementationWithCache_reuseBudgetedDirect_noCalls
+            contextCaches sourceExternals))
+        reuseCapacityLazyLetRuntimeRefinesWithCost_noLazy
+        caseRuntimeRefines_defaultOnly
+        (fun _ => effectRuntimeRefines_noEffects)
+        parameterCount
+
+/-- Public partial-correctness corollary for the first recursive production
+fragment.
+
+If the source export has the finite hereditary evaluation described above,
+then invoking the compiler-selected Wasm export terminates with a concrete
+runtime and physical result that refine the exact source runtime and value.
+The proof is derived from lowering, adaptation, generated declaration rows,
+and the individual runtime-operation theorems; no target run is assumed. -/
+theorem
+    ConcreteSupportedExport.correct_reuseBudgetedDirect_noCalls
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec : ConcreteSupportedExport program context sourceCode sourceModule
+      sourceFunction target hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    {sourceExternals : ExternalImpl}
+    {resultKind : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters callerTail : List Wasm.Value}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityDirectHereditaryCodeEvaluates sourceExternals
+        (fun context => ReuseBudgetedDirectSupported context)
+        (fun _ => NoReuseCapacityExternalsSupported)
+        (fun _ => NoReuseCapacityLazySupported)
+        (fun _ => DefaultOnlyCaseSupported)
+        (fun _ => NoEffectsSupported)
+        directLetAllocationCost context resultKind facts sourceRuntime sourceEnv
+        sourceCode resultFacts resultRuntime resultEnv resultValue
+        requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+        sourceExternals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness)
+    (parameterCount :
+      parameters.length = spec.targetFunction.numParams) :
+    ExecEvaluates sourceExternals
+        (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+        (ReturnedObservation resultRuntime resultValue) ∧
+      ConcreteExportTerminatesWith hosts.env target.wasmModule exportName
+        initial (parameters ++ callerTail)
+        (RefinedReturnPost resultRuntime resultValue resultKind callerTail) := by
+  obtain ⟨resultStore, resultWitness, physical, result⟩ :=
+    spec.budgetedDeclarationWithCache_of_reuseCapacityDirectHereditaryCodeEvaluates_reuseBudgetedDirect_noCalls
+      contextCaches evaluation invariant parameterCount
+  have successful := result.declaration.capacityPreserving.successful
+  exact ⟨successful.sourceEvaluates, spec.targetFunctionIndex, spec.exported,
+    successful.terminatesWith callerTail⟩
 
 end FirTalos.Concrete
