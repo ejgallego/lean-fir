@@ -51,6 +51,25 @@ def AbiKind.isObjectLike : AbiKind → Bool
   | .object | .tagged | .tobject => true
   | _ => false
 
+/--
+Compatibility at an ordinary compiler-produced Lean call/control-flow
+boundary.
+
+Upstream Lean's final-LCNF emitter maps `object`, `tagged`, and `tobject` to
+the same `lean_object*` calling representation.  In particular, it emits
+ordinary C assignment for calls, returns, and join arguments even when
+monomorphization has retained a coarse `tobject` annotation on one side and a
+more precise object-family annotation on the other.  Wasm uses the same
+single `i32` lane for this family.
+
+This is deliberately distinct from `AbiKind.refines`: refinement remains the
+directional semantic relation used by runtime and proof contracts.  Compiler
+compatibility is symmetric only within Lean's object family and never accepts
+an unrelated scalar merely because it shares a physical Wasm value type.
+-/
+def AbiKind.leanCompatible (actual expected : AbiKind) : Bool :=
+  actual.refines expected || (actual.isObjectLike && expected.isObjectLike)
+
 def AbiKind.isObjectField : AbiKind → Bool
   | .object | .tagged | .tobject | .erased => true
   | _ => false

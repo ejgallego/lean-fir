@@ -189,7 +189,8 @@ abbrev OperandStack := List AbiKind
 
 def stackMatches (actual expected : OperandStack) : Bool :=
   actual.length == expected.length &&
-    (actual.zip expected).all fun (actual, expected) => actual.refines expected
+    (actual.zip expected).all fun (actual, expected) =>
+      actual.leanCompatible expected
 
 def stackEquivalent (left right : OperandStack) : Bool :=
   stackMatches left right && stackMatches right left

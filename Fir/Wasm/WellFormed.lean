@@ -103,8 +103,9 @@ def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
           args.mapM (supportedArgKind? locals) with
       | .extern _, some result, some paramKinds, some argKinds
       | .code _, some result, some paramKinds, some argKinds =>
-          result.refines declared && argKinds.size == paramKinds.size &&
-            (argKinds.zip paramKinds).all fun pair => pair.fst.refines pair.snd
+          result.leanCompatible declared && argKinds.size == paramKinds.size &&
+            (argKinds.zip paramKinds).all fun pair =>
+              pair.fst.leanCompatible pair.snd
       | _, _, _, _ => false
 
 def supportedPartialApply (program : Fir.LeanIR.ImpureProgram)
@@ -225,10 +226,10 @@ def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
         none
   | value => if supportedLetValue value then some declared else none
 
-def resultKindRefines (actual expected : Option AbiKind) : Bool :=
+def resultKindCompatible (actual expected : Option AbiKind) : Bool :=
   match actual, expected with
   | none, none => true
-  | some actual, some expected => actual.refines expected
+  | some actual, some expected => actual.leanCompatible expected
   | _, _ => false
 
 abbrev SupportedCaseFacts := List (FVarId × Nat)
@@ -335,7 +336,7 @@ partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
           some (insertLocal locals param.fvarId kind)) with
       | some bodyLocals =>
           abiTypeKnown decl.type &&
-            resultKindRefines (abiValueKind? decl.type) expectedResult &&
+            resultKindCompatible (abiValueKind? decl.type) expectedResult &&
             supportedCodeWithJoins program joins bodyLocals
               (abiValueKind? decl.type) [] [] decl.value &&
             supportedCodeWithJoins program joins locals expectedResult facts sharing continuation
@@ -343,7 +344,7 @@ partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
   | .jmp fvarId args =>
       match findJoinPoint? joins fvarId with
       | some decl =>
-          resultKindRefines (abiValueKind? decl.type) expectedResult &&
+          resultKindCompatible (abiValueKind? decl.type) expectedResult &&
             supportedJumpArgs locals facts sharing decl args
       | none => false
   | .cases cases =>
@@ -358,14 +359,14 @@ partial def supportedCodeWithJoins (program : Fir.LeanIR.ImpureProgram)
             | none => false
         | none => false
       resultKnown &&
-        resultKindRefines (abiValueKind? cases.resultType) expectedResult &&
+        resultKindCompatible (abiValueKind? cases.resultType) expectedResult &&
         altsSupported
   | .return fvarId =>
       match findLocalKind? locals fvarId, expectedResult with
-      | some actual, some expected => actual.refines expected
+      | some actual, some expected => actual.leanCompatible expected
       | _, _ => false
   | .unreach type =>
-      abiTypeKnown type && resultKindRefines (abiValueKind? type) expectedResult
+      abiTypeKnown type && resultKindCompatible (abiValueKind? type) expectedResult
   | .oset objectId _ arg continuation =>
       match findLocalKind? locals objectId, supportedArgKind? locals arg with
       | some .object, some fieldKind =>

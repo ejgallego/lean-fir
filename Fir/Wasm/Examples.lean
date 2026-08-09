@@ -27,6 +27,12 @@ def classifiesAs (type : Lean.Expr) (expected : AbiKind) : Bool :=
 #guard classifiesAs LCNF.ImpureType.object .object
 #guard classifiesAs LCNF.ImpureType.tagged .tagged
 #guard classifiesAs LCNF.ImpureType.tobject .tobject
+
+#guard AbiKind.object.leanCompatible .tobject
+#guard AbiKind.tobject.leanCompatible .object
+#guard AbiKind.tagged.leanCompatible .object
+#guard !AbiKind.uint8.leanCompatible .uint32
+#guard !AbiKind.erased.leanCompatible .object
 #guard classifiesAs LCNF.ImpureType.erased .erased
 #guard classifiesAs LCNF.ImpureType.uint8 .uint8
 #guard classifiesAs LCNF.ImpureType.uint16 .uint16
