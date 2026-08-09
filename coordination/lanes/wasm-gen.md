@@ -22,6 +22,42 @@ handoff: integration may land isolated generation helper commit 3bb2b99a followe
 next: build the separate Verso FIR Wasm Flat artifact requested by /home/egallego/lean/verso-slides/.worktrees/vir-pretty-prototype/handoffs/fir-wasm-flat-runtime/AGENT_TASK.md without replacing PrettyTrace. Disposable end-to-end evidence is now complete: the clean source-side shape uses an explicit reducible RenderedM monad and MonadPrettyFormat dictionary plus a local Nat-indexed tail-recursive chunk join, preserves the public formatRenderedForRuntime semantics in 19 existing and 9 focused native tests, captures exactly 113 declarations with 24 reviewed Array/Nat/Int/String/fallback externals, and closes to a module-owned-memory Wasm artifact with zero imports, zero residual runtime operations, 656 functions, five public functions plus memory, 164441 bytes, and sha256 cb4092061337d29f44c3444560b0bcbfaa2ea275ef256cae7a9cf7de7612ba35. The exact module matches native Lean on all 9 focused cases: empty, nested/multiple tags, UTF-8 byte offsets, indentation, wide/narrow nonzero-column grouping, a 64-bit tag, a 2047-node balanced append tree, and a 256-KiB Unicode output. Required W7-owned implementation is generic UInt8 box / UInt8 and UInt32 unbox helpers, tagged closure projection, and batched internalization for read projections, closure projections, closure matches, and partial applications; batching avoids hundreds of repeated whole-module rewrites. Before committing it, integration must land the two shared admission cards and the Verso owner must adopt the semantically equivalent source refactor. After Flat, implement Illuminate's timing-free dispatch request from FIR_UNTIMED_DISPATCH_HANDOFF.md as a distinct adapter experiment, then evaluate FIR_STATE_SYNC_HANDOFF.md without combining their measurements
 ```
 
+## Verso Flat end-to-end probe (2026-08-09)
+
+The disposable Flat experiment now includes a standalone browser adapter and
+a package-shaped validation artifact at `/tmp/fir-verso-flat-package`. This is
+evidence only, not a publishable package: `BUILD.json` honestly records the
+clean local Verso probe commit `e9ae2ed6` and the still-dirty disposable FIR
+compiler/runtime patch. The eventual immutable package must replace both with
+integrated, remotely resolvable commits.
+
+The exact Wasm is 164,441 bytes with SHA-256
+`cb4092061337d29f44c3444560b0bcbfaa2ea275ef256cae7a9cf7de7612ba35`,
+zero imports, 656 functions, five function exports plus module-owned memory,
+and zero residual runtime operations. The adapter is deterministically
+specialized from the accepted PrettyFormat control adapter: normalization,
+bulk raw encoding, timings, and ownership stay identical; only the browser API
+version and `Rendered` result decoder differ. The current generated adapter is
+33,318 bytes.
+
+Passed gates:
+
+- 19 existing Verso native tests and 9 explicit-state/native-oracle tests;
+- 9 native/Wasm Flat differential cases, including exact UTF-8 event offsets;
+- 1 MiB UTF-8 output with memory growth from 1 to 33 pages;
+- the 2,047-node balanced and 256-break grouped stack-safety shapes;
+- 32 repeated calls on one adapter with monotonic frontier synchronization;
+- package SHA-256 verification and Node smoke;
+- Verso's exact `validate-native-flat-package.py` contract validator; and
+- Chrome fetch/compile/instantiate/render smoke over HTTP.
+
+Integration order remains: accept the scalar-tick stack; land the two isolated
+generic join/box admission fixes through the shared-contract queue; obtain the
+clean Verso source refactor; then commit and validate the W7 resident scalar
+helpers, batched linker, Flat package generator, immutable publication, and
+full FIR gates. W6 proof adaptation for the new helpers proceeds in parallel
+after their signatures are generation-ready.
+
 ## Illuminate request — timing-free production dispatch (2026-08-09)
 
 Illuminate requests a v5 selection-player package that separates the
