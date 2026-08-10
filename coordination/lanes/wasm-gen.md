@@ -5,21 +5,21 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: active
-base: d7907814 on main
-functional-head: c447a413
-contract-base: d7907814 on main
+state: ready
+base: 31b9290c on main
+functional-head: 5a4fc4e0
+contract-base: 31b9290c on main
 clean-at-update: true
-slice: The HitScene source-admission stack, exact W6 lazy-cache proof adaptation, and resident-artifact ratchet are accepted on main. Start the principled successor by freezing object/tagged/tobject transfer and heap-operation behavior before the shared compiler representation is split into source annotation, physical carrier, and semantic provenance
-files: coordination/lanes/wasm-gen.md; generation-side examples will be added only after the integration-owned contract plan at docs/wasm-object-carrier-provenance-plan.md
-contracts: consumes the accepted effectiveDeclarationResultKind? contract at c93bf226 and the object-carrier/provenance milestone at d7907814; no new shared contract, runtime signature, concrete layout, or helper change in this mailbox update
-checks: PASS integrated git diff --check; PASS make check (642 unique cases, 1844/1844 comparisons equal, 119 active bug cards); PASS make talos-check (3131 jobs); PASS complete deterministic resident-artifact gate; PASS exact HitScene source probe (159 declarations, 34 externals, zero unsupported); PASS follow-up documentation make check with the same 642/1844 coverage
-bug-cards: fixed FIR-BUG-wasm-none-closed-vec2-constant-admission; fixed FIR-BUG-wasm-none-endpoint-partial-application-admission; fixed FIR-BUG-wasm-none-lazy-cache-result-refinement
-blockers: none; W6 can continue independent proof work until integration publishes a standalone descriptor/signature contract, and no answer is currently needed from Illuminate or Verso
-artifacts: no executable HitScene Wasm package yet; the accepted compiler probe inventories 159 reachable declarations and 34 externals, including Float.abs, Float.sqrt, Float.sin, Float.cos, Float.acos, Float.atan2, Float.cbrt, and Float.floor
-measurements: source capture is approximately 6.5 seconds and symbolic lowering approximately 62 seconds on the accepted probe; no execution-performance claim is made before resident math and external-engine acceptance exist
-handoff: none; the previous compiler/proof/artifact stack is accepted on main through 4d91fb0d, and the object-carrier/provenance plan is accepted at d7907814
-next: add the nine object-family transfer combinations and negative heap-operation fixtures without changing output; then introduce carrier/provenance descriptors alongside AbiKind on the integration branch. After that contract stabilizes, notify W6 and continue the zero-import HitScene resident-math package
+slice: Published the real Illuminate.HitScene.query as a clean immutable zero-import package. Added bit-exact Float32/Float closure capture/projection, the resident closure-application ownership protocol, and rewind-safe fresh lazy-singleton publication through the existing recursive cache persistence helper. Kept physical layout/discriminator fixtures stateless while production-linked helpers enable matcher-to-projection ownership
+files: Fir/Wasm/Emit/ResidentCache.lean; Fir/Wasm/Emit/ResidentClosureAllocation.lean; Fir/Wasm/Emit/ResidentRuntime.lean; integration/illuminate-hit-scene/**; integration/talos/artifact/resident-closure-projections-client.mjs; docs/build-examples.md; four fixed W7 bug cards; coordination/lanes/wasm-gen.md; coordination/BOARD.md
+contracts: consumes the existing semantic/concrete closure-application and persistent-cache contracts; executable helper implementation changed without changing RuntimeOp signatures, concrete object layout, public semantic ABI, or the W6-owned proof surface. Production matcher success now consumes the closure application and projection transfers captures; standalone layout artifacts deliberately omit that stateful protocol
+checks: PASS Lean Beam update/sync/save for ResidentCache and ResidentRuntime with zero diagnostics; PASS focused root and HitScene dependency cones; PASS git diff --check; PASS make check (642 unique cases, 1844/1844 comparisons equal, 123 active bug cards); PASS make talos-setup at a01d01c and make talos-check (3131 jobs); PASS complete deterministic resident-artifact gate (44/44 artifacts, 15/15 sources, 601-case V8 triangle); PASS clean HitScene frontier repeat, complete-runtime repeat, SHA256SUMS, 301 oracle queries, 10000 flat-frontier queries, two instances, disposal/error paths
+bug-cards: fixed FIR-BUG-wasm-none-resident-float-closure-capture; fixed FIR-BUG-wasm-none-resident-closure-application-transfer; fixed FIR-BUG-wasm-none-hitscene-lazy-cache-rewind; fixed FIR-BUG-wasm-none-rewindable-lazy-initializer-persistence
+blockers: none for generation or publication; W6 still owns the separate implementation-to-concrete-runtime refinement theorem for the resident closure-application helper and may audit the fresh-persistent lazy initializer transform against its existing cache proof cone
+artifacts: integration/illuminate-hit-scene/_build/illuminate-hit-scene-current -> illuminate-hit-scene-960979c729bc1199; 45595 bytes; SHA-256 960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6; zero imports; six function exports plus module-owned memory; BUILD.json records clean FIR package source da69d378 and clean Illuminate af088e313eaa
+measurements: 159 captured declarations, 34 reviewed source externals, 439 frontier functions, 15 unresolved Float/C-libm imports before the final resident merge, persistent checkpoint 69872, encoded scene allocation 4336 bytes, and flat post-query frontier across 10000 repeated calls
+handoff: integrate 48605780, da69d378, a8db316e, and 5a4fc4e0 in order, then resolve this mailbox commit from wasm/generation. The immutable package source identity remains da69d378 because the later commits change only card schema and standalone artifact separation
+next: after this package lands, rebase integration/object-provenance on the new main before resuming the interface adaptation fixtures and carrier/provenance descriptors
 ```
 
 ## Verso Flat end-to-end probe (2026-08-09)
@@ -87,32 +87,15 @@ median, and p95. Illuminate will map detailed mode off/on to the new
 fast/timed methods and run the consumer acceptance suite. Keep work on
 a named `ejgallego/lean-fir` branch and do not open a PR.
 
-## Illuminate request — prepared hit-scene queries (2026-08-09)
+## Illuminate prepared HitScene package (2026-08-10)
 
-Illuminate requests a separate FIR-native package for the real
-`Illuminate.HitScene.query : HitScene → Float → Float → HitSceneResult` entry.
-The source handoff is
-`/home/egallego/lean/illuminate/.worktrees/vir-performance/FIR_HIT_SCENE_HANDOFF.md`.
-This is queued work, not an accepted package or a replacement for either
-player artifact.
-
-The first action is a clean source-view compatibility probe: the requesting
-Illuminate checkout currently uses Lean 4.33.0-rc2, while FIR generation is
-pinned to Lean 4.32.0. Do not change either toolchain or copy the hit-test
-algorithm to bypass that gate. If compatible, capture the real query closure,
-inventory its Float operations early (`Float.abs`, square root, and
-trigonometric paths are expected), and internalize them in Wasm rather than
-adding per-operation JavaScript `Math` imports. The clean worktree and remote
-`ejgallego/feat/vir-performance` branch both resolve to immutable candidate
-`af088e313eaade90be100aeaf63ddac79a8c1710`; all six task-relevant source
-hashes match the handoff. No Illuminate-owner answer is currently needed.
-
-The intended package retains one encoded immutable `HitScene` below a
-persistent checkpoint, transports two bit-exact binary64 coordinates per
-query, decodes the allocation-conscious `HitSceneResult`, clears and rewinds
-bounded scratch, and exposes opaque create/query/dispose handles with isolated
-instances. Acceptance includes the existing 295-point Illuminate differential
-scene, every relevant constructor, 10,000-query flat-frontier evidence, two
-instances, disposal/error paths, exact source/helper/import/export inventories,
-and immutable package publication. The Illuminate worktree remains read-only
-to this lane.
+The request is complete at functional head `5a4fc4e0`. The immutable package
+pointer is `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current`;
+its complete Wasm is 45,595 bytes with SHA-256
+`960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6`,
+zero imports, six intended function exports plus module-owned memory, and a
+clean exact-source manifest. The adapter retains one scene per instance below
+a checkpoint, transports coordinates bit-exactly, copies results, and rewinds
+query scratch. Its acceptance smoke covers 301 oracle queries and 10,000
+flat-frontier repeats. W6 refinement of the new executable ownership helper is
+an independent proof follow-up and does not block this generation artifact.

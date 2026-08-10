@@ -37,6 +37,46 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   capture, closure dispatch, lazy-cache, and dereference/mutation sites; retain
   the accepted HitScene and Flat examples; pass root, Talos, and deterministic
   resident-artifact gates before superseding the compromise.
+- Publication prerequisite: satisfied by the integrated
+  `W7-ILLUMINATE-HITSCENE-PACKAGE` stack below. Rebase
+  `integration/object-provenance` on the resulting `main` before interface
+  adaptation resumes.
+
+## Latest completed integration lease
+
+- Milestone: `W7-ILLUMINATE-HITSCENE-PACKAGE`.
+- Integration owner: `wasm-gen`; the user asked to close the publication
+  backlog before resuming object-carrier/provenance interface adaptation.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, based directly on `main` at `31b9290c`.
+- Published stack: resident ownership/cache repair `48605780`, immutable
+  package implementation `da69d378`, bug-card schema follow-up `a8db316e`, and
+  standalone layout/artifact separation `5a4fc4e0`.
+- Package identity: real clean Illuminate source entry
+  `Illuminate.HitScene.query` at `af088e313eaa`; 45,595-byte complete Wasm with
+  SHA-256 `960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6`;
+  zero imports; six function exports plus module-owned memory; canonical local
+  pointer `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current`.
+- Runtime closure: 159 captured declarations, 34 reviewed externals, 439
+  resident-frontier functions, and 15 Float/C-libm imports before the final
+  self-contained merge. Float captures use the existing fixed closure slots;
+  successful matcher/projection sequences implement application ownership;
+  rewindable lazy initializers reuse recursive persistence publication without
+  retaining module roots. Runtime signatures and concrete layout are unchanged.
+- Ownership evidence: one instance per opaque scene, 4,336 encoded scene bytes
+  below checkpoint 69,872, copied results, scratch rewind on success/failure,
+  301 oracle queries, 10,000 flat-frontier repeats, independent instances, and
+  disposal/malformed-input checks.
+- Validation: zero-diagnostic Lean Beam checkpoints; focused dependency cones;
+  `git diff --check`; `make check` with 642 cases and 1,844/1,844 equal
+  comparisons; all 3,131 Talos jobs; clean repeated HitScene frontier and
+  complete-runtime bytes; package checksums/smoke; and the complete
+  deterministic resident-artifact gate with 44/44 readiness artifacts, 15/15
+  source probes, and the 601-case V8 triangle.
+- Proof boundary: W7 supplies the executable helpers and accepted package. W6
+  retains the separate implementation-to-concrete-runtime proof for resident
+  closure application and may audit the fresh-persistent lazy-initializer
+  transform against the existing cache proof cone.
 
 ## Latest completed integration lease
 
