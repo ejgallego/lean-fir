@@ -98,7 +98,7 @@ def supportedNamedCall (program : Fir.LeanIR.ImpureProgram)
   match program.findDecl? name with
   | none => false
   | some target =>
-      match target.value, abiValueKind? target.type,
+      match target.value, effectiveDeclarationResultKind? target,
           declarationParameterKinds? program target,
           args.mapM (supportedArgKind? locals) with
       | .extern _, some result, some paramKinds, some argKinds
@@ -131,7 +131,7 @@ def supportedClosureCall (program : Fir.LeanIR.ImpureProgram)
       if args.isEmpty then closureKind.refines declared
       else closureKind.isObjectLike && program.decls.any fun target =>
         match declarationParameterKinds? program target,
-            abiValueKind? target.type with
+            effectiveDeclarationResultKind? target with
         | some paramKinds, some resultKind =>
             argKinds.size <= paramKinds.size &&
               let fixed := paramKinds.size - argKinds.size
@@ -221,10 +221,10 @@ def supportedLetDeclKind? (program : Fir.LeanIR.ImpureProgram)
       else
         none
   | .fap name args =>
-      if supportedNamedCall program locals declared name args then
-        some declared
-      else
-        none
+      if supportedNamedCall program locals declared name args then do
+        let target ← program.findDecl? name
+        effectiveDeclarationResultKind? target
+      else none
   | value => if supportedLetValue value then some declared else none
 
 def resultKindCompatible (actual expected : Option AbiKind) : Bool :=
@@ -770,7 +770,7 @@ def supportedDecl (program : Fir.LeanIR.ImpureProgram)
     match addSupportedDeclarationParams? program decl, decl.value with
     | some _, .extern _ => true
     | some locals, .code code =>
-        supportedCode program locals (abiValueKind? decl.type) code
+        supportedCode program locals (effectiveDeclarationResultKind? decl) code
     | _, _ => false
 
 def supportedProgram (program : Fir.LeanIR.ImpureProgram) : Bool :=

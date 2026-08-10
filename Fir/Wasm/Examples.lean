@@ -464,6 +464,67 @@ def supportedPreciseFloatBoxProgram : Fir.LeanIR.ImpureProgram :=
         (validateModule module).isOk
   | .error _ => false
 
+def boxedFloatSource : FVarId := ⟨`boxedFloatSource⟩
+def boxedFloatValue : FVarId := ⟨`boxedFloatValue⟩
+def boxedFloatClosure : FVarId := ⟨`boxedFloatClosure⟩
+def boxedFloatOther : FVarId := ⟨`boxedFloatOther⟩
+
+def boxedFloatSourceDecl : LCNF.Decl .impure :=
+  decl `boxedFloatSource #[] LCNF.ImpureType.float (.extern { entries := [] })
+
+/-- Shape emitted by Lean's generic explicit-boxing path for an expensive
+closed Float: the public result is `tobject`, while the body proves that the
+returned value is a definite heap box. -/
+def boxedFloatConstantDecl : LCNF.Decl .impure :=
+  decl `boxedFloatConstant #[] LCNF.ImpureType.tobject (.code <|
+    .let (letDecl boxedFloatSource LCNF.ImpureType.float
+      (.fap `boxedFloatSource #[])) <|
+    .let (letDecl boxedFloatValue LCNF.ImpureType.tobject
+      (.box LCNF.ImpureType.float boxedFloatSource)) <|
+    .return boxedFloatValue)
+
+def boxedFloatClosureTargetDecl : LCNF.Decl .impure :=
+  decl `boxedFloatClosureTarget #[param boxedFloatValue objType,
+    param boxedFloatOther objType] objType (.code (.return boxedFloatValue))
+
+def preciseBoxedConstantPartialApplicationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[boxedFloatSourceDecl, boxedFloatConstantDecl,
+      boxedFloatClosureTargetDecl,
+      decl `main #[] objType (.code <|
+        .let (letDecl boxedFloatValue LCNF.ImpureType.tobject
+          (.fap `boxedFloatConstant #[])) <|
+        .let (letDecl boxedFloatClosure objType
+          (.pap `boxedFloatClosureTarget #[.fvar boxedFloatValue])) <|
+        .return boxedFloatClosure)] }
+
+#guard effectiveDeclarationResultKind? boxedFloatConstantDecl == some .object
+#guard supportedProgram preciseBoxedConstantPartialApplicationProgram
+#guard match lowerSupported preciseBoxedConstantPartialApplicationProgram with
+  | .ok module =>
+      (validateModule module).isOk &&
+        module.cacheGlobalKinds == #[.uint32, .float, .uint32, .object] &&
+        module.closureDescriptors.contains #[.object]
+  | .error _ => false
+
+/-- The same public `tobject` signature is not refined when the body may return
+a tagged value; this guards against globally weakening heap-object capture. -/
+def impreciseTaggedConstantDecl : LCNF.Decl .impure :=
+  decl `impreciseTaggedConstant #[] LCNF.ImpureType.tobject (.code <|
+    .let (letDecl boxedFloatValue LCNF.ImpureType.tobject (.lit (.nat 1))) <|
+    .return boxedFloatValue)
+
+def impreciseTaggedPartialApplicationProgram : Fir.LeanIR.ImpureProgram :=
+  { decls := #[impreciseTaggedConstantDecl, boxedFloatClosureTargetDecl,
+      decl `main #[] objType (.code <|
+        .let (letDecl boxedFloatValue LCNF.ImpureType.tobject
+          (.fap `impreciseTaggedConstant #[])) <|
+        .let (letDecl boxedFloatClosure objType
+          (.pap `boxedFloatClosureTarget #[.fvar boxedFloatValue])) <|
+        .return boxedFloatClosure)] }
+
+#guard effectiveDeclarationResultKind? impreciseTaggedConstantDecl == some .tobject
+#guard !supportedProgram impreciseTaggedPartialApplicationProgram
+
 def supportedIsSharedProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedIsShared #[param x LCNF.ImpureType.tobject] u8Type (.code <|
       .let (letDecl r u8Type (.isShared x)) (.return r))] }

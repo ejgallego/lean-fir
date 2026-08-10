@@ -576,6 +576,70 @@ def letValueKind (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind :=
   | .box type _ => return boxResultKind type (← checkedAbiKind decl.type)
   | _ => checkedAbiKind decl.type
 
+/--
+Conservatively recover a more precise result kind from straight-line LCNF.
+
+Lean's explicit-boxing pass deliberately gives generated boxed constants the
+public result type `tobject`, even when their body returns a definite heap box.
+The native backend can forget that distinction because every object-family
+kind is `lean_object*`; FIR retains it for the concrete refinement relation.
+This analysis therefore refines only results established by local parameter
+types and let-value construction, and falls back at joins or branches.
+-/
+private partial def straightLineResultKind? (locals : LocalKinds) :
+    LCNF.Code .impure → Option AbiKind
+  | .let decl continuation =>
+      match letValueKind decl with
+      | .ok kind => straightLineResultKind?
+          (insertLocal locals decl.fvarId kind) continuation
+      | .error _ => none
+  | .return fvarId => findLocalKind? locals fvarId
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation => straightLineResultKind? locals continuation
+  | .fun _ _ h => nomatch h
+  | .jp .. | .jmp .. | .cases .. | .unreach .. => none
+
+private def declaredParameterKinds? (decl : LCNF.Decl .impure) :
+    Option LocalKinds :=
+  decl.params.foldlM (init := []) fun locals param =>
+    match abiKind? param.type with
+    | .ok none => some locals
+    | .ok (some kind) => some (insertLocal locals param.fvarId kind)
+    | .error _ => none
+
+/--
+The exact singleton result lane selected for one internal declaration when its
+body proves a strict refinement of the public LCNF annotation. Externals and
+control-flow-rich bodies retain their declared ABI kind.
+-/
+def effectiveDeclarationResultKind? (decl : LCNF.Decl .impure) :
+    Option AbiKind := do
+  let declared ← match abiKind? decl.type with
+    | .ok kind? => kind?
+    | .error _ => none
+  if declared != .tobject then return declared
+  let .code code := decl.value | return declared
+  let some locals := declaredParameterKinds? decl | return declared
+  let some actual := straightLineResultKind? locals code | return declared
+  if actual.refines declared then some actual else some declared
+
+/-- Use a known internal callee's proved result kind for a named call local. -/
+def effectiveLetValueKind (program : Fir.LeanIR.ImpureProgram)
+    (decl : LCNF.LetDecl .impure) : Except CompileError AbiKind := do
+  let declared ← letValueKind decl
+  let .fap name _ := decl.value | return declared
+  let some target := program.findDecl? name | throw (.unknownDeclaration name)
+  let some actual := effectiveDeclarationResultKind? target |
+    throw (.malformed s!"named call {name} has no value result")
+  unless actual.leanCompatible declared do
+    throw (.malformed s!"named call {name} result is incompatible with its let ABI")
+  return actual
+
 /-- Proof-relevant parameter kind selected for one complete declaration.
 Compiler-declared `tobject` parameters whose uses are structurally erased are
 tracked as `.erased`; every other parameter retains its declared ABI kind. -/
@@ -738,6 +802,41 @@ def collectLocals (locals : LocalKinds) (code : LCNF.Code .impure) :
     Except CompileError LocalKinds :=
   finishCollectLocalsResult (collectLocalsCore locals code)
 
+private def replaceLocalKind (locals : LocalKinds) (fvarId : FVarId)
+    (kind : AbiKind) : LocalKinds :=
+  locals.map fun entry =>
+    if sameFVar entry.fst fvarId then (entry.fst, kind) else entry
+
+/--
+Refine the declaration-local rows produced by `collectLocals` with exact
+internal named-call results. Keeping the original row order preserves numeric
+local assignment; only the proof-relevant ABI annotation changes.
+-/
+partial def refineNamedCallLocalKinds (program : Fir.LeanIR.ImpureProgram)
+    (locals : LocalKinds) : LCNF.Code .impure → Except CompileError LocalKinds
+  | .let decl continuation => do
+      let kind ← effectiveLetValueKind program decl
+      refineNamedCallLocalKinds program
+        (replaceLocalKind locals decl.fvarId kind) continuation
+  | .jp decl continuation => do
+      let locals ← refineNamedCallLocalKinds program locals decl.value
+      refineNamedCallLocalKinds program locals continuation
+  | .cases cases =>
+      cases.alts.foldlM (init := locals) fun locals alt =>
+        match alt with
+        | .ctorAlt _ code | .default code =>
+            refineNamedCallLocalKinds program locals code
+        | .alt _ _ _ h => nomatch h
+  | .oset _ _ _ continuation
+  | .uset _ _ _ continuation
+  | .sset _ _ _ _ _ continuation
+  | .setTag _ _ continuation
+  | .inc _ _ _ _ continuation
+  | .dec _ _ _ _ _ continuation
+  | .del _ continuation => refineNamedCallLocalKinds program locals continuation
+  | .fun _ _ h => nomatch h
+  | .jmp .. | .return .. | .unreach .. => pure locals
+
 theorem finishCollectLocalsResult_eq_ok_iff
     {α : Type} {result : CollectLocalsM α} {value : α} :
     finishCollectLocalsResult result = .ok value ↔
@@ -838,7 +937,7 @@ def compileClosureCandidateAt (declId closureId : FVarId) (resultKind : AbiKind)
       .localSet declId]
     some (matcher, body)
   else
-    let targetResult ← directAbiKind? target.type
+    let targetResult ← effectiveDeclarationResultKind? target
     if !targetResult.refines resultKind then none else
     some (matcher, fields ++ [.call (.declaration target.name), .localSet declId])
 
@@ -923,6 +1022,8 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
       let (arguments, _) ← compileArgs context args
       let some target := context.program.findDecl? name | throw (.unknownDeclaration name)
       if args.isEmpty && target.params.isEmpty then
+        let some targetResultKind := effectiveDeclarationResultKind? target |
+          throw (.malformed s!"cached declaration {name} has no value result")
         let some cacheIndex := context.cachedDeclarations.findIdx? (· == name) |
           throw (.malformed s!"missing lazy cache slot for {name}")
         let flagIndex := 2 * cacheIndex
@@ -932,11 +1033,11 @@ def compileLetValue (context : Context) (decl : LCNF.LetDecl .impure) :
           .ifElse
             []
             ([.call (.declaration name),
-              .call (.runtime (.cacheSet name resultKind)),
-              .globalSet valueIndex resultKind,
+              .call (.runtime (.cacheSet name targetResultKind)),
+              .globalSet valueIndex targetResultKind,
               .i32Const .uint32 1,
               .globalSet flagIndex .uint32]),
-          .globalGet valueIndex resultKind]
+          .globalGet valueIndex targetResultKind]
       else
         return arguments ++ [.call (.declaration name)]
   | .pap name args =>
@@ -974,9 +1075,11 @@ lazy-cache slot. This fixes the exact flag/value layout and miss sequence used
 by the adapter and semantic proofs. -/
 theorem compileLetValue_fap_cached
     (context : Context) (fvarId : FVarId) (type : Expr) (name : Name)
-    (target : LCNF.Decl .impure) (resultKind : AbiKind) (cacheIndex : Nat)
+    (target : LCNF.Decl .impure) (resultKind targetResultKind : AbiKind)
+    (cacheIndex : Nat)
     (kindEq : checkedAbiKind type = .ok resultKind)
     (targetEq : context.program.findDecl? name = some target)
+    (targetResultEq : effectiveDeclarationResultKind? target = some targetResultKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq : context.cachedDeclarations.findIdx? (· == name) = some cacheIndex) :
     compileLetValue context {
@@ -987,13 +1090,13 @@ theorem compileLetValue_fap_cached
         .globalGet (2 * cacheIndex) .uint32,
         .ifElse [] [
           .call (.declaration name),
-          .call (.runtime (.cacheSet name resultKind)),
-          .globalSet (2 * cacheIndex + 1) resultKind,
+          .call (.runtime (.cacheSet name targetResultKind)),
+          .globalSet (2 * cacheIndex + 1) targetResultKind,
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
-        .globalGet (2 * cacheIndex + 1) resultKind] := by
-  simp [compileLetValue, letValueKind, kindEq, compileArgs, targetEq, paramsEq,
-    cacheEq]
+        .globalGet (2 * cacheIndex + 1) targetResultKind] := by
+  simp [compileLetValue, letValueKind, kindEq, compileArgs, targetEq, targetResultEq,
+    paramsEq, cacheEq]
   rfl
 
 /-- Transparent compiler equation for closure allocation by partial
@@ -1679,15 +1782,18 @@ def lowerDecl (program : Fir.LeanIR.ImpureProgram)
   | .code code =>
       let paramLocals ← addDeclarationParams program decl
       let bodyLocals ← collectLocals [] code
+      let bodyLocals ← refineNamedCallLocalKinds program bodyLocals code
       let params := paramLocals.reverse
       let locals := bodyLocals.reverse
       let localKinds := params ++ locals
       let context : Context := { program, localKinds, cachedDeclarations }
       let body ← compileCode context code
-      let results ←
-        match resultKinds decl.type with
-        | .ok results => pure results
-        | .error error => throw (.abi error)
+      let results ← match effectiveDeclarationResultKind? decl with
+        | some kind => pure #[kind]
+        | none =>
+            match resultKinds decl.type with
+            | .ok results => pure results
+            | .error error => throw (.abi error)
       return some {
         name := decl.name
         params := params.toArray

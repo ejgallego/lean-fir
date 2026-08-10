@@ -99,8 +99,14 @@ none
 
 ## Resolution and regression
 
-Confirmed. Coordinate a shared lowering change so the lazy-cache sequence uses
-the target declaration's actual result kind and exposes its refinement into
-the caller's declared destination kind. Then add an executable source
-regression in the integration-owned symbolic lowering/validation suite and
-derive the W6 alignment boundary from the repaired compiler output.
+Candidate repair: the lazy-cache sequence now uses the target declaration's
+effective result kind consistently for `cacheSet`, `global.set`, and
+`global.get`. Named-call local collection carries the same kind, so the loaded
+cache value refines the caller's coarser annotation without assigning a false
+kind to the physical cache slot.
+
+The executable regression covers both the existing precise-declaration case
+and Lean's generated `tobject` boxed-constant shape. Root checks and generic
+Talos lowering proofs pass. The remaining W6-owned
+`ConcreteCacheCorrectness` theorem must quantify the target result kind
+separately from the call-site result before this card can be marked fixed.

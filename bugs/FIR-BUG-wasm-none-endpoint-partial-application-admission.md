@@ -93,4 +93,19 @@ none
 
 ## Resolution and regression
 
-unresolved
+Candidate repair: lowering now derives an effective singleton result kind for
+an internal declaration when a straight-line body proves a strict refinement
+of its public `tobject` annotation. The analysis is deliberately conservative:
+it follows parameter and let-value kinds to the return, and retains the public
+kind at joins, branches, externals, or incompatible results.
+
+Named-call locals, declaration results, partial-application checking, and lazy
+cache slots use that effective kind. The focused source regressions distinguish
+the boxed-Float case (refined to `object`) from a `tobject` declaration that
+returns a tagged natural (not refined). The real HitScene probe now captures
+159 declarations with 34 externals and zero unsupported declarations.
+
+The candidate preserves FIR's directional semantic refinement rather than
+making arbitrary `tobject` values acceptable as heap objects. Landing remains
+pending the W6 adaptation of the concrete lazy-cache correctness theorem and
+the complete integration gate.
