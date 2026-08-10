@@ -1089,21 +1089,22 @@ def LazyCacheValidatorSound : Prop :=
 Static result-kind agreement between generated lazy-cache operations and the
 declaration signatures that determine their physical value lanes.
 
-This is intentionally stronger than source-level named-call admission:
-`AbiKind.refines` permits an `.object` declaration result at a `.tobject`
-call site, while one generated Wasm global has one exact symbolic kind. See
-`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
+The source annotation and effective target result are deliberately separate:
+`AbiKind.refines` may admit an `.object` declaration result at a `.tobject`
+call site, while the generated signature and global retain the exact physical
+`.object` lane.
 -/
 def LazyCacheResultKindsAligned
     (context : Fir.Wasm.Context) (source : Fir.Wasm.Module) : Prop :=
   ∀ {type : Expr} {declaration : Name} {target : LCNF.Decl .impure}
-      {kind : AbiKind} {index : Nat},
-    Fir.Wasm.checkedAbiKind type = .ok kind →
+      {declaredKind targetKind : AbiKind} {index : Nat},
+    Fir.Wasm.checkedAbiKind type = .ok declaredKind →
     context.program.findDecl? declaration = some target →
+    Fir.Wasm.effectiveDeclarationResultKind? target = some targetKind →
     target.params.isEmpty = true →
     context.cachedDeclarations.findIdx? (· == declaration) = some index →
     (source.callSignature? (.declaration declaration)).bind
-        (·.results[0]?) = some kind
+        (·.results[0]?) = some targetKind
 
 /--
 One environment-wide static boundary for generated lazy caches.
@@ -1133,10 +1134,10 @@ theorem LazyCacheGeneratedEnvironment.ofCoherent
   refine ⟨generated.checked, ?_, ?_⟩
   · rw [← contexts.cachedDeclarations]
     exact generated.cacheNames
-  · intro type declaration target kind index kindEq targetEq paramsEq
-      cacheEq
+  · intro type declaration target declaredKind targetKind index kindEq targetEq
+      targetResultEq paramsEq cacheEq
     exact generated.resultKinds kindEq
-      (by simpa [contexts.program] using targetEq) paramsEq
+      (by simpa [contexts.program] using targetEq) targetResultEq paramsEq
       (by simpa [contexts.cachedDeclarations] using cacheEq)
 
 /-- Successful supported lowering exposes the underlying production lowering
@@ -1237,9 +1238,8 @@ Canonical whole-pipeline constructor for the generated lazy-cache environment.
 
 Supported lowering fixes the emitted initializer order, adaptation supplies
 symbolic validation, and the uniform validator theorem supplies the checked
-layout facts. The only cache-specific static condition left is exact result
-kind agreement, currently false for the refinement case recorded by
-`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
+layout facts. The remaining cache-specific condition relates the selected
+declaration's effective result to its exact emitted signature kind.
 -/
 theorem LazyCacheGeneratedEnvironment.ofSupportedPipeline
     {program : Fir.LeanIR.ImpureProgram}
@@ -1310,16 +1310,18 @@ theorem LazyCacheGeneratedEnvironment.select
     {type : Expr}
     {declaration : Name}
     {target : LCNF.Decl .impure}
-    {kind : AbiKind}
+    {declaredKind targetKind : AbiKind}
     {index : Nat}
-    (kindEq : Fir.Wasm.checkedAbiKind type = .ok kind)
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok declaredKind)
     (targetEq : context.program.findDecl? declaration = some target)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some targetKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) = some index) :
     source.initializers[index]? = some declaration ∧
       (source.callSignature? (.declaration declaration)).bind
-          (·.results[0]?) = some kind := by
+          (·.results[0]?) = some targetKind := by
   obtain ⟨inBounds, selected, _⟩ :=
     Array.findIdx?_eq_some_iff_getElem.mp cacheEq
   have selectedEq :
@@ -1330,7 +1332,7 @@ theorem LazyCacheGeneratedEnvironment.select
     rw [Array.getElem?_eq_getElem inBounds, selectedEq]
   rw [generated.cacheNames] at cacheFound
   exact ⟨cacheFound,
-    generated.resultKinds kindEq targetEq paramsEq cacheEq⟩
+    generated.resultKinds kindEq targetEq targetResultEq paramsEq cacheEq⟩
 
 /-- The validator's executable uniqueness check is exactly `List.Nodup` under
 the lawful Boolean equality used by module names. -/
@@ -2636,7 +2638,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
     (sourceExternals : ExternalImpl)
     (fvarId : FVarId) (type : Expr) (declaration : Name)
     (target : LCNF.Decl .impure)
-    (resultKind : AbiKind)
+    (declaredResultKind resultKind : AbiKind)
     (cacheIndex declarationId cacheSetId resultIndex : Nat)
     (continuation : LCNF.Code .impure)
     (sourceRuntime : RuntimeState)
@@ -2646,8 +2648,10 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
     (locals : Wasm.Locals)
     (initialWitness : RefinementWitness)
     (physical : Wasm.Value)
-    (kindEq : Fir.Wasm.checkedAbiKind type = .ok resultKind)
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok declaredResultKind)
     (targetEq : context.program.findDecl? declaration = some target)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) =
@@ -2726,8 +2730,9 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
   dsimp
   obtain ⟨compiled, adapted⟩ :=
     compileCachedLetValue_adapted context sourceModule sourceFunction labels
-      fvarId type declaration target resultKind cacheIndex declarationId
-      cacheSetId kindEq targetEq paramsEq cacheEq declarationFound cacheSetFound
+      fvarId type declaration target declaredResultKind resultKind cacheIndex
+      declarationId cacheSetId kindEq targetEq targetResultEq paramsEq cacheEq
+      declarationFound cacheSetFound
   obtain ⟨nextLocals, hit⟩ :=
     BudgetedCapacityPreservingLazyStep.hit_of_populatedSlot sourceStep
       initialRelated frameAligned resultFound resultKindAt slot
@@ -2753,7 +2758,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     (sourceExternals : ExternalImpl)
     (fvarId : FVarId) (type : Expr) (declaration : Name)
     (target : LCNF.Decl .impure)
-    (resultKind : AbiKind)
+    (declaredResultKind resultKind : AbiKind)
     (cacheIndex declarationId cacheSetId resultIndex : Nat)
     (continuation : LCNF.Code .impure)
     (sourceRuntime : RuntimeState)
@@ -2762,8 +2767,10 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
     (initial : Wasm.Store Host)
     (locals : Wasm.Locals)
     (initialWitness : RefinementWitness)
-    (kindEq : Fir.Wasm.checkedAbiKind type = .ok resultKind)
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok declaredResultKind)
     (targetEq : context.program.findDecl? declaration = some target)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some resultKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) =
@@ -2842,7 +2849,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
             0 := by
   dsimp
   obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq targetEq paramsEq cacheEq
+    generated.select kindEq targetEq targetResultEq paramsEq cacheEq
   obtain ⟨_, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts targetEq paramsEq sourceStep
   obtain ⟨physical, slot⟩ :=
@@ -2850,11 +2857,11 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiledCacheTable
   obtain ⟨nextLocals, compiled, adapted, hit⟩ :=
     BudgetedCapacityPreservingLazyStep.hit_of_compiledCache
       context sourceModule sourceFunction labels module hostEnv sourceExternals
-      fvarId type declaration target resultKind cacheIndex declarationId
-      cacheSetId resultIndex continuation sourceRuntime sourceEnv sourceValue
-      initial locals initialWitness physical kindEq targetEq paramsEq cacheEq
-      declarationFound cacheSetFound sourceStep initialRelated frameAligned
-      resultFound resultKindAt slot
+      fvarId type declaration target declaredResultKind resultKind cacheIndex
+      declarationId cacheSetId resultIndex continuation sourceRuntime sourceEnv
+      sourceValue initial locals initialWitness physical kindEq targetEq
+      targetResultEq paramsEq cacheEq declarationFound cacheSetFound sourceStep
+      initialRelated frameAligned resultFound resultKindAt slot
   exact ⟨physical, nextLocals, compiled, adapted, hit⟩
 
 /--
@@ -3140,7 +3147,7 @@ theorem
     {continuation : LCNF.Code .impure}
     {declaration : Name}
     {sourceDeclaration : LCNF.Decl .impure}
-    {kind resultKind : AbiKind}
+    {declaredKind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
     {cacheSlot : ConcreteGlobalSlot}
@@ -3164,13 +3171,16 @@ theorem
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (kindEq :
-      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+      Fir.Wasm.checkedAbiKind decl.type = .ok declaredKind)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) =
         some cacheIndex)
     (flagIndexEq : flagIndex = 2 * cacheIndex)
     (declarationFound :
       context.program.findDecl? declaration = some sourceDeclaration)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+        some resultKind)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
     (contexts : DeclarationContextsCoherent context calleeContext)
@@ -3186,11 +3196,11 @@ theorem
     (importInBounds : cacheSetId < module.imports.length)
     (contractFound :
       spec.contracts[cacheSetId]? =
-        some (cacheSetContract declaration kind))
+        some (cacheSetContract declaration resultKind))
     (parameterCount : imp.params.length = 1)
     (resultCount : imp.results.length = 1)
     (operation :
-      cacheSetStep declaration kind afterCall [physical] =
+      cacheSetStep declaration resultKind afterCall [physical] =
         .Return [physical] afterCache)
     (valueGlobal :
       afterCache.globals.globals[valueIndex]? = some oldValue)
@@ -3204,16 +3214,15 @@ theorem
         some resultIndex)
     (resultKindAt :
       (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
-        some kind)
+        some resultKind)
     (targetSet :
       locals.set? resultIndex physical = some nextLocals)
     (publicationOrdinary :
       ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
         (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
-    (resultKindEq : resultKind = kind)
     (cacheFound :
       afterCall.host.runtime.globals.find? declaration = some cacheSlot)
-    (cacheKindEq : cacheSlot.kind = kind)
+    (cacheKindEq : cacheSlot.kind = resultKind)
     (cacheDescriptorsEq :
       afterCall.host.closureDescriptors = callWitness.closureDescriptors)
     (publicationExternals :
@@ -3241,7 +3250,7 @@ theorem
   have paramsEq : sourceDeclaration.params.isEmpty = true := by
     simp [declarationParams]
   obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq declarationFound paramsEq cacheEq
+    generated.select kindEq declarationFound targetResultEq paramsEq cacheEq
   have publicationRuntimeEq :
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
@@ -3258,8 +3267,7 @@ theorem
     initialRelated.bindAfterCacheSet
       callee.capacityPreserving.successful.runtimeRelated
       callee.capacityPreserving.witnessTransport
-      (by simpa [resultKindEq] using
-        callee.capacityPreserving.successful.valueRelated)
+      callee.capacityPreserving.successful.valueRelated
       cacheFound cacheKindEq cacheDescriptorsEq operation valueStoreEq
       resultFound resultKindAt targetSet
   apply BudgetedCapacityPreservingLazyStep.miss_of_bodyWP_cacheSet sourceStep
@@ -3280,8 +3288,7 @@ theorem
     simpa [writeWasmGlobal, valueStoreEq] using
       cacheSetStep_preserves_mappedHeaderCapacity_of_related
         callee.capacityPreserving.successful.runtimeRelated
-        (by simpa [resultKindEq] using
-          callee.capacityPreserving.successful.valueRelated)
+        callee.capacityPreserving.successful.valueRelated
         cacheFound cacheKindEq cacheDescriptorsEq operation
   · exact publicationExternals.trans callee.externalsPreserved
   · exact
@@ -3443,7 +3450,7 @@ theorem
     {continuation : LCNF.Code .impure}
     {declaration : Name}
     {sourceDeclaration : LCNF.Decl .impure}
-    {kind resultKind : AbiKind}
+    {declaredKind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
     {cacheSlot : ConcreteGlobalSlot}
@@ -3467,12 +3474,15 @@ theorem
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (kindEq :
-      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+      Fir.Wasm.checkedAbiKind decl.type = .ok declaredKind)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) =
         some cacheIndex)
     (declarationFound :
       context.program.findDecl? declaration = some sourceDeclaration)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+        some resultKind)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
     (contexts : DeclarationContextsCoherent context calleeContext)
@@ -3488,11 +3498,11 @@ theorem
     (importInBounds : cacheSetId < module.imports.length)
     (contractFound :
       spec.contracts[cacheSetId]? =
-        some (cacheSetContract declaration kind))
+        some (cacheSetContract declaration resultKind))
     (parameterCount : imp.params.length = 1)
     (resultCount : imp.results.length = 1)
     (operation :
-      cacheSetStep declaration kind afterCall [physical] =
+      cacheSetStep declaration resultKind afterCall [physical] =
         .Return [physical] afterCache)
     (valueGlobal :
       afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue)
@@ -3506,16 +3516,15 @@ theorem
         some resultIndex)
     (resultKindAt :
       (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
-        some kind)
+        some resultKind)
     (targetSet :
       locals.set? resultIndex physical = some nextLocals)
     (publicationOrdinary :
       ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
         (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
-    (resultKindEq : resultKind = kind)
     (cacheFound :
       afterCall.host.runtime.globals.find? declaration = some cacheSlot)
-    (cacheKindEq : cacheSlot.kind = kind)
+    (cacheKindEq : cacheSlot.kind = resultKind)
     (cacheDescriptorsEq :
       afterCall.host.closureDescriptors = callWitness.closureDescriptors)
     (publicationExternals :
@@ -3547,7 +3556,7 @@ theorem
   have paramsEq : sourceDeclaration.params.isEmpty = true := by
     simp [declarationParams]
   obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq declarationFound paramsEq cacheEq
+    generated.select kindEq declarationFound targetResultEq paramsEq cacheEq
   have publicationRuntimeEq :
       nextRuntime = callRuntime.setGlobal declaration sourceValue :=
     (SourceLazyLetResult.miss_cacheFacts_of_callee declValue declarationFound
@@ -3570,16 +3579,15 @@ theorem
         nextLocals resultIndex initialWitness callWitness physical stepCost :=
     BudgetedCapacityPreservingLazyStep.miss_of_budgetedDeclaration_cacheSet
       sourceStep declValue initialRelated cacheTable generated kindEq cacheEq
-      rfl declarationFound declarationParams declarationBody
+      rfl declarationFound targetResultEq declarationParams declarationBody
       contexts callee.declaration importFound hostSatisfies importInBounds
       contractFound parameterCount resultCount operation valueGlobal
       valueStoreEq flagGlobal (by omega) resultFound resultKindAt targetSet
-      publicationOrdinary resultKindEq cacheFound cacheKindEq cacheDescriptorsEq
+      publicationOrdinary cacheFound cacheKindEq cacheDescriptorsEq
       publicationExternals publicationDispatch publicationDescriptors
   exact step.withCacheSetPublishedTable callee.cacheTable operation
     initializerFound signature publicationRuntimeEq
-    (by simpa [resultKindEq] using
-      callee.declaration.capacityPreserving.successful.valueRelated)
+    callee.declaration.capacityPreserving.successful.valueRelated
     valueStoreEq
 
 /--
@@ -4815,6 +4823,7 @@ structure LoweredInternalDeclaration
     (sourceCode : LCNF.Code .impure)
     (sourceFunction : Fir.Wasm.Function) where
   paramLocals : Fir.Wasm.LocalKinds
+  rawBodyLocals : Fir.Wasm.LocalKinds
   bodyLocals : Fir.Wasm.LocalKinds
   symbolicBody : List Fir.Wasm.Instruction
   abiResults : Array AbiKind
@@ -4822,14 +4831,19 @@ structure LoweredInternalDeclaration
   paramsAdded :
     Fir.Wasm.addDeclarationParams program declaration = .ok paramLocals
   localsCollected :
-    Fir.Wasm.collectLocals [] sourceCode = .ok bodyLocals
+    Fir.Wasm.collectLocals [] sourceCode = .ok rawBodyLocals
+  localsRefined :
+    Fir.Wasm.refineNamedCallLocalKinds program rawBodyLocals sourceCode =
+      .ok bodyLocals
   bodyCompiled :
     Fir.Wasm.compileCode {
         program
         localKinds := paramLocals.reverse ++ bodyLocals.reverse
         cachedDeclarations } sourceCode = .ok symbolicBody
-  resultsCompiled :
-    Fir.Wasm.resultKinds declaration.type = .ok abiResults
+  resultsSelected :
+    match Fir.Wasm.effectiveDeclarationResultKind? declaration with
+    | some kind => abiResults = #[kind]
+    | none => Fir.Wasm.resultKinds declaration.type = .ok abiResults
   sourceFunctionEq :
     sourceFunction = {
       name := declaration.name
@@ -4837,6 +4851,9 @@ structure LoweredInternalDeclaration
       results := abiResults
       locals := bodyLocals.reverse.toArray
       body := symbolicBody }
+  lowered :
+    Fir.Wasm.lowerDecl program cachedDeclarations declaration =
+      .ok (some sourceFunction)
 
 /-- The canonical binding row shared by symbolic compilation and adaptation. -/
 def LoweredInternalDeclaration.localKinds
@@ -6639,7 +6656,7 @@ structure SaturatedClosureCallResolution
     Fir.Wasm.kindsRefine site.argumentKinds
       (parameterKinds.extract captures.size parameterKinds.size) = true
   targetResult :
-    Fir.Wasm.directAbiKind? target.type = some targetResultKind
+    Fir.Wasm.effectiveDeclarationResultKind? target = some targetResultKind
   targetResultRefines :
     targetResultKind.refines site.resultKind = true
   bodyEq : target.value = .code calleeCode
@@ -9243,7 +9260,7 @@ theorem
     {continuation : LCNF.Code .impure}
     {declaration : Name}
     {sourceDeclaration : LCNF.Decl .impure}
-    {kind resultKind : AbiKind}
+    {declaredKind resultKind : AbiKind}
     {declarationId cacheSetId : Nat}
     {imp : Wasm.ImportDecl}
     {sourceRuntime callRuntime nextRuntime : RuntimeState}
@@ -9265,12 +9282,15 @@ theorem
     (generated :
       LazyCacheGeneratedEnvironment context sourceModule)
     (kindEq :
-      Fir.Wasm.checkedAbiKind decl.type = .ok kind)
+      Fir.Wasm.checkedAbiKind decl.type = .ok declaredKind)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) =
         some cacheIndex)
     (declarationFound :
       context.program.findDecl? declaration = some sourceDeclaration)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+        some resultKind)
     (declarationParams : sourceDeclaration.params = #[])
     (declarationBody : sourceDeclaration.value = .code calleeCode)
     (contexts : DeclarationContextsCoherent context calleeContext)
@@ -9286,7 +9306,7 @@ theorem
     (importInBounds : cacheSetId < module.imports.length)
     (contractFound :
       spec.contracts[cacheSetId]? =
-        some (cacheSetContract declaration kind))
+        some (cacheSetContract declaration resultKind))
     (parameterCount : imp.params.length = 1)
     (resultCount : imp.results.length = 1)
     (resultFound :
@@ -9294,11 +9314,10 @@ theorem
         some resultIndex)
     (resultKindAt :
       (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
-        some kind)
+        some resultKind)
     (publicationOrdinary :
       ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
-        (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue)
-    (resultKindEq : resultKind = kind) :
+        (callRuntime.setGlobal declaration sourceValue) sourceEnv sourceValue) :
     ∃ nextStore nextLocals,
       BudgetedCapacityPreservingLazyStep .miss facts context callerFunction
             module hostEnv sourceExternals decl continuation
@@ -9318,14 +9337,13 @@ theorem
     ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩,
       descriptorAgreement⟩, initialCache, _initialClosureTables⟩
   obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq declarationFound
+    generated.select kindEq declarationFound targetResultEq
       (by simp [declarationParams]) cacheEq
   obtain ⟨cacheSlot, cacheFound, cacheKindEq⟩ :=
     callee.cacheTable.hostSlot initializerFound signature
   have valueRelated :
-      PhysicalValueRel callWitness kind physical sourceValue := by
-    simpa [resultKindEq] using
-      callee.declaration.capacityPreserving.successful.valueRelated
+      PhysicalValueRel callWitness resultKind physical sourceValue :=
+    callee.declaration.capacityPreserving.successful.valueRelated
   have cacheDescriptorsEq :
       afterCall.host.closureDescriptors = callWitness.closureDescriptors :=
     callee.declaration.hostDescriptorsPreserved.trans
@@ -9337,7 +9355,7 @@ theorem
       valueRelated cacheFound cacheKindEq cacheDescriptorsEq
   let afterCache := replaceRuntime afterCall runtimeAfter
   have operationEq :
-      cacheSetStep declaration kind afterCall [physical] =
+      cacheSetStep declaration resultKind afterCall [physical] =
         .Return [physical] afterCache := by
     simpa [afterCache] using operation
   obtain ⟨oldFlag, oldValue, flagAfterCall, valueAfterCall⟩ :=
@@ -9384,10 +9402,10 @@ theorem
   obtain ⟨step, nextCache⟩ :=
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclaration_cacheSet
       sourceStep declValue initialRelated.1 initialCache generated kindEq cacheEq
-      declarationFound declarationParams declarationBody contexts callee
-      importFound hostSatisfies importInBounds contractFound parameterCount
-      resultCount operationEq valueAfterCache valueStoreEq flagAfterValue
-      resultFound resultKindAt targetSet publicationOrdinary resultKindEq
+      declarationFound targetResultEq declarationParams declarationBody
+      contexts callee importFound hostSatisfies importInBounds contractFound
+      parameterCount resultCount operationEq valueAfterCache valueStoreEq
+      flagAfterValue resultFound resultKindAt targetSet publicationOrdinary
       cacheFound cacheKindEq cacheDescriptorsEq publicationExternals
       publicationDispatch publicationDescriptors
   exact ⟨nextStore, nextLocals, step, nextCache⟩
@@ -9407,10 +9425,16 @@ inductive LazyCacheCallSupported (context : Fir.Wasm.Context) :
       {declaration : Name}
       {sourceDeclaration : LCNF.Decl .impure}
       {resultKind : AbiKind}
+      {declaredResultKind : AbiKind}
       (valueEq : decl.value = .fap declaration #[])
-      (kindEq : Fir.Wasm.checkedAbiKind decl.type = .ok resultKind)
+      (kindEq :
+        Fir.Wasm.checkedAbiKind decl.type = .ok declaredResultKind)
       (targetEq :
         context.program.findDecl? declaration = some sourceDeclaration)
+      (targetResultEq :
+        Fir.Wasm.effectiveDeclarationResultKind? sourceDeclaration =
+          some resultKind)
+      (resultRefines : resultKind.refines declaredResultKind = true)
       (paramsEq : sourceDeclaration.params.isEmpty = true)
       (resultCompiled :
         Fir.Wasm.getLocal context decl.fvarId =
@@ -9752,12 +9776,17 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
             some (eraseReuseCapacityFact facts decl.fvarId) ∧
           LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
   rcases supported with
-    ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
-  obtain ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationCall,
-      cacheSetCall, _, targetValueEq⟩ :=
+    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+      resultCompiled⟩, bodyEq⟩
+  obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
+      recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall, _,
+      targetValueEq⟩ :=
     compileCachedLetValue_adapted_inv context sourceModule callerFunction
-      labels decl declaration sourceDeclaration resultKind valueCode
+      labels decl declaration sourceDeclaration _ valueCode
       targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
+  have targetKindEq : targetResultKind = resultKind :=
+    Option.some.inj (recoveredTargetResultEq.symm.trans targetResultEq)
+  subst targetResultKind
   obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
       afterCall, callWitness, physical, contexts, callee,
       publicationOrdinary⟩ :=
@@ -9775,9 +9804,9 @@ theorem BudgetedCapacityPreservingLazyStep.miss_of_supportedFunctionCompiler
   obtain ⟨nextStore, nextLocals, step, nextCache⟩ :=
     BudgetedCapacityPreservingLazyStep.miss_of_cachedDeclarationFrame
       sourceStep valueEq invariant generated kindEq cacheEq targetEq
-      declarationParams bodyEq contexts callee importFound spec.hostsSatisfy
-      importInBounds contractFound parameterCount resultCount resultFound
-      resultKindAt publicationOrdinary rfl
+      targetResultEq declarationParams bodyEq contexts callee importFound
+      spec.hostsSatisfy importInBounds contractFound parameterCount resultCount
+      resultFound resultKindAt publicationOrdinary
   refine
     ⟨nextStore, nextLocals, callWitness, physical, ?_, ?_, nextCache⟩
   · rw [targetValueEq]
@@ -9835,12 +9864,17 @@ theorem
     (notTObject : resultKind ≠ .tobject) :
     OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
   rcases supported with
-    ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
-  obtain ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationCall,
-      cacheSetCall, valueCodeEq, targetValueEq⟩ :=
+    ⟨⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+      resultCompiled⟩, bodyEq⟩
+  obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
+      recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall,
+      valueCodeEq, targetValueEq⟩ :=
     compileCachedLetValue_adapted_inv context sourceModule callerFunction
-      labels decl declaration sourceDeclaration resultKind valueCode
+      labels decl declaration sourceDeclaration _ valueCode
       targetValue valueEq kindEq targetEq paramsEq valueCompiled valueAdapted
+  have targetKindEq : targetResultKind = resultKind :=
+    Option.some.inj (recoveredTargetResultEq.symm.trans targetResultEq)
+  subst targetResultKind
   obtain ⟨calleeContext, calleeFunction, targetFunction, callRuntime,
       afterCall, callWitness, physical, contexts, callee, hereditaryPost⟩ :=
     induction declarationCall
@@ -9922,16 +9956,21 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
             some (eraseReuseCapacityFact facts decl.fvarId) ∧
           LazyCacheGlobalsRel nextWitness sourceModule nextRuntime nextStore := by
   rcases supported with
-    ⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩
+    ⟨valueEq, kindEq, targetEq, targetResultEq, _resultRefines, paramsEq,
+      resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
       sourceStep
   subst nextRuntime
   subst stepCost
-  obtain ⟨cacheIndex, _, _, cacheEq, _, _, valueCodeEq, targetValueEq⟩ :=
+  obtain ⟨targetResultKind, cacheIndex, _, _, recoveredTargetResultEq,
+      cacheEq, _, _, valueCodeEq, targetValueEq⟩ :=
     compileCachedLetValue_adapted_inv context sourceModule sourceFunction labels
-      decl declaration target resultKind valueCode targetValue valueEq kindEq
+      decl declaration target _ valueCode targetValue valueEq kindEq
       targetEq paramsEq valueCompiled valueAdapted
+  have targetKindEq : targetResultKind = resultKind :=
+    Option.some.inj (recoveredTargetResultEq.symm.trans targetResultEq)
+  subst targetResultKind
   obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
     localsAligned resultCompiled
   rw [resultFound] at alignedResultFound
@@ -9941,7 +9980,7 @@ theorem BudgetedCapacityPreservingLazyStep.hit_of_compiler
     ⟨⟨⟨⟨initialRelated, _, frameAligned, _⟩, _, _, _⟩, _⟩,
       cacheTable, _closureTables⟩
   obtain ⟨initializerFound, signature⟩ :=
-    generated.select kindEq targetEq paramsEq cacheEq
+    generated.select kindEq targetEq targetResultEq paramsEq cacheEq
   obtain ⟨physical, slot⟩ :=
     cacheTable.populatedSlot initializerFound signature semanticFound
   obtain ⟨nextLocals, hit⟩ :=
@@ -9972,7 +10011,8 @@ theorem SourceLazyLetResult.hit_ordinaryTransport_of_supported
         decl continuation nextRuntime sourceValue) :
     OrdinaryPersistenceTransport sourceRuntime nextRuntime := by
   rcases supported with
-    ⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩
+    ⟨valueEq, kindEq, targetEq, _targetResultEq, _resultRefines, paramsEq,
+      resultCompiled⟩
   obtain ⟨runtimeEq, semanticFound⟩ :=
     SourceLazyLetResult.hit_cacheFacts_of_valueEq valueEq targetEq paramsEq
       sourceStep
@@ -11079,6 +11119,7 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
         .ok (some sourceFunction)) :
     Nonempty (LoweredInternalDeclaration program cachedDeclarations declaration
       sourceCode sourceFunction) := by
+  have lowerDeclEq := lowered
   unfold Fir.Wasm.lowerDecl at lowered
   rw [bodyEq] at lowered
   cases paramsResult : Fir.Wasm.addDeclarationParams program declaration with
@@ -11092,37 +11133,70 @@ theorem LoweredInternalDeclaration.exists_of_lowerDecl
       | error error =>
           simp only [localsResult] at lowered
           contradiction
-      | ok bodyLocals =>
+      | ok rawBodyLocals =>
           simp only [localsResult] at lowered
-          cases bodyResult :
-              Fir.Wasm.compileCode {
-                program
-                localKinds := paramLocals.reverse ++ bodyLocals.reverse
-                cachedDeclarations } sourceCode with
+          cases refinedResult :
+              Fir.Wasm.refineNamedCallLocalKinds program rawBodyLocals
+                sourceCode with
           | error error =>
-              simp only [bodyResult] at lowered
+              simp only [refinedResult] at lowered
               contradiction
-          | ok symbolicBody =>
-              simp only [bodyResult] at lowered
-              cases resultsResult :
-                  Fir.Wasm.resultKinds declaration.type with
+          | ok bodyLocals =>
+              simp only [refinedResult] at lowered
+              cases bodyResult :
+                  Fir.Wasm.compileCode {
+                    program
+                    localKinds := paramLocals.reverse ++ bodyLocals.reverse
+                    cachedDeclarations } sourceCode with
               | error error =>
-                  simp only [resultsResult] at lowered
+                  simp only [bodyResult] at lowered
                   contradiction
-              | ok abiResults =>
-                  simp only [resultsResult, pure, Except.pure,
-                    Except.ok.injEq, Option.some.injEq] at lowered
-                  exact ⟨{
-                    paramLocals
-                    bodyLocals
-                    symbolicBody
-                    abiResults
-                    bodyEq
-                    paramsAdded := paramsResult
-                    localsCollected := localsResult
-                    bodyCompiled := bodyResult
-                    resultsCompiled := resultsResult
-                    sourceFunctionEq := lowered.symm }⟩
+              | ok symbolicBody =>
+                  simp only [bodyResult] at lowered
+                  cases effectiveResult :
+                      Fir.Wasm.effectiveDeclarationResultKind? declaration with
+                  | some resultKind =>
+                      simp only [effectiveResult, pure, Except.pure,
+                        Except.ok.injEq, Option.some.injEq] at lowered
+                      exact ⟨{
+                        paramLocals
+                        rawBodyLocals
+                        bodyLocals
+                        symbolicBody
+                        abiResults := #[resultKind]
+                        bodyEq
+                        paramsAdded := paramsResult
+                        localsCollected := localsResult
+                        localsRefined := refinedResult
+                        bodyCompiled := bodyResult
+                        resultsSelected := by simp [effectiveResult]
+                        sourceFunctionEq := lowered.symm
+                        lowered := lowerDeclEq }⟩
+                  | none =>
+                      cases resultsResult :
+                          Fir.Wasm.resultKinds declaration.type with
+                      | error error =>
+                          simp only [effectiveResult, resultsResult] at lowered
+                          contradiction
+                      | ok abiResults =>
+                          simp only [effectiveResult, resultsResult, pure,
+                            Except.pure, Except.ok.injEq,
+                            Option.some.injEq] at lowered
+                          exact ⟨{
+                            paramLocals
+                            rawBodyLocals
+                            bodyLocals
+                            symbolicBody
+                            abiResults
+                            bodyEq
+                            paramsAdded := paramsResult
+                            localsCollected := localsResult
+                            localsRefined := refinedResult
+                            bodyCompiled := bodyResult
+                            resultsSelected := by
+                              simp [effectiveResult, resultsResult]
+                            sourceFunctionEq := lowered.symm
+                            lowered := lowerDeclEq }⟩
 
 /-- A lowering view replays to the exact executable `lowerDecl` result. -/
 theorem LoweredInternalDeclaration.lowerDecl
@@ -11136,10 +11210,7 @@ theorem LoweredInternalDeclaration.lowerDecl
         sourceCode sourceFunction) :
   Fir.Wasm.lowerDecl program cachedDeclarations declaration =
       .ok (some sourceFunction) := by
-  unfold Fir.Wasm.lowerDecl
-  simp only [row.bodyEq, row.paramsAdded, row.localsCollected,
-    row.bodyCompiled, row.resultsCompiled, Bind.bind, Except.bind, pure,
-    Except.pure, row.sourceFunctionEq]
+  exact row.lowered
 
 /-- Production declaration lowering preserves the source declaration name. -/
 theorem LoweredInternalDeclaration.sourceFunctionName
@@ -11180,21 +11251,34 @@ theorem lowerDecl_some_of_code
           cases localsResult :
               Fir.Wasm.collectLocals [] sourceCode with
           | error error => simp [localsResult] at lowered
-          | ok bodyLocals =>
+          | ok rawBodyLocals =>
               simp only [localsResult] at lowered
-              cases bodyResult :
-                  Fir.Wasm.compileCode {
-                    program
-                    localKinds := paramLocals.reverse ++ bodyLocals.reverse
-                    cachedDeclarations } sourceCode with
-              | error error => simp [bodyResult] at lowered
-              | ok symbolicBody =>
-                  simp only [bodyResult] at lowered
-                  cases resultsResult :
-                      Fir.Wasm.resultKinds declaration.type with
-                  | error error => simp [resultsResult] at lowered
-                  | ok abiResults =>
-                      simp [resultsResult, pure, Except.pure] at lowered
+              cases refinedResult :
+                  Fir.Wasm.refineNamedCallLocalKinds program rawBodyLocals
+                    sourceCode with
+              | error error => simp [refinedResult] at lowered
+              | ok bodyLocals =>
+                  simp only [refinedResult] at lowered
+                  cases bodyResult :
+                      Fir.Wasm.compileCode {
+                        program
+                        localKinds := paramLocals.reverse ++ bodyLocals.reverse
+                        cachedDeclarations } sourceCode with
+                  | error error => simp [bodyResult] at lowered
+                  | ok symbolicBody =>
+                      simp only [bodyResult] at lowered
+                      cases effectiveResult :
+                          Fir.Wasm.effectiveDeclarationResultKind? declaration with
+                      | some resultKind =>
+                          simp [effectiveResult, pure, Except.pure] at lowered
+                      | none =>
+                          cases resultsResult :
+                              Fir.Wasm.resultKinds declaration.type with
+                          | error error =>
+                              simp [effectiveResult, resultsResult] at lowered
+                          | ok abiResults =>
+                              simp [effectiveResult, resultsResult, pure,
+                                Except.pure] at lowered
 
 /-- Successful whole-module lowering exposes the exact production
 `filterMapM lowerDecl` result used as the symbolic function table. -/
@@ -13024,16 +13108,47 @@ theorem LoweredInternalDeclaration.singleResult_of_abiKind
     (classified :
       Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
     sourceFunction.results.size = 1 := by
-  have resultsCompiled := row.resultsCompiled
-  have abiResultsEq : row.abiResults = #[resultKind] := by
-    unfold Fir.Wasm.resultKinds at resultsCompiled
-    rw [classified] at resultsCompiled
-    simp only [Bind.bind, Except.bind, pure, Except.pure,
-      Except.ok.injEq] at resultsCompiled
-    exact resultsCompiled.symm
   have functionResults : sourceFunction.results = row.abiResults := by
     simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
-  rw [functionResults, abiResultsEq]
+  rw [functionResults]
+  cases effectiveResult :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration with
+  | some actualKind =>
+      have selected := row.resultsSelected
+      rw [effectiveResult] at selected
+      rw [selected]
+      rfl
+  | none =>
+      have selected := row.resultsSelected
+      rw [effectiveResult] at selected
+      unfold Fir.Wasm.resultKinds at selected
+      rw [classified] at selected
+      simp only [Bind.bind, Except.bind, pure, Except.pure,
+        Except.ok.injEq] at selected
+      rw [← selected]
+      rfl
+
+/-- An effective internal result lane directly determines a singleton result
+row, including the strict refinement selected for a publicly tagged result. -/
+theorem LoweredInternalDeclaration.singleResult_of_effectiveResult
+    {program : Fir.LeanIR.ImpureProgram}
+    {cachedDeclarations : Array Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    (row :
+      LoweredInternalDeclaration program cachedDeclarations declaration
+        sourceCode sourceFunction)
+    {resultKind : AbiKind}
+    (selected :
+      Fir.Wasm.effectiveDeclarationResultKind? declaration = some resultKind) :
+    sourceFunction.results.size = 1 := by
+  have functionResults : sourceFunction.results = row.abiResults := by
+    simpa using congrArg Fir.Wasm.Function.results row.sourceFunctionEq
+  rw [functionResults]
+  have resultsSelected := row.resultsSelected
+  rw [selected] at resultsSelected
+  rw [resultsSelected]
   rfl
 
 /-- A successful function adaptation turns the source body equation into the
@@ -13256,7 +13371,7 @@ callee package have definitionally the same declaration-local context; no
 context cast, target execution, or translation certificate is needed.
 -/
 theorem
-    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLoweredSingleResult
     {program : Fir.LeanIR.ImpureProgram}
     {caller : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -13265,7 +13380,6 @@ theorem
     {declaration : LCNF.Decl .impure}
     {sourceCode : LCNF.Code .impure}
     {sourceFunction : Fir.Wasm.Function}
-    {resultKind : AbiKind}
     (callerProgram : caller.program = program)
     (callerCaches :
       caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
@@ -13277,8 +13391,7 @@ theorem
     (row :
       LoweredInternalDeclaration caller.program caller.cachedDeclarations
         declaration sourceCode sourceFunction)
-    (resultClassified :
-      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    (sourceSingleResult : sourceFunction.results.size = 1) :
     Nonempty (ConcreteGeneratedInternalDeclaration program declaration
       row.context sourceCode sourceModule sourceFunction target) := by
   have ordinaryLowering : Fir.Wasm.lower program = .ok sourceModule :=
@@ -13311,8 +13424,6 @@ theorem
   have sourceFunctionFound :
       sourceModule.functions[sourceFunctionIndex]? = some sourceFunction := by
     simpa using sourceFunctionFoundList
-  have sourceSingleResult : sourceFunction.results.size = 1 :=
-    row.singleResult_of_abiKind resultClassified
   obtain ⟨generated⟩ :=
     ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
       sourceFunctionIndex sourceFunctionFound row.compileCode row.localsAligned
@@ -13344,6 +13455,38 @@ theorem
     parametersAdded
     sourceParameters
     callIndexEq := by simpa [declarationNameEq] using callIndexEq }⟩
+
+/-- The common lowered-row selector specialized to a source ABI
+classification. -/
+theorem
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+    {program : Fir.LeanIR.ImpureProgram}
+    {caller : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {target : AdaptedModule}
+    {declarationName : Name}
+    {declaration : LCNF.Decl .impure}
+    {sourceCode : LCNF.Code .impure}
+    {sourceFunction : Fir.Wasm.Function}
+    {resultKind : AbiKind}
+    (callerProgram : caller.program = program)
+    (callerCaches :
+      caller.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (namesUnique : program.NamesUnique)
+    (lowered : Fir.Wasm.lowerSupported program = .ok sourceModule)
+    (adapted : FirTalos.adapt sourceModule = .ok target)
+    (declarationFound :
+      program.findDecl? declarationName = some declaration)
+    (row :
+      LoweredInternalDeclaration caller.program caller.cachedDeclarations
+        declaration sourceCode sourceFunction)
+    (resultClassified :
+      Fir.Wasm.abiKind? declaration.type = .ok (some resultKind)) :
+    Nonempty (ConcreteGeneratedInternalDeclaration program declaration
+      row.context sourceCode sourceModule sourceFunction target) :=
+  ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLoweredSingleResult
+    callerProgram callerCaches namesUnique lowered adapted declarationFound row
+    (row.singleResult_of_abiKind resultClassified)
 
 /--
 Module-wide production declaration family.
@@ -14705,8 +14848,6 @@ def DirectHereditaryGeneratedDeclarationInduction
       {resultKind : AbiKind}
       (row : ConcreteGeneratedInternalDeclaration program declaration context
         sourceCode sourceModule sourceFunction target)
-      (_resultClassified :
-        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
       {resultFacts : ReuseCapacityFacts}
       {sourceRuntime resultRuntime : RuntimeState}
       {sourceEnv resultEnv : Env}
@@ -14766,8 +14907,6 @@ def DirectHereditaryGeneratedDeclarationAbiInduction
       {resultKind : AbiKind}
       (row : ConcreteGeneratedInternalDeclaration program declaration context
         sourceCode sourceModule sourceFunction target)
-      (_resultClassified :
-        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
       {resultFacts : ReuseCapacityFacts}
       {sourceRuntime resultRuntime : RuntimeState}
       {sourceEnv resultEnv : Env}
@@ -14831,12 +14970,11 @@ theorem DirectHereditaryGeneratedDeclarationAbiInduction.ofInduction
       target hosts sourceExternals DirectSupported ExternalSupported
       LazySupported CaseSupported EffectSupported := by
   intro declaration context sourceCode sourceFunction resultKind row
-    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
     resultValue requiredBytes evaluation initial initialWitness parameters
     invariant parameterCount
   obtain ⟨resultStore, resultWitness, physical, result⟩ :=
-    declarations row resultClassified evaluation invariant.cacheFrame
-      parameterCount
+    declarations row evaluation invariant.cacheFrame parameterCount
   have initialAbi : ClosureAllocationsAbiAligned program initialWitness := by
     rw [← row.contextProgram]
     exact invariant.closureAbi
@@ -14866,8 +15004,6 @@ def ProductionHereditaryGeneratedDeclarationInduction
       {resultKind : AbiKind}
       (row : ConcreteGeneratedInternalDeclaration program declaration context
         sourceCode sourceModule sourceFunction target)
-      (_resultClassified :
-        Fir.Wasm.abiKind? declaration.type = .ok (some resultKind))
       {resultFacts : ReuseCapacityFacts}
       {sourceRuntime resultRuntime : RuntimeState}
       {sourceEnv resultEnv : Env}
@@ -15496,14 +15632,11 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
           closureLocal candidatesEq selectedMem selectedIdentity resultFound
           applicationFound applicationRelated postMatcher.stateRelated.1
           postMatcher.stateRelated.1.clearFailure
-      have resultClassified :
-          Fir.Wasm.abiKind? resolution.target.type =
-            .ok (some resolution.targetResultKind) :=
-        abiKind?_eq_ok_some_of_directAbiKind?_eq_some resolution.targetResult
       obtain ⟨generatedRow⟩ :=
-        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLoweredSingleResult
           rfl contextCaches spec.programNamesUnique spec.lowered spec.adapted
-          resolution.targetFound loweredRow resultClassified
+          resolution.targetFound loweredRow
+          (loweredRow.singleResult_of_effectiveResult resolution.targetResult)
       have calleeFrame :=
         postMatcher.generatedSaturatedClosureCalleeEntryAtCost site resolution
           generatedRow argumentsRelated stepFits
@@ -15828,7 +15961,7 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
     ProductionHereditaryGeneratedDeclarationInduction program sourceModule
       target hosts sourceExternals := by
   intro declaration context sourceCode sourceFunction resultKind row
-    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
     resultValue requiredBytes evaluation initial initialWitness parameters
     invariant parameterCount
   have initialEntry :
@@ -15975,7 +16108,7 @@ theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
       hosts sourceExternals DirectSupported ExternalSupported LazySupported
       CaseSupported EffectSupported := by
   intro declaration context sourceCode sourceFunction resultKind row
-    resultClassified resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
+    resultFacts sourceRuntime resultRuntime sourceEnv resultEnv
     resultValue requiredBytes evaluation initial initialWitness parameters
     invariant parameterCount
   have initialEntry :
@@ -16162,7 +16295,8 @@ theorem
       resultKind calleeCode calleeFunction calleeResultFacts call loweredRow
       resultClassified notObject notTObject calleeEvaluation =>
       rcases call with
-        ⟨⟨valueEq, kindEq, targetEq, paramsEq, resultCompiled⟩, bodyEq⟩
+        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, paramsEq,
+          resultCompiled⟩, bodyEq⟩
       have programEq : context.program = program := spec.contextProgram
       subst program
       obtain ⟨generatedRow⟩ :=
@@ -16190,7 +16324,7 @@ theorem
         have declarationIdEq := Option.some.inj declarationCall
         subst declarationId
         obtain ⟨afterCall, callWitness, physical, calleeResult⟩ :=
-          declarations generatedRow resultClassified calleeEvaluation
+          declarations generatedRow calleeEvaluation
             calleeFrame
             (generatedRow.targetParameterCount_nullary parametersEmpty)
         exact ⟨loweredRow.context, calleeFunction,
@@ -16200,7 +16334,10 @@ theorem
       have missSupported :
           LazyCacheInternalMissSupported context decl declaration
             sourceDeclaration resultKind calleeCode :=
-        .intro (.intro valueEq kindEq targetEq paramsEq resultCompiled) bodyEq
+        .intro
+          (.intro valueEq kindEq targetEq targetResultEq resultRefines paramsEq
+            resultCompiled)
+          bodyEq
       have publication :
           LazyCacheInternalPublicationInduction context sourceModule
             target.wasmModule hosts.env sourceExternals facts sourceRuntime
@@ -16621,7 +16758,7 @@ theorem
     invariant.generatedDirectCalleeEntryAtCost site generatedRow
       argumentsRelated stepFits
   obtain ⟨afterCall, resultWitness, physical, calleeResult⟩ :=
-    declarations generatedRow resultClassified calleeEvaluation
+    declarations generatedRow calleeEvaluation
       (by simpa using calleeFrame)
       (generatedRow.targetParameterCount site argumentsRelated)
   have declarationNameEq :
@@ -16779,14 +16916,11 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
       abiInvariant.closureAbi closureFound closureLocal candidatesEq selectedMem
       selectedIdentity resultFound applicationFound applicationRelated
       postMatcher.stateRelated.1 postMatcher.stateRelated.1.clearFailure
-  have resultClassified :
-      Fir.Wasm.abiKind? resolution.target.type =
-        .ok (some resolution.targetResultKind) :=
-    abiKind?_eq_ok_some_of_directAbiKind?_eq_some resolution.targetResult
   obtain ⟨generatedRow⟩ :=
-    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+    ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLoweredSingleResult
       rfl contextCaches spec.programNamesUnique spec.lowered spec.adapted
-      resolution.targetFound loweredRow resultClassified
+      resolution.targetFound loweredRow
+      (loweredRow.singleResult_of_effectiveResult resolution.targetResult)
   have calleeCacheFrame :=
     postMatcher.generatedSaturatedClosureCalleeEntryAtCost site resolution
       generatedRow argumentsRelated stepFits
@@ -16801,7 +16935,7 @@ theorem ConcreteSupportedExport.saturatedClosureCallRuntimeRefines_hereditary
     ⟨calleeCacheFrame, calleeAbi⟩
   obtain ⟨afterCall, resultWitness, physical, calleeResult,
       resultAbi⟩ :=
-    abiDeclarations generatedRow resultClassified calleeEvaluation
+    abiDeclarations generatedRow calleeEvaluation
       (by simpa using calleeFrame)
       (generatedRow.targetParameterCount_saturatedClosure site resolution
         argumentsRelated)

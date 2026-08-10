@@ -1,9 +1,9 @@
 ---
 id: FIR-BUG-wasm-none-lazy-cache-result-refinement
-status: confirmed
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
-lean-revision: e7b4813cc4e06543d43b3449588ffb8233f96a3e
+lean-revision: c93bf2265e5b460d8cbf5853826b1f111fd55f19
 phase: wasm
 pass: none
 discovered-by: proof
@@ -89,9 +89,7 @@ slot decoding to accept a differently declared lane.
 
 ## Workaround
 
-The W6 proof boundary names exact generated cache-kind alignment explicitly.
-It must not claim that the current supported-source predicate establishes
-that property.
+none
 
 ## Upstream tracking
 
@@ -106,7 +104,9 @@ cache value refines the caller's coarser annotation without assigning a false
 kind to the physical cache slot.
 
 The executable regression covers both the existing precise-declaration case
-and Lean's generated `tobject` boxed-constant shape. Root checks and generic
-Talos lowering proofs pass. The remaining W6-owned
-`ConcreteCacheCorrectness` theorem must quantify the target result kind
-separately from the call-site result before this card can be marked fixed.
+and Lean's generated `tobject` boxed-constant shape. The W6 cache inversion,
+hit/miss simulation, generated-environment, recursive declaration, and
+closure-dispatch proofs now quantify the effective target result separately
+from the source annotation while preserving exact physical slot decoding.
+The Talos contract regression asserts an `.object` cache lane and successful
+adaptation; root and Talos gates pass.

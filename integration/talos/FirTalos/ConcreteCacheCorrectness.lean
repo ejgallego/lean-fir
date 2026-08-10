@@ -17,16 +17,19 @@ theorem compileCachedLetValue_adapted
     (labels : List Lean.FVarId)
     (fvarId : Lean.FVarId) (type : Lean.Expr) (name : Lean.Name)
     (target : Lean.Compiler.LCNF.Decl .impure)
-    (resultKind : AbiKind) (cacheIndex declarationId cacheSetId : Nat)
+    (resultKind targetResultKind : AbiKind)
+    (cacheIndex declarationId cacheSetId : Nat)
     (kindEq : Fir.Wasm.checkedAbiKind type = .ok resultKind)
     (targetEq : context.program.findDecl? name = some target)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some targetResultKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == name) = some cacheIndex)
     (declarationFound :
       callIndex? sourceModule (.declaration name) = some declarationId)
     (cacheSetFound :
-      callIndex? sourceModule (.runtime (.cacheSet name resultKind)) =
+      callIndex? sourceModule (.runtime (.cacheSet name targetResultKind)) =
         some cacheSetId) :
     let decl : Lean.Compiler.LCNF.LetDecl .impure := {
       fvarId
@@ -37,20 +40,20 @@ theorem compileCachedLetValue_adapted
         .globalGet (2 * cacheIndex) .uint32,
         .ifElse [] [
           .call (.declaration name),
-          .call (.runtime (.cacheSet name resultKind)),
-          .globalSet (2 * cacheIndex + 1) resultKind,
+          .call (.runtime (.cacheSet name targetResultKind)),
+          .globalSet (2 * cacheIndex + 1) targetResultKind,
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
-        .globalGet (2 * cacheIndex + 1) resultKind] ∧
+        .globalGet (2 * cacheIndex + 1) targetResultKind] ∧
       instructions sourceModule sourceFunction labels [
         .globalGet (2 * cacheIndex) .uint32,
         .ifElse [] [
           .call (.declaration name),
-          .call (.runtime (.cacheSet name resultKind)),
-          .globalSet (2 * cacheIndex + 1) resultKind,
+          .call (.runtime (.cacheSet name targetResultKind)),
+          .globalSet (2 * cacheIndex + 1) targetResultKind,
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
-        .globalGet (2 * cacheIndex + 1) resultKind] = .ok [
+        .globalGet (2 * cacheIndex + 1) targetResultKind] = .ok [
           .globalGet (2 * cacheIndex),
           .iff 0 0 [] [
             .call declarationId,
@@ -62,7 +65,8 @@ theorem compileCachedLetValue_adapted
   dsimp
   constructor
   · exact Fir.Wasm.compileLetValue_fap_cached context fvarId type name target
-      resultKind cacheIndex kindEq targetEq paramsEq cacheEq
+      resultKind targetResultKind cacheIndex kindEq targetEq targetResultEq
+      paramsEq cacheEq
   · simp [instructions, instruction, declarationFound, cacheSetFound]
     rfl
 
@@ -86,38 +90,50 @@ theorem compileCachedLetValue_inv
     (targetEq : context.program.findDecl? name = some target)
     (paramsEq : target.params.isEmpty = true)
     (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode) :
-    ∃ cacheIndex,
+    ∃ targetResultKind cacheIndex,
+      Fir.Wasm.effectiveDeclarationResultKind? target =
+          some targetResultKind ∧
       context.cachedDeclarations.findIdx? (· == name) = some cacheIndex ∧
       valueCode = [
         .globalGet (2 * cacheIndex) .uint32,
         .ifElse [] [
           .call (.declaration name),
-          .call (.runtime (.cacheSet name resultKind)),
-          .globalSet (2 * cacheIndex + 1) resultKind,
+          .call (.runtime (.cacheSet name targetResultKind)),
+          .globalSet (2 * cacheIndex + 1) targetResultKind,
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
-        .globalGet (2 * cacheIndex + 1) resultKind] := by
-  cases cacheEq : context.cachedDeclarations.findIdx? (· == name) with
+        .globalGet (2 * cacheIndex + 1) targetResultKind] := by
+  cases targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target with
   | none =>
       simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, valueEq, kindEq,
-        Fir.Wasm.compileArgs, targetEq, paramsEq, cacheEq] at valueCompiled
+        Fir.Wasm.compileArgs, targetEq, targetResultEq, paramsEq]
+        at valueCompiled
       nomatch valueCompiled
-  | some cacheIndex =>
-      have compiledExpected :
-          Fir.Wasm.compileLetValue context decl = .ok [
-            .globalGet (2 * cacheIndex) .uint32,
-            .ifElse [] [
-              .call (.declaration name),
-              .call (.runtime (.cacheSet name resultKind)),
-              .globalSet (2 * cacheIndex + 1) resultKind,
-              .i32Const .uint32 1,
-              .globalSet (2 * cacheIndex) .uint32],
-            .globalGet (2 * cacheIndex + 1) resultKind] := by
+  | some targetResultKind =>
+    cases cacheEq : context.cachedDeclarations.findIdx? (· == name) with
+    | none =>
         simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, valueEq, kindEq,
-          Fir.Wasm.compileArgs, targetEq, paramsEq, cacheEq]
-      rw [compiledExpected] at valueCompiled
-      injection valueCompiled with codeEq
-      exact ⟨cacheIndex, rfl, codeEq.symm⟩
+          Fir.Wasm.compileArgs, targetEq, targetResultEq, paramsEq, cacheEq]
+          at valueCompiled
+        nomatch valueCompiled
+    | some cacheIndex =>
+        have compiledExpected :
+            Fir.Wasm.compileLetValue context decl = .ok [
+              .globalGet (2 * cacheIndex) .uint32,
+              .ifElse [] [
+                .call (.declaration name),
+                .call (.runtime (.cacheSet name targetResultKind)),
+                .globalSet (2 * cacheIndex + 1) targetResultKind,
+                .i32Const .uint32 1,
+                .globalSet (2 * cacheIndex) .uint32],
+              .globalGet (2 * cacheIndex + 1) targetResultKind] := by
+          simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, valueEq,
+            kindEq, Fir.Wasm.compileArgs, targetEq, targetResultEq, paramsEq,
+            cacheEq]
+        rw [compiledExpected] at valueCompiled
+        injection valueCompiled with codeEq
+        exact ⟨targetResultKind, cacheIndex, rfl, rfl, codeEq.symm⟩
 
 /--
 Successful Talos adaptation of the canonical cached sequence determines both
@@ -218,20 +234,22 @@ theorem compileCachedLetValue_adapted_inv
     (valueAdapted :
       instructions sourceModule sourceFunction labels valueCode =
         .ok targetValue) :
-    ∃ cacheIndex declarationId cacheSetId,
+    ∃ targetResultKind cacheIndex declarationId cacheSetId,
+      Fir.Wasm.effectiveDeclarationResultKind? target =
+          some targetResultKind ∧
       context.cachedDeclarations.findIdx? (· == name) = some cacheIndex ∧
       callIndex? sourceModule (.declaration name) = some declarationId ∧
-      callIndex? sourceModule (.runtime (.cacheSet name resultKind)) =
+      callIndex? sourceModule (.runtime (.cacheSet name targetResultKind)) =
         some cacheSetId ∧
       valueCode = [
         .globalGet (2 * cacheIndex) .uint32,
         .ifElse [] [
           .call (.declaration name),
-          .call (.runtime (.cacheSet name resultKind)),
-          .globalSet (2 * cacheIndex + 1) resultKind,
+          .call (.runtime (.cacheSet name targetResultKind)),
+          .globalSet (2 * cacheIndex + 1) targetResultKind,
           .i32Const .uint32 1,
           .globalSet (2 * cacheIndex) .uint32],
-        .globalGet (2 * cacheIndex + 1) resultKind] ∧
+        .globalGet (2 * cacheIndex + 1) targetResultKind] ∧
       targetValue = [
         .globalGet (2 * cacheIndex),
         .iff 0 0 [] [
@@ -241,16 +259,18 @@ theorem compileCachedLetValue_adapted_inv
           .const 1,
           .globalSet (2 * cacheIndex)],
         .globalGet (2 * cacheIndex + 1)] := by
-  obtain ⟨cacheIndex, cacheEq, valueCodeEq⟩ :=
+  obtain ⟨targetResultKind, cacheIndex, targetResultEq, cacheEq,
+      valueCodeEq⟩ :=
     compileCachedLetValue_inv context decl name target resultKind valueCode
       valueEq kindEq targetEq paramsEq valueCompiled
   rw [valueCodeEq] at valueAdapted
   obtain ⟨declarationId, cacheSetId, declarationFound, cacheSetFound,
       targetValueEq⟩ :=
-    adaptCachedLetValue_inv sourceModule sourceFunction labels name resultKind
-      cacheIndex targetValue valueAdapted
-  exact ⟨cacheIndex, declarationId, cacheSetId, cacheEq, declarationFound,
-    cacheSetFound, valueCodeEq, targetValueEq⟩
+    adaptCachedLetValue_inv sourceModule sourceFunction labels name
+      targetResultKind cacheIndex targetValue valueAdapted
+  exact ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
+    targetResultEq, cacheEq, declarationFound, cacheSetFound, valueCodeEq,
+    targetValueEq⟩
 
 /-- The proof package required from one compiler-generated zero-argument
 declaration before its result may be published through the lazy cache.

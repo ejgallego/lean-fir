@@ -3853,8 +3853,8 @@ example
 /--
 The production supported-lowering/adaptation pipeline determines the
 generated cache-name table and symbolic validation facts. The integration
-validator owes one uniform soundness theorem; callers retain only the exact
-result-kind condition isolated by the confirmed compiler bug.
+validator owes one uniform soundness theorem; callers retain the effective
+declaration-result condition that fixes each exact physical cache lane.
 -/
 example
     {program : Fir.LeanIR.ImpureProgram}
@@ -3893,17 +3893,19 @@ example
     {type : Expr}
     {declaration : Name}
     {target : LCNF.Decl .impure}
-    {kind : AbiKind}
+    {declaredKind targetKind : AbiKind}
     {index : Nat}
-    (kindEq : Fir.Wasm.checkedAbiKind type = .ok kind)
+    (kindEq : Fir.Wasm.checkedAbiKind type = .ok declaredKind)
     (targetEq : context.program.findDecl? declaration = some target)
+    (targetResultEq :
+      Fir.Wasm.effectiveDeclarationResultKind? target = some targetKind)
     (paramsEq : target.params.isEmpty = true)
     (cacheEq :
       context.cachedDeclarations.findIdx? (· == declaration) = some index) :
     source.initializers[index]? = some declaration ∧
       (source.callSignature? (.declaration declaration)).bind
-          (·.results[0]?) = some kind :=
-  generated.select kindEq targetEq paramsEq cacheEq
+          (·.results[0]?) = some targetKind :=
+  generated.select kindEq targetEq targetResultEq paramsEq cacheEq
 
 /--
 Reachability disjointness is one sufficient implementation of the minimal
@@ -4863,14 +4865,10 @@ example
       physical stepCost :=
   callee.ofRefines refines
 
-/--
-Executable witness for
-`FIR-BUG-wasm-none-lazy-cache-result-refinement`.
-
-Source admission permits the precise `.object` target result at a `.tobject`
-call site. Lowering then emits a `.tobject` cache operation for an `.object`
-value global, and production adaptation rejects that generated module.
--/
+/-- Regression for the exact effective-result cache lane. A source `.tobject`
+annotation may call a declaration whose body proves an `.object` result; the
+generated cache value lane and publication operation must both use `.object`,
+and the resulting module must adapt successfully. -/
 private def lazyCacheRefinementResult : FVarId :=
   FVarId.mk `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheResult
 
@@ -4913,11 +4911,9 @@ private def lazyCacheRefinementProgram : Fir.LeanIR.ImpureProgram :=
   | .ok source =>
       source.initializers ==
           #[`FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheTarget] &&
+        source.cacheGlobalKinds == #[.uint32, .object] &&
         match adapt source with
-        | .error (.invalidModule (.invalidGlobalKind function index)) =>
-            function ==
-                `FirTalos.Concrete.CompilerCorrectnessContract.lazyCacheCaller &&
-              index == 1
+        | .ok _ => true
         | _ => false
 
 /--
