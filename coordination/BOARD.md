@@ -13,48 +13,47 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `W7-HITSCENE-PARTIAL-APPLICATION-ADMISSION`.
 - Integration owner: `wasm-gen`; the user assigned W7 the temporary lease to
   land the exact postponed-LCNF HitScene capture checkpoint and isolate the
   shared result-kind/partial-application admission repair.
 - Integration branch/worktree: `integration/hitscene-admission` in
-  `.worktrees/integration-hitscene-admission`, based directly on `main` at
-  `691e00b9`.
+  `.worktrees/integration-hitscene-admission`, with shared contract base
+  `0792847b` on `main`.
 - Lease boundary: land the green W7 source-capture checkpoint, then repair
   `FIR-BUG-wasm-none-endpoint-partial-application-admission` without an
   Illuminate-specific exception. Prefer preserving the precise heap-object
   result of the generated boxed Float constant through its nullary call/cache
   boundary. Any alternative that broadens closure capture/projection
   compatibility requires W6 review before landing.
-- W6 notification: seed the `wasm-proof` mailbox at milestone start. W6 may
-  continue its independent structured-terminal adequacy work; no proof change
-  is requested unless the shared repair changes the refinement premise used
-  by concrete closure projection.
-- Contract candidate: `c93bf226`, followed by HitScene diagnostics at
+- Published stack: compiler contract `c93bf226`, HitScene diagnostics
+  `14242c49`, provisional client handoff `db698bdd`, W6 proof adaptation
+  `ac81f18d`, W6 ready mailbox `5b5d2a87`, and precise source-artifact ratchet
+  `c447a413`.
+- Accepted contract: `c93bf226`, followed by HitScene diagnostics at
   `14242c49`. Straight-line internal declarations may expose a proved result
   refinement of a public `tobject` annotation; named-call locals, emitted
   results, and lazy-cache value lanes preserve that exact kind. Directional
   `AbiKind.refines`, closure compatibility, and concrete layouts are unchanged.
-- Candidate validation: Lean Beam clean saves; `git diff --check`; focused
-  `Fir.Wasm.Examples`; root `make check` with 642 unique cases and 1844/1844
-  equal comparisons; exact HitScene capture with 159 declarations, 34
-  externals, and zero unsupported declarations. `make talos-check` reaches one
-  expected W6-owned failure in `ConcreteCacheCorrectness`; the generic lowering
-  and compiler-correctness cone passes.
-- Contract queue: W6 adapts the concrete lazy-cache theorem to distinguish the
-  target result kind from the coarser call-site annotation, retaining exact
-  cache-slot decoding. Request committed in the W6 mailbox at `72e66449`.
-  Integration remains blocked from `main` until that proof checkpoint returns
-  and the combined Talos gate is green.
-- Provisional client handoff: `db698bdd` documents the exact source pin,
+- W6 acceptance: the concrete lazy-cache and recursive generated-declaration
+  proof cone distinguishes the target result kind from the coarser call-site
+  annotation while retaining exact physical cache-slot decoding. No
+  `AbiKind.refines`, closure-compatibility, or concrete-layout rule was
+  weakened.
+- Validation: Lean Beam clean saves; `git diff --check`; root `make check` with
+  642 unique cases and 1844/1844 equal comparisons; all 3,131 Talos jobs; exact
+  HitScene capture with 159 declarations, 34 externals, and zero unsupported;
+  and the complete deterministic resident-artifact gate, including 15/15
+  source probes, 44/44 readiness artifacts, PrettyFormat stress, and the
+  601-case V8 triangle.
+- Client handoff: `db698bdd` documents the exact source pin,
   reproduction commands, expected inventory, and output digests for the
-  compiler-admission demo. It is explicitly not an executable Wasm package:
-  clients may test final-LCNF capture and complete symbolic lowering now, but
-  must wait for W6 acceptance and resident linking before application staging.
+  accepted compiler-admission demo. It is explicitly not an executable Wasm
+  package; resident linking and application staging remain the next W7 slice.
 
-## Latest completed integration lease
+## Previous completed integration lease
 
 - Milestone: `W7-FLAT-RESIDENT-PACKAGE`.
 - Integration owner: `wasm-gen`; the user assigned the W7 owner the temporary

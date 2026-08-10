@@ -1,9 +1,9 @@
-# Provisional HitScene compiler demo handoff
+# HitScene compiler demo handoff
 
 This handoff lets compiler and Illuminate clients reproduce FIR admission and
-symbolic lowering of the real prepared hit-scene query while the W6 proof owner
-checks the lazy-cache result-kind refinement. It is intentionally not a Wasm
-package handoff.
+symbolic lowering of the real prepared hit-scene query. The compiler admission
+and W6 lazy-cache result-kind proof are linked/accepted. This remains
+intentionally distinct from a Wasm package handoff.
 
 ## Revisions and status
 
@@ -15,7 +15,8 @@ package handoff.
   `af088e313eaade90be100aeaf63ddac79a8c1710`
 - Lean toolchain: `leanprover/lean4:v4.32.0`
 - Source entry: `Illuminate.HitScene.query`
-- Status: demo-ready on the integration branch; not landed or proof-accepted
+- Status: compiler-admission demo accepted on `main`; no executable HitScene
+  package yet
 
 Resolve the current containing handoff commit from the named integration
 branch. The functional compiler identity is the fixed contract candidate above.
@@ -102,9 +103,7 @@ part of the deterministic identity.
 - a JavaScript input/output adapter;
 - external-engine or differential execution;
 - a stable input layout or memory-ownership contract;
-- proof acceptance of the refined lazy-cache result kind.
 
 Do not point Illuminate staging scripts at this directory: it does not satisfy
-the immutable package contract. Once W6 returns a green cache proof and the
-candidate lands on `main`, W7 can use this admitted closure as the input to the
-resident-linking and client-package slice.
+the immutable package contract. W7 can now use this admitted closure as the
+input to the resident-linking and client-package slice.

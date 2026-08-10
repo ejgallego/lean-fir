@@ -1,6 +1,6 @@
 ---
 id: FIR-BUG-wasm-none-endpoint-partial-application-admission
-status: candidate
+status: fixed
 classification: compiler
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
@@ -9,7 +9,7 @@ pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-10
 reproduction: integration/illuminate-hit-scene/Probe.lean
-regression: none
+regression: Fir/Wasm/Examples.lean
 ---
 
 # Summary
@@ -105,7 +105,9 @@ the boxed-Float case (refined to `object`) from a `tobject` declaration that
 returns a tagged natural (not refined). The real HitScene probe now captures
 159 declarations with 34 externals and zero unsupported declarations.
 
-The candidate preserves FIR's directional semantic refinement rather than
-making arbitrary `tobject` values acceptable as heap objects. Landing remains
-pending the W6 adaptation of the concrete lazy-cache correctness theorem and
-the complete integration gate.
+The repair preserves FIR's directional semantic refinement rather than making
+arbitrary `tobject` values acceptable as heap objects. W6 proves that the
+effective target kind is used consistently by the exact lazy-cache lanes and
+recursive generated-declaration cone. The integrated root, 3,131-job Talos,
+resident-artifact, and exact HitScene gates pass; the real source closure has
+zero unsupported declarations.

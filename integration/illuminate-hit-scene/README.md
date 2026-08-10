@@ -28,16 +28,15 @@ lake --keep-toolchain \
 The probe writes `_build/hit-scene-probe.json`, the exact unsupported LCNF to
 `_build/hit-scene-unsupported.lcnf`, and the relevant compiler-generated
 partial-application declarations to
-`_build/hit-scene-partial-application.lcnf`. On the provisional integration
-branch it captures 159 reachable declarations, inventories 34 external names,
+`_build/hit-scene-partial-application.lcnf`. It captures 159 reachable
+declarations, inventories 34 external names,
 lowers 126 base functions with 311 distinct runtime operations, and reports
 zero unsupported declarations and no lowering error.
 
 This directory remains a source-closure/lowering probe, not yet an executable
-artifact package. The current compiler repair is pending its W6 lazy-cache
-proof and must not be represented as landed on `main`. See
-[`CLIENT_HANDOFF.md`](CLIENT_HANDOFF.md) for the exact provisional revision,
-expected output, checksums, and client boundary.
+artifact package. The compiler repair and its W6 lazy-cache proof are
+linked/accepted. See [`CLIENT_HANDOFF.md`](CLIENT_HANDOFF.md) for the exact
+revision, expected output, checksums, and client boundary.
 
 Package generation, resident math, the browser adapter, fixture differential
 testing, and bounded scratch ownership follow after the shared
