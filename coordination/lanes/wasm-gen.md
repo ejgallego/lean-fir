@@ -5,21 +5,21 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: ready
-base: 0efe9753dc605039992eead05cc4ece2d2568c95 on main
-functional-head: 84a85ced1afef26dbce263a8d5eaeb3c749cdca9
-contract-base: 0efe9753dc605039992eead05cc4ece2d2568c95 on main
+state: active
+base: d7907814 on main
+functional-head: c447a413
+contract-base: d7907814 on main
 clean-at-update: true
-slice: Replay Lean 4.32 postponed final-LCNF module groups through the upstream-aligned private target-module environment and capture the real Illuminate.HitScene.query closure without copying Illuminate code; add the pinned HitScene source probe and classify the remaining admission frontier
-files: Fir/Wasm/Emit/CompilerPrivate.lean; Fir/Wasm/Emit/Source.lean; integration/illuminate-hit-scene/; bugs/FIR-BUG-wasm-none-closed-vec2-constant-admission.md; bugs/FIR-BUG-wasm-none-endpoint-partial-application-admission.md; this mailbox
-contracts: no shared semantic, signature, layout, or runtime change in this slice; compileEntryModuleWiseInternalized is a W7 source-generation API that follows leanir's postponed-group replay. The remaining endpoint partial-application repair is explicitly not worked around here because either precise boxed-result propagation or broader object-family closure compatibility crosses the integration-owned lowering contract and may affect W6 closure-projection proofs
-checks: PASS Lean Beam sync/save with zero diagnostics for Fir/Wasm/Emit/CompilerPrivate.lean and Fir/Wasm/Emit/Source.lean, plus zero Probe.lean errors; PASS lake build Fir.Wasm.Emit.Source; PASS lake --keep-toolchain -KilluminateRoot=/tmp/illuminate-hit-scene-pinned build IlluminateFirHitScene.Compile; PASS lake --keep-toolchain -KilluminateRoot=/tmp/illuminate-hit-scene-pinned env lean -DmaxHeartbeats=0 Probe.lean (159 reachable declarations, 34 externals, two unsupported declarations at the single endpoint partial-application frontier); PASS git diff --check; PASS make check (642 unique cases, 1844/1844 comparisons equal, 119 active bug cards); PASS make talos-check (3131 jobs)
-bug-cards: fixed FIR-BUG-wasm-none-closed-vec2-constant-admission; candidate FIR-BUG-wasm-none-endpoint-partial-application-admission; no workaround
-blockers: HitScene artifact generation is waiting at one shared compiler-admission frontier: Illuminate.endpointToCenter._closed_1 partially applies an object-parameter function to a compiler-generated boxed Float whose declaration result is typed as tobject. FIR requires actual.refines expected at partial application even though ordinary calls and joins accept the common Lean object-family representation. No answer is currently needed from Illuminate or Verso
-artifacts: no HitScene Wasm package yet; probe inventory contains 159 reachable final-LCNF declarations and 34 externals, including Float.abs, Float.sqrt, Float.sin, Float.cos, Float.acos, Float.atan2, Float.cbrt, and Float.floor; exact diagnostic files are generated under integration/illuminate-hit-scene/_build and intentionally ignored
-measurements: source capture and lowering probe completes in approximately 7.3 seconds on the current worktree; no execution-performance claim is made before resident math and external-engine acceptance exist
-handoff: integration may fast-forward the green wasm/generation stack through functional head 84a85ced and its containing mailbox commit, then synthesize the checkpoint into coordination/BOARD.md. The HitScene integration lease is active and W6 has been notified; prefer precise boxed-result propagation if it preserves existing refinement premises, and stop for W6 review before any alternative that broadens closure capture/projection compatibility
-next: after the shared admission repair lands and W7 rebases, confirm the 159-declaration closure has zero unsupported source declarations; then implement the eight resident Float/math operations without JavaScript Math imports, publish the module-owned-memory HitScene package, and run the 301-query plus 10000-query bounded-frontier acceptance suite
+slice: The HitScene source-admission stack, exact W6 lazy-cache proof adaptation, and resident-artifact ratchet are accepted on main. Start the principled successor by freezing object/tagged/tobject transfer and heap-operation behavior before the shared compiler representation is split into source annotation, physical carrier, and semantic provenance
+files: coordination/lanes/wasm-gen.md; generation-side examples will be added only after the integration-owned contract plan at docs/wasm-object-carrier-provenance-plan.md
+contracts: consumes the accepted effectiveDeclarationResultKind? contract at c93bf226 and the object-carrier/provenance milestone at d7907814; no new shared contract, runtime signature, concrete layout, or helper change in this mailbox update
+checks: PASS integrated git diff --check; PASS make check (642 unique cases, 1844/1844 comparisons equal, 119 active bug cards); PASS make talos-check (3131 jobs); PASS complete deterministic resident-artifact gate; PASS exact HitScene source probe (159 declarations, 34 externals, zero unsupported); PASS follow-up documentation make check with the same 642/1844 coverage
+bug-cards: fixed FIR-BUG-wasm-none-closed-vec2-constant-admission; fixed FIR-BUG-wasm-none-endpoint-partial-application-admission; fixed FIR-BUG-wasm-none-lazy-cache-result-refinement
+blockers: none; W6 can continue independent proof work until integration publishes a standalone descriptor/signature contract, and no answer is currently needed from Illuminate or Verso
+artifacts: no executable HitScene Wasm package yet; the accepted compiler probe inventories 159 reachable declarations and 34 externals, including Float.abs, Float.sqrt, Float.sin, Float.cos, Float.acos, Float.atan2, Float.cbrt, and Float.floor
+measurements: source capture is approximately 6.5 seconds and symbolic lowering approximately 62 seconds on the accepted probe; no execution-performance claim is made before resident math and external-engine acceptance exist
+handoff: none; the previous compiler/proof/artifact stack is accepted on main through 4d91fb0d, and the object-carrier/provenance plan is accepted at d7907814
+next: add the nine object-family transfer combinations and negative heap-operation fixtures without changing output; then introduce carrier/provenance descriptors alongside AbiKind on the integration branch. After that contract stabilizes, notify W6 and continue the zero-import HitScene resident-math package
 ```
 
 ## Verso Flat end-to-end probe (2026-08-09)
