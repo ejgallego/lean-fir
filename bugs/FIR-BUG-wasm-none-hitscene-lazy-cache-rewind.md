@@ -1,7 +1,7 @@
 ---
 id: FIR-BUG-wasm-none-hitscene-lazy-cache-rewind
 status: fixed
-classification: wasm-runtime
+classification: wasm-adapter
 lean-toolchain: leanprover/lean4:v4.32.0
 lean-revision: 8c9756b28d64dab099da31a4c09229a9e6a2ef35
 phase: wasm
