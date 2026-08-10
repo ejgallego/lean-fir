@@ -11,6 +11,7 @@ their acceptance checks reject drift.
 | [FIR-native styled `prettyM`](../integration/talos/artifact/prettyM-package/README.md) | accepted W7 package | `Fir.Wasm.Emit.SourceFixture.prettyFormatTraceRaw` | `bash integration/talos/artifact/check.sh` | `integration/talos/artifact/_build/prettyM-current` |
 | [Illuminate full-action player](../integration/illuminate-player/README.md) | accepted; retained as the full-action oracle | `Illuminate.AnimationPlayer.initialLive`, `transitionLive` | `ILLUMINATE_ROOT=/clean/pinned/illuminate bash integration/illuminate-player/check.sh` | `integration/illuminate-player/_build/illuminate-player-current` |
 | [Illuminate selection player](../integration/illuminate-player/README.md#selection-only-v4-package) | accepted; preferred compact player | `Illuminate.AnimationPlayer.initialSelectionLive`, `transitionSelectionLive`, and the bit-exact tick facade | same Illuminate gate | `integration/illuminate-player/_build/illuminate-selection-player-current` |
+| [Illuminate prepared HitScene](../integration/illuminate-hit-scene/README.md) | accepted W7 query package | `Illuminate.HitScene.query` and its bit-exact coordinate facade | `ILLUMINATE_ROOT=/clean/pinned/illuminate ILLUMINATE_HIT_SCENE_FIXTURE=/fixture.json FIR_HIT_SCENE_REQUIRE_REPEAT=1 node integration/illuminate-hit-scene/package.mjs` | `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current` |
 | [C/Emscripten styled `prettyM`](../integration/lcnf-c-wasm/prettyM-emscripten-package/README.md) | accepted alternative backend | `Fir.LCNFC.PrettyM.renderWire` | `bash integration/lcnf-c-wasm/package-prettyM-emscripten.sh` | `integration/lcnf-c-wasm/_build/prettyM-emscripten-current` |
 
 An accepted package has a real source entry, immutable publication,
@@ -47,16 +48,6 @@ canonical package pointer:
 - Illuminate's timing-free selection dispatch is an adapter experiment over
   the accepted v4 semantics; it remains distinct from the diagnostic API until
   its interleaved benchmark and consumer gate pass.
-- Illuminate prepared hit-scene queries target the real
-  `Illuminate.HitScene.query : HitScene → Float → Float → HitSceneResult`.
-  The first gate is compiling the exact clean source through FIR's Lean 4.32
-  source view; the requesting checkout currently uses Lean 4.33. Its clean,
-  remotely published source candidate is Illuminate commit `af088e313eaa`.
-  The package remains queued until the compatibility result is known. It must
-  retain a scene below a checkpoint, transport bit-exact coordinates, rewind
-  query scratch, and internalize Float math rather than import JavaScript
-  `Math` helpers.
-
 ## Lifecycle
 
 Add a package here only after its immutable acceptance artifact passes. Keep

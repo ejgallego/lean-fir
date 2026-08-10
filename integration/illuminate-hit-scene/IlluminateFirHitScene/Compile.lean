@@ -70,6 +70,45 @@ def captureSourceSingleUnit : CoreM Fir.Validation.Lcnf.Artifact :=
 def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Wasm.Emit.Source.ModuleArtifact) := do
   let source ← captureSource
-  Fir.Wasm.Emit.Source.compileModuleArtifact source
+  let result ← Fir.Wasm.Emit.Source.compileModuleArtifact source
+  return result.bind fun artifact => do
+    let module ← Fir.Wasm.Emit.ResidentCache.eliminateLazyInitializers
+        artifact.module |>.mapError fun error =>
+          Fir.Wasm.Emit.Source.CompileError.manifest
+            s!"failed to make the HitScene module rewind-safe: {repr error}"
+    unless module.globals.isEmpty do
+      throw (.manifest "HitScene source module retained resident globals")
+    let bytes ← Fir.Wasm.Emit.encode module |>.mapError
+      Fir.Wasm.Emit.Source.CompileError.encoding
+    return { artifact with module, bytes }
+
+def publicExports : Array Name := #[
+  entry,
+  Fir.Wasm.Emit.BitExactFloat.facadeName entry] ++
+  Fir.Wasm.Emit.ResidentLinker.allocatorExports
+
+/--
+Link every already-accepted resident helper while deliberately retaining the
+unresolved external frontier. This is the publication diagnostic boundary:
+runtime operations must be closed before the separately compiled upstream C
+math helpers are merged into the final zero-import module.
+-/
+def residentFrontierPolicy : Fir.Wasm.Emit.ResidentLinker.Policy := {
+  steps := Fir.Wasm.Emit.ResidentLinker.commonSteps ++ #[
+    .numericAvailable,
+    .bigNumeric,
+    .floatAvailable,
+    .arraysAvailable,
+    .natModAvailable,
+    .natShiftAvailable,
+    .usizeAvailable,
+    .stringLiterals]
+  publicExports := some publicExports
+  requireZeroImports := false }
+
+def linkResidentFrontier
+    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
+    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact :=
+  Fir.Wasm.Emit.ResidentLinker.linkArtifact residentFrontierPolicy artifact
 
 end IlluminateFirHitScene.Compile

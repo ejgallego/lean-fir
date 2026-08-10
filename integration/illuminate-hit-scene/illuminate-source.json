@@ -1,0 +1,12 @@
+{
+  "repository": "git@github.com:ejgallego/illuminate.git",
+  "revision": "af088e313eaade90be100aeaf63ddac79a8c1710",
+  "files": {
+    "src/Illuminate/Diagram/HitScene.lean": "a37e5a8af3c5477c445b9d123d767eb719ab6f351e5dd9abf8914919959fe7f2",
+    "src/Illuminate/Diagram/HitTest.lean": "8e8b73223cf3867fc1e7e5b9bba0c49cc94f2a0a07c6a881d55ece6259f8c3cb",
+    "src/Illuminate/Geometry/Trace.lean": "21956218724ce7deb9ef00354c01261f33dc17c294b013c69494ea8374997a16",
+    "src/Illuminate/Geometry/PathData.lean": "92dc894058d3e4a5e08d2a5a1fc3bf1d47bdfd52aa3ff1ec8226bdd04a265793",
+    "src/Illuminate/Geometry/Types.lean": "ed63356e5f21cd40b5b653510f20fb71e54b89b4072d848a5a58a66bd4b4d1d0",
+    "src/Illuminate/Geometry/Matrix.lean": "28cd47a7d678913ed0d22eeb6284637bfa99860bf760e2225bbd31dec1af80a3"
+  }
+}
