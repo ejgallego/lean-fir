@@ -82,8 +82,18 @@ private def captureStore (kind : AbiKind) (index : Nat) :
         .localGet addressLocal,
         .localGet (captureId index),
         .i64Store kind offset]
-  | .f32 | .f64 =>
-      throw (.unsupportedCaptureKind kind)
+  | .f32 =>
+      return [
+        .localGet addressLocal,
+        .localGet (captureId index),
+        .i32ReinterpretF32 .uint32,
+        .i32Store .uint32 offset]
+  | .f64 =>
+      return [
+        .localGet addressLocal,
+        .localGet (captureId index),
+        .i64ReinterpretF64 .uint64,
+        .i64Store .uint64 offset]
 
 private def captureStores (fields : Array AbiKind) :
     Except LinkError (List Instruction) := do
@@ -178,9 +188,10 @@ Internalize every supported closure allocation after the resident allocator is
 installed. Stable target and capture-layout IDs come only from the retained
 module tables; removing runtime imports cannot renumber either header field.
 
-Float captures fail closed until the symbolic resident surface gains typed
-float stores. The current text and styled `prettyM` closures use only i32
-captures, while the standalone fixture also covers an i64 slot.
+Scalar captures are stored bit-exactly in the same fixed eight-byte slots as
+object values. Floating lanes use the symbolic reinterpret operations before
+the existing integer stores, so this helper does not introduce a second
+physical closure layout.
 -/
 def internalizePartialApplications (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule module with
@@ -220,7 +231,8 @@ def exampleTarget : Name := `ResidentClosureAllocation.target
 
 def exampleOperations : Array RuntimeOp := #[
   .partialApply exampleTarget 3 0 #[] .object,
-  .partialApply exampleTarget 4 3 #[.tobject, .uint8, .usize] .tobject]
+  .partialApply exampleTarget 4 3 #[.tobject, .uint8, .usize] .tobject,
+  .partialApply exampleTarget 3 2 #[.float32, .float] .object]
 
 def exampleClosureDispatch : Array Name := #[
   exampleUnrelatedTarget,
@@ -229,7 +241,8 @@ def exampleClosureDispatch : Array Name := #[
 def exampleClosureDescriptors : Array (Array AbiKind) := #[
   #[.uint32],
   #[],
-  #[.tobject, .uint8, .usize]]
+  #[.tobject, .uint8, .usize],
+  #[.float32, .float]]
 
 def exampleEmptyCaller : Function := {
   name := `resident_closure_empty
@@ -264,11 +277,23 @@ def exampleLoopCaller : Function := {
       .ret],
     .unreachable] }
 
+def exampleFloatCaller : Function := {
+  name := `resident_closure_float_captured
+  params := #[(captureId 0, .float32), (captureId 1, .float)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet (captureId 0),
+    .localGet (captureId 1),
+    .call (.runtime exampleOperations[2]!),
+    .ret] }
+
 def exampleModule : Module := {
   imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
-  functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller]
+  functions := #[exampleEmptyCaller, exampleCapturedCaller, exampleLoopCaller,
+    exampleFloatCaller]
   exports := #[exampleEmptyCaller.name, exampleCapturedCaller.name,
-    exampleLoopCaller.name]
+    exampleLoopCaller.name, exampleFloatCaller.name]
   initializers := #[]
   runtimeOperations := exampleOperations
   closureDispatch := exampleClosureDispatch
@@ -298,10 +323,11 @@ def manifest : Json :=
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
       module.functions.size ==
-        3 + ResidentAllocator.helperNames.size + exampleOperations.size &&
+        4 + ResidentAllocator.helperNames.size + exampleOperations.size &&
       module.exports.contains exampleEmptyCaller.name &&
       module.exports.contains exampleCapturedCaller.name &&
       module.exports.contains exampleLoopCaller.name &&
+      module.exports.contains exampleFloatCaller.name &&
       module.closureDispatch == exampleClosureDispatch &&
       module.closureDescriptors == exampleClosureDescriptors &&
       module.memory == some ResidentRuntime.residentMemory &&

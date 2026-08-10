@@ -25,7 +25,6 @@ inductive LinkError where
   | incompatibleMemory
   | malformedLazyCache (name : Name)
   | retainedCacheGlobal (index : Nat)
-  | retainedCacheSet
   | invalidOutput (error : SymbolicError)
   deriving Inhabited, Repr
 
@@ -368,6 +367,7 @@ private partial def eliminateLazyCacheInstructions
                 flagIndex == storedFlagIndex && initialized == 1 do
               throw (.malformedLazyCache target)
             return .call (.declaration target) ::
+              .call (.runtime (.cacheSet target resultKind)) ::
               (← eliminateLazyCacheInstructions initializers cacheGlobalCount rest)
         | _ => throw (.retainedCacheGlobal flagIndex)
       else
@@ -408,8 +408,11 @@ end
 
 /--
 Remove compiler-generated lazy singleton state so a consumer may rewind its
-allocation arena after every public call. Run this before cache-set
-internalization; no initializer, cache global, or cache-set operation remains.
+allocation arena after every public call. Each use constructs a fresh graph
+and routes it through the existing recursive cache-publication helper, thereby
+preserving the persistent ownership contract already assumed by final LCNF
+without retaining a module-global root. Run this before cache-set
+internalization; no initializer or cache global remains.
 -/
 def eliminateLazyInitializers (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule module with
@@ -421,8 +424,6 @@ def eliminateLazyInitializers (module : Module) : Except LinkError Module := do
       cacheGlobalCount function.body
     return { function with body }
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  if runtimeOperations.any isCacheSet then
-    throw .retainedCacheSet
   let externalImports := module.imports.filter (·.operation?.isNone)
   let result := {
     module with
@@ -504,14 +505,16 @@ private def lazyModule : Module := {
 
 private def eliminatedLazyCallerBody : List Instruction := [
   .call (.declaration lazyInitializerName),
+  .call (.runtime (.cacheSet lazyInitializerName .uint32)),
   .localSet lazyValueLocal,
   .globalGet 0 .uint32,
   .ret]
 
 #guard match eliminateLazyInitializers lazyModule with
   | .ok module =>
-      module.initializers.isEmpty && module.runtimeOperations.isEmpty &&
-      module.imports.isEmpty && module.globals == lazyModule.globals &&
+      module.initializers.isEmpty &&
+      module.runtimeOperations == #[.cacheSet lazyInitializerName .uint32] &&
+      module.imports.size == 1 && module.globals == lazyModule.globals &&
       (module.functions[1]?.map (·.body) == some eliminatedLazyCallerBody) &&
       (Fir.Wasm.validateModule module).isOk
   | .error _ => false

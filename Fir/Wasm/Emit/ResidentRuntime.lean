@@ -22,6 +22,8 @@ def resultLocal : FVarId := ⟨`result⟩
 
 def sharedLocal : FVarId := ⟨`shared⟩
 
+def closureRefCountLocal : FVarId := ⟨`closureRefCount⟩
+
 private def offset (value : Nat) : UInt32 := UInt32.ofNat value
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
@@ -184,6 +186,7 @@ inductive LinkError where
   | unsupportedClosureProjection (index : Nat) (result : AbiKind)
   | unsupportedClosureMatch
   | missingClosureTarget (function : Name)
+  | missingClosureApplicationGlobals
   | closureMetadataOverflow (value : Nat)
   | projectionOffsetOverflow (value : Nat)
   | incompatibleMemory
@@ -479,7 +482,45 @@ private def closureProjectionSuffix? : AbiKind → Option String
   | .tobject => some "tobject"
   | .uint8 => some "uint8"
   | .uint32 => some "uint32"
+  | .float32 => some "float32"
+  | .float => some "float"
   | _ => none
+
+/--
+Private single-threaded state connecting one successful closure matcher to its
+immediately following generated capture-projection prefix. The closure address
+prevents projections from borrowing an unrelated parent; the remaining count
+keeps an exclusive parent allocation alive until its final non-erased capture
+has been transferred.
+-/
+private structure ClosureApplicationGlobals where
+  object : Nat
+  remaining : Nat
+
+private def closureApplicationGlobalDecls : Array GlobalDecl := #[
+  { kind := .tobject, init := .i32 0 },
+  { kind := .uint32, init := .i32 0 }]
+
+private def isClosureApplicationOperation : RuntimeOp → Bool
+  | .closureProj .. | .closureMatches .. => true
+  | _ => false
+
+private def installClosureApplicationGlobals (module : Module) :
+    Module × ClosureApplicationGlobals :=
+  let base := module.cacheGlobalKinds.size + module.globals.size
+  ({ module with globals := module.globals ++ closureApplicationGlobalDecls },
+    { object := base, remaining := base + 1 })
+
+private def existingClosureApplicationGlobals (module : Module) :
+    Except LinkError ClosureApplicationGlobals := do
+  if module.globals.size < closureApplicationGlobalDecls.size then
+    throw .missingClosureApplicationGlobals
+  let base := module.globals.size - closureApplicationGlobalDecls.size
+  unless module.globals.extract base module.globals.size ==
+      closureApplicationGlobalDecls do
+    throw .missingClosureApplicationGlobals
+  let physicalBase := module.cacheGlobalKinds.size + base
+  return { object := physicalBase, remaining := physicalBase + 1 }
 
 def closureProjectionCoordinate? : RuntimeOp → Option (Nat × AbiKind)
   | .closureProj _ _ _ index result =>
@@ -523,7 +564,86 @@ private def closureHeapBody
         equalsConst .uint32 0 ++
         [.ifElse (liveClosureBody load) [.unreachable]])]
 
-private def closureProjectionFunction (index : Nat) (result : AbiKind) :
+private def requireActiveClosureApplication
+    (globals : ClosureApplicationGlobals) : List Instruction :=
+  [.globalGet globals.object .tobject,
+    .localGet objectParam,
+    .i32Eq,
+    .ifElse [] [.unreachable],
+    .globalGet globals.remaining .uint32] ++
+  equalsConst .uint32 0 ++
+  [.ifElse [.unreachable] []]
+
+private def clearClosureApplication
+    (globals : ClosureApplicationGlobals) : List Instruction :=
+  [.i32Const .tobject 0,
+    .globalSet globals.object .tobject,
+    .i32Const .uint32 0,
+    .globalSet globals.remaining .uint32]
+
+/-- Mark only the closure header dead, preserving its retained allocation and
+every capture lane. The application has transferred those lanes to the callee,
+so recursively releasing them here would consume the same ownership twice. -/
+private def canonicalClosureApplicationRelease : List Instruction := [
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 ObjectKind.freed.code,
+  .i32Store .uint32 (offset headerKindOffset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerFlagsOffset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerRefCountOffset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerAux0Offset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerAux1Offset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerAux2Offset),
+  .localGet objectParam,
+  .i32Const .uint32 0,
+  .i32Add,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (offset headerAux3Offset)]
+
+private def finishClosureProjection
+    (globals : ClosureApplicationGlobals) : List Instruction :=
+  [.globalGet globals.remaining .uint32,
+    .i32Const .uint32 1,
+    .i32Sub,
+    .globalSet globals.remaining .uint32,
+    .globalGet globals.remaining .uint32] ++
+  equalsConst .uint32 0 ++
+  [.ifElse
+    (loadFlags ++
+      [.i32Const .uint32 persistentFlag, .i32And] ++
+      equalsConst .uint32 persistentFlag ++
+      [.ifElse
+        []
+        ([.localGet objectParam,
+          .i32Load .uint32 (offset headerRefCountOffset)] ++
+          equalsConst .uint32 0 ++
+          [.ifElse canonicalClosureApplicationRelease []])] ++
+      clearClosureApplication globals)
+    []]
+
+private def closureProjectionFunction (globals : ClosureApplicationGlobals)
+    (index : Nat) (result : AbiKind) :
     Except LinkError Function := do
   let probe : RuntimeOp :=
     .closureProj `resident (index + 2) (index + 1) index result
@@ -536,21 +656,30 @@ private def closureProjectionFunction (index : Nat) (result : AbiKind) :
     params := #[(objectParam, .tobject)]
     results := #[result]
     locals := #[(resultLocal, result)]
-    body := closureHeapBody
-      [.localGet objectParam,
-        .i32Load result fieldOffset,
-        .localSet resultLocal] ++
+    body := requireActiveClosureApplication globals ++ closureHeapBody
+      (([.localGet objectParam] ++
+        match result.valueType with
+        | .i32 => [.i32Load result fieldOffset]
+        | .i64 => [.i64Load result fieldOffset]
+        | .f32 => [.i32Load .uint32 fieldOffset, .f32ReinterpretI32 .float32]
+        | .f64 => [.i64Load .uint64 fieldOffset, .f64ReinterpretI64 .float]) ++
+      [.localSet resultLocal]) ++ finishClosureProjection globals ++
       [.localGet resultLocal, .ret] }
 
 def internalizeClosureProjections (module : Module) : Except LinkError Module := do
   validateInput module
+  let hasApplicationOperations :=
+    module.runtimeOperations.any isClosureApplicationOperation
+  let (module, globals) :=
+    if hasApplicationOperations then installClosureApplicationGlobals module
+    else (module, { object := 0, remaining := 1 })
   let operations := module.runtimeOperations.filter supportsClosureProjection
   let bindings ← operations.mapM fun operation => do
     let some name := closureProjectionName? operation |
       throw (.unsupportedClosureProjection 0 .erased)
     let some (index, kind) := closureProjectionCoordinate? operation |
       throw (.unsupportedClosureProjection 0 .erased)
-    let function ← closureProjectionFunction index kind
+    let function ← closureProjectionFunction globals index kind
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
@@ -569,17 +698,21 @@ def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (2, .tobject),
   (3, .object),
   (3, .tobject),
-  (4, .object)]
+  (4, .object),
+  (5, .float32),
+  (6, .float)]
 
 def prettyFormatClosureProjectionModule : Except LinkError Module := do
+  let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }
   let functions ← prettyFormatClosureProjectionCoordinates.mapM fun coordinate =>
-    closureProjectionFunction coordinate.1 coordinate.2
+    closureProjectionFunction globals coordinate.1 coordinate.2
   return {
     imports := #[]
     functions
     exports := functions.map (·.name)
     initializers := #[]
     runtimeOperations := #[]
+    globals := closureApplicationGlobalDecls
     memory := some residentMemory }
 
 def closureMatchCoordinate? (dispatch : Array Name) : RuntimeOp →
@@ -603,7 +736,112 @@ private def checkedClosureWord (value : Nat) : Except LinkError UInt32 :=
   else
     throw (.closureMetadataOverflow value)
 
-private def closureMatchFunction (dispatch : Array Name) (operation : RuntimeOp) :
+private def projectedCaptureCount (descriptor : Array AbiKind) : Nat :=
+  descriptor.foldl (init := 0) fun count kind =>
+    if kind == .erased then count else count + 1
+
+private def retainClosureCapture (index : Nat) : List Instruction :=
+  let fieldOffset := offset <| headerBytes + target.semanticSlotBytes * index
+  [.localGet objectParam,
+    .i32Load .tobject fieldOffset] ++
+  equalsConst .tobject 0 ++
+  [.ifElse
+    []
+    [.localGet objectParam,
+      .i32Load .tobject fieldOffset,
+      .call (.runtime (.inc 1 true))]]
+
+private def retainClosureCaptures (descriptor : Array AbiKind) :
+    List Instruction :=
+  descriptor.toList.zipIdx.flatMap fun (kind, index) =>
+    if kind.isObjectLike then retainClosureCapture index else []
+
+private def beginClosureApplication
+    (globals : ClosureApplicationGlobals) (descriptor : Array AbiKind) :
+    Except LinkError (List Instruction) := do
+  let projectionCount ← checkedClosureWord (projectedCaptureCount descriptor)
+  let clearIfComplete :=
+    if projectionCount == 0 then clearClosureApplication globals else []
+  let exclusiveBody :=
+    if projectionCount == 0 then
+      canonicalClosureApplicationRelease ++ clearClosureApplication globals
+    else
+      [.localGet objectParam,
+        .i32Const .uint32 0,
+        .i32Add,
+        .i32Const .uint32 0,
+        .i32Store .uint32 (offset headerRefCountOffset)]
+  let sharedBody :=
+    [.localGet objectParam,
+      .i32Const .uint32 0,
+      .i32Add,
+      .localGet closureRefCountLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .i32Store .uint32 (offset headerRefCountOffset)] ++
+    retainClosureCaptures descriptor ++ clearIfComplete
+  let ordinaryBody :=
+    [.localGet objectParam,
+      .i32Load .uint32 (offset headerRefCountOffset),
+      .localSet closureRefCountLocal,
+      .localGet closureRefCountLocal] ++
+    equalsConst .uint32 0 ++
+    [.ifElse
+      [.unreachable]
+      ([.localGet closureRefCountLocal] ++
+        equalsConst .uint32 1 ++
+        [.ifElse exclusiveBody sharedBody])]
+  return (
+    [.globalGet globals.object .tobject] ++
+    equalsConst .tobject 0 ++
+    [.ifElse [] [.unreachable],
+      .localGet objectParam,
+      .globalSet globals.object .tobject,
+      .i32Const .uint32 projectionCount,
+      .globalSet globals.remaining .uint32] ++
+    loadFlags ++
+    [.i32Const .uint32 persistentFlag, .i32And] ++
+    equalsConst .uint32 persistentFlag ++
+    [.ifElse clearIfComplete ordinaryBody])
+
+private partial def closureDescriptorApplicationBody
+    (descriptors : Array (Array AbiKind))
+    (globals : ClosureApplicationGlobals) (index : Nat) :
+    Except LinkError (List Instruction) := do
+  if h : index < descriptors.size then
+    let descriptor := descriptors[index]
+    let descriptorId ← checkedClosureWord index
+    let fixed ← checkedClosureWord descriptor.size
+    let body ← beginClosureApplication globals descriptor
+    let rest ← closureDescriptorApplicationBody descriptors globals (index + 1)
+    return (
+      [.localGet objectParam,
+        .i32Load .uint32 (offset headerAux3Offset)] ++
+      equalsConst .uint32 descriptorId ++
+      [.ifElse
+        ([.localGet objectParam,
+          .i32Load .uint32 (offset headerAux2Offset)] ++
+          equalsConst .uint32 fixed ++
+          [.ifElse body [.unreachable]])
+        rest])
+  else
+    return [.unreachable]
+
+private def takeClosureApplicationName : Name := `fir_take_closure_application
+
+private def takeClosureApplicationFunction
+    (descriptors : Array (Array AbiKind))
+    (globals : ClosureApplicationGlobals) : Except LinkError Function := do
+  let descriptorBody ← closureDescriptorApplicationBody descriptors globals 0
+  return {
+    name := takeClosureApplicationName
+    params := #[(objectParam, .tobject)]
+    results := #[]
+    locals := #[(closureRefCountLocal, .uint32)]
+    body := closureHeapBody descriptorBody ++ [.ret] }
+
+private def closureMatchFunction (dispatch : Array Name)
+    (operation : RuntimeOp) :
     Except LinkError Function := do
   let some (targetId, arity, fixed) := closureMatchCoordinate? dispatch operation |
     match operation.closureTarget? with
@@ -633,6 +871,11 @@ private def closureMatchFunction (dispatch : Array Name) (operation : RuntimeOp)
     results := #[.uint32]
     locals := #[(resultLocal, .uint32)]
     body := closureHeapBody compareMetadata ++
+      [.localGet resultLocal,
+        .ifElse
+          [.localGet objectParam,
+            .call (.declaration takeClosureApplicationName)]
+          []] ++
       [.localGet resultLocal, .ret] }
 
 /--
@@ -647,6 +890,16 @@ these physical header comparisons implement semantic `closureMatches`.
 def internalizeClosureMatches (module : Module) : Except LinkError Module := do
   validateInput module
   let operations := module.runtimeOperations.filter isClosureMatch
+  if operations.isEmpty then
+    return module
+  let globals ← existingClosureApplicationGlobals module
+  if module.imports.any (·.declaration? == some takeClosureApplicationName) ||
+      module.functions.any (·.name == takeClosureApplicationName) ||
+      module.exports.contains takeClosureApplicationName then
+    throw (.reservedDeclaration takeClosureApplicationName)
+  let applicationFunction ←
+    takeClosureApplicationFunction module.closureDescriptors globals
+  let module := { module with functions := module.functions.push applicationFunction }
   let bindings ← operations.mapM fun operation => do
     let some name := closureMatchName? module.closureDispatch operation |
       match operation.closureTarget? with
@@ -659,6 +912,9 @@ def internalizeClosureMatches (module : Module) : Except LinkError Module := do
 
 def closureMatchExampleDispatch : Array Name := #[`callee, `other]
 
+def closureMatchExampleDescriptors : Array (Array AbiKind) := #[
+  #[.uint8], #[]]
+
 def closureMatchExampleOperations : Array RuntimeOp := #[
   .closureMatches `callee 2 1,
   .closureMatches `other 2 1,
@@ -666,15 +922,20 @@ def closureMatchExampleOperations : Array RuntimeOp := #[
   .closureMatches `callee 2 0]
 
 def closureMatchExampleModule : Except LinkError Module := do
+  let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }
+  let applicationFunction ←
+    takeClosureApplicationFunction closureMatchExampleDescriptors globals
   let functions ← closureMatchExampleOperations.mapM
     (closureMatchFunction closureMatchExampleDispatch)
   return {
     imports := #[]
-    functions
+    functions := functions.push applicationFunction
     exports := functions.map (·.name)
     initializers := #[]
     runtimeOperations := #[]
     closureDispatch := closureMatchExampleDispatch
+    closureDescriptors := closureMatchExampleDescriptors
+    globals := closureApplicationGlobalDecls
     memory := some residentMemory }
 
 def getTagManifest : Json :=
@@ -791,7 +1052,7 @@ def closureMatchExampleManifest : Json :=
 #guard match closureMatchExampleModule with
   | .ok module =>
       module.imports.isEmpty &&
-      module.functions.size == closureMatchExampleOperations.size &&
+      module.functions.size == closureMatchExampleOperations.size + 1 &&
       module.exports.size == closureMatchExampleOperations.size &&
       module.closureDispatch == closureMatchExampleDispatch &&
       (module.memory.any fun memory =>
