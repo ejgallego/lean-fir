@@ -52,7 +52,7 @@ export const CONCRETE_SOURCE_EXPECTATIONS = Object.freeze({
     fixture: "Fir.Validation.Corpus.Source.litNat",
     sourceEntry: "Fir.Validation.Corpus.Source.litNat",
     params: Object.freeze([]),
-    result: "tobject",
+    result: "tagged",
     expected: natural(42),
   }),
   "source-nat-list-case": Object.freeze({

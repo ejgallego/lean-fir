@@ -296,7 +296,7 @@ node --input-type=module -e '
   import { formatExternalRegistry } from "../../../scripts/wasm_format_externals.mjs";
   const cases = [
     [process.argv[1], "uint64", [], 0xffffffffffffffffn],
-    [process.argv[2], "tobject", [], 42n],
+    [process.argv[2], "tagged", [], 42n],
     [process.argv[3], "usize", ["usize"], 42n],
     [process.argv[4], "uint8", ["uint8"], 0xffn],
     [process.argv[5], "uint16", ["uint16"], 0xffffn],
