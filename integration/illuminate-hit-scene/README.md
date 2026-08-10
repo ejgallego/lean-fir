@@ -25,14 +25,20 @@ lake --keep-toolchain \
   env lean -DmaxHeartbeats=0 Probe.lean
 ```
 
-The probe writes `_build/hit-scene-probe.json` and the exact unsupported LCNF
-to `_build/hit-scene-unsupported.lcnf`. At the current checkpoint it captures
-159 reachable declarations, inventories 34 unresolved standard/runtime
-operations including all eight expected geometry math functions, and reaches
-one generic partial-application ABI blocker recorded as
-`FIR-BUG-wasm-none-endpoint-partial-application-admission`.
+The probe writes `_build/hit-scene-probe.json`, the exact unsupported LCNF to
+`_build/hit-scene-unsupported.lcnf`, and the relevant compiler-generated
+partial-application declarations to
+`_build/hit-scene-partial-application.lcnf`. On the provisional integration
+branch it captures 159 reachable declarations, inventories 34 external names,
+lowers 126 base functions with 311 distinct runtime operations, and reports
+zero unsupported declarations and no lowering error.
 
-This directory is a source-closure probe, not yet an artifact package. Package
-generation, resident math, the browser adapter, fixture differential testing,
-and bounded scratch ownership follow only after the shared compiler-admission
-repair lands.
+This directory remains a source-closure/lowering probe, not yet an executable
+artifact package. The current compiler repair is pending its W6 lazy-cache
+proof and must not be represented as landed on `main`. See
+[`CLIENT_HANDOFF.md`](CLIENT_HANDOFF.md) for the exact provisional revision,
+expected output, checksums, and client boundary.
+
+Package generation, resident math, the browser adapter, fixture differential
+testing, and bounded scratch ownership follow after the shared
+compiler-admission repair lands.
