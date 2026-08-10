@@ -643,7 +643,7 @@ private def finishClosureProjection
     []]
 
 private def closureProjectionFunction (globals : ClosureApplicationGlobals)
-    (index : Nat) (result : AbiKind) :
+    (applicationOwnership : Bool) (index : Nat) (result : AbiKind) :
     Except LinkError Function := do
   let probe : RuntimeOp :=
     .closureProj `resident (index + 2) (index + 1) index result
@@ -651,19 +651,23 @@ private def closureProjectionFunction (globals : ClosureApplicationGlobals)
     throw (.unsupportedClosureProjection index result)
   let fieldOffset ← checkedProjectionOffset <|
     headerBytes + target.semanticSlotBytes * index
+  let applicationPrefix :=
+    if applicationOwnership then requireActiveClosureApplication globals else []
+  let applicationSuffix :=
+    if applicationOwnership then finishClosureProjection globals else []
   return {
     name
     params := #[(objectParam, .tobject)]
     results := #[result]
     locals := #[(resultLocal, result)]
-    body := requireActiveClosureApplication globals ++ closureHeapBody
+    body := applicationPrefix ++ closureHeapBody
       (([.localGet objectParam] ++
         match result.valueType with
         | .i32 => [.i32Load result fieldOffset]
         | .i64 => [.i64Load result fieldOffset]
         | .f32 => [.i32Load .uint32 fieldOffset, .f32ReinterpretI32 .float32]
         | .f64 => [.i64Load .uint64 fieldOffset, .f64ReinterpretI64 .float]) ++
-      [.localSet resultLocal]) ++ finishClosureProjection globals ++
+      [.localSet resultLocal]) ++ applicationSuffix ++
       [.localGet resultLocal, .ret] }
 
 def internalizeClosureProjections (module : Module) : Except LinkError Module := do
@@ -679,12 +683,14 @@ def internalizeClosureProjections (module : Module) : Except LinkError Module :=
       throw (.unsupportedClosureProjection 0 .erased)
     let some (index, kind) := closureProjectionCoordinate? operation |
       throw (.unsupportedClosureProjection 0 .erased)
-    let function ← closureProjectionFunction globals index kind
+    let function ← closureProjectionFunction globals true index kind
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
-/-- Physical closure-capture reads reachable from the control and Flat `prettyM` entries. -/
+/-- Physical closure-capture reads reachable from the control and Flat `prettyM` entries.
+The standalone module below isolates layout and typed-load behavior; linked
+source artifacts additionally enable the matcher/projection ownership protocol. -/
 def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
   (0, .object),
   (0, .tagged),
@@ -705,14 +711,13 @@ def prettyFormatClosureProjectionCoordinates : Array (Nat × AbiKind) := #[
 def prettyFormatClosureProjectionModule : Except LinkError Module := do
   let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }
   let functions ← prettyFormatClosureProjectionCoordinates.mapM fun coordinate =>
-    closureProjectionFunction globals coordinate.1 coordinate.2
+    closureProjectionFunction globals false coordinate.1 coordinate.2
   return {
     imports := #[]
     functions
     exports := functions.map (·.name)
     initializers := #[]
     runtimeOperations := #[]
-    globals := closureApplicationGlobalDecls
     memory := some residentMemory }
 
 def closureMatchCoordinate? (dispatch : Array Name) : RuntimeOp →
@@ -841,7 +846,7 @@ private def takeClosureApplicationFunction
     body := closureHeapBody descriptorBody ++ [.ret] }
 
 private def closureMatchFunction (dispatch : Array Name)
-    (operation : RuntimeOp) :
+    (applicationOwnership : Bool) (operation : RuntimeOp) :
     Except LinkError Function := do
   let some (targetId, arity, fixed) := closureMatchCoordinate? dispatch operation |
     match operation.closureTarget? with
@@ -865,17 +870,21 @@ private def closureMatchFunction (dispatch : Array Name)
     equalsConst .uint32 fixed ++
     [.i32And,
       .localSet resultLocal]
+  let applicationBody :=
+    if applicationOwnership then
+      [.localGet resultLocal,
+        .ifElse
+          [.localGet objectParam,
+            .call (.declaration takeClosureApplicationName)]
+          []]
+    else
+      []
   return {
     name
     params := #[(objectParam, .tobject)]
     results := #[.uint32]
     locals := #[(resultLocal, .uint32)]
-    body := closureHeapBody compareMetadata ++
-      [.localGet resultLocal,
-        .ifElse
-          [.localGet objectParam,
-            .call (.declaration takeClosureApplicationName)]
-          []] ++
+    body := closureHeapBody compareMetadata ++ applicationBody ++
       [.localGet resultLocal, .ret] }
 
 /--
@@ -905,15 +914,12 @@ def internalizeClosureMatches (module : Module) : Except LinkError Module := do
       match operation.closureTarget? with
       | some function => throw (.missingClosureTarget function)
       | none => throw .unsupportedClosureMatch
-    let function ← closureMatchFunction module.closureDispatch operation
+    let function ← closureMatchFunction module.closureDispatch true operation
     return { operation, name, function : RuntimeBinding }
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
 def closureMatchExampleDispatch : Array Name := #[`callee, `other]
-
-def closureMatchExampleDescriptors : Array (Array AbiKind) := #[
-  #[.uint8], #[]]
 
 def closureMatchExampleOperations : Array RuntimeOp := #[
   .closureMatches `callee 2 1,
@@ -921,21 +927,19 @@ def closureMatchExampleOperations : Array RuntimeOp := #[
   .closureMatches `callee 3 1,
   .closureMatches `callee 2 0]
 
+/-- Standalone physical-discriminator fixture. Linked source artifacts enable
+application ownership after a successful discriminator and test that protocol
+through their complete execution smoke. -/
 def closureMatchExampleModule : Except LinkError Module := do
-  let globals : ClosureApplicationGlobals := { object := 0, remaining := 1 }
-  let applicationFunction ←
-    takeClosureApplicationFunction closureMatchExampleDescriptors globals
   let functions ← closureMatchExampleOperations.mapM
-    (closureMatchFunction closureMatchExampleDispatch)
+    (closureMatchFunction closureMatchExampleDispatch false)
   return {
     imports := #[]
-    functions := functions.push applicationFunction
+    functions
     exports := functions.map (·.name)
     initializers := #[]
     runtimeOperations := #[]
     closureDispatch := closureMatchExampleDispatch
-    closureDescriptors := closureMatchExampleDescriptors
-    globals := closureApplicationGlobalDecls
     memory := some residentMemory }
 
 def getTagManifest : Json :=
@@ -1052,7 +1056,7 @@ def closureMatchExampleManifest : Json :=
 #guard match closureMatchExampleModule with
   | .ok module =>
       module.imports.isEmpty &&
-      module.functions.size == closureMatchExampleOperations.size + 1 &&
+      module.functions.size == closureMatchExampleOperations.size &&
       module.exports.size == closureMatchExampleOperations.size &&
       module.closureDispatch == closureMatchExampleDispatch &&
       (module.memory.any fun memory =>

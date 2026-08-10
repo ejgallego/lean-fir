@@ -14,6 +14,8 @@ const ENTRIES = [
   ["fir_cproj_3_object", 3, "object"],
   ["fir_cproj_3_tobject", 3, "tobject"],
   ["fir_cproj_4_object", 4, "object"],
+  ["fir_cproj_5_float32", 5, "float32"],
+  ["fir_cproj_6_float", 6, "float"],
 ];
 
 const HEADER_BYTES = 32;
@@ -34,6 +36,42 @@ function expectTrap(action, label) {
     return;
   }
   throw new Error(`${label} did not trap`);
+}
+
+const BITS = new DataView(new ArrayBuffer(8));
+
+function sameCapture(kind, actual, expected) {
+  if (kind === "float32") {
+    BITS.setFloat32(0, actual, true);
+    const actualBits = BITS.getUint32(0, true);
+    BITS.setFloat32(0, expected, true);
+    return actualBits === BITS.getUint32(0, true);
+  }
+  if (kind === "float") {
+    BITS.setFloat64(0, actual, true);
+    const actualBits = BITS.getBigUint64(0, true);
+    BITS.setFloat64(0, expected, true);
+    return actualBits === BITS.getBigUint64(0, true);
+  }
+  return (actual >>> 0) === (expected >>> 0);
+}
+
+function rawCapture(kind, ordinal) {
+  if (kind === "float32") return Math.fround(-13.25 - ordinal);
+  if (kind === "float") return -0;
+  return 0x100001 + ordinal * 17;
+}
+
+function writeRawCapture(view, address, kind, value) {
+  if (kind === "float32") {
+    view.setFloat32(address, value, true);
+    view.setUint32(address + 4, 0, true);
+  } else if (kind === "float") {
+    view.setFloat64(address, value, true);
+  } else {
+    view.setUint32(address, value, true);
+    view.setUint32(address + 4, 0, true);
+  }
 }
 
 function writeHeader(view, address, {
@@ -58,12 +96,13 @@ function writeHeader(view, address, {
 
 function rawLayoutChecks(instance, memory) {
   const view = new DataView(memory.buffer);
-  ENTRIES.forEach(([entry, index], ordinal) => {
+  ENTRIES.forEach(([entry, index, result], ordinal) => {
     const address = 1024 + ordinal * 512;
-    const expected = 0x100001 + ordinal * 17;
+    const expected = rawCapture(result, ordinal);
     writeHeader(view, address);
-    view.setUint32(address + HEADER_BYTES + SLOT_BYTES * index, expected, true);
-    expect((instance.exports[entry](address) >>> 0) === (expected >>> 0),
+    writeRawCapture(view, address + HEADER_BYTES + SLOT_BYTES * index,
+      result, expected);
+    expect(sameCapture(result, instance.exports[entry](address), expected),
       `${entry} returned the wrong raw capture`);
   });
 
@@ -103,6 +142,8 @@ function concreteValue(host, kind, ordinal, leaf) {
     case "tobject": return host.encodeTagged(BigInt(20 + ordinal));
     case "uint8": return 0x80 + ordinal;
     case "uint32": return (0xf0000000 + ordinal) | 0;
+    case "float32": return Math.fround(ordinal + 0.25);
+    case "float": return -(ordinal + 0.5);
     default: throw new Error(`unsupported closure capture test kind: ${kind}`);
   }
 }
@@ -128,7 +169,7 @@ async function concreteHostChecks(module, memoryExport) {
         ? concreteValue(host, result, ordinal, leaf)
         : concreteValue(host, kind, ordinal + fieldIndex, leaf));
     const closure = host.partialApply(operation, args);
-    expect((instance.exports[entry](closure) >>> 0) === (args[index] >>> 0),
+    expect(sameCapture(result, instance.exports[entry](closure), args[index]),
       `${entry} disagreed with the concrete host closure layout`);
   });
 }
