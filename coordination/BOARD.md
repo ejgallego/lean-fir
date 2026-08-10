@@ -32,6 +32,22 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   continue its independent structured-terminal adequacy work; no proof change
   is requested unless the shared repair changes the refinement premise used
   by concrete closure projection.
+- Contract candidate: `c93bf226`, followed by HitScene diagnostics at
+  `14242c49`. Straight-line internal declarations may expose a proved result
+  refinement of a public `tobject` annotation; named-call locals, emitted
+  results, and lazy-cache value lanes preserve that exact kind. Directional
+  `AbiKind.refines`, closure compatibility, and concrete layouts are unchanged.
+- Candidate validation: Lean Beam clean saves; `git diff --check`; focused
+  `Fir.Wasm.Examples`; root `make check` with 642 unique cases and 1844/1844
+  equal comparisons; exact HitScene capture with 159 declarations, 34
+  externals, and zero unsupported declarations. `make talos-check` reaches one
+  expected W6-owned failure in `ConcreteCacheCorrectness`; the generic lowering
+  and compiler-correctness cone passes.
+- Contract queue: W6 adapts the concrete lazy-cache theorem to distinguish the
+  target result kind from the coarser call-site annotation, retaining exact
+  cache-slot decoding. Request committed in the W6 mailbox at `72e66449`.
+  Integration remains blocked from `main` until that proof checkpoint returns
+  and the combined Talos gate is green.
 
 ## Latest completed integration lease
 
