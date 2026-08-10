@@ -13,6 +13,31 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `WASM-OBJECT-CARRIER-PROVENANCE`.
+- Integration owner: `wasm-gen`; this is the principled successor to the
+  accepted HitScene result-admission compromise.
+- Integration branch/worktree: `integration/object-provenance` in
+  `.worktrees/integration-object-provenance`, based on `main` at `4d91fb0d`.
+- Lease boundary: separate the physical Wasm carrier used at compiler-generated
+  call/control-flow boundaries from the semantic provenance required by heap,
+  tagged, ownership, projection, and mutation operations. Preserve the current
+  accepted behavior while introducing the replacement alongside it; do not
+  weaken `AbiKind.refines` or make arbitrary `tobject` values heap objects.
+- First slice: freeze the existing relations and consumers in
+  `docs/wasm-object-carrier-provenance-plan.md`, then add executable positive
+  and negative examples before changing the shared ABI surface.
+- Lane coordination: the integration owner owns changes to the shared ABI,
+  lowerer, well-formedness gate, and symbolic surface. W6 continues independent
+  proof work until a standalone contract commit is ready; W7 may prepare the
+  generation-side analysis and fixtures but must not duplicate the shared
+  relation on its lane branch.
+- Acceptance: the replacement must explain ordinary call, return, join, partial
+  capture, closure dispatch, lazy-cache, and dereference/mutation sites; retain
+  the accepted HitScene and Flat examples; pass root, Talos, and deterministic
+  resident-artifact gates before superseding the compromise.
+
 ## Latest completed integration lease
 
 - Milestone: `W7-HITSCENE-PARTIAL-APPLICATION-ADMISSION`.
