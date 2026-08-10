@@ -48,6 +48,11 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   cache-slot decoding. Request committed in the W6 mailbox at `72e66449`.
   Integration remains blocked from `main` until that proof checkpoint returns
   and the combined Talos gate is green.
+- Provisional client handoff: `db698bdd` documents the exact source pin,
+  reproduction commands, expected inventory, and output digests for the
+  compiler-admission demo. It is explicitly not an executable Wasm package:
+  clients may test final-LCNF capture and complete symbolic lowering now, but
+  must wait for W6 acceptance and resident linking before application staging.
 
 ## Latest completed integration lease
 
