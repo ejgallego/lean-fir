@@ -1745,6 +1745,17 @@ structure ReleaseReplacement where
   payload : Nat
   marker : Nat
 
+structure RepeatedReleaseOwner where
+  proof : True
+  first : ReleaseLeaf
+  second : ReleaseLeaf
+  marker : Nat
+
+structure RepeatedReleaseReplacement where
+  firstPayload : Nat
+  secondPayload : Nat
+  marker : Nat
+
 @[noinline]
 def mkReleaseLeaf (payload : Nat) : ReleaseLeaf :=
   { payload, marker := "release-leaf" }
@@ -1758,9 +1769,19 @@ def mkReleaseOwner (child : ReleaseChild) : ReleaseOwner :=
   { proof := True.intro, child, marker := 23 }
 
 @[noinline]
+def mkRepeatedReleaseOwner (leaf : ReleaseLeaf) : RepeatedReleaseOwner :=
+  { proof := True.intro, first := leaf, second := leaf, marker := 31 }
+
+@[noinline]
 def replaceReleaseOwner
     (owner : ReleaseOwner) (payload : Nat) : ReleaseReplacement :=
   { payload, marker := owner.marker }
+
+@[noinline]
+def replaceRepeatedReleaseOwner
+    (owner : RepeatedReleaseOwner) (payload : Nat) :
+    RepeatedReleaseReplacement :=
+  { firstPayload := payload, secondPayload := payload, marker := owner.marker }
 
 @[noinline]
 def ReleaseLeaf.bump (leaf : ReleaseLeaf) : ReleaseLeaf :=
@@ -1792,6 +1813,32 @@ def recursiveReleaseSharedChildStop
   let owner := mkReleaseOwner child
   let replacement := replaceReleaseOwner owner replacementPayload
   (replacement, child, child.leaf.bump)
+
+/--
+Store the same leaf in both fields of a unique owner while retaining a third
+alias outside. Replacing the owner must release both fields before the outside
+leaf becomes reusable.
+-/
+def repeatedChildReleaseUniqueReuse
+    (payload replacementPayload : Nat) :
+    RepeatedReleaseReplacement × ReleaseLeaf :=
+  let leaf := mkReleaseLeaf payload
+  let owner := mkRepeatedReleaseOwner leaf
+  let replacement := replaceRepeatedReleaseOwner owner replacementPayload
+  (replacement, leaf.bump)
+
+/--
+Retain the repeated-child owner while replacing it. Release must stop at the
+shared owner, preserving both original leaf fields and forcing the outside
+leaf update to allocate.
+-/
+def repeatedChildReleaseSharedOwnerStop
+    (payload replacementPayload : Nat) :
+    RepeatedReleaseReplacement × RepeatedReleaseOwner × ReleaseLeaf :=
+  let leaf := mkReleaseLeaf payload
+  let owner := mkRepeatedReleaseOwner leaf
+  let replacement := replaceRepeatedReleaseOwner owner replacementPayload
+  (replacement, owner, leaf.bump)
 
 set_option genInjectivity false in
 structure BigCtor where
@@ -2281,6 +2328,29 @@ private def releaseSharedResultDatum
   .ctor "Prod.mk" 0 #[releaseReplacementDatum value.1,
     .ctor "Prod.mk" 0 #[releaseChildDatum value.2.1, releaseLeafDatum value.2.2]]
 
+private def repeatedReleaseOwnerDatum
+    (value : Source.RepeatedReleaseOwner) : ValidationDatum :=
+  .ctor "RepeatedReleaseOwner.mk" 0
+    #[releaseLeafDatum value.first, releaseLeafDatum value.second, .nat value.marker]
+
+private def repeatedReleaseReplacementDatum
+    (value : Source.RepeatedReleaseReplacement) : ValidationDatum :=
+  .ctor "RepeatedReleaseReplacement.mk" 0
+    #[.nat value.firstPayload, .nat value.secondPayload, .nat value.marker]
+
+private def repeatedReleaseUniqueResultDatum
+    (value : Source.RepeatedReleaseReplacement × Source.ReleaseLeaf) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0
+    #[repeatedReleaseReplacementDatum value.1, releaseLeafDatum value.2]
+
+private def repeatedReleaseSharedResultDatum
+    (value : Source.RepeatedReleaseReplacement × Source.RepeatedReleaseOwner ×
+      Source.ReleaseLeaf) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[repeatedReleaseReplacementDatum value.1,
+    .ctor "Prod.mk" 0
+      #[repeatedReleaseOwnerDatum value.2.1, releaseLeafDatum value.2.2]]
+
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
@@ -2520,6 +2590,20 @@ private def releaseSharedResultSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[releaseReplacementSchema,
     .ctor "Prod.mk" 0 #[releaseChildSchema, releaseLeafSchema]]
 
+private def repeatedReleaseOwnerSchema : ValidationSchema :=
+  .ctor "RepeatedReleaseOwner.mk" 0
+    #[releaseLeafSchema, releaseLeafSchema, .nat]
+
+private def repeatedReleaseReplacementSchema : ValidationSchema :=
+  .ctor "RepeatedReleaseReplacement.mk" 0 #[.nat, .nat, .nat]
+
+private def repeatedReleaseUniqueResultSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[repeatedReleaseReplacementSchema, releaseLeafSchema]
+
+private def repeatedReleaseSharedResultSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[repeatedReleaseReplacementSchema,
+    .ctor "Prod.mk" 0 #[repeatedReleaseOwnerSchema, releaseLeafSchema]]
+
 private def byteArrayPairPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
 
@@ -2715,6 +2799,22 @@ private def recursiveReleaseSharedFormTrace : Array String :=
     "join", "isShared", "cases", "inc", "inc", "dec", "jump", "lit", "fap",
     "extern", "dec", "join", "cases", "ctor", "jump", "return", "ctor", "ctor",
     "return"]
+
+private def repeatedChildReleaseUniqueFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc", "fap",
+    "lit", "inc", "ctor", "return", "fap", "oproj", "join", "isShared",
+    "cases", "oproj", "dec", "oproj", "dec", "jump", "inc", "join", "cases",
+    "oset", "oset", "jump", "return", "fap", "oproj", "oproj", "join",
+    "isShared", "cases", "jump", "lit", "fap", "extern", "dec", "join",
+    "cases", "oset", "jump", "return", "ctor", "return"]
+
+private def repeatedChildReleaseSharedFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc", "fap",
+    "lit", "inc", "ctor", "return", "inc", "fap", "oproj", "join", "isShared",
+    "cases", "inc", "dec", "jump", "inc", "join", "cases", "ctor", "jump",
+    "return", "fap", "oproj", "oproj", "join", "isShared", "cases", "inc",
+    "inc", "dec", "jump", "lit", "fap", "extern", "dec", "join", "cases",
+    "ctor", "jump", "return", "ctor", "ctor", "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -6651,6 +6751,100 @@ private def postConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``Nat.add]
     provenance := firProvenance
       "Stop recursive owner release at a retained child and preserve its original leaf" },
+  { id := "repeated-child-release-unique-reuse"
+    entry := ``Source.repeatedChildReleaseUniqueReuse
+    dependencies :=
+      #[``Source.mkReleaseLeaf, ``Source.mkRepeatedReleaseOwner,
+        ``Source.replaceRepeatedReleaseOwner, ``Source.ReleaseLeaf.bump]
+    args := #[.nat Source.largeNat, .nat 37]
+    argSchemas := #[.nat, .nat]
+    resultSchema := repeatedReleaseUniqueResultSchema
+    native := fun _ => repeatedReleaseUniqueResultDatum
+      (Source.repeatedChildReleaseUniqueReuse Source.largeNat 37)
+    tags :=
+      #["stress", "ownership", "reference-count", "recursive-release",
+        "release-fidelity", "repeated-alias", "repeated-child-alias", "multiplicity",
+        "outside-alias", "unique", "unique-owner-release", "release", "reuse",
+        "constructor", "object", "heap", "string", "large-nat", "erased",
+        "allocation"]
+    requiredLcnfForms :=
+      #["fap", "inc", "ctor", "return", "lit", "oproj", "join", "cases",
+        "oset", "jump", "isShared", "dec", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "oproj", "join", "isShared",
+        "cases", "dec", "jump", "oset", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 6, maximum := some 6 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 5, maximum := some 5 },
+        { form := "join", minimum := 4, maximum := some 4 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some repeatedChildReleaseUniqueFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.add, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some #[``Nat.add]
+    provenance := firProvenance
+      "Release both fields of a unique repeated-child owner before reusing its outside leaf" },
+  { id := "repeated-child-release-shared-owner-stop"
+    entry := ``Source.repeatedChildReleaseSharedOwnerStop
+    dependencies :=
+      #[``Source.mkReleaseLeaf, ``Source.mkRepeatedReleaseOwner,
+        ``Source.replaceRepeatedReleaseOwner, ``Source.ReleaseLeaf.bump]
+    args := #[.nat Source.largeNat, .nat 37]
+    argSchemas := #[.nat, .nat]
+    resultSchema := repeatedReleaseSharedResultSchema
+    native := fun _ => repeatedReleaseSharedResultDatum
+      (Source.repeatedChildReleaseSharedOwnerStop Source.largeNat 37)
+    tags :=
+      #["stress", "ownership", "reference-count", "recursive-release",
+        "release-fidelity", "repeated-alias", "repeated-child-alias", "multiplicity",
+        "outside-alias", "shared", "shared-owner-stop", "stop-recursion", "retain",
+        "release", "copy-on-write", "constructor", "object", "heap", "string",
+        "large-nat", "erased", "allocation", "path-exclusion"]
+    requiredLcnfForms :=
+      #["fap", "inc", "ctor", "return", "lit", "oproj", "join", "cases",
+        "oset", "jump", "isShared", "dec", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "oproj", "join", "isShared",
+        "cases", "dec", "jump", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 6, maximum := some 6 },
+        { form := "lit", minimum := 3, maximum := some 3 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 8, maximum := some 8 },
+        { form := "ctor", minimum := 6, maximum := some 6 },
+        { form := "oproj", minimum := 3, maximum := some 3 },
+        { form := "join", minimum := 4, maximum := some 4 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some repeatedChildReleaseSharedFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.add, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some #[``Nat.add]
+    provenance := firProvenance
+      "Stop at a shared repeated-child owner and preserve both original leaf fields" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]
