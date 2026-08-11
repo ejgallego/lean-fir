@@ -71,6 +71,11 @@ function sameKinds(left, right) {
   return left.length === right.length && left.every((kind, index) => kind === right[index]);
 }
 
+function abiKindRefines(actual, expected) {
+  return actual === expected ||
+    expected === "tobject" && (actual === "object" || actual === "tagged");
+}
+
 function scalarBits(kind, value, context) {
   const width = SCALAR_WIDTHS.get(kind);
   assert.ok(width, `${context} uses unsupported scalar kind: ${kind}`);
@@ -1242,10 +1247,11 @@ export class ConcreteHost {
     assert.ok(metadata.functionName === operation.function &&
       metadata.header.aux1 === operation.arity && metadata.header.aux2 === operation.fixed,
     "concrete closure metadata mismatch");
-    assert.equal(metadata.fields[operation.index], operation.result,
+    const actualKind = metadata.fields[operation.index];
+    assert.ok(abiKindRefines(actualKind, operation.result),
       "concrete closure capture kind mismatch");
     return this.readCapture(metadata.address + HEADER_BYTES + SLOT_BYTES * operation.index,
-      operation.result);
+      actualKind);
   }
 
   markPersistentWord(word) {

@@ -109,4 +109,66 @@ assert.deepStrictEqual(
   ],
 );
 
+const refinedOperations = [
+  {
+    kind: "partialApply",
+    function: "tagged-callee",
+    arity: 2,
+    fixed: 1,
+    fields: ["tagged"],
+    result: "tobject",
+  },
+  {
+    kind: "partialApply",
+    function: "object-callee",
+    arity: 2,
+    fixed: 1,
+    fields: ["object"],
+    result: "tobject",
+  },
+  {
+    kind: "partialApply",
+    function: "tobject-callee",
+    arity: 2,
+    fixed: 1,
+    fields: ["tobject"],
+    result: "tobject",
+  },
+];
+const refinedHost = new ConcreteHost(
+  refinedOperations.map((operation) => ({ operation })),
+  undefined,
+  undefined,
+  refinedOperations.map((operation) => operation.function),
+  refinedOperations.map((operation) => operation.fields),
+);
+const taggedCapture = refinedHost.encode("tagged", { kind: "tagged", payload: 13n });
+const objectCapture = refinedHost.allocateString("captured object");
+for (const [operation, capture] of [
+  [refinedOperations[0], taggedCapture],
+  [refinedOperations[1], objectCapture],
+]) {
+  const refinedClosure = refinedHost.partialApply(operation, [capture]);
+  assert.equal(refinedHost.closureProj({
+    kind: "closureProj",
+    function: operation.function,
+    arity: operation.arity,
+    fixed: operation.fixed,
+    index: 0,
+    result: "tobject",
+  }, [refinedClosure]), capture,
+  `${operation.fields[0]} capture must refine tobject projection`);
+}
+const tobjectCapture = refinedHost.encode("tobject", { kind: "tagged", payload: 17n });
+const tobjectClosure = refinedHost.partialApply(refinedOperations[2], [tobjectCapture]);
+assert.throws(() => refinedHost.closureProj({
+  kind: "closureProj",
+  function: "tobject-callee",
+  arity: 2,
+  fixed: 1,
+  index: 0,
+  result: "tagged",
+}, [tobjectClosure]), /concrete closure capture kind mismatch/,
+"tobject capture must not refine tagged projection");
+
 console.log("PASS retained concrete closure dispatch and descriptor metadata");
