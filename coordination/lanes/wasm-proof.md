@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: bc72d23f on main
+state: active
+base: f9df6e24 on main
 functional-head: 66a9905a (recursive structured simulation now includes erased object-field mutation)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 143 hash 054249c1b62f6e8d (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready from base bc72d23f at functional head 66a9905a; worktree was clean before this mailbox update.
-next: Land this slice, then connect `USize` field mutation through the existing two-local binary host boundary. Keep packed-scalar mutations, heap-valued lazy publication, and saturated closure calls separate.
+handoff: none; erased object-field mutation landed on main at f9df6e24 and the lane is active on `USize` field mutation.
+next: Connect `USize` field mutation through the existing two-local binary host boundary. Keep packed-scalar mutations, heap-valued lazy publication, and saturated closure calls separate.
 ```
