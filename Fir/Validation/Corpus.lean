@@ -1554,6 +1554,23 @@ def applyMixedClosureCaptureTwice
     (f : Nat → MixedClosureCapture) (first second : Nat) : Nat × Nat :=
   ((f first).argument, (f second).argument)
 
+@[noinline]
+def ignoreMixedClosureCapture (_f : Nat → MixedClosureCapture) : Nat :=
+  0
+
+@[noinline]
+def applyMixedClosureCaptureThrice
+    (f : Nat → MixedClosureCapture) (first second third : Nat) : Nat × Nat × Nat :=
+  ((f first).argument, (f second).argument, (f third).argument)
+
+def captureMixedClosureZero
+    (natural : Nat) (text : String) (bytes : ByteArray) (usize : USize)
+    (word : UInt32) (single : Float32) (double : Float) : Nat :=
+  ignoreMixedClosureCapture
+    (fun capturedArgument =>
+      { natural, text, bytes, usize, word, single, double,
+        argument := capturedArgument })
+
 def captureMixedClosure
     (natural : Nat) (text : String) (bytes : ByteArray) (usize : USize)
     (word : UInt32) (single : Float32) (double : Float) (argument : Nat) : Nat :=
@@ -1572,6 +1589,16 @@ def captureMixedClosureTwice
       { natural, text, bytes, usize, word, single, double,
         argument := capturedArgument })
     first second
+
+def captureMixedClosureThrice
+    (natural : Nat) (text : String) (bytes : ByteArray) (usize : USize)
+    (word : UInt32) (single : Float32) (double : Float)
+    (first second third : Nat) : Nat × Nat × Nat :=
+  applyMixedClosureCaptureThrice
+    (fun capturedArgument =>
+      { natural, text, bytes, usize, word, single, double,
+        argument := capturedArgument })
+    first second third
 
 @[noinline]
 def applyCapturedByteArrayRead
@@ -2045,6 +2072,9 @@ private def stringPairDatum (value : String × String) : ValidationDatum :=
 private def natPairDatum (value : Nat × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.nat value.1, .nat value.2]
 
+private def natTripleDatum (value : Nat × Nat × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[.nat value.1, natPairDatum value.2]
+
 private def float32Datum (value : Float32) : ValidationDatum :=
   .bits 32 (UInt64.ofNat value.toBits.toNat)
 
@@ -2097,6 +2127,15 @@ private def mixedClosureTwiceArgs : Array ValidationDatum :=
 
 private def mixedClosureTwiceArgSchemas : Array ValidationSchema :=
   mixedClosureBaseArgSchemas.push .nat |>.push .nat
+
+private def mixedClosureThriceArgs : Array ValidationDatum :=
+  mixedClosureBaseArgs
+    |>.push (.nat 17)
+    |>.push (.nat 340282366920938463463374607431768211473)
+    |>.push (.nat 99)
+
+private def mixedClosureThriceArgSchemas : Array ValidationSchema :=
+  mixedClosureBaseArgSchemas.push .nat |>.push .nat |>.push .nat
 
 private def mixedLayoutArgs : Array ValidationDatum :=
   #[.nat Source.largeNat, .string mixedLayoutText, byteArrayDatum mixedLayoutBytes,
@@ -2314,6 +2353,9 @@ private def recursiveEmptyFormTrace : Array String :=
 private def scalarEnumFormTrace : Array String :=
   #["fap", "lit", "fap", "cases", "lit", "return", "return", "inc", "return"]
 
+private def mixedClosureZeroFormTrace : Array String :=
+  #["box", "box", "box", "box", "pap", "fap", "lit", "return", "dec", "return"]
+
 private def mixedClosureOnceFormTrace : Array String :=
   #["box", "box", "box", "box", "pap", "fap", "fvar",
     "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
@@ -2328,6 +2370,18 @@ private def mixedClosureTwiceFormTrace : Array String :=
     "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
     "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
     "oproj", "inc", "dec", "ctor", "return", "return"]
+
+private def mixedClosureThriceFormTrace : Array String :=
+  #["box", "box", "box", "box", "pap", "fap", "inc", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "fvar",
+    "unbox", "dec", "unbox", "dec", "unbox", "dec", "unbox", "dec",
+    "fap", "ctor", "uset", "sset", "sset", "sset", "return", "return",
+    "oproj", "inc", "dec", "ctor", "ctor", "return", "return"]
 
 private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "fvar", "fap", "fap", "extern", "fap",
@@ -5585,6 +5639,40 @@ private def postConversionCases : Array Case := #[
     requiredExecutedLcnfForms := #["pap", "fap", "fvar", "ctor", "return"]
     provenance := leanCompileProvenance "tests/compile/closure_bug1.lean"
       "Pure list-valued adaptation retaining 17 captured values" },
+  { id := "mixed-closure-capture-zero"
+    entry := ``Source.captureMixedClosureZero
+    dependencies := #[``Source.ignoreMixedClosureCapture]
+    args := mixedClosureBaseArgs
+    argSchemas := mixedClosureBaseArgSchemas
+    resultSchema := .nat
+    native := fun _ => .nat
+      (Source.captureMixedClosureZero Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize 0xdeadbeef mixedClosureSingle mixedClosureDouble)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "mixed-layout", "object", "usize", "scalar", "float", "float32", "float64",
+        "exact-bits", "heap", "ownership", "allocation", "release", "multiplicity",
+        "zero-use"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "dec", "return", "unbox", "ctor", "uset", "sset",
+        "lit"]
+    requiredExecutedLcnfForms := #["box", "pap", "fap", "dec", "return", "lit"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 2, maximum := some 2 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 0, maximum := some 0 },
+        { form := "ctor", minimum := 0, maximum := some 0 },
+        { form := "uset", minimum := 0, maximum := some 0 },
+        { form := "sset", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some mixedClosureZeroFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Allocate and release one mixed-kind closure without invoking its body" },
   { id := "mixed-closure-capture-once"
     entry := ``Source.captureMixedClosure
     dependencies := #[``Source.applyMixedClosureCapture]
@@ -5598,7 +5686,7 @@ private def postConversionCases : Array Case := #[
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
         "float", "float32", "float64", "exact-bits", "heap", "ownership", "unique",
-        "single-use"]
+        "single-use", "multiplicity", "one-use", "unique-final-application"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "fvar", "unbox", "dec", "ctor", "uset", "sset",
         "return", "oproj", "inc"]
@@ -5637,7 +5725,8 @@ private def postConversionCases : Array Case := #[
       #["stress", "closure", "closure-ownership", "capture", "partial-application",
         "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
         "float", "float32", "float64", "exact-bits", "heap", "ownership", "shared",
-        "multiplicity", "repeated-application"]
+        "multiplicity", "repeated-application", "two-use",
+        "shared-intermediate-application", "unique-final-application"]
     requiredLcnfForms :=
       #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
         "sset", "return", "oproj"]
@@ -5662,6 +5751,46 @@ private def postConversionCases : Array Case := #[
       #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Apply one shared mixed-kind closure twice and preserve both argument projections" },
+  { id := "mixed-closure-capture-thrice"
+    entry := ``Source.captureMixedClosureThrice
+    dependencies := #[``Source.applyMixedClosureCaptureThrice]
+    args := mixedClosureThriceArgs
+    argSchemas := mixedClosureThriceArgSchemas
+    resultSchema := .ctor "Prod.mk" 0 #[.nat, .ctor "Prod.mk" 0 #[.nat, .nat]]
+    native := fun _ => natTripleDatum
+      (Source.captureMixedClosureThrice Source.largeNat mixedLayoutText mixedLayoutBytes
+        Source.maxUSize 0xdeadbeef mixedClosureSingle mixedClosureDouble 17
+        340282366920938463463374607431768211473 99)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "mixed-layout", "constructor", "projection", "object", "usize", "scalar",
+        "float", "float32", "float64", "exact-bits", "heap", "ownership", "shared",
+        "multiplicity", "repeated-application", "three-use",
+        "shared-intermediate-application", "unique-final-application"]
+    requiredLcnfForms :=
+      #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
+        "sset", "return", "oproj"]
+    requiredExecutedLcnfForms :=
+      #["box", "pap", "fap", "inc", "fvar", "unbox", "dec", "ctor", "uset",
+        "sset", "return", "oproj"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "box", minimum := 4, maximum := some 4 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "inc", minimum := 4, maximum := some 4 },
+        { form := "fvar", minimum := 3, maximum := some 3 },
+        { form := "unbox", minimum := 12, maximum := some 12 },
+        { form := "dec", minimum := 15, maximum := some 15 },
+        { form := "ctor", minimum := 5, maximum := some 5 },
+        { form := "uset", minimum := 3, maximum := some 3 },
+        { form := "sset", minimum := 9, maximum := some 9 },
+        { form := "return", minimum := 8, maximum := some 8 },
+        { form := "oproj", minimum := 3, maximum := some 3 }]
+    requiredExecutedLcnfFormTrace := some mixedClosureThriceFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Apply one mixed-kind closure twice while shared and once as its unique final use" },
   { id := "captured-byte-array-outside-alias-read"
     entry := ``Source.capturedByteArrayOutsideAliasRead
     dependencies := #[``Source.applyCapturedByteArrayRead]

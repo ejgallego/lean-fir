@@ -19,7 +19,7 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land the prepared closure baseline, then execute S2 and S3 |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land S2 closure multiplicity, then execute S3 capture topology |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Use S4 tail-call ownership as the first joint slice |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 637-case source checkpoint, case counts are concentrated in
-scalar and pure-external behavior: 411 cases are tagged `scalar`, 302 `signed`,
-300 `external`, and 146 `arithmetic`. In contrast, only 16 are tagged
+At the current 639-case source checkpoint, case counts are concentrated in
+scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
+300 `external`, and 146 `arithmetic`. In contrast, only 17 are tagged
 `constructor`, 12 `control-flow`, three `effect`, three `recursion`, one
 `tail-control`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 637 eligible cases, not a scalar
+historical: the plan currently selects all 639 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -92,14 +92,14 @@ near-synonym drift:
 
 | Milestone | State | Current checkpoint | Next acceptance step |
 | --- | --- | --- | --- |
-| M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the prepared fixture/documentation stack on `main` |
+| M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair pass native/LCNF/V8 | Cover zero/three uses and unique/shared final application |
+| M2 Closure/capture ownership | active | The zero/one/two/three-use matrix pins 14/36/62/87 transitions and passes native/LCNF/V8; the outside-alias ByteArray pair remains green | Land S2, then execute S3 repeated-capture and outside-alias topology |
 | M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
-| M7 Real-engine promotion | continuous | Scalar closures and the mixed one-use/two-use pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and the outside-alias ByteArray pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
 `contract-blocked`. A prepared slice is committed and locally validated but
@@ -162,8 +162,7 @@ requirements below.
 
 ### S1: outside-alias ByteArray capture
 
-State: `prepared` and real-engine validated on
-`validation/closure-ownership-fixtures`.
+State: `landed` and real-engine validated on `main`.
 
 Pair a closure that borrows a captured ByteArray with a closure that consumes
 and mutates it through `ByteArray.set!`. Both retain the original ByteArray
@@ -182,11 +181,16 @@ alias materialization or the effect-wrapper contracts.
 
 ### S2: closure-use multiplicity
 
-Extend the same-closure matrix to zero, one, two, and three uses. Keep the
-zero-use case only if final LCNF retains a real closure allocation; otherwise
-cover that machine state in the direct-LCNF tier. Distinguish a shared
-intermediate application from a unique final application with exact increment
-and decrement counts.
+State: `prepared` and real-engine validated on
+`validation/closure-ownership-fixtures`.
+
+The same-closure matrix now covers zero, one, two, and three uses. Final LCNF
+retains a real four-box `pap` in the zero-use case and releases it without
+executing any closure-body unbox/constructor/write form. The three-use case
+executes two shared intermediate applications and one unique final application.
+Exact traces pin 14, 36, 62, and 87 interpreter transitions across the matrix;
+matching source and V8 tag/domain floors prevent any use-count or ownership
+path from disappearing. All four cases pass native Lean, LCNF, and real V8.
 
 ### S3: capture alias topology
 
@@ -359,8 +363,8 @@ and coverage requirements.
 
 ## Portfolio cadence
 
-1. Land the prepared closure-ownership stack.
-2. Complete S2 closure multiplicity and S3 capture topology.
+1. Land the prepared S2 closure-multiplicity stack.
+2. Complete S3 capture topology.
 3. Execute S4/B1 tail-call ownership as the memory/control bridge.
 4. Take one compact C1 ordered-effect slice and one E1 aggregate/erasure slice
    before returning to S5 recursive release and reuse.
