@@ -16774,4 +16774,417 @@ theorem ConcreteStructuredSaturatedBindFrameFocus.advance_popResourceStack
   exact ⟨sourceAfter, targetAfter, resumedLocals, sourceStep, targetPath,
     stack, resourcesAfter⟩
 
+/-! ## Source-only pointwise admission
+
+The terminating hereditary evaluator above remains useful for finite endpoint
+theorems, but it is intentionally not part of the compiler simulation
+relation.  The following judgment keeps only structural source coverage.  It
+contains compiler-facing support, the deterministic reuse-fact transfer, and
+the remaining allocation budget.  In particular it contains no source step,
+final value, final state, target path, or recursive evaluation derivation.
+-/
+
+/-- Structural admission for the first pointwise code fragment.
+
+The recursive premise follows source syntax, not execution: it states that
+the compiled continuation is covered after the statically determined fact and
+budget transfer.  Dynamic source results are supplied by the transition being
+simulated and are never stored in this judgment. -/
+inductive ConcreteStructuredCodeAdmission
+    (context : Fir.Wasm.Context) (expectedResult : AbiKind) :
+    ReuseCapacityFacts → Nat → Lean.Compiler.LCNF.Code .impure → Prop where
+  | ret
+      {result : Lean.FVarId} {actualResult : AbiKind}
+      (resultCompiled :
+        Fir.Wasm.getLocal context result =
+          .ok (.localGet result, actualResult))
+      (resultRefines : actualResult.refines expectedResult = true) :
+      ConcreteStructuredCodeAdmission context expectedResult facts
+        remainingBytes (.return result)
+  | directLet
+      {facts nextFacts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : ReuseBudgetedDirectSupported context facts decl)
+      (fits : directLetAllocationCost decl ≤ remainingBytes)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued : ConcreteStructuredCodeAdmission context expectedResult
+        nextFacts (remainingBytes - directLetAllocationCost decl)
+        continuation) :
+      ConcreteStructuredCodeAdmission context expectedResult facts
+        remainingBytes (.let decl continuation)
+
+theorem ConcreteStructuredCodeAdmission.directLet_cases
+    {context : Fir.Wasm.Context} {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    (admitted : ConcreteStructuredCodeAdmission context expectedResult facts
+      remainingBytes (.let decl continuation)) :
+    ∃ nextFacts,
+      ReuseBudgetedDirectSupported context facts decl ∧
+      directLetAllocationCost decl ≤ remainingBytes ∧
+      reuseCapacityLetFacts? facts decl = some nextFacts ∧
+      ConcreteStructuredCodeAdmission context expectedResult nextFacts
+        (remainingBytes - directLetAllocationCost decl) continuation := by
+  cases admitted with
+  | directLet supported fits transfer continued =>
+      exact ⟨_, supported, fits, transfer, continued⟩
+
+theorem ConcreteStructuredCodeAdmission.return_cases
+    {context : Fir.Wasm.Context} {expectedResult : AbiKind}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {result : Lean.FVarId}
+    (admitted : ConcreteStructuredCodeAdmission context expectedResult facts
+      remainingBytes (.return result)) :
+    ∃ actualResult,
+      Fir.Wasm.getLocal context result =
+          .ok (.localGet result, actualResult) ∧
+      actualResult.refines expectedResult = true := by
+  cases admitted with
+  | ret resultCompiled resultRefines =>
+      exact ⟨_, resultCompiled, resultRefines⟩
+
+/-- Compatibility between an active generated function's result ABI and the
+optional ABI expected by its suspended caller. -/
+def ConcreteStructuredResultCompatible
+    (functionResult : AbiKind) : Option AbiKind → Prop
+  | none => True
+  | some expected => functionResult.refines expected = true
+
+/-- The ordinary-code component of the compiler-produced pointwise relation.
+
+`focus` is the actual lowering/adapter relation, `resources` is the hereditary
+entry-relative heap invariant, and `admitted` is source-only structural
+coverage.  The active function result kind is kept separately from the result
+expected by a suspended caller, making return compatibility compositional.
+No terminating evaluation or target execution witness occurs in the
+relation. -/
+structure ConcreteStructuredCodePointwiseRel
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind)
+    (facts : ReuseCapacityFacts)
+    (remainingBytes : Nat)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceCode : Lean.Compiler.LCNF.Code .impure)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (targetCode : Wasm.Program)
+    (witness : RefinementWitness)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+    labels sourceRuntime sourceEnv sourceCode targetStore targetLocals
+    targetCode witness source target
+  resources : ConcreteStructuredResourceStack program context sourceModule
+    sourceFunction externals entryRuntime sourceRuntime entryStore targetStore
+    entryWitness witness facts remainingBytes sourceEnv targetLocals
+    callerExpectedResult source.frames target.frames
+  admitted : ConcreteStructuredCodeAdmission context functionResult facts
+    remainingBytes sourceCode
+  resultCompatible : ConcreteStructuredResultCompatible functionResult
+    callerExpectedResult
+
+/-- A compiler-produced root focus and its ordinary resource invariant start
+the pointwise relation.  The empty source/target stacks are proved at the
+canonical entry rather than assumed by later transition rules. -/
+theorem ConcreteStructuredCodePointwiseRel.root
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (focus : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv sourceCode targetStore targetLocals
+      targetCode witness source target)
+    (invariant : ConcreteReuseCapacityCacheAbiFrame context sourceModule
+      sourceFunction externals facts remainingBytes sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (admitted : ConcreteStructuredCodeAdmission context functionResult facts
+      remainingBytes sourceCode)
+    (sourceFrames : source.frames = [])
+    (targetFrames : target.frames = []) :
+    ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      sourceRuntime targetStore witness functionResult none facts
+      remainingBytes sourceRuntime sourceEnv sourceCode targetStore targetLocals
+      targetCode witness source target := by
+  have scope := ConcreteStructuredResourceScope.root invariant
+  have resourcesAtRoot :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals sourceRuntime sourceRuntime targetStore
+        targetStore witness witness facts remainingBytes sourceEnv targetLocals
+        none [] [] :=
+    ConcreteStructuredResourceStack.root scope
+  have resources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals sourceRuntime sourceRuntime targetStore
+        targetStore witness witness facts remainingBytes sourceEnv targetLocals
+        none source.frames target.frames := by
+    rw [sourceFrames, targetFrames]
+    exact resourcesAtRoot
+  exact ⟨focus, resources, admitted, trivial⟩
+
+/-- One admitted direct-value binding preserves the complete pointwise
+relation.
+
+The dynamic premise is only the current interpreter operation result.  The
+production runtime theorem constructs the target execution, next concrete
+store/witness, and resource transports; the source-only admission judgment
+supplies the successor syntax coverage. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_directLet
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime sourceEnv (.let decl continuation)
+      targetStore targetLocals targetCode witness source target)
+    (sourceResult : SourceLetResult context sourceRuntime sourceEnv decl
+      nextRuntime sourceValue) :
+    ∃ sourceAfter targetAfter nextStore resumedLocals nextWitness nextFacts
+        targetRest targetCount,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        targetCount target targetAfter ∧
+      ConcreteStructuredCodePointwiseRel program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult nextFacts
+        (remainingBytes - directLetAllocationCost decl) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) continuation nextStore
+        resumedLocals targetRest nextWitness sourceAfter targetAfter := by
+  obtain ⟨nextFacts, supported, fits, transfer, continued⟩ :=
+    related.admitted.directLet_cases
+  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+      targetCodeEq⟩ :=
+    CodeAdapted.let_eq related.focus.adapted
+  have continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest :=
+    ⟨restCode, restCompiled, restAdapted⟩
+  obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+      _externalsPreserved, _hostDescriptorsPreserved,
+      _witnessDescriptorsPreserved, transports, producedTransfer,
+      nextInvariant⟩ :=
+    (spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect_pureExternalOwnership_entryRelativeCache
+      externals) supported fits related.resources.current.1 sourceResult
+        valueCompiled valueAdapted resultFound
+  rw [transfer] at producedTransfer
+  have factsEq := Option.some.inj producedTransfer
+  subst producedFacts
+  have flat : StructuredWasmFlatProgram targetModule.wasmModule
+      (targetValue ++ [.localSet resultIndex]) :=
+    spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
+      supported valueCompiled valueAdapted
+  have nextAbi : ClosureAllocationsAbiAligned context.program nextWitness :=
+    ClosureAllocationsAbiAligned.ofPersistent related.resources.current.2
+      transports.closureAllocationsPersistent
+  let resumedLocals : Wasm.Locals :=
+    { nextLocals with values := targetLocals.values }
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore resumedLocals
+        nextWitness := by
+    exact ⟨by
+      simpa [resumedLocals] using
+        nextInvariant.withValues targetLocals.values,
+      nextAbi⟩
+  obtain ⟨sourceAfter, targetAfter, sourceStep, targetPath, nextFocus,
+      _sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
+    related.focus.advance_flatLet targetCodeEq continuationAdapted flat
+      step nextScope.frameAligned
+  have nextResourcesBefore :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl)
+        (bind sourceEnv decl.fvarId sourceValue) resumedLocals
+        callerExpectedResult source.frames target.frames :=
+    ⟨nextScope, related.resources.suspended⟩
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore
+        nextStore entryWitness nextWitness nextFacts
+        (remainingBytes - directLetAllocationCost decl)
+        (bind sourceEnv decl.fvarId sourceValue) resumedLocals
+        callerExpectedResult sourceAfter.frames targetAfter.frames := by
+    rw [sourceFramesEq, targetFramesEq]
+    exact nextResourcesBefore
+  let targetCount :=
+    (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+  refine ⟨sourceAfter, targetAfter, nextStore, resumedLocals, nextWitness,
+    nextFacts, targetRest, targetCount, sourceStep, ?_, ?_⟩
+  · simpa [targetCount] using targetPath
+  · exact ⟨nextFocus, nextResources, continued,
+      related.resultCompatible⟩
+
+/-- An admitted return is classified pointwise as either a terminal result or
+the appropriate direct/saturated bind protocol from the hereditary frame
+stack.  The successful source step supplies the lookup; admission supplies
+only the static result ABI refinement. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_return
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes sourceRuntime sourceEnv (.return result) targetStore
+      targetLocals targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+        targetAfter ∧
+      ConcreteStructuredStackRel sourceAfter targetAfter ∧
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals callerExpectedResult sourceAfter.frames
+        targetAfter.frames := by
+  obtain ⟨admittedResult, resultCompiled, resultRefines⟩ :=
+    related.admitted.return_cases
+  cases sourceLookup : lookup sourceEnv result with
+  | none =>
+      rcases source with
+        ⟨sourceProgram, sourceControl, sourceStateEnv, sourceJoins,
+          sourceFrames, runtime⟩
+      have controlEq := related.focus.sourceControlEq
+      change sourceControl = .code (.return result) at controlEq
+      subst sourceControl
+      have envEq := related.focus.sourceEnvEq
+      change sourceStateEnv = sourceEnv at envEq
+      subst sourceStateEnv
+      simp [executeStep, coreStep, lookupValue, sourceLookup, fail] at sourceStep
+  | some sourceValue =>
+      obtain ⟨actualKind, physical, computedAfter, targetAfter,
+          localCompiled, computedStep, targetPath, yielded,
+          _sourceJoinsEq, sourceFramesEq, targetFramesEq⟩ :=
+        related.focus.advance_return spec.localsAligned sourceLookup
+      have afterEq : sourceAfter = computedAfter := by
+        rw [sourceStep] at computedStep
+        injection computedStep
+      subst computedAfter
+      have kindEq : actualKind = admittedResult := by
+        rw [resultCompiled] at localCompiled
+        have pairEq := Except.ok.inj localCompiled
+        exact (congrArg Prod.snd pairEq).symm
+      subst actualKind
+      have frames :
+          ConcreteStructuredFrameRel sourceAfter.program sourceRuntime
+            targetStore witness callerExpectedResult source.frames
+            target.frames := by
+        rw [yielded.sourceProgramEq, spec.contextProgram]
+        exact related.resources.frameRel
+      have actualCompatible :
+          ConcreteStructuredResultCompatible admittedResult
+            callerExpectedResult := by
+        cases callerExpectedResult with
+        | none => trivial
+        | some expected =>
+            exact AbiKind.refines_trans resultRefines
+              related.resultCompatible
+      have stack := frames.control_of_yield yielded sourceFramesEq
+        targetFramesEq (by
+          cases callerExpectedResult with
+          | none => trivial
+          | some expected => exact actualCompatible)
+      have resourcesAfter :
+          ConcreteStructuredResourceStack program context sourceModule
+            sourceFunction externals entryRuntime sourceRuntime entryStore
+            targetStore entryWitness witness facts remainingBytes sourceEnv
+            targetLocals callerExpectedResult sourceAfter.frames
+            targetAfter.frames := by
+        rw [sourceFramesEq, targetFramesEq]
+        exact related.resources
+      exact ⟨targetAfter, targetPath, stack, resourcesAfter⟩
+
 end FirTalos.Concrete

@@ -6038,10 +6038,22 @@ by construction. Its `frameRel` projection transports every saved caller to
 the active heap and reconstructs `ConcreteStructuredFrameRel`; generated
 direct and saturated entries push the same invariant, while both bind-return
 rules restore the caller scope and expose the older chain as the successor.
-The next boundary is the source-only pointwise admission invariant. It must
-construct the applicable local rule and preserve facts, budget, and admission
-at the successor instead of reintroducing the terminating hereditary
-evaluator.
+The first source-only pointwise admission boundary is now implemented.
+`ConcreteStructuredCodeAdmission` retains only structural source coverage:
+the supported operation family, deterministic fact transfer, remaining
+budget, and recursively covered source continuation. It contains no runtime
+step, final value/state, target path, or terminating evaluation.
+`ConcreteStructuredCodePointwiseRel` combines that admission with the real
+compiler focus and hereditary resource stack under one fixed generated
+function specification. Its canonical root constructor, direct-value
+successor theorem, and return classifier are checked. Direct values construct
+the exact target path and successor relation from the production runtime law;
+returns obtain their dynamic lookup from the supplied successful source step
+and become terminal, direct-bind, or saturated-bind control according to the
+existing frame stack. The next boundary stores this same source-only
+continuation admission across call entry/return, then adds the already proved
+external, lazy, case, and effect one-step families to the relation-wide
+`advance` theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

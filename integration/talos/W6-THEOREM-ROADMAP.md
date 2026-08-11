@@ -1446,9 +1446,21 @@ acceptance tests pass.
      scope. Its projection reconstructs `ConcreteStructuredFrameRel` at the
      current heap. Direct and saturated generated entries push the unified
      invariant; both return protocols restore its caller head and expose the
-     older tail as the successor resource stack. The next slice begins the
-     source-only pointwise admission invariant, whose preservation proof must
-     replace rather than wrap the terminating hereditary evaluator.
+     older tail as the successor resource stack. The source-only pointwise
+     admission invariant has now begun without wrapping the terminating
+     hereditary evaluator. `ConcreteStructuredCodeAdmission` records only
+     structural source coverage, deterministic fact/budget transfer, and
+     covered source continuations; it contains no semantic step, final result,
+     target path, or evaluation derivation.
+     `ConcreteStructuredCodePointwiseRel` combines it with the actual compiler
+     focus and hereditary resource stack. The canonical root, direct-value
+     successor preservation, and return classification are proved: a direct
+     `let` reconstructs the complete successor relation, while a return uses
+     the supplied successful source step and static ABI compatibility to
+     select terminal, direct-bind, or saturated-bind control. The next slice
+     carries continuation admission through the call stack and then widens the
+     relation-wide `advance` case split to the already established external,
+     lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
