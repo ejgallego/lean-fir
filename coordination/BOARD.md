@@ -15,6 +15,40 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-PURE-EXTERNAL-RESULTS`.
+- Integration owner: `wasm-proof`; this connects the pure external-result
+  constructor to the recursive W6.7e structured simulation.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `4d4e5b4c`.
+- Published stack: active-slice record `54671278`, functional head `cbe31a53`,
+  and ready mailbox `f1fbe340`.
+- Accepted proof: `ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCalls_generated`
+  handles every admitted pure `Nat`, `Int`, and scalar external result at
+  arbitrary finite nesting with generated named calls. The source path is the
+  interpreter's exact three-step request protocol. The target path executes
+  compiled arguments, one resolver-proved imported declaration call, and the
+  generated destination write; the runtime theorem constructs its exact
+  execution and evolved heap witness.
+- Compiler boundary: `PureExternalSupported.structuredFlatProgram` derives
+  the entire target shape from production compilation, adaptation, external
+  declaration resolution, and import alignment. The caller supplies no target
+  path, execution certificate, numeric target index, or resolver package.
+- State boundary: the evolved entry-relative cache/resource invariant, final
+  ABI refinement, and exact outer source/target frames are retained. Until
+  the case/join slice, the admitted fragment records its empty source join
+  environment explicitly.
+- Remaining boundary: connect lazy-cache hit/miss prefixes next, followed by
+  case/join, effect, saturated-closure, and target-only administrative paths.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam save version 45 at source hash
+  `eaac3110f293de68`; forced direct recompilation; focused 3,110-job
+  dependency-cone build; `git diff --check`; complete `make check` with 642
+  covered cases and 1,844/1,844 backend comparisons; Talos setup pinned at
+  `a01d01c`; and all 3,133 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-RECURSIVE-NAMED-CALLS`.
 - Integration owner: `wasm-proof`; this closes generated named-call recursion
   in the current W6.7e admitted language.
