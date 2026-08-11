@@ -19,7 +19,7 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Execute S3 capture topology from the landed S2 multiplicity matrix |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land S3b ignore/read topology, then execute S4 tail-call ownership |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Use S4 tail-call ownership as the first joint slice |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 641-case source checkpoint, case counts are concentrated in
+At the current 645-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-301 `external`, and 146 `arithmetic`. In contrast, only 17 are tagged
+303 `external`, and 146 `arithmetic`. In contrast, only 19 are tagged
 `constructor`, 12 `control-flow`, three `effect`, three `recursion`, one
 `tail-control`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 639 eligible cases, not a scalar
+historical: the plan currently selects all 645 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -94,12 +94,12 @@ near-synonym drift:
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | active | S2 and S3a are on `main`; S3a adds a real two-slot repeated-ByteArray capture with a third outside alias and pins 22/27 transitions across returned/consumed paths | Add ignore/read and a second heap-shape representative |
+| M2 Closure/capture ownership | prepared | S2 and S3a are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Integrate the green S3b fixture stack, then carry its alias shapes into S4 |
 | M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
-| M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and the outside-alias ByteArray pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
 `contract-blocked`. A prepared slice is committed and locally validated but
@@ -194,7 +194,7 @@ path from disappearing. All four cases pass native Lean, LCNF, and real V8.
 ### S3: capture alias topology
 
 State: S3a is `landed` and real-engine validated on `main` at `eacdd3bd`;
-S3b is active on `validation/closure-ownership-fixtures`.
+S3b is prepared on `validation/closure-ownership-fixtures`.
 
 Compare one captured heap object with the same object captured in multiple
 slots, then retain an independent alias outside the closure. Cover callees that
@@ -216,19 +216,28 @@ The landed pair passes native Lean, the LCNF interpreter, and real V8. The
 returned path pins 22 interpreter transitions and zero `ByteArray.set!`
 dispatches; the consumed path pins 27 transitions and exactly one dispatch.
 Both execute a real `pap`, `fvar` closure invocation, Boolean branch, and two
-result constructors. The 641-case snapshot raises the aggregate floor to 650
-unique cases, 1,932 comparisons, 6,050 interpreter steps, 96 tag floors, and
-201 conjunctive domains, with no finding.
+result constructors.
 
 S3b adds two ignore-versus-read pairs without widening a shared contract. The
 first partially applies the same `ByteArray` into two fixed slots while its
 caller retains a third alias. One branch returns the first capture and drops
 the second; the other borrows the second through `ByteArray.get!` and returns
 the observation beside both surviving aliases. The second pair constructs a
-small one-field object internally, repeats it across the same capture/outside
-shape, and distinguishes dropping the second capture from projecting its
-field. Exact traces must retain and execute real `pap`/`fvar` closure paths,
-the ignored-capture release, and the read-specific external or projection.
+small two-object-field constructor containing a large `Nat` and a `String`,
+repeats it across the same capture/outside shape, and distinguishes dropping
+the second capture from projecting its `Nat` field. Exact traces retain and
+execute real `pap`/`fvar` closure paths, the ignored-capture release, and the
+read-specific external or projection.
+
+The ByteArray ignored/read cases pin 24 and 30 transitions respectively. The
+ignored path executes one `dec` and no external; the read path executes
+`ByteArray.get!` and `UInt8.toNat` exactly once each. The allocated constructor
+ignored/read cases pin 36 and 44 transitions. Both construct and retain the
+nested object, while only the read path executes `oproj`, `isShared`, and its
+join/jump ownership branch. All four agree across native Lean, LCNF, and real
+V8. The 645-case snapshot raises the aggregate floor to 654 unique cases,
+1,944 comparisons, 6,184 interpreter steps, 98 tag floors, and 209 conjunctive
+domains, with no finding.
 
 ### S4: tail-call ownership
 
@@ -393,9 +402,10 @@ and coverage requirements.
 
 ## Portfolio cadence
 
-1. Land the prepared S2 closure-multiplicity stack.
-2. Complete S3 capture topology.
-3. Execute S4/B1 tail-call ownership as the memory/control bridge.
+1. Land the prepared S3b capture-topology stack.
+2. Execute S4/B1 tail-call ownership as the memory/control bridge.
+3. Extend capture topology only when a new heap kind or boundary adds distinct
+   ownership signal.
 4. Take one compact C1 ordered-effect slice and one E1 aggregate/erasure slice
    before returning to S5 recursive release and reuse.
 5. Queue D0 and C2 as shared contracts, but do not overlap the integration,

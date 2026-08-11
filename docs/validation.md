@@ -1832,6 +1832,27 @@ capture, outside-alias preservation, the external-free returned path, and the
 copy-on-write consumed path. Native Lean, LCNF, and V8 agree on all three
 returned arrays in both cases.
 
+The follow-up repeated-capture matrix separates ignoring a capture from
+borrowing it and repeats the experiment over two heap shapes. The ByteArray
+pair again fixes the same source object in both partial-application slots and
+retains a third outside alias. Its ignored path pins 24 transitions: one
+`inc`, one `pap`, one `fvar`, the Boolean `cases`, one `dec`, two result
+constructors, and no external dispatch. Its read path pins 30 transitions and
+adds exactly one `ByteArray.get!` followed by exactly one `UInt8.toNat`. Both
+return the outside alias, the first capture, and the branch observation.
+
+The constructor pair builds one two-object-field `RepeatedCaptureBox`
+containing a large `Nat` and a `String`, then installs that same object in both
+closure slots while retaining it outside. The ignored path pins 36 transitions
+and releases the unused fixed capture without projection. The read path pins
+44 transitions and uniquely executes one `oproj`, one `isShared`, two joins,
+two jumps, and the associated retain/release branch before returning both
+surviving object aliases. Exact complete form traces and exact per-form counts
+make those path distinctions executable requirements. Native Lean, LCNF, and
+V8 agree for all four cases; matching source and V8 domains independently
+require ignored capture, read capture, ByteArray borrow, and constructor
+projection topology.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in

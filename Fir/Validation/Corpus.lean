@@ -1651,6 +1651,56 @@ def repeatedCapturedByteArrayOutsideAlias
     (applyRepeatedCapturedByteArray source source) mutate
   (source, captured)
 
+@[noinline]
+def inspectRepeatedCapturedByteArray
+    (first second : ByteArray) (readSecond : Bool) : ByteArray × Nat :=
+  if readSecond then
+    (first, (second.get! 2).toNat)
+  else
+    (first, 0)
+
+@[noinline]
+def invokeRepeatedCapturedByteArrayRead
+    (f : Bool → ByteArray × Nat) (readSecond : Bool) : ByteArray × Nat :=
+  f readSecond
+
+def repeatedCapturedByteArrayOutsideAliasRead
+    (readSecond : Bool) (source : ByteArray) : ByteArray × ByteArray × Nat :=
+  let captured := invokeRepeatedCapturedByteArrayRead
+    (inspectRepeatedCapturedByteArray source source) readSecond
+  (source, captured)
+
+structure RepeatedCaptureBox where
+  value : Nat
+  marker : String
+
+@[noinline]
+def mkRepeatedCaptureBox (value : Nat) : RepeatedCaptureBox :=
+  { value, marker := "capture" }
+
+@[noinline]
+def inspectRepeatedCapturedBox
+    (first second : RepeatedCaptureBox) (readSecond : Bool) :
+    RepeatedCaptureBox × Nat :=
+  if readSecond then
+    (first, second.value)
+  else
+    (first, 0)
+
+@[noinline]
+def invokeRepeatedCapturedBoxRead
+    (f : Bool → RepeatedCaptureBox × Nat) (readSecond : Bool) :
+    RepeatedCaptureBox × Nat :=
+  f readSecond
+
+def repeatedCapturedBoxOutsideAliasRead
+    (readSecond : Bool) (value : Nat) :
+    RepeatedCaptureBox × RepeatedCaptureBox × Nat :=
+  let source := mkRepeatedCaptureBox value
+  let captured := invokeRepeatedCapturedBoxRead
+    (inspectRepeatedCapturedBox source source) readSecond
+  (source, captured)
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -2094,6 +2144,24 @@ private def byteArrayNatPairDatum
     (value : ByteArray × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, .nat value.2]
 
+private def byteArrayByteArrayNatDatum
+    (value : ByteArray × ByteArray × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayNatPairDatum value.2]
+
+private def repeatedCaptureBoxDatum
+    (value : Source.RepeatedCaptureBox) : ValidationDatum :=
+  .ctor "RepeatedCaptureBox.mk" 0 #[.nat value.value, .string value.marker]
+
+private def repeatedCaptureBoxNatPairDatum
+    (value : Source.RepeatedCaptureBox × Nat) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[repeatedCaptureBoxDatum value.1, .nat value.2]
+
+private def repeatedCaptureBoxTripleDatum
+    (value : Source.RepeatedCaptureBox × Source.RepeatedCaptureBox × Nat) :
+    ValidationDatum :=
+  .ctor "Prod.mk" 0 #[repeatedCaptureBoxDatum value.1,
+    repeatedCaptureBoxNatPairDatum value.2]
+
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
@@ -2301,6 +2369,16 @@ private def byteArrayPairSchema : ValidationSchema :=
 private def byteArrayTripleSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, byteArrayPairSchema]
 
+private def byteArrayByteArrayNatSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.bytes, .ctor "Prod.mk" 0 #[.bytes, .nat]]
+
+private def repeatedCaptureBoxSchema : ValidationSchema :=
+  .ctor "RepeatedCaptureBox.mk" 0 #[.nat, .string]
+
+private def repeatedCaptureBoxTripleSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema,
+    .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema, .nat]]
+
 private def byteArrayPairPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
 
@@ -2430,6 +2508,26 @@ private def repeatedCapturedByteArrayConsumedFormTrace : Array String :=
   #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "lit",
     "lit", "fap", "extern", "ctor", "return", "return", "return", "ctor",
     "return"]
+
+private def repeatedCapturedByteArrayIgnoredFormTrace : Array String :=
+  #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "lit",
+    "ctor", "return", "dec", "return", "return", "ctor", "return"]
+
+private def repeatedCapturedByteArrayReadFormTrace : Array String :=
+  #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "lit",
+    "fap", "extern", "fap", "extern", "ctor", "return", "dec", "return",
+    "return", "ctor", "return"]
+
+private def repeatedCapturedBoxIgnoredFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc", "pap",
+    "fap", "box", "fvar", "unbox", "fap", "cases", "dec", "lit", "ctor",
+    "return", "return", "return", "ctor", "return"]
+
+private def repeatedCapturedBoxReadFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc", "pap",
+    "fap", "box", "fvar", "unbox", "fap", "cases", "oproj", "join",
+    "isShared", "cases", "inc", "dec", "jump", "join", "cases", "ctor",
+    "jump", "return", "return", "return", "ctor", "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -5994,6 +6092,188 @@ private def postConversionCases : Array Case := #[
     requiredExecutedExternalTrace := some #[``ByteArray.set!]
     provenance := firProvenance
       "Consume one of two identical captures while preserving the other and an outside alias" },
+  { id := "repeated-captured-byte-array-ignored"
+    entry := ``Source.repeatedCapturedByteArrayOutsideAliasRead
+    dependencies :=
+      #[``Source.inspectRepeatedCapturedByteArray,
+        ``Source.invokeRepeatedCapturedByteArrayRead]
+    args := #[.bool false, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := byteArrayByteArrayNatSchema
+    native := fun _ => byteArrayByteArrayNatDatum
+      (Source.repeatedCapturedByteArrayOutsideAliasRead false mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "shared",
+        "capture-alias-topology", "repeated-capture", "outside-alias",
+        "ignore-capture", "path-exclusion", "release"]
+    requiredLcnfForms :=
+      #["inc", "pap", "fap", "ctor", "return", "unbox", "dec", "cases", "lit",
+        "box", "fvar", "extern"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "lit", "ctor",
+        "return", "dec"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 2, maximum := some 2 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace :=
+      some repeatedCapturedByteArrayIgnoredFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.get!, minimum := 0, maximum := some 0 },
+        { external := ``UInt8.toNat, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[]
+    provenance := firProvenance
+      "Drop one repeated ByteArray capture while preserving its twin and the outside alias" },
+  { id := "repeated-captured-byte-array-read"
+    entry := ``Source.repeatedCapturedByteArrayOutsideAliasRead
+    dependencies :=
+      #[``Source.inspectRepeatedCapturedByteArray,
+        ``Source.invokeRepeatedCapturedByteArrayRead]
+    args := #[.bool true, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := byteArrayByteArrayNatSchema
+    native := fun _ => byteArrayByteArrayNatDatum
+      (Source.repeatedCapturedByteArrayOutsideAliasRead true mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "shared",
+        "capture-alias-topology", "repeated-capture", "outside-alias", "borrow",
+        "read", "retain", "release"]
+    requiredLcnfForms :=
+      #["inc", "pap", "fap", "ctor", "return", "unbox", "dec", "cases", "lit",
+        "box", "fvar", "extern"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "lit", "extern",
+        "ctor", "return", "dec"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 4, maximum := some 4 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace :=
+      some repeatedCapturedByteArrayReadFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternals := #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalCounts :=
+      exactlyOnceExternalCounts #[``ByteArray.get!, ``UInt8.toNat]
+    requiredExecutedExternalTrace := some #[``ByteArray.get!, ``UInt8.toNat]
+    provenance := firProvenance
+      "Borrow one repeated ByteArray capture while preserving its twin and the outside alias" },
+  { id := "repeated-captured-box-ignored"
+    entry := ``Source.repeatedCapturedBoxOutsideAliasRead
+    dependencies :=
+      #[``Source.mkRepeatedCaptureBox, ``Source.inspectRepeatedCapturedBox,
+        ``Source.invokeRepeatedCapturedBoxRead]
+    args := #[.bool false, .nat Source.largeNat]
+    argSchemas := #[.bool, .nat]
+    resultSchema := repeatedCaptureBoxTripleSchema
+    native := fun _ => repeatedCaptureBoxTripleDatum
+      (Source.repeatedCapturedBoxOutsideAliasRead false Source.largeNat)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "constructor", "object", "heap", "ownership", "shared", "nested", "string",
+        "allocation",
+        "capture-alias-topology", "repeated-capture", "outside-alias",
+        "ignore-capture", "path-exclusion", "release"]
+    requiredLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "unbox", "cases", "dec",
+        "oproj", "join", "oset", "jump", "isShared", "box", "fvar"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "pap", "box", "fvar", "unbox",
+        "cases", "dec"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 4, maximum := some 4 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "oproj", minimum := 0, maximum := some 0 },
+        { form := "join", minimum := 0, maximum := some 0 },
+        { form := "oset", minimum := 0, maximum := some 0 },
+        { form := "jump", minimum := 0, maximum := some 0 },
+        { form := "isShared", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some repeatedCapturedBoxIgnoredFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-cache",
+        "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Drop one repeated constructor capture while preserving its twin and outside alias" },
+  { id := "repeated-captured-box-read"
+    entry := ``Source.repeatedCapturedBoxOutsideAliasRead
+    dependencies :=
+      #[``Source.mkRepeatedCaptureBox, ``Source.inspectRepeatedCapturedBox,
+        ``Source.invokeRepeatedCapturedBoxRead]
+    args := #[.bool true, .nat Source.largeNat]
+    argSchemas := #[.bool, .nat]
+    resultSchema := repeatedCaptureBoxTripleSchema
+    native := fun _ => repeatedCaptureBoxTripleDatum
+      (Source.repeatedCapturedBoxOutsideAliasRead true Source.largeNat)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "constructor", "object", "heap", "ownership", "shared", "nested", "string",
+        "allocation",
+        "capture-alias-topology", "repeated-capture", "outside-alias", "read",
+        "projection", "retain", "release"]
+    requiredLcnfForms :=
+      #["fap", "inc", "pap", "ctor", "return", "lit", "unbox", "cases", "dec",
+        "oproj", "join", "oset", "jump", "isShared", "box", "fvar"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "pap", "box", "fvar", "unbox",
+        "cases", "oproj", "join", "isShared", "dec", "jump"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 4, maximum := some 4 },
+        { form := "lit", minimum := 1, maximum := some 1 },
+        { form := "return", minimum := 6, maximum := some 6 },
+        { form := "inc", minimum := 3, maximum := some 3 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 3, maximum := some 3 },
+        { form := "oproj", minimum := 1, maximum := some 1 },
+        { form := "join", minimum := 2, maximum := some 2 },
+        { form := "isShared", minimum := 1, maximum := some 1 },
+        { form := "dec", minimum := 1, maximum := some 1 },
+        { form := "jump", minimum := 2, maximum := some 2 },
+        { form := "oset", minimum := 0, maximum := some 0 }]
+    requiredExecutedLcnfFormTrace := some repeatedCapturedBoxReadFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-cache",
+        "admin:yield-bind", "admin:yield-done"]
+    provenance := firProvenance
+      "Project one repeated constructor capture while preserving its twin and outside alias" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]
