@@ -1235,12 +1235,23 @@ acceptance tests pass.
      it does not equate the entry and exit stores. Call entry constructs the
      canonical entry-relative cache frame with reflexive transports, and
      `bindFrame_of_yield_cacheFrame` consumes the evolved hereditary frame at
-     a related callee yield to establish the accepted bind-frame focus. The
-     next slice is the structural callee-body simulation that threads this
-     entry-relative frame and exact saved-frame suffix through each admitted
-     code constructor, recursively nesting the same relation for internal
-     calls. Subsequent slices handle target-only label/loop unwinding,
-     apply/cache source frames, and positive target paths for the remaining
+     a related callee yield to establish the accepted bind-frame focus.
+     The first structural body transition is now derived end to end as well.
+     Existing runtime WP laws are specialized to an exact successful Talos
+     outcome, and `StructuredWasmFlatProgram.finitePathWithSuffix` reifies
+     that outcome as one structured step per generated straight-line
+     instruction beneath arbitrary residual code and saved frames. This is a
+     theorem-derived execution boundary, not a caller-provided certificate.
+     `ConcreteStructuredCodeFocus.advance_flatLet` uses it to match one direct
+     source `let`, preserve the operand and frame suffixes, and reconstruct the
+     recursively compiled continuation focus. Compiler/adapter inversion now
+     discharges the flatness premise for immediate literals and local aliases.
+     The next slice extends that compiler-shape proof across the remaining
+     direct runtime-import families and folds `advance_flatLet` into the
+     resource-indexed structural induction. It then threads the entry-relative
+     frame and exact saved-frame suffix recursively through internal calls.
+     Subsequent slices handle structured lazy/case prefixes, target-only
+     label/loop unwinding, apply/cache source frames, and the remaining
      non-terminal operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,

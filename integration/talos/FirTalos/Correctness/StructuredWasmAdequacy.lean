@@ -42,6 +42,138 @@ def StructuredWasmExecutes
   ∃ fuel,
     Wasm.exec fuel module store locals program env = outcome.toContinuation
 
+/-- A generated instruction that the structured machine can execute in one
+step: either an ordinary emitted atomic instruction or a call resolved by the
+module as an import.  Internal calls and structured control are deliberately
+excluded because their bodies are exposed by multiple machine steps. -/
+inductive StructuredWasmFlatInstruction (module : Wasm.Module) :
+    Wasm.Instruction → Prop where
+  | atomic {instruction : Wasm.Instruction}
+      (shape : IsEmittedAtomicInstruction instruction) :
+      StructuredWasmFlatInstruction module instruction
+  | importedCall {functionIndex : Nat} {decl : Wasm.ImportDecl}
+      (found : module.imports[functionIndex]? = some decl) :
+      StructuredWasmFlatInstruction module (.call functionIndex)
+
+/-- Straight-line fragment whose instructions each correspond to exactly one
+structured-machine transition. -/
+inductive StructuredWasmFlatProgram (module : Wasm.Module) :
+    Wasm.Program → Prop where
+  | nil : StructuredWasmFlatProgram module []
+  | cons {instruction : Wasm.Instruction} {rest : Wasm.Program}
+      (head : StructuredWasmFlatInstruction module instruction)
+      (tail : StructuredWasmFlatProgram module rest) :
+      StructuredWasmFlatProgram module (instruction :: rest)
+
+namespace StructuredWasmFlatInstruction
+
+/-- An exact Talos fallthrough for a flat instruction is the corresponding
+single transition of the structured machine. -/
+theorem step
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {fuel : Nat} {store nextStore : Wasm.Store α}
+    {locals nextLocals : Wasm.Locals}
+    {instruction : Wasm.Instruction} {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatInstruction module instruction)
+    (executed :
+      Wasm.execOne fuel module store locals instruction env =
+        .Fallthrough nextStore nextLocals) :
+    StructuredWasmStep module env
+      ⟨store, .running locals (instruction :: rest), frames⟩
+      ⟨nextStore, .running nextLocals rest, frames⟩ := by
+  cases flat with
+  | atomic shape => exact .atomic shape executed
+  | importedCall found => exact .importedCall found executed
+
+end StructuredWasmFlatInstruction
+
+namespace StructuredWasmFlatProgram
+
+/-- Completeness of the structured machine for a successful straight-line
+fragment.  The exact Talos execution is decomposed, not trusted separately:
+each instruction contributes one machine transition and the final store and
+locals are preserved literally. -/
+theorem finitePathWithSuffix_of_exec_fallthrough
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {fuel : Nat} {store nextStore : Wasm.Store α}
+    {locals nextLocals : Wasm.Locals} {program : Wasm.Program}
+    {suffix : Wasm.Program} {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatProgram module program)
+    (executed :
+      Wasm.exec fuel module store locals program env =
+        .Fallthrough nextStore nextLocals) :
+    FinitePath (StructuredWasmStep module env) program.length
+      ⟨store, .running locals (program ++ suffix), frames⟩
+      ⟨nextStore, .running nextLocals suffix, frames⟩ := by
+  induction flat generalizing store locals with
+  | nil =>
+      simp only [Wasm.exec] at executed
+      cases executed
+      exact .refl _
+  | @cons instruction rest head tail ih =>
+      cases oneExecuted :
+          Wasm.execOne fuel module store locals instruction env with
+      | Fallthrough middleStore middleLocals =>
+          have restExecuted :
+              Wasm.exec fuel module middleStore middleLocals rest env =
+                .Fallthrough nextStore nextLocals := by
+            simpa only [Wasm.exec, oneExecuted] using executed
+          exact .cons (head.step oneExecuted) (ih restExecuted)
+      | Break level breakStore breakLocals =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | Return returnStore values =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | Trap trapStore message =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | Invalid message =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | OutOfFuel =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | ReturnCall functionIndex returnStore values =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+      | Throwing tag args throwStore throwLocals =>
+          simp only [Wasm.exec, oneExecuted] at executed
+          cases executed
+
+/-- A semantic execution witness for a flat fragment therefore determines an
+exact structured path, with path length equal to emitted instruction count. -/
+theorem finitePathWithSuffix
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {store nextStore : Wasm.Store α}
+    {locals nextLocals : Wasm.Locals} {program : Wasm.Program}
+    {suffix : Wasm.Program} {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatProgram module program)
+    (executed : StructuredWasmExecutes module env store locals program
+      (.fallthrough nextStore nextLocals)) :
+    FinitePath (StructuredWasmStep module env) program.length
+      ⟨store, .running locals (program ++ suffix), frames⟩
+      ⟨nextStore, .running nextLocals suffix, frames⟩ := by
+  obtain ⟨fuel, run⟩ := executed
+  exact flat.finitePathWithSuffix_of_exec_fallthrough run
+
+/-- Empty-suffix specialization of `finitePathWithSuffix`. -/
+theorem finitePath
+    {module : Wasm.Module} {env : Wasm.HostEnv α}
+    {store nextStore : Wasm.Store α}
+    {locals nextLocals : Wasm.Locals} {program : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatProgram module program)
+    (executed : StructuredWasmExecutes module env store locals program
+      (.fallthrough nextStore nextLocals)) :
+    FinitePath (StructuredWasmStep module env) program.length
+      ⟨store, .running locals program, frames⟩
+      ⟨nextStore, .running nextLocals [], frames⟩ := by
+  simpa using flat.finitePathWithSuffix (suffix := []) executed
+
+end StructuredWasmFlatProgram
+
 mutual
 
 /-- Semantic completion of one structured configuration.  For running code it

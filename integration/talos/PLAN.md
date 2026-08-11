@@ -5831,8 +5831,8 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7a generic ranked weak simulation | complete | `execSteps` transports any finite source prefix for a constructed simulation, with exact world/trace observations and a strict rank decrease on zero-target-step matches |
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
-| W6.7d structured terminal adequacy | next | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | pending; largest remaining proof | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
+| W6.7e compiler relation and rank | in progress; direct return, silence, call entry/return, caller transport, and first flat direct-let transition complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5844,6 +5844,16 @@ arbitrary finite nesting depth. Additional LCNF admission and W7 resident
 helper refinement are separate widenings, not reasons to weaken this theorem.
 W7 may continue in parallel; its helper theorems and the final zero-import
 `prettyM` acceptance theorem follow after the core compiler simulation.
+
+The current W6.7e body boundary derives exact Talos execution from existing
+runtime WP laws and reifies straight-line generated prefixes as structured
+finite paths beneath arbitrary code and frame suffixes. The direct source
+`let` constructor restores the recursively compiled focus without accepting a
+target execution or translation certificate. Immediate literals and local
+aliases already discharge the required target-shape premise from the real
+compiler and adapter; the next direct slice closes the remaining
+runtime-import families before the resource-indexed recursive induction is
+assembled.
 
 ## Parallel agent packages
 

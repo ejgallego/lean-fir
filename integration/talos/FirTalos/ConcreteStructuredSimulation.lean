@@ -92,6 +92,478 @@ theorem ConcreteStructuredCodeFocus.observes
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.stateRelated.1.trace
 
+/-- A total-correctness weakest-precondition proof with an exact successful
+fallthrough postcondition already contains a finite Talos execution witness.
+This is the executable-semantics boundary used below: operation refinements
+produce the witness themselves, rather than asking the compiler-correctness
+theorem's caller to supply an execution certificate. -/
+theorem structuredWasmExecutes_fallthrough_of_wp
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {target : Wasm.Program} {tail : List Wasm.Value}
+    (executed :
+      Wasm.wp module target
+        (fun continuation =>
+          continuation =
+            .Fallthrough nextStore { nextLocals with values := tail })
+        targetStore { targetLocals with values := tail } hostEnv) :
+    StructuredWasmExecutes module hostEnv targetStore
+      { targetLocals with values := tail } target
+      (.fallthrough nextStore { nextLocals with values := tail }) := by
+  unfold Wasm.wp at executed
+  obtain ⟨fuel, stable⟩ := executed
+  exact ⟨fuel, by
+    simpa [StructuredWasmOutcome.toContinuation] using
+      stable fuel (Nat.le_refl fuel)⟩
+
+/-- Reify the target prefix guaranteed by an ordinary concrete `let` law as
+an exact successful Talos execution.  The continuation-transformer law is
+specialized to the empty continuation; no independent target-execution
+premise is introduced. -/
+theorem LetStepSimulates.structuredExecutes
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    (step : LetStepSimulates context sourceFunction module hostEnv decl
+      targetValue sourceRuntime nextRuntime sourceEnv sourceValue targetStore
+      nextStore targetLocals nextLocals resultIndex witness nextWitness) :
+    StructuredWasmExecutes module hostEnv targetStore
+      { targetLocals with values := tail }
+      (targetValue ++ [.localSet resultIndex])
+      (.fallthrough nextStore { nextLocals with values := tail }) := by
+  apply structuredWasmExecutes_fallthrough_of_wp
+  let Q : Wasm.Assertion Host := fun continuation =>
+    continuation =
+      .Fallthrough nextStore { nextLocals with values := tail }
+  have finalWP :
+      Wasm.wp module [] Q nextStore
+        { nextLocals with values := tail } hostEnv :=
+    (Wasm.wp_nil).2 rfl
+  simpa [Q] using step.2.2.2 [] Q tail finalWP
+
+/-- A straight-line ordinary `let` prefix therefore advances the structured
+machine beneath an arbitrary residual program and saved frame stack. -/
+theorem LetStepSimulates.structuredFinitePath
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {targetValue targetRest : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]))
+    (step : LetStepSimulates context sourceFunction module hostEnv decl
+      targetValue sourceRuntime nextRuntime sourceEnv sourceValue targetStore
+      nextStore targetLocals nextLocals resultIndex witness nextWitness) :
+    FinitePath (StructuredWasmStep module hostEnv)
+      (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+      ⟨targetStore,
+        .running { targetLocals with values := tail }
+          (targetValue ++ .localSet resultIndex :: targetRest),
+        frames⟩
+      ⟨nextStore,
+        .running { nextLocals with values := tail } targetRest,
+        frames⟩ := by
+  simpa [List.append_assoc] using
+    flat.finitePathWithSuffix (suffix := targetRest) (frames := frames)
+      step.structuredExecutes
+
+/-- The concrete target for any admitted immediate literal followed by its
+destination write is a straight-line structured fragment. -/
+theorem ImmediateLiteralKind.structuredFlatProgram
+    {literal : Lean.Compiler.LCNF.LitValue} {kind : AbiKind}
+    (shape : ImmediateLiteralKind literal kind)
+    (module : Wasm.Module) (resultIndex : Nat) :
+    StructuredWasmFlatProgram module
+      ([shape.targetInstruction] ++ [.localSet resultIndex]) := by
+  cases shape <;>
+    exact .cons (.atomic (by trivial))
+      (.cons (.atomic (by trivial)) .nil)
+
+/-- Successful production compilation and adaptation determine the immediate
+literal's flat target prefix; no target syntax is admitted independently. -/
+theorem ImmediateLiteralSupported.structuredFlatProgram
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
+    {resultIndex : Nat}
+    (supported : ImmediateLiteralSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro literal resultKind valueEq valueKind _ shape =>
+      have expectedCompiled :=
+        shape.compileLetValue_eq (context := context) valueEq valueKind
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      have expectedAdapted :=
+        shape.instructions_eq (sourceModule := sourceModule)
+          (sourceFunction := sourceFunction) (labels := labels)
+      rw [expectedAdapted] at valueAdapted
+      injection valueAdapted with targetValueEq
+      subst targetValue
+      exact shape.structuredFlatProgram module resultIndex
+
+/-- A local read followed by the generated destination write is the other
+cost-zero straight-line prefix used by the first recursive spine. -/
+theorem structuredWasmFlatProgram_localGet_localSet
+    (module : Wasm.Module) (sourceIndex resultIndex : Nat) :
+    StructuredWasmFlatProgram module
+      ([.localGet sourceIndex] ++ [.localSet resultIndex]) := by
+  exact .cons (.atomic (by trivial))
+    (.cons (.atomic (by trivial)) .nil)
+
+/-- Local-alias admission plus the executable compiler and adapter uniquely
+recover that two-instruction target prefix. -/
+theorem LocalAliasSupported.structuredFlatProgram
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
+    {resultIndex : Nat}
+    (supported : LocalAliasSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro sourceId kind valueEq resultKind sourceCompiled _ =>
+      have emptyCompiled :
+          Fir.Wasm.compileArgs context #[] = .ok ([], #[]) := by
+        rfl
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok [.localGet sourceId] := by
+        simp [Fir.Wasm.compileLetValue, valueEq, resultKind, sourceCompiled,
+          emptyCompiled]
+        rfl
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      cases sourceFound :
+          findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            sourceId with
+      | none =>
+          simp [instructions, instruction, sourceFound, Bind.bind,
+            Except.bind] at valueAdapted
+      | some sourceIndex =>
+          have expectedAdapted :
+              instructions sourceModule sourceFunction labels
+                  [.localGet sourceId] =
+                .ok [.localGet sourceIndex] := by
+            simp [instructions, instruction, sourceFound]
+            rfl
+          rw [expectedAdapted] at valueAdapted
+          injection valueAdapted with targetValueEq
+          subst targetValue
+          exact structuredWasmFlatProgram_localGet_localSet module sourceIndex
+            resultIndex
+
+/-- Interprocedural concrete `let` laws expose the same exact executable
+prefix.  Internal-call execution is therefore obtained from the proved
+runtime law and will be structurally reified by the shared target theorem. -/
+theorem CallLetStepSimulates.structuredExecutes
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    (step : CallLetStepSimulates context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime
+      sourceEnv sourceValue targetStore nextStore targetLocals nextLocals
+      resultIndex witness nextWitness) :
+    StructuredWasmExecutes module hostEnv targetStore
+      { targetLocals with values := tail }
+      (targetValue ++ [.localSet resultIndex])
+      (.fallthrough nextStore { nextLocals with values := tail }) := by
+  apply structuredWasmExecutes_fallthrough_of_wp
+  let Q : Wasm.Assertion Host := fun continuation =>
+    continuation =
+      .Fallthrough nextStore { nextLocals with values := tail }
+  have finalWP :
+      Wasm.wp module [] Q nextStore
+        { nextLocals with values := tail } hostEnv :=
+    (Wasm.wp_nil).2 rfl
+  simpa [Q] using step.2.2.2 [] Q tail finalWP
+
+/-- External-call refinements expose their generated prefix at the identical
+executable boundary. -/
+theorem ExternalLetStepSimulates.structuredExecutes
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    (step : ExternalLetStepSimulates context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime
+      sourceEnv sourceValue targetStore nextStore targetLocals nextLocals
+      resultIndex witness nextWitness) :
+    StructuredWasmExecutes module hostEnv targetStore
+      { targetLocals with values := tail }
+      (targetValue ++ [.localSet resultIndex])
+      (.fallthrough nextStore { nextLocals with values := tail }) := by
+  apply structuredWasmExecutes_fallthrough_of_wp
+  let Q : Wasm.Assertion Host := fun continuation =>
+    continuation =
+      .Fallthrough nextStore { nextLocals with values := tail }
+  have finalWP :
+      Wasm.wp module [] Q nextStore
+        { nextLocals with values := tail } hostEnv :=
+    (Wasm.wp_nil).2 rfl
+  simpa [Q] using step.2.2.2 [] Q tail finalWP
+
+/-- A straight-line external-call prefix advances beneath the same arbitrary
+residual program and saved frame stack. -/
+theorem ExternalLetStepSimulates.structuredFinitePath
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetValue targetRest : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    {frames : List StructuredWasmFrame}
+    (flat : StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]))
+    (step : ExternalLetStepSimulates context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime
+      sourceEnv sourceValue targetStore nextStore targetLocals nextLocals
+      resultIndex witness nextWitness) :
+    FinitePath (StructuredWasmStep module hostEnv)
+      (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+      ⟨targetStore,
+        .running { targetLocals with values := tail }
+          (targetValue ++ .localSet resultIndex :: targetRest),
+        frames⟩
+      ⟨nextStore,
+        .running { nextLocals with values := tail } targetRest,
+        frames⟩ := by
+  simpa [List.append_assoc] using
+    flat.finitePathWithSuffix (suffix := targetRest) (frames := frames)
+      step.structuredExecutes
+
+/-- Both lazy-cache paths obtain their concrete execution from the proved
+cache law, so hits and misses share the same structural reification boundary. -/
+theorem LazyLetStepSimulates.structuredExecutes
+    {path : LazyCachePath} {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host} {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetValue : Wasm.Program}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals} {resultIndex : Nat}
+    {witness nextWitness : RefinementWitness} {tail : List Wasm.Value}
+    (step : LazyLetStepSimulates path context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime
+      sourceEnv sourceValue targetStore nextStore targetLocals nextLocals
+      resultIndex witness nextWitness) :
+    StructuredWasmExecutes module hostEnv targetStore
+      { targetLocals with values := tail }
+      (targetValue ++ [.localSet resultIndex])
+      (.fallthrough nextStore { nextLocals with values := tail }) := by
+  apply structuredWasmExecutes_fallthrough_of_wp
+  let Q : Wasm.Assertion Host := fun continuation =>
+    continuation =
+      .Fallthrough nextStore { nextLocals with values := tail }
+  have finalWP :
+      Wasm.wp module [] Q nextStore
+        { nextLocals with values := tail } hostEnv :=
+    (Wasm.wp_nil).2 rfl
+  simpa [Q] using step.2.2.2 [] Q tail finalWP
+
+/-- The concrete state relation is insensitive to the operand-stack suffix;
+all environment bindings live in parameter or local slots. -/
+theorem StateRelated.withValues
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related : StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness)
+    (values : List Wasm.Value) :
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+      { targetLocals with values := values } witness := by
+  refine ⟨related.1, related.2.1, ?_⟩
+  intro fvar value sourceLookup
+  obtain ⟨index, kind, physical, found, kindAt, targetLookup,
+      valueRelated⟩ := related.2.2 sourceLookup
+  exact ⟨index, kind, physical, found, kindAt, by simpa using targetLookup,
+    valueRelated⟩
+
+/-- Local-frame shape is likewise independent of the operand stack. -/
+theorem ConcreteLocalFrameAligned.withValues
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (aligned : ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv
+      targetStore targetLocals witness)
+    (values : List Wasm.Value) :
+    ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv targetStore
+      { targetLocals with values := values } witness := by
+  exact aligned
+
+/-- One direct source `let` whose generated prefix is straight-line advances
+both machines to the recursively compiled continuation.  The target path is
+derived from the runtime law's exact WP execution plus compiler-side flatness;
+the caller supplies neither an execution trace nor a translation certificate.
+The operand-stack suffix and both continuation stacks are preserved exactly. -/
+theorem ConcreteStructuredCodeFocus.advance_flatLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode targetValue targetRest : Wasm.Program}
+    {resultIndex : Nat} {witness nextWitness : RefinementWitness}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (targetCodeEq :
+      targetCode = targetValue ++ .localSet resultIndex :: targetRest)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (flat : StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]))
+    (step : LetStepSimulates context sourceFunction module hostEnv decl
+      targetValue sourceRuntime nextRuntime sourceEnv sourceValue targetStore
+      nextStore targetLocals nextLocals resultIndex witness nextWitness)
+    (nextAligned :
+      ConcreteLocalFrameAligned sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness) :
+    ∃ sourceAfter targetAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv)
+        (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+        target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        nextStore { nextLocals with values := targetLocals.values } targetRest
+        nextWitness sourceAfter targetAfter := by
+  let resumedLocals : Wasm.Locals :=
+    { nextLocals with values := targetLocals.values }
+  let sourceAfter : MachineState :=
+    { source with
+      control := .code continuation
+      env := bind sourceEnv decl.fvarId sourceValue
+      runtime := nextRuntime }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      store := nextStore
+      control := .running resumedLocals targetRest }
+  refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_⟩
+  · rcases source with
+      ⟨program, control, env, joins, frames, runtime⟩
+    have programEq := related.sourceProgramEq
+    change program = context.program at programEq
+    subst program
+    have controlEq := related.sourceControlEq
+    change control = .code (.let decl continuation) at controlEq
+    subst control
+    have envEq := related.sourceEnvEq
+    change env = sourceEnv at envEq
+    subst env
+    have runtimeEq := related.sourceRuntimeEq
+    change runtime = sourceRuntime at runtimeEq
+    subst runtime
+    have evaluated :
+        evalLetValue {
+          program := context.program
+          control := .code (.let decl continuation)
+          env := sourceEnv
+          joins := joins
+          frames := frames
+          runtime := sourceRuntime } decl =
+          .ok (nextRuntime, .value sourceValue) := by
+      have sourceStep := step.1
+      unfold SourceLetResult at sourceStep
+      cases decl.value <;> exact sourceStep
+    simp [sourceAfter, executeStep, coreStep, evaluated]
+  · rcases target with ⟨store, control, frames⟩
+    have storeEq := related.targetStoreEq
+    change store = targetStore at storeEq
+    subst store
+    have controlEq := related.targetControlEq
+    rw [targetCodeEq] at controlEq
+    change control =
+      .running targetLocals
+        (targetValue ++ .localSet resultIndex :: targetRest) at controlEq
+    subst control
+    simpa [resumedLocals, targetAfter] using
+      step.structuredFinitePath (targetRest := targetRest)
+        (tail := targetLocals.values) (frames := frames) flat
+  · exact {
+      sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+      sourceControlEq := by simp [sourceAfter]
+      sourceEnvEq := by simp [sourceAfter]
+      sourceRuntimeEq := by simp [sourceAfter]
+      targetStoreEq := by simp [targetAfter]
+      targetControlEq := by simp [targetAfter, resumedLocals]
+      adapted := continuationAdapted
+      stateRelated := by
+        simpa [resumedLocals] using
+          (step.2.2.1.withValues targetLocals.values)
+      frameAligned := by
+        simpa [resumedLocals] using
+          (nextAligned.withValues targetLocals.values) }
+
 /-- Local compiler relation after a source return has yielded its semantic
 value and the generated target has entered explicit return mode.  The
 pre-return locals remain available for the later call-frame relation; the
