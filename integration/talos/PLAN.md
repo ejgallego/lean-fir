@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` field mutation, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5914,8 +5914,11 @@ connected by the analogous three-step object-local/constant-zero/call path;
 zero is justified only by the erased ABI relation. `USize` mutation is now
 connected by the exact three-step object-local/`i64`-local/call path, using the
 checked absolute-slot writer while preserving the witness and heap frontier.
-Remaining construction slices connect packed-scalar field mutations,
-saturated-closure transitions, and heap-valued cache misses to the same
+Packed-integer scalar mutation is connected through one common three-step
+continuation rule: production state refinement selects i32 for `UInt8`/16/32
+and i64 for `UInt64`, while the four checked writers establish their exact
+layout-preserving heap updates. Remaining construction slices connect
+saturated-closure transitions and heap-valued cache misses to the same
 induction.
 
 ## Parallel agent packages

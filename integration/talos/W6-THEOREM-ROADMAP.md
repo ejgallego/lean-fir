@@ -1338,9 +1338,12 @@ acceptance tests pass.
      path; the zero payload is justified only by `ValueRel.erased`. `USize`
      mutation is now connected through an exact object-local/`i64`-local/call
      path, with the checked absolute-slot writer preserving the witness and
-     heap frontier. Subsequent slices connect packed-scalar field mutations and
-     add saturated closure calls, heap-valued cache misses, and target-only
-     label/loop unwinding to this induction.
+     heap frontier. All supported packed-integer scalar mutations are now
+     connected through one common exact three-step continuation rule;
+     production state refinement selects i32 for `UInt8`/16/32 and i64 for
+     `UInt64`, and the four checked writers preserve the layout, witness, and
+     heap frontier. Subsequent slices add saturated closure calls, heap-valued
+     cache misses, and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

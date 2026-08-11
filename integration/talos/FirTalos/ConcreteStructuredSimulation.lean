@@ -5555,6 +5555,20 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | scalarFieldEffect
+      (supported :
+        ScalarFieldEffectSupported context sourceRuntime sourceEnv code
+          continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -5670,6 +5684,9 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
   | usizeFieldEffect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (sourceStep externals) (.refl _)) ih
+  | scalarFieldEffect _ sourceStep _ ih =>
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
 
@@ -7296,11 +7313,444 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
       | float32Bits objectRelated => cases objectRelated
       | float64Bits objectRelated => cases objectRelated
 
+/-- Common structured continuation rule for every supported packed-scalar
+writer. Width-specific reasoning supplies only the physical second operand and
+the checked concrete operation; the generated binary prefix, source step, and
+entry-relative frame reconstruction are shared. -/
+private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (functionSpec :
+      ConcreteSupportedFunction program context functionCode sourceModule
+        sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime nextRuntime entryRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {location : Location} {field : ScalarValue} {fieldKind : AbiKind}
+    {targetStore entryStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    {objectIndex fieldIndex callIndex : Nat}
+    {targetRest : Wasm.Program}
+    {objectWord : Word32} {physicalField : Wasm.Value}
+    {heap : MemoryState} {imp : Wasm.ImportDecl}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (objectLookup :
+      lookupValue sourceEnv objectId = .ok (.object (.heap location)))
+    (fieldLookup : lookupValue sourceEnv fieldId = .ok (.scalar field))
+    (updated :
+      setScalarField sourceRuntime (.object (.heap location)) slotIndex
+          byteOffset (.scalar field) =
+        .ok nextRuntime)
+    (sourceStep :
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        continuation)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        targetStore targetLocals
+        ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+          targetRest)
+        witness source target)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction [] continuation
+        targetRest)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness)
+    (targetObjectLookup :
+      targetLocals.get objectIndex =
+        some (.i32 (UInt32.ofNat objectWord.value)))
+    (targetFieldLookup : targetLocals.get fieldIndex = some physicalField)
+    (imported : targetModule.wasmModule.imports[callIndex]? = some imp)
+    (inBounds : callIndex < targetModule.wasmModule.imports.length)
+    (contracted : hosts.spec.contracts[callIndex]? = some
+      (scalarSetContract slotIndex byteOffset fieldKind))
+    (parameterCount : imp.params.length = 2)
+    (resultCount : imp.results.length = 0)
+    (operation :
+      scalarSetStep slotIndex byteOffset fieldKind targetStore
+          [.i32 (UInt32.ofNat objectWord.value), physicalField] =
+        .Return [] (replaceHeap targetStore heap))
+    (runtimeRelated :
+      ConcreteRuntimeRel (replaceHeap targetStore heap).host.runtime witness
+        nextRuntime)
+    (capacity :
+      MappedHeaderCapacityTransport targetStore.host.runtime.heap heap witness)
+    (cursor : heap.heapCursor = targetStore.host.runtime.heap.heapCursor) :
+    ∃ sourceAfter targetAfter nextStore targetRest,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          1 source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            3 target targetAfter ∧
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+              nextRuntime sourceEnv continuation nextStore targetLocals
+              targetRest witness sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness facts remainingBytes
+              nextRuntime sourceEnv nextStore targetLocals witness ∧
+            sourceAfter.joins = source.joins ∧
+              sourceAfter.frames = source.frames ∧
+                targetAfter.frames = target.frames := by
+  have nextRelated :
+      StateRelated sourceFunction nextRuntime sourceEnv
+        (replaceHeap targetStore heap) targetLocals witness :=
+    ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+      related.stateRelated.2.2⟩
+  have effectStep :
+      EffectStepSimulates context sourceModule sourceFunction []
+        targetModule.wasmModule hosts.env sourceRuntime nextRuntime sourceEnv
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        continuation
+        ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+          targetRest)
+        targetRest targetStore (replaceHeap targetStore heap) targetLocals
+        witness witness := by
+    apply effectStepSimulates_binaryHost
+      (spec := hosts.spec)
+      (step := scalarSetStep slotIndex byteOffset fieldKind)
+    · exact sourceStep
+    · exact related.adapted
+    · exact related.stateRelated
+    · exact nextRelated
+    · exact targetObjectLookup
+    · exact targetFieldLookup
+    · exact imported
+    · exact functionSpec.hostsSatisfy
+    · exact inBounds
+    · exact contracted
+    · exact parameterCount
+    · exact resultCount
+    · exact operation
+  have ordinaryTransport :
+      OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+    setScalarField_ordinaryPersistenceTransport updated
+  have sourceGlobals : nextRuntime.globals = sourceRuntime.globals :=
+    (setScalarField_runtimeAux updated).globals
+  have nextInvariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes nextRuntime
+        sourceEnv (replaceHeap targetStore heap) targetLocals witness :=
+    invariant.ofReplaceHeapEffectStep effectStep capacity ordinaryTransport
+      sourceGlobals cursor
+  let sourceAfter : MachineState := {
+    source with control := .code continuation
+                runtime := nextRuntime }
+  have sourcePath : executeStep externals source = .next sourceAfter := by
+    rcases source with
+      ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv, sourceFrames,
+        actualRuntime⟩
+    have programEq := related.sourceProgramEq
+    change sourceProgram = context.program at programEq
+    subst sourceProgram
+    have controlEq := related.sourceControlEq
+    change sourceControl = _ at controlEq
+    subst sourceControl
+    have envEq := related.sourceEnvEq
+    change actualEnv = sourceEnv at envEq
+    subst actualEnv
+    have runtimeEq := related.sourceRuntimeEq
+    change actualRuntime = sourceRuntime at runtimeEq
+    subst actualRuntime
+    simp [sourceAfter, executeStep, coreStep, objectLookup, fieldLookup,
+      updated]
+  let targetAfter : StructuredWasmState Host := {
+    store := replaceHeap targetStore heap
+    control := .running
+      { targetLocals with values := targetLocals.values } targetRest
+    frames := target.frames }
+  have targetPath :
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+        target targetAfter := by
+    rcases target with ⟨actualStore, actualControl, actualFrames⟩
+    have storeEq := related.targetStoreEq
+    change actualStore = targetStore at storeEq
+    subst actualStore
+    have controlEq := related.targetControlEq
+    change actualControl =
+      .running targetLocals
+        ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+          targetRest)
+      at controlEq
+    subst actualControl
+    simpa [targetAfter] using
+      structuredWasmBinaryHostEffectPrefixFinitePath
+        (module := targetModule.wasmModule) (env := hosts.env)
+        (spec := hosts.spec)
+        (step := scalarSetStep slotIndex byteOffset fieldKind)
+        (initial := targetStore) (final := replaceHeap targetStore heap)
+        (locals := targetLocals) (firstIndex := objectIndex)
+        (secondIndex := fieldIndex)
+        (physicalFirst := .i32 (UInt32.ofNat objectWord.value))
+        (physicalSecond := physicalField) (targetRest := targetRest)
+        (tail := targetLocals.values) (frames := actualFrames)
+        targetObjectLookup targetFieldLookup imported functionSpec.hostsSatisfy
+        inBounds contracted parameterCount resultCount operation
+  have nextFocus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        nextRuntime sourceEnv continuation (replaceHeap targetStore heap)
+        targetLocals targetRest witness sourceAfter targetAfter := {
+    sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+    sourceControlEq := by simp [sourceAfter]
+    sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+    sourceRuntimeEq := by simp [sourceAfter]
+    targetStoreEq := by simp [targetAfter]
+    targetControlEq := by simp [targetAfter]
+    adapted := continuationAdapted
+    stateRelated := nextRelated
+    frameAligned := nextInvariant.1.1.1.1.2.2.1 }
+  exact ⟨sourceAfter, targetAfter, replaceHeap targetStore heap, targetRest,
+    .single sourcePath, targetPath, nextFocus, nextInvariant,
+    by simp [sourceAfter], by simp [sourceAfter], by simp [targetAfter]⟩
+
+/-- One successful packed-integer scalar mutation advances the source by one
+effect step and the structured target by the exact generated binary-host
+prefix. Production inversion and state refinement select the i32 lane for
+`UInt8`/`UInt16`/`UInt32` and the i64 lane for `UInt64`; each checked writer
+then enters the common same-witness continuation rule. -/
+theorem ConcreteStructuredCodeFocus.advance_scalarField
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (functionSpec :
+      ConcreteSupportedFunction program context functionCode sourceModule
+        sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime nextRuntime entryRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore entryStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    {targetCode : Wasm.Program}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (supported :
+      ScalarFieldEffectSupported context sourceRuntime sourceEnv code
+        continuation nextRuntime)
+    (sourceStep :
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
+        source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness) :
+    ∃ sourceAfter targetAfter nextStore targetRest,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          1 source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            3 target targetAfter ∧
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+              nextRuntime sourceEnv continuation nextStore targetLocals
+              targetRest witness sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness facts remainingBytes
+              nextRuntime sourceEnv nextStore targetLocals witness ∧
+            sourceAfter.joins = source.joins ∧
+              sourceAfter.frames = source.frames ∧
+                targetAfter.frames = target.frames := by
+  cases supported with
+  | sset sourceRuntime nextRuntime sourceEnv objectId fieldId slotIndex
+      byteOffset type continuation location cell semantic field fieldKind
+      objectCompiled fieldCompiled objectLookup fieldLookup updated found live
+      objectEq layoutSafe =>
+      obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
+          objectKindAt, fieldFound, fieldKindAt, callFound,
+          continuationAdapted, targetCodeEq⟩ :=
+        CodeAdapted.scalarSet_eq functionSpec.localsAligned objectCompiled
+          fieldCompiled related.adapted
+      subst targetCode
+      have objectSourceLookup :
+          lookup sourceEnv objectId = some (.object (.heap location)) := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value foundLookup
+          injection objectLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      have fieldSourceLookup :
+          lookup sourceEnv fieldId = some (.scalar field) := by
+        unfold lookupValue at fieldLookup
+        split at fieldLookup
+        · rename_i value foundLookup
+          injection fieldLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      obtain ⟨physicalObject, targetObjectLookup, physicalObjectRelated⟩ :=
+        related.stateRelated.resolve objectSourceLookup objectFound objectKindAt
+      obtain ⟨physicalField, targetFieldLookup, physicalFieldRelated⟩ :=
+        related.stateRelated.resolve fieldSourceLookup fieldFound fieldKindAt
+      cases physicalObjectRelated with
+      | word32 objectRelated =>
+          rename_i objectWord
+          have decoded :
+              getConstructor sourceRuntime (.object (.heap location)) =
+                .ok (location, cell, semantic) := by
+            unfold getConstructor
+            simp only [getLiveCell, found, live, if_true, Bind.bind,
+              Except.bind]
+            rw [objectEq]
+            rfl
+          have tobjectRelated := objectRelated.object_to_tobject
+          obtain ⟨info, fieldKinds, descriptorFound⟩ :=
+            ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+              related.stateRelated.1 tobjectRelated decoded
+          obtain ⟨historySafe, slotIndexEq, fieldFits⟩ :=
+            layoutSafe tobjectRelated descriptorFound
+          have fieldSupported : PackedIntegerAbiKind fieldKind := by
+            cases fieldKind <;>
+              simp [PackedIntegerAbiKind] at fieldFits ⊢
+          cases fieldKind with
+          | uint8 =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | word32 fieldRelated =>
+                  rename_i fieldWord
+                  cases fieldRelated with
+                  | uint8 encoded =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_uint8_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated (.uint8 encoded)
+                          found live objectEq descriptorFound
+                          (by simpa using historySafe) slotIndexEq
+                          (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word64 fieldRelated => cases fieldRelated
+              | float32Bits fieldRelated => cases fieldRelated
+              | float64Bits fieldRelated => cases fieldRelated
+          | uint16 =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | word32 fieldRelated =>
+                  rename_i fieldWord
+                  cases fieldRelated with
+                  | uint16 encoded =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_uint16_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated (.uint16 encoded)
+                          found live objectEq descriptorFound
+                          (by simpa using historySafe) slotIndexEq
+                          (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word64 fieldRelated => cases fieldRelated
+              | float32Bits fieldRelated => cases fieldRelated
+              | float64Bits fieldRelated => cases fieldRelated
+          | uint32 =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | word32 fieldRelated =>
+                  rename_i fieldWord
+                  cases fieldRelated with
+                  | uint32 encoded =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_uint32_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated (.uint32 encoded)
+                          found live objectEq descriptorFound
+                          (by simpa using historySafe) slotIndexEq
+                          (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word64 fieldRelated => cases fieldRelated
+              | float32Bits fieldRelated => cases fieldRelated
+              | float64Bits fieldRelated => cases fieldRelated
+          | uint64 =>
+              obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+                  resultCount⟩ :=
+                functionSpec.scalarSetCall callFound (by trivial)
+              cases physicalFieldRelated with
+              | word64 fieldRelated =>
+                  cases fieldRelated with
+                  | uint64 =>
+                      obtain ⟨heap, operation, runtimeRelated, capacity,
+                          cursor⟩ :=
+                        scalarSetStep_uint64_of_refines_with_capacity
+                          related.stateRelated.1 objectRelated .uint64 found live
+                          objectEq descriptorFound (by simpa using historySafe)
+                          slotIndexEq (by simpa using fieldFits) updated
+                      exact
+                        ConcreteStructuredCodeFocus.advance_scalarFieldOperation
+                          functionSpec objectLookup fieldLookup updated sourceStep
+                          related continuationAdapted invariant
+                          targetObjectLookup targetFieldLookup imported inBounds
+                          contracted parameterCount resultCount operation
+                          runtimeRelated capacity cursor
+              | word32 fieldRelated => cases fieldRelated
+              | float32Bits fieldRelated => cases fieldRelated
+              | float64Bits fieldRelated => cases fieldRelated
+          | object => simp [PackedIntegerAbiKind] at fieldSupported
+          | tagged => simp [PackedIntegerAbiKind] at fieldSupported
+          | tobject => simp [PackedIntegerAbiKind] at fieldSupported
+          | erased => simp [PackedIntegerAbiKind] at fieldSupported
+          | reuseToken => simp [PackedIntegerAbiKind] at fieldSupported
+          | usize => simp [PackedIntegerAbiKind] at fieldSupported
+          | float32 => simp [PackedIntegerAbiKind] at fieldSupported
+          | float => simp [PackedIntegerAbiKind] at fieldSupported
+      | word64 objectRelated => cases objectRelated
+      | float32Bits objectRelated => cases objectRelated
+      | float64Bits objectRelated => cases objectRelated
+
 /-- Recursive structured partial correctness for direct values, supported pure
 external results, statically named calls, generated lazy caches, erased
 default-case wrappers, arbitrary normalized object and scalar `UInt8`
 dispatchers, ownership effects through deletion, constructor-tag mutation,
-both FVar and erased object-field mutation, and `USize` field mutation.
+both FVar and erased object-field mutation, `USize` field mutation, and every
+supported packed-integer scalar field mutation.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -8517,6 +8967,25 @@ theorem
           targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
           sourceMiddleFrames, targetMiddleFrames⟩ :=
         related.advance_usizeField functionSpec supported sourceStep invariant
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, targetFramesEq⟩ :=
+        ih functionSpec contextCaches nextFocus
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
+        sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
+        resultInvariant, resultRefines, resultJoins,
+        sourceFramesEq.trans sourceMiddleFrames,
+        targetFramesEq.trans targetMiddleFrames⟩
+  | @scalarFieldEffect sourceRuntime sourceEnv code continuation nextRuntime
+      context expectedResult facts resultFacts resultRuntime resultEnv
+      resultValue requiredBytes supported sourceStep continued ih =>
+      obtain ⟨sourceMiddle, targetMiddle, nextStore, targetRest, sourcePrefix,
+          targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
+          sourceMiddleFrames, targetMiddleFrames⟩ :=
+        related.advance_scalarField functionSpec supported sourceStep invariant
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
