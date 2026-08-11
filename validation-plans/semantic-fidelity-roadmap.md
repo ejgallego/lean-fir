@@ -19,7 +19,7 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land S5c grow/delete release, then select the next undominated lifetime interaction |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Select the next undominated lifetime interaction after landed S5c grow/delete release |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -98,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | S5a and S5b are landed; S5c is prepared with one `del` on both growth paths and released-leaf reuse only on the unique-owner path | Land S5c, then select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
+| M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -288,11 +288,11 @@ control.
 
 ### S5: recursive release and reuse
 
-State: S5b landed on `main` through `e47139b6`; changes no shared contract.
+State: S5c landed on `main` through `0deba715`; changes no shared contract.
 
 Cover repeated child aliases, nested unique release, shared-child recursion
-stopping, persistent owners, erased/scalar neighbors, same-size reuse, retained
-capacity, and grow/delete/allocation. Make release order observable through a
+stopping, persistent owners, erased/scalar neighbors, same-size reuse, variant
+changes, and grow/delete/allocation. Make release order observable through a
 surviving alias, later copy-on-write, or a reuse decision, and pin exact
 `project-dec`, `dec`, `reset`, `reuse`, `del`, `oset`, and `setTag` counts.
 

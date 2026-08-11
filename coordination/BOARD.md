@@ -15,6 +15,42 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-GROW-DELETE-RELEASE-S5C`.
+- Integration owner: `test-fixtures`; the user authorized this lane to take
+  the integration role when needed.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  `main` at `43a5c14e` after the accepted W6 pointwise call-resource stack.
+- Published stack: planning seed `e90d24c6`, functional fixture/coverage head
+  `072e90d7`, and clean ready mailbox `0deba715`.
+- Candidate search: the first big-to-small-to-big candidate was rejected by
+  the dominance filter. Source-generated execution did not retain capacity,
+  and the interpreter model has no independent capacity state, so that history
+  could not support a semantic coverage claim.
+- Accepted fixtures: a two-field seed/leaf owner grows to a three-scalar-field
+  variant while a leaf alias survives outside. Both paths execute one `del`.
+  Unique-owner release makes the leaf reusable and executes one later `oset`;
+  retaining the owner stops release before the leaf and forces allocation with
+  zero `oset`. Complete 66- and 74-step traces pin the distinction.
+- Contracts: none. This is fixture, exact-trace, oracle-floor,
+  coverage-policy, roadmap, and validation documentation work only. It neither
+  changes nor requests compiler, W6, W7, proof, concrete-runtime, symbolic-Wasm,
+  or resident-helper work.
+- Acceptance: Lean Beam update/sync/save with zero diagnostics; focused pinned
+  native/LCNF and native/LCNF/real-V8 matrices; `lake --rehash build`; repeated
+  `git diff --check`; and complete `make check` both before and after rebasing
+  over W6. The accepted baseline has 653/653 source native/LCNF/V8 cases, 9/9
+  direct ownership machines, 1,306 native-oracle witnesses, 662 unique cases,
+  1,315 tier cases, 1,968/1,968 equal indexed comparisons, 6,829 interpreter
+  steps, 124 tag floors, 233 semantic domains, and zero findings. No bug card
+  was required.
+- Result: `main` fast-forwards through the ready mailbox and the fixture lane
+  is released. The next fixture slice uses the same coverage-guided filter to
+  select the smallest undominated lifetime interaction outside the now-covered
+  replacement/release matrix; native Lean remains the admission oracle.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-CALL-RESOURCES`.
 - Integration owner: `wasm-proof`; this lease closes the resource half of the
   non-terminating direct and saturated call boundaries.
