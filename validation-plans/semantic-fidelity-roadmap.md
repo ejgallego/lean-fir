@@ -84,7 +84,7 @@ near-synonym drift:
 | S2 | `closure-ownership`, `multiplicity`, `zero-use`, `three-use`, `unique-final-application`, `shared-intermediate-application` | `closure-ownership-zero-use`, `closure-ownership-three-use`, `closure-ownership-unique-final`, `closure-ownership-shared-intermediate` |
 | S3 | `capture-alias-topology`, `repeated-capture`, `outside-alias`, plus the consumer action | `capture-topology-repeated`, `capture-topology-outside-alias`, and one action-sensitive domain |
 | S4/B1 | `tail-control`, `tail-ownership`, `unique-transfer`, `shared-retain` | `tail-ownership-unique-transfer`, `tail-ownership-shared-retain` |
-| S5 | `release-fidelity`, `recursive-release`, `repeated-child-alias`, plus the release stop boundary | `recursive-release-repeated-child`, `recursive-release-repeated-child-unique`, `recursive-release-repeated-child-shared-owner` |
+| S5 | `release-fidelity`, `recursive-release`, `repeated-child-alias`, `grow-delete-release`, plus the ownership/release stop boundary | `recursive-release-repeated-child`, `recursive-release-repeated-child-unique`, `recursive-release-repeated-child-shared-owner`, `grow-delete-release`, `grow-delete-release-unique-reuse`, `grow-delete-release-shared-stop` |
 | B2 | `application-shape` plus `nullary`, `underapplication`, `overapplication`, or `returned-closure` | One domain per admitted application shape |
 | C1 | `effect`, `ordered-effect`, `call-boundary`, `alias-across-effect` | `effect-call-order`, `effect-alias-retention` |
 | E1 | `aggregate`, `erasure`, and the exercised construction/case/projection action | `aggregate-erasure` and one result-shape domain |
@@ -98,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | S5a and S5b are landed; repeated-child-alias unique release versus shared-owner stopping complements the direct LCNF anchors for repeated aliases and persistent owners | Use the coverage model to choose the smallest undominated retained-capacity or grow/delete pair |
+| M5 Recursive release | active, primary | S5a and S5b are landed; repeated-child-alias unique release versus shared-owner stopping complements the direct LCNF anchors for repeated aliases and persistent owners | Admit S5c only if grow/delete exposes the released-child reuse versus shared-owner stop interaction with a new complete path signature |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -375,6 +375,21 @@ that both the replacement and updated leaf allocated. Both execute exactly one
 ordered `Nat.add`. The resulting snapshot is 651 source cases, 660 aggregate
 unique cases, 1,311 tier cases, 1,962 comparisons, 6,689 interpreter steps,
 122 tag floors, and 227 semantic domains.
+
+The first S5c candidate, big-to-small-to-big retained capacity, was rejected by
+the dominance filter. Both source-generated paths executed delete plus
+construction for the big-to-small transition, and the interpreter model has no
+separate capacity state beyond the current constructor fields. Capacity history
+therefore is not an observable semantic axis in this validation model.
+
+S5c instead combines grow/delete with recursive release. Grow a unique
+one-field owner containing a leaf into a two-scalar-field replacement, retain
+an independent leaf alias, and then update that leaf. The unique grow/delete
+path must release the old leaf so the later update reuses it. Its pair retains
+the original owner: release must stop at that shared owner, preserve the
+original leaf, and force the outside update to allocate. Admit this pair only
+if its complete signatures differ from both the existing one-step grow/delete
+cases and the same-size S5a/S5b release cases.
 
 ### S6: nonlocal ownership boundaries
 
