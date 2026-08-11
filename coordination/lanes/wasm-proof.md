@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 745610b0 on main
+state: active
+base: 64f79c0b on main
 functional-head: 342af289 (recursive structured simulation now includes compiler-derived generated lazy-cache hits and non-heap misses)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 80 hash e8748da368d4c09e; forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); make talos-setup (a01d01c); make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: Ready for prompt integration on main. Base 745610b0; functional head 342af289; containing mailbox commit is resolved from wasm/talos-runtime.
-next: After integration, rebase and connect the first selected production case node to the recursive structured theorem. Heap-valued cache misses remain behind the reachability-sensitive ordinary-token/entry-transport boundary and should not block independent case/effect widening.
+handoff: none; the lazy-cache slice landed on main at 64f79c0b and the lane is active on the next proof family.
+next: Connect erased default-only source case selection to the recursive structured theorem as the first production case node: one exact source step, a zero-step target path over the compiler-identical selected branch, and unchanged entry-relative resources. Heap-valued cache misses remain behind the reachability-sensitive ordinary-token/entry-transport boundary and do not block this widening.
 ```
