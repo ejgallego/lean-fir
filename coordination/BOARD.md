@@ -15,6 +15,45 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-RECURSIVE-STACK`.
+- Integration owner: `wasm-proof`; this lease adds the recursive saved-frame
+  component required by the certificate-free finite-prefix simulation.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `414c68cd` after the
+  repeated-child release-fixture acceptance.
+- Published stack: active-slice record `a223642b`, functional proof head
+  `3a0508ae`, and clean ready mailbox `79fb8347`.
+- Accepted proof: `ConcreteStructuredFrameRel` recursively relates suspended
+  source binds to the exact generated direct-call frame or saturated
+  call-plus-matcher-label protocol. The head carries the caller's expected ABI
+  kind and every saved caller is related to the current runtime, concrete
+  store, and witness rather than a frozen entry heap. The complete stack
+  transports across accumulated runtime effects and classifies a related
+  finite-prefix yield as terminal, direct-bind, or saturated-bind control
+  without a callee evaluation or termination premise.
+- Control closure: `ConcreteStructuredStackRel` joins the frame evidence to all
+  ten local compiler-control protocols. Stack-lifted theorems cover named and
+  saturated call staging, generated entry, and both return protocols.
+  Saturated entry additionally transports older callers across the real
+  matcher/closure-consumption update and establishes the generated callee's
+  cache frame; callers provide no target program, path, or selection
+  certificate.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: Lean Beam update/sync/save with zero errors; forced direct build
+  of `FirTalos.ConcreteStructuredSimulation`; `git diff --check` before and
+  after rebase; Talos setup at `a01d01c`; all 3,133 Talos jobs; and complete
+  post-rebase `make check` with Lean examples and interpreter/Wasm validation.
+  No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next adds the
+  parallel resource stack and source-only pointwise admission invariant,
+  preserving fact maps, allocation budget, closure ABI, and admission at each
+  successor without wrapping the terminating hereditary evaluator. Target-only
+  case-label control and the relation-wide `advance` assembly follow.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-REPEATED-CHILD-RELEASE-S5B`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take
   the integration role when needed.
