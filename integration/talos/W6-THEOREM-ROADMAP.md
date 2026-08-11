@@ -1297,9 +1297,14 @@ acceptance tests pass.
      `getTag` test, the concrete host contract supplies its tag, and a five-step
      target prefix enters the compiled arm beneath a saved label frame. After
      recursively executing that arm, one structured `returnLabel` step restores
-     the enclosing frames. The current fragment makes its empty join environment
-     explicit. Subsequent slices connect ordered object and scalar case chains,
-     effects, saturated closure calls, heap-valued cache misses, and target-only
+     the enclosing frames. The first ordered chain is recursive as well: two
+     constructor tests followed by a default cover a first hit, a second hit
+     after one failed comparison, and the default after two failed comparisons.
+     The exact path retains one generated label per executed test and discharges
+     all of them after recursively executing the selected branch. The current
+     fragment makes its empty join environment explicit. Subsequent slices
+     generalize object chains, connect scalar chains and effects, and add
+     saturated closure calls, heap-valued cache misses, and target-only
      label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
