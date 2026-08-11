@@ -102,3 +102,29 @@ bounds; the adapter retains one scene below a checkpoint, transports binary64
 coordinates bit-exactly, supports production and diagnostic queries, copies
 results, and rewinds scratch. Smoke covers 301 fixture queries and 10,000
 flat-frontier queries.
+
+## Illuminate request — spatial HitScene package (2026-08-11)
+
+Illuminate requests the missing spatial-FIR cell in its 2 by 2 HitScene
+comparison. The complete, source-pinned handoff is published on
+`ejgallego/illuminate` branch `feat/vir-hit-scene` at commit
+`c8d321721262b5987226ae9626abf5ca3e1dfe9b`:
+
+```text
+/home/egallego/lean/illuminate/.worktrees/vir-hit-scene/
+  FIR_SPATIAL_HIT_SCENE_HANDOFF.md
+```
+
+Compile the real `Illuminate.SpatialHitScene.ofHitScene` and
+`Illuminate.SpatialHitScene.query` declarations from the exact Illuminate
+source revision and hashes in that handoff. Spatial preparation must execute
+inside compiled Lean once when the retained scene is created; do not reproduce
+the algorithm in the browser adapter. Keep the accepted reference HitScene v2
+package immutable and publish this as a separately versioned, zero-import,
+module-owned package with untimed production and timed diagnostic query paths.
+
+Consumer acceptance is the shared 1,009-query oracle, bit-exact binary64
+coordinates, concurrent-scene isolation, idempotent disposal, and a flat
+10,000-query memory frontier. Return paired measurements sufficient to compare
+reference/spatial under both VIR and FIR. Keep the work on a named
+`ejgallego/lean-fir` branch and do not open a PR.
