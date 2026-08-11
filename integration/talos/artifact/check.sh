@@ -23,6 +23,12 @@ lake exe fir-wasm-artifact resident-allocator _build/resident-allocator.wasm
 node run-resident-allocator.mjs _build/resident-allocator.wasm
 lake exe fir-wasm-artifact resident-arrays _build/resident-arrays.wasm
 node run-resident-arrays.mjs _build/resident-arrays.wasm
+lake exe fir-wasm-artifact resident-byte-arrays \
+  _build/resident-byte-arrays.wasm
+node run-resident-byte-array.mjs _build/resident-byte-arrays.wasm
+lake exe fir-wasm-artifact resident-fixed-width \
+  _build/resident-fixed-width.wasm
+node run-resident-fixed-width.mjs _build/resident-fixed-width.wasm
 lake exe fir-wasm-artifact resident-constructors \
   _build/resident-constructors.wasm
 node run-resident-constructors.mjs _build/resident-constructors.wasm

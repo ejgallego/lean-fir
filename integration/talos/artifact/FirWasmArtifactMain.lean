@@ -3,9 +3,11 @@ import Fir.Wasm.Emit.Manifest
 import Fir.Wasm.Emit.ResidentAllocator
 import Fir.Wasm.Emit.ResidentArray
 import Fir.Wasm.Emit.ResidentCache
+import Fir.Wasm.Emit.ResidentByteArray
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentFallback
+import Fir.Wasm.Emit.ResidentFixedWidth
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentBigNumeric
@@ -104,6 +106,34 @@ def emitResidentArrays (path : System.FilePath) : IO Unit := do
   IO.FS.writeFile manifestPath
     Fir.Wasm.Emit.ResidentArray.manifest.compress
   IO.println s!"resident-arrays: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
+def emitResidentByteArrays (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentByteArray.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident ByteArray encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentByteArray.manifest.compress
+  IO.println
+    s!"resident-byte-arrays: wrote {bytes.size} bytes to {path} and {manifestPath}"
+
+def emitResidentFixedWidth (path : System.FilePath) : IO Unit := do
+  let module ← IO.ofExcept <|
+    Fir.Wasm.Emit.ResidentFixedWidth.residentExampleModule
+  let bytes ← IO.ofExcept <| (Fir.Wasm.Emit.encode module).mapError fun error =>
+    s!"resident fixed-width encoding failed: {repr error}"
+  if let some parent := path.parent then
+    IO.FS.createDirAll parent
+  IO.FS.writeBinFile path bytes
+  let manifestPath : System.FilePath := path.toString ++ ".json"
+  IO.FS.writeFile manifestPath
+    Fir.Wasm.Emit.ResidentFixedWidth.manifest.compress
+  IO.println
+    s!"resident-fixed-width: wrote {bytes.size} bytes to {path} and {manifestPath}"
 
 def emitResidentConstructors (path : System.FilePath) : IO Unit := do
   let module ← IO.ofExcept <|
@@ -352,6 +382,8 @@ def usage : String :=
     "       fir-wasm-artifact resident-memory-surface <output.wasm>\n" ++
     "       fir-wasm-artifact resident-allocator <output.wasm>\n" ++
     "       fir-wasm-artifact resident-arrays <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-byte-arrays <output.wasm>\n" ++
+    "       fir-wasm-artifact resident-fixed-width <output.wasm>\n" ++
     "       fir-wasm-artifact resident-constructors <output.wasm>\n" ++
     "       fir-wasm-artifact resident-closure-allocation <output.wasm>\n" ++
     "       fir-wasm-artifact resident-scalar-box <output.wasm>\n" ++
@@ -393,6 +425,12 @@ def main (args : List String) : IO UInt32 := do
         return 0
     | ["resident-arrays", output] =>
         emitResidentArrays output
+        return 0
+    | ["resident-byte-arrays", output] =>
+        emitResidentByteArrays output
+        return 0
+    | ["resident-fixed-width", output] =>
+        emitResidentFixedWidth output
         return 0
     | ["resident-constructors", output] =>
         emitResidentConstructors output

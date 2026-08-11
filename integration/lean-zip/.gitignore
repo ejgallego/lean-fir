@@ -1,0 +1,5 @@
+/.beam/
+/.lake/
+/_build/
+/.lean-zip
+/.zip-common

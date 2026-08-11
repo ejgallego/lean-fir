@@ -7,6 +7,12 @@ import {
   checkFetchedResidentAllocator,
 } from "./resident-allocator-client.mjs";
 import {
+  checkFetchedResidentByteArray,
+} from "./resident-byte-array-client.mjs";
+import {
+  checkFetchedResidentFixedWidth,
+} from "./resident-fixed-width-client.mjs";
+import {
   checkFetchedResidentConstructors,
 } from "./resident-constructor-client.mjs";
 import {
@@ -69,6 +75,8 @@ try {
     checkFetchedResidentGlobal("./_build/resident-global.wasm"),
     checkFetchedResidentMemorySurface("./_build/resident-memory-surface.wasm"),
     checkFetchedResidentAllocator("./_build/resident-allocator.wasm"),
+    checkFetchedResidentByteArray("./_build/resident-byte-arrays.wasm"),
+    checkFetchedResidentFixedWidth("./_build/resident-fixed-width.wasm"),
     checkFetchedResidentConstructors("./_build/resident-constructors.wasm"),
     checkFetchedResidentClosureAllocation(
       "./_build/resident-closure-allocation.wasm",

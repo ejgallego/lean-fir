@@ -211,8 +211,9 @@ private def installBinding (functions : Array Function) (binding : Binding) :
         throw (.reservedDeclaration binding.name)
       return functions
 
-/-- Internalize exactly the supported small-scalar operations present. -/
-def internalizeAvailable (module : Module) : Except LinkError Module := do
+/-- Internalize an explicit dependency-closed set of small-scalar operations. -/
+def internalizeOperations (module : Module) (operations : Array RuntimeOp) :
+    Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
@@ -232,7 +233,6 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
     unless imports[0]!.signature == {
         params := #[.uint32, .uint32], results := #[.uint8] } do
       throw (.incompatibleExternal `UInt32.decEq)
-  let operations := module.runtimeOperations.filter (runtimeName? · |>.isSome)
   let bindings ← operations.mapM fun operation => do
     let some name := runtimeName? operation |
       throw .unsupportedOperation
@@ -263,6 +263,11 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
+
+/-- Internalize exactly the supported small-scalar operations present. -/
+def internalizeAvailable (module : Module) : Except LinkError Module :=
+  internalizeOperations module <|
+    module.runtimeOperations.filter (runtimeName? · |>.isSome)
 
 private def roundtripName : Name := `resident_scalar_box_uint8_roundtrip
 private def unboxUInt32ExampleName : Name := `resident_scalar_unbox_uint32

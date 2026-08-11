@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.ResidentArray
 import Fir.Wasm.Emit.ResidentBigNumeric
+import Fir.Wasm.Emit.ResidentByteArray
 import Fir.Wasm.Emit.ResidentCache
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
@@ -7,6 +8,7 @@ import Fir.Wasm.Emit.ResidentDeadCode
 import Fir.Wasm.Emit.ExternalRuntime
 import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentFloat
+import Fir.Wasm.Emit.ResidentFixedWidth
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentMutation
 import Fir.Wasm.Emit.ResidentNatMod
@@ -50,6 +52,7 @@ inductive Step where
   | numericStrict
   | numericAvailable
   | bigNumeric
+  | fixedWidthAvailable
   | stringOperations
   | stringOperationsAvailable
   | stringLiterals
@@ -59,6 +62,7 @@ inductive Step where
   | floatAvailable
   | arraysStrict
   | arraysAvailable
+  | byteArraysAvailable
   | natModStrict
   | natModAvailable
   | natShiftAvailable
@@ -151,6 +155,9 @@ private def applyStep (step : Step) (module : Module) :
       transform "available Nat/Int operations" ResidentNumeric.internalizeAvailable module
   | .bigNumeric =>
       transform "arbitrary-precision Nat/Int operations" ResidentBigNumeric.internalize module
+  | .fixedWidthAvailable =>
+      transform "available fixed-width operations"
+        ResidentFixedWidth.internalizeAvailable module
   | .stringOperations =>
       transform "String operations" ResidentString.internalize module
   | .stringOperationsAvailable =>
@@ -166,6 +173,9 @@ private def applyStep (step : Step) (module : Module) :
   | .arraysStrict => transform "Array operations" ResidentArray.internalize module
   | .arraysAvailable =>
       transform "available Array operations" ResidentArray.internalizeAvailable module
+  | .byteArraysAvailable =>
+      transform "available ByteArray operations"
+        ResidentByteArray.internalizeAvailable module
   | .natModStrict => transform "Nat.mod" ResidentNatMod.internalize module
   | .natModAvailable =>
       transform "available Nat.mod" ResidentNatMod.internalizeAvailable module
@@ -270,6 +280,25 @@ def commonSteps : Array Step := #[
   .cacheSets,
   .scalarBoxesAvailable]
 
+/--
+The common physical prefix specialized to the runtime operations that are
+actually present in one lowered module. `getTag` and `isShared` each install a
+single exact runtime operation and therefore deliberately fail when that
+operation is absent; the remaining common families already internalize every
+matching operation and are valid no-ops on a narrow closure.
+
+This operation-derived prefix lets generic consumers link small source
+closures without maintaining application-specific helper lists. The fixed
+`commonSteps` value remains the accepted policy for packages whose reviewed
+closure contains both singleton operations.
+-/
+def availableCommonSteps (module : Module) : Array Step :=
+  commonSteps.filter fun step =>
+    match step with
+    | .getTag => module.runtimeOperations.contains .getTag
+    | .isShared => module.runtimeOperations.contains .isShared
+    | _ => true
+
 /-- Exact resident pipeline used by the accepted `Std.Format.prettyM` closure. -/
 def prettyFormatPolicy : Policy := {
   steps := commonSteps ++ #[
@@ -297,9 +326,11 @@ names and replaces per-application retained-external lists.
 def closedApplicationExternalDeclarations : Array Name :=
   let declarations :=
     ResidentNumeric.externalDeclarations ++
+    ResidentFixedWidth.externalDeclarations ++
     ResidentFloat.externalDeclarations ++
     ExternalRuntime.mathDeclarations ++
     ResidentArray.availableExternalDeclarations ++
+    ResidentByteArray.externalDeclarations ++
     #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
     ResidentUSize.externalDeclarations ++
     ResidentString.availableExternalDeclarations ++
@@ -310,24 +341,41 @@ def closedApplicationExternalDeclarations : Array Name :=
 def closedApplicationRetainedExternalNames : Array String :=
   closedApplicationExternalDeclarations.map Name.toString
 
+/-- Available external-helper families in their checked dependency order. -/
+def closedApplicationFamilySteps : Array Step := #[
+  .numericAvailable,
+  .bigNumeric,
+  .fixedWidthAvailable,
+  .floatAvailable,
+  .arraysAvailable,
+  .byteArraysAvailable,
+  .natModAvailable,
+  .natShiftAvailable,
+  .usizeAvailable,
+  .stringOperationsAvailable,
+  .stringLiterals,
+  .fallbacksAvailable,
+  .directSelfTailCallsAvailable]
+
 /--
 Runtime policy for a closed structured application. It links only the
 available operations in the larger scalar families, then retains the requested
 source entries plus the low-level arena surface.
 -/
 def closedApplicationPolicy (sourceExports : Array Name) : Policy := {
-  steps := commonSteps ++ #[
-    .numericAvailable,
-    .bigNumeric,
-    .floatAvailable,
-    .arraysAvailable,
-    .natModAvailable,
-    .natShiftAvailable,
-    .usizeAvailable,
-    .stringOperationsAvailable,
-    .stringLiterals,
-    .fallbacksAvailable,
-    .directSelfTailCallsAvailable]
+  steps := commonSteps ++ closedApplicationFamilySteps
+  publicExports := some (sourceExports ++ allocatorExports) }
+
+/--
+Generic closed-application policy derived from the lowered source module.
+Unlike `closedApplicationPolicy`, it does not require singleton common runtime
+operations that the source closure never emitted. Helper-family selection is
+still explicit and fail-closed; only absence of those exact operations removes
+their otherwise-strict linking steps.
+-/
+def closedApplicationAvailablePolicy (module : Module)
+    (sourceExports : Array Name) : Policy := {
+  steps := availableCommonSteps module ++ closedApplicationFamilySteps
   publicExports := some (sourceExports ++ allocatorExports) }
 
 /--
@@ -342,6 +390,22 @@ def closedApplicationFrontierPolicy (sourceExports : Array Name) : Policy := {
 #guard !hasDuplicates prettyFormatPolicy.steps
 
 #guard !hasDuplicates (closedApplicationPolicy #[`entry]).steps
+
+private def emptyPolicyProbeModule : Module := {
+  imports := #[]
+  functions := #[]
+  exports := #[]
+  initializers := #[]
+  runtimeOperations := #[] }
+
+#guard (availableCommonSteps emptyPolicyProbeModule).contains .getTag == false
+
+#guard (availableCommonSteps { emptyPolicyProbeModule with
+  runtimeOperations := #[.getTag, .isShared]
+}).take 2 == #[.getTag, .isShared]
+
+#guard !hasDuplicates
+  (closedApplicationAvailablePolicy emptyPolicyProbeModule #[`entry]).steps
 
 #guard (closedApplicationPolicy #[`entry]).publicExports ==
   some (#[`entry] ++ allocatorExports)
