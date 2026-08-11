@@ -6,20 +6,20 @@ owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
 state: ready
-base: 71890121f98eec5eeae171fbb1c4501b115537f7 on main
-functional-head: 95ccd21c99867b33812e879e371ac7a10c85e74c
-contract-base: 8bcd73260d7cf18d2915e2aaee0a333ed6072c8c on main
+base: 348977fea0f44694200e2a2c141ce80a7c377baf on main
+functional-head: c780c94b724b61aba8be222fc6ceb3bc454e3ef0
+contract-base: 348977fea0f44694200e2a2c141ce80a7c377baf on main; consumes the accepted concrete closure-projection refinement and changes no shared contract
 clean-at-update: true
-slice: Accepted Verso Flat publication plus the first principled complete-HTML closure probe. Flat is pinned to published Verso commit 3dbc9ef4 and its immutable package passed deterministic, Node, Chrome, and Verso consumer gates. HTML captures the real formatHtmlForRuntime through module-wise postponed final LCNF; it emits a stable base module and fails closed at the exact precompiled-core boundary instead of adding host fallbacks or copying semantics into FIR
-files: integration/verso-flat/verso-source.json; integration/verso-html/{lakefile.lean,lake-manifest.json,lean-toolchain,VersoFirHtml.lean,VersoFirHtml/Compile.lean,Emit.lean,README.md,verso-source.json}; bugs/FIR-BUG-impure-none-generated-external-source-ancestor.md
-contracts: no shared Lean semantics, symbolic Wasm surface, concrete layout/runtime, resident-helper signature, or existing package API changed. Flat keeps fir-prettyM-package-metadata-v2 and fir.prettyM.flat.browser/v1. The prospective HTML compiler descriptor establishes the physical entry ABI as [tobject,object,tobject,tobject,tobject] -> object; Array TaggedAnnotation is physically object
-checks: Lean Beam update/sync/save for VersoFirHtml.Compile and VersoFirHtml passed with zero diagnostics; Emit reached the recorded expected fail-closed linker diagnostic; focused module-wise Verso source build passed; exact HTML base identity repeated after rebase (32407 bytes, SHA-256 6befd7de55f0c6044104a43b9b8ffa9b4ca25009f3871b66155bc1a7dcb41917, 52 external-name inventory SHA-256 1d1546f915150586a44c631b8e32baa966fc5abf8a1fb905dc20bc7f8a06d1bb); git diff --check passed; final post-rebase make check passed (642 unique cases, 1844/1844 comparisons, zero findings, 127 active bug cards); make talos-setup retained Talos a01d01c and final post-rebase make talos-check passed (3133 jobs); bash integration/talos/artifact/check.sh passed; VERSO_ROOT=/tmp/verso-flat-published FIR_BROWSER=google-chrome bash integration/verso-flat/check.sh passed deterministic double publication, checksums, 9 native/Wasm cases, 1 MiB UTF-8, cold stack shapes, 32 repeats, timing/malformed checks, Verso validator, and Chrome smoke
-bug-cards: FIR-BUG-impure-none-generated-external-source-ancestor (candidate; exact HTML reproduction updated)
-blockers: HTML publication requires the Verso owner to make the HTML source closure self-contained in its postponed module: explicit specialized HtmlM/dictionary and chunk join plus a source-local specialized escaping loop instead of precompiled generic StateT/String.join/String.replace declarations
-artifacts: accepted Flat package integration/verso-flat/_build/verso-flat-packages/a4dce92bc6e1-3dbc9ef4fa5a-7d16ade417a24f50058e; 154635-byte Wasm SHA-256 60a70d63a38d230f37c04e1a88bad264a69cd9b23215b1ba859bd6dd125f0b0e; zero imports; exact package FIR source commit remotely reachable at origin/publish-verso-flat-a4dce92b. HTML has no package claim; diagnostic base only is 32407 bytes with 498 FIR operations and 52 Lean externals
-measurements: accepted Flat closure remains 90 captured declarations, 64 source functions, 504 resident helpers, 568 complete functions, zero lazy initializers, and three resident globals. Module-wise Verso source replay takes 2.6 seconds on the warm FIR worktree; the abandoned single-unit HTML capture did not finish after 15 minutes
-handoff: integrate the three rebased W7 commits through functional head 95ccd21c; Flat is complete, accepted, and remotely reproducible; preserve the HTML diagnostic as a fail-closed source-contract handoff
-next: wait for the Verso HTML source refactor, then publish the zero-import HTML package/adapter and run its Node/Chrome/Verso-validator gates; otherwise resume the parked object-carrier/provenance interface adaptation
+slice: Publish Illuminate HitScene v2 from exact Illuminate revision 88dcfee895a55e804641bff485024cffec1b5419. Compile the real Illuminate.HitScene.query entry, transfer the v2 prepared path bounds and bit-exact coordinates, expose production and diagnostic query paths, retain one scene below a per-instance checkpoint, and publish a deterministic zero-import module. Also consume the already accepted W6 closure-projection refinement in the W7 concrete host and refresh the exact ByteArray blocker inventory for the landed closure-multiplicity fixtures
+files: integration/illuminate-hit-scene/{CLIENT_HANDOFF.md,README.md,closure-contract.json,illuminate-hit-scene-browser-adapter.mjs,illuminate-source.json,package-smoke.mjs,package.mjs}; bugs/FIR-BUG-wasm-none-hitscene-v2-path-scalar-layout.md; integration/talos/artifact/{concrete-host.mjs,concrete-validation-case.mjs,test-concrete-closure-dispatch.mjs}
+contracts: no shared Lean semantics, symbolic Wasm surface, concrete layout/runtime, or resident-helper signature changed. Package input layout advances to lean-4.32-Illuminate.HitScene/v2; browser API remains fir.illuminate-hit-scene.browser/v1 and ownership remains fir.illuminate-hit-scene.persistent-checkpoint/v1. The publisher now forces Lake reconfiguration at both external-source build and final-LCNF capture. The concrete host mirrors the existing directional AbiKind.refines rule and reads captures at their immutable descriptor kind
+checks: Lean Beam 0.2.0-beta refresh/sync source-view probe passed with zero diagnostics and the temporary probe was removed; focused Lake external-source build passed with --reconfigure; FIR_HIT_SCENE_REQUIRE_REPEAT=1 publication passed fresh frontier and complete-link determinism; package SHA256SUMS and Node smoke passed 301 fixture queries, 10000 flat-frontier queries, independent instances, disposal/error paths, production/diagnostic parity, and bit-exact coordinates; node integration/talos/artifact/test-concrete-closure-dispatch.mjs passed exact object/tagged-to-tobject widening and reverse-direction rejection; git diff --check passed; final make check passed with 122 harness tests, 648 unique cases, 639/639 native-LCNF, 9/9 direct-machine, 639/639 native-LCNF-V8, 1926/1926 aggregate comparisons, zero findings, and 129 active bug cards; make talos-check passed all 3133 jobs on Talos a01d01c; bash integration/talos/artifact/check.sh passed, including 600/639 concrete product executions and the exact 39-case ByteArray blocker inventory
+bug-cards: FIR-BUG-wasm-none-hitscene-v2-path-scalar-layout fixed; consumed fixed FIR-BUG-wasm-none-closure-projection-kind-refinement; refreshed the exact inventory governed by fixed FIR-BUG-wasm-none-concrete-blocker-inventory-validation-growth
+blockers: none for W7 publication. Illuminate consumer acceptance remains downstream and intentionally runs in its own worktree
+artifacts: immutable package integration/illuminate-hit-scene/_build/illuminate-hit-scene-75c51b9f3d04fbcd; canonical pointer integration/illuminate-hit-scene/_build/illuminate-hit-scene-current; package SHA-256 75c51b9f3d04fbcd3f348f0cfd71e8e9bdfe5e1db027eb875f1305d888208a3b; complete Wasm 46089 bytes SHA-256 06708aac339cd7f6f7fcbe7c973dc29125e263925635d0311a0571d4428e97b7; base Wasm 30965 bytes SHA-256 366245b7876d1d719632fcdd0b31e0330c743876fa9f6264e966f568bcec5027; frontier 73323 bytes SHA-256 fa3dd1aa15bbd66cdec287bb449861935c87d2ab61a9c82fedf09c2adadcff33; zero function/memory imports; exact exports Illuminate.HitScene.query, Illuminate.HitScene.query._fir_bit_exact, fir_heap_frontier, fir_heap_set_frontier, fir_heap_rewind, fir_heap_alloc, and module-owned memory
+measurements: 162 captured source declarations, 34 reviewed externals, 444 frontier functions, 15 standard Float/libm operations before complete linking, zero runtime operations after linking; encoded fixture scene 4464 bytes below checkpoint 70000; 10000 post-checkpoint queries retain a flat frontier
+handoff: integrate the two rebased W7 commits through functional head c780c94b724b61aba8be222fc6ceb3bc454e3ef0 and publish the immutable package to Illuminate. No PR is requested
+next: Illuminate runs ILLUMINATE_FIR_HIT_SCENE_DIR=/home/egallego/lean/fir/.worktrees/wasm-generation/integration/illuminate-hit-scene/_build/illuminate-hit-scene-75c51b9f3d04fbcd npm run accept:fir-hit-scene; after acceptance, treat ROOT-FIR-20260811-001..003 as secondary generator/verifier/toolkit work
 ```
 
 ## Verso Flat end-to-end probe (2026-08-09)
@@ -87,15 +87,18 @@ median, and p95. Illuminate will map detailed mode off/on to the new
 fast/timed methods and run the consumer acceptance suite. Keep work on
 a named `ejgallego/lean-fir` branch and do not open a PR.
 
-## Illuminate prepared HitScene package (2026-08-10)
+## Illuminate HitScene v2 package (2026-08-11)
 
-The request is complete at functional head `5a4fc4e0`. The immutable package
-pointer is `integration/illuminate-hit-scene/_build/illuminate-hit-scene-current`;
-its complete Wasm is 45,595 bytes with SHA-256
-`960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6`,
-zero imports, six intended function exports plus module-owned memory, and a
-clean exact-source manifest. The adapter retains one scene per instance below
-a checkpoint, transports coordinates bit-exactly, copies results, and rewinds
-query scratch. Its acceptance smoke covers 301 oracle queries and 10,000
-flat-frontier repeats. W6 refinement of the new executable ownership helper is
-an independent proof follow-up and does not block this generation artifact.
+The exact-source v2 package is complete at functional head `c780c94b`. Its
+immutable directory is
+`integration/illuminate-hit-scene/_build/illuminate-hit-scene-75c51b9f3d04fbcd`;
+the canonical pointer resolves to that directory. The 46,089-byte complete
+Wasm has SHA-256
+`06708aac339cd7f6f7fcbe7c973dc29125e263925635d0311a0571d4428e97b7`,
+zero imports, six function exports plus module-owned memory, and deterministic
+fresh frontier/complete-link evidence. Layout
+`lean-4.32-Illuminate.HitScene/v2` transfers the real source's prepared path
+bounds; the adapter retains one scene below a checkpoint, transports binary64
+coordinates bit-exactly, supports production and diagnostic queries, copies
+results, and rewinds scratch. Smoke covers 301 fixture queries and 10,000
+flat-frontier queries.
