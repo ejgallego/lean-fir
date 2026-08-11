@@ -7,7 +7,7 @@ Illuminate.HitScene.query : HitScene → Float → Float → HitSceneResult
 ```
 
 from clean Illuminate commit
-`af088e313eaade90be100aeaf63ddac79a8c1710`. It publishes a complete,
+`88dcfee895a55e804641bff485024cffec1b5419`. It publishes a complete,
 zero-import Wasm module and a browser/Node adapter; it does not copy the
 geometry algorithm, compile JSON inside Lean, or call JavaScript math helpers.
 
@@ -36,8 +36,11 @@ adapter.disposeHitScene(created.scene);
 
 `encodedScene` is Illuminate's canonical encoded HitScene JSON string. The
 adapter parses and encodes it once into one module-owned Wasm instance per
-scene. Coordinates cross the boundary as exact binary64 bits. No raw Wasm
-address escapes.
+scene. Input layout `lean-4.32-Illuminate.HitScene/v2` retains each path's
+prepared `left`, `right`, `bottom`, and `top` Float bounds alongside its
+geometry; the adapter transfers those values and never recomputes them.
+Coordinates cross the boundary as exact binary64 bits. No raw Wasm address
+escapes.
 
 The immutable scene graph lies below a persistent checkpoint. Query results
 are copied to JavaScript; query scratch is cleared and rewound on success and
@@ -52,7 +55,7 @@ Create the clean source view once:
 ```sh
 git -C /home/egallego/lean/illuminate worktree add --detach \
   /tmp/illuminate-hit-scene-pinned \
-  af088e313eaade90be100aeaf63ddac79a8c1710
+  88dcfee895a55e804641bff485024cffec1b5419
 ```
 
 Install the repository-pinned Emscripten toolchain, then publish:
@@ -80,6 +83,11 @@ FIR_HIT_SCENE_REQUIRE_REPEAT=1 \
 publication must use fresh generation. `FIR_ALLOW_DIRTY_PACKAGE=1` exists for
 diagnosis and must not be used for a release handoff.
 
+The publisher passes Lake `--reconfigure` before both source-view compilation
+and final-LCNF capture. This prevents a prior external source root embedded in
+Lake's elaborated configuration cache from supplying stale Illuminate module
+artifacts after the pinned revision changes.
+
 The publisher writes an immutable directory named by the first 16 hex digits
 of the complete package-inventory SHA-256, runs its packaged smoke test,
 verifies every checksum, and atomically moves
@@ -99,8 +107,8 @@ The package smoke checks:
 - malformed input rejection; and
 - complete package checksums.
 
-The closure contains 159 source declarations and 34 reviewed externals. The
-resident frontier contains 439 functions and 15 C/libm Float operations before
+The closure contains 162 source declarations and 34 reviewed externals. The
+resident frontier contains 444 functions and 15 C/libm Float operations before
 the final merge. Exact counts, hashes, sizes, and inventories are ratcheted in
 `closure-contract.json` and reproduced in package `BUILD.json`.
 

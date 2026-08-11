@@ -29,10 +29,14 @@ smoke.mjs
 
 The compiled entry is the real
 `Illuminate.HitScene.query : HitScene → Float → Float → HitSceneResult` from
-clean Illuminate commit `af088e313eaade90be100aeaf63ddac79a8c1710`.
+clean Illuminate commit `88dcfee895a55e804641bff485024cffec1b5419`.
 The final module is self-contained, owns its memory, has zero imports, and
 exports only the structured entry, its bit-exact-coordinate facade, four heap
 operations, and memory.
+
+The admitted input capability is `lean-4.32-Illuminate.HitScene/v2`. Its path
+constructor includes the four prepared Float bounds emitted by Illuminate;
+v1 packages and scenes are incompatible and must not be staged.
 
 Import either adapter constructor:
 

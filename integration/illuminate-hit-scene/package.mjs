@@ -111,10 +111,12 @@ mkdirSync(buildDirectory, { recursive: true });
 const priorFrontierHash = existsSync(frontierStem)
   ? sha256(readFileSync(frontierStem)) : null;
 if (process.env.FIR_HIT_SCENE_REUSE_FRONTIER !== "1") {
-  run("lake", ["--keep-toolchain", `-KilluminateRoot=${illuminateRoot}`,
-    "build", "IlluminateFirHitScene.Compile"], { capture: false });
-  run("lake", ["--keep-toolchain", `-KilluminateRoot=${illuminateRoot}`,
-    "env", "lean", "-DmaxHeartbeats=0", "Emit.lean"], { capture: false });
+  run("lake", ["--keep-toolchain", "--reconfigure",
+    `-KilluminateRoot=${illuminateRoot}`, "build",
+    "IlluminateFirHitScene.Compile"], { capture: false });
+  run("lake", ["--keep-toolchain", "--reconfigure",
+    `-KilluminateRoot=${illuminateRoot}`, "env", "lean",
+    "-DmaxHeartbeats=0", "Emit.lean"], { capture: false });
 }
 const frontierHash = sha256(readFileSync(frontierStem));
 if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
@@ -168,7 +170,15 @@ const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
 assert.deepEqual(imports, []);
-assert.equal(exports.filter(({ kind }) => kind === "memory").length, 1);
+assert.deepEqual(exports, [
+  { name: "Illuminate.HitScene.query", kind: "function" },
+  { name: "Illuminate.HitScene.query._fir_bit_exact", kind: "function" },
+  { name: "fir_heap_frontier", kind: "function" },
+  { name: "fir_heap_set_frontier", kind: "function" },
+  { name: "fir_heap_rewind", kind: "function" },
+  { name: "fir_heap_alloc", kind: "function" },
+  { name: "memory", kind: "memory" },
+]);
 assertOptional(frontierInventory.capturedDeclarations,
   expectedClosure.capturedDeclarations, "captured declaration count");
 assertOptional(frontierInventory.reviewedExternalsBeforeLink,
@@ -207,6 +217,11 @@ const build = {
     illuminate: {
       repository: sourcePin.repository,
       ...illuminate,
+      sourceView: {
+        mechanism: "Lake external source root",
+        reconfiguredBeforeCapture: true,
+        consumedSourceBuildArtifacts: false,
+      },
       relevantFiles: Object.entries(sourcePin.files).map(([path, digest]) =>
         ({ path, sha256: digest })),
     },

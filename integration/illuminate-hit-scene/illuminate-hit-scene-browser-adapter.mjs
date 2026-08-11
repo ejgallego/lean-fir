@@ -3,7 +3,7 @@
 export const ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION =
   "fir.illuminate-hit-scene.browser/v1";
 export const ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.HitScene/v1";
+  "lean-4.32-Illuminate.HitScene/v2";
 export const ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION =
   "fir.illuminate-hit-scene.persistent-checkpoint/v1";
 
@@ -264,6 +264,10 @@ class Encoder {
         return this.ctor(0, [this.pathData(value.data, `${label}.data`)],
           scalarBytes([
             requireFloat(value.strokeWidth, `${label}.strokeWidth`),
+            requireFloat(value.left, `${label}.left`),
+            requireFloat(value.right, `${label}.right`),
+            requireFloat(value.bottom, `${label}.bottom`),
+            requireFloat(value.top, `${label}.top`),
           ], [requireBoolean(value.hasFill, `${label}.hasFill`)]), label);
       case "bounds":
         return this.ctor(1, [], scalarBytes([

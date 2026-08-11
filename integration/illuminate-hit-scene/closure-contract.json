@@ -1,10 +1,10 @@
 {
-  "capturedDeclarations": 159,
+  "capturedDeclarations": 162,
   "reviewedExternalsBeforeLink": 34,
-  "baseWasmBytes": 30275,
-  "frontierFunctions": 439,
-  "frontierFunctionSha256": "2d52c283a1f33ca4d9efebd5e297476bf07b3fe8320bc6edf1aaf88e8ee37253",
+  "baseWasmBytes": 30965,
+  "frontierFunctions": 444,
+  "frontierFunctionSha256": "e73366a126cc8c71666a1fce54c82b98f52d5d26c0318dac52ecd15127123bf7",
   "frontierImports": 15,
-  "frontierImportSha256": "88bd7d8220d9cedd6938dbf378c46b96c9abdb095b22825e6c7b1699394a5dd7",
-  "completeWasmBytes": 45621
+  "frontierImportSha256": "3971b46725ec96dd9c422c725f4c602008ceb8d2aafe28f5a3b41e23666cea3c",
+  "completeWasmBytes": 46089
 }
