@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-SATURATED-CALL-CORE`.
+- Integration owner: `wasm-proof`; this lease connects exactly saturated
+  closure calls to the nonterminating pointwise core without evaluating a
+  callee as a whole.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `bc30ac44`.
+- Published stack: active-slice record `1e39b836`, functional proof head
+  `fe962816`, and clean ready mailbox `0810738b`.
+- Local staging: state-indexed current-node admission classifies generated
+  exactly saturated calls at cost zero. One source staging step matches a
+  reflexive target path and strictly decreases `compilerStructuredControlRank`.
+- Dynamic entry: `ConcreteStructuredSaturatedCallReadyCoreRel.advance_enter`
+  derives matcher selection, closure ownership consumption, captured/new
+  argument assembly, and generated callee entry from the compiler and concrete
+  runtime contracts. It pushes the saved caller resource scope and result ABI
+  in one hereditary constructor and starts a fresh callee core.
+- Return: saturated bind pop exposes the resumed compiler focus after the exact
+  matcher-label unwind, restores the caller heap/cache/resource scope, and
+  reconstructs the caller code core. No staging, entry, or pop rule assumes
+  that the selected callee returns.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: Lean Beam update/sync/save with zero errors and three linter
+  warnings; direct `FirTalos.ConcreteStructuredSimulation` build (3,110 jobs);
+  `git diff --check`; complete `make check` including 122 interpreter tests,
+  662 unique validation cases, and 1,968/1,968 comparisons; Talos setup at
+  `a01d01c`; and all 3,133 Talos jobs. The complete gate was repeated after the
+  clean rebase. No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next assembles the
+  relation-wide one-source-step classifier/advance theorem, attaching fresh
+  local admission only after a dynamic successor is known.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-DIRECT-CALL-CORE`.
 - Integration owner: `wasm-proof`; this lease connects generated named calls
   to the nonterminating pointwise core without evaluating a callee as a whole.
@@ -2717,7 +2752,7 @@ moving global snapshot hash.
 |---|---|---|---|---|---|
 | Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
-| W6 runtime proof | W6 owner | `wasm/talos-runtime` | parked | Ready mailbox `d70ef62d`, documentation functional head `e46a5b86`, on base `14cc46ad`, synchronizes the W6.7a–g completion ladder and identifies structured terminal adequacy as the next proof boundary. | No source, proof, semantic/runtime contract, ABI, helper, or artifact changed. All 3,131 Talos jobs pass. Resume with W6.7d and stop before the larger compiler relation/rank milestone until terminal adequacy is green. |
+| W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Saturated-call pointwise core landed through ready mailbox `0810738b`, functional head `fe962816`, on base `bc30ac44`; staging, closure/matcher entry, hereditary result ABI, and caller-core pop are certificate-free and do not assume callee termination. Next assemble the relation-wide one-source-step classifier/advance theorem. | No shared contract changed. Lean Beam, the 3,110-job focused cone, full root gate, and all 3,133 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
