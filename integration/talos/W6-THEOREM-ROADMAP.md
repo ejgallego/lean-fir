@@ -1489,9 +1489,17 @@ acceptance tests pass.
      continued code, named-call ready, saturated-call ready, or returned
      control. `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining
      locality obligation explicit: fresh current-node admission is attached
-     only after the dynamic successor is known. The next slice closes the
-     ready/entry/return control states under the same outcome relation and then
-     widens admission to the established external, lazy, case, and effect laws.
+     only after the dynamic successor is known.
+     `ConcreteStructuredGlobalOutcome` existentially hides the active
+     generated function, entry anchor, and resource budget, and
+     `advance_global` lifts the pointwise code law to that module-stable type.
+     Both named and exactly saturated ready states now enter their generated
+     callees in the same global outcome from only the ordinary source step;
+     the saturated rule reconstructs exact closure consumption internally.
+     The next slice adds the suspended caller's supported-function identity to
+     the hereditary return boundary, closes direct/saturated pop under the
+     global outcome, and then widens admission to the established external,
+     lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

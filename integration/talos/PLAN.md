@@ -6085,9 +6085,15 @@ production callee row internally, returns
 `ConcreteStructuredCodeStepOutcome`, and proves strict compiler-rank descent
 for every empty target path. Continued code is admission-free;
 `withAdmission` attaches only the newly reached node's local classifier after
-that dynamic successor is known. The next boundary closes the
-ready/entry/return outcome states, then widens the same law over the already
-established external, lazy, case, and effect operations.
+that dynamic successor is known. `ConcreteStructuredGlobalOutcome` now hides
+the active generated function, entry anchor, and budget, so
+`advance_global` has a module-stable conclusion. Named and exactly saturated
+ready states take the ordinary source step into that same global outcome;
+saturated closure consumption is reconstructed from the step rather than
+supplied as a second dynamic premise. The remaining return-pop boundary must
+retain the suspended caller's supported-function identity alongside its
+resource scope, then the same law widens over the already established
+external, lazy, case, and effect operations.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
