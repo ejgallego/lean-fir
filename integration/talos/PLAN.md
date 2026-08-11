@@ -5973,10 +5973,10 @@ or target path. This remains explicitly the terminating admitted-fragment
 boundary; it is not mislabeled as W6.7f, whose ranked relation must preserve
 every finite prefix without a termination premise.
 `ConcreteStructuredControlRel` is now the first unified relation component.
-Its nine constructors cover ordinary code/yield, pure-external call-ready and
+Its ten constructors cover ordinary code/yield, pure-external call-ready and
 bind-ready states, direct-call argument-ready, callee-entry, and bind-return
-states, plus saturated-call callee-entry and matcher-unwinding bind-return
-states. One `observes` theorem discharges exact world/trace agreement for every
+states, plus saturated-call staging, callee-entry, and matcher-unwinding
+bind-return states. One `observes` theorem discharges exact world/trace agreement for every
 constructor. The external protocol is split at individual source-step
 boundaries: compiled arguments take their exact generated prefix, the imported
 call takes one target step, and the destination write takes one target step.
@@ -5991,9 +5991,18 @@ reconstructs the exact residual budget and installed-handler frame.
 compose the exact imported-call and destination-write steps. The final theorem
 matches the source's three-step external protocol against precisely the
 production argument prefix followed by two target steps, and re-enters the
-adapted continuation with the reduced frame. The pre-entry saturated-closure
-staging state now remains the missing control constructor before the unified
-relation can satisfy the per-source-step `advance` law.
+adapted continuation with the reduced frame. Saturated closure entry is now
+split at its remaining source-step boundary as well.
+`advance_saturatedCall_stage` takes the source to `.invokeValue` while the
+target path is reflexive, so the unchanged source runtime remains related to
+the unchanged concrete store. The new saturated-call-ready focus retains the
+compiler-produced dispatch. Its `advance_enter` theorem then consumes the
+closure in one source step while independently deriving the complete matcher,
+capture/argument, and generated-callee-entry target path from compiler
+adaptation plus the cache/ABI frame. It returns the evolved cache frame and
+matcher capacity/store transports, without accepting a target program, path,
+or candidate-selection certificate. The unified per-source-step `advance` law
+and whole-control structural rank are now the next proof boundary.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

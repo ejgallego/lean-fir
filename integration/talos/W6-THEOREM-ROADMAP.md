@@ -1391,7 +1391,7 @@ acceptance tests pass.
      observations. This theorem deliberately retains the source `evaluation`
      premise: it closes the exact terminating boundary but does not claim the
      prefix-general W6.7f theorem. `ConcreteStructuredControlRel` now unifies
-     nine completed code, yield, external-call, direct-call, and saturated-call
+     ten completed code, yield, external-call, direct-call, and saturated-call
      focus shapes and proves their observation obligation once. The external
      `let` is no longer a three-source-step black box:
      `advance_external_stage` stops after the exact compiler-derived argument
@@ -1407,10 +1407,17 @@ acceptance tests pass.
      `advance_call_of_budget` exposes no execution certificate, and
      `advance_call_bind_of_budget` plus `advance_external_of_budget` compose
      the exact two-step target suffix and complete three-step source protocol
-     back into ordinary compiled code. Pre-entry saturated-call staging now
-     remains before the per-step `advance` law and structural rank can be
-     assembled. Heap-valued cache misses and target-only loop unwinding remain
-     later widenings.
+     back into ordinary compiled code. The final missing saturated-call
+     boundary is now explicit too: `advance_saturatedCall_stage` matches the
+     source staging step with a reflexive target path, preserving the unchanged
+     runtime observation, and
+     `ConcreteStructuredSaturatedCallReadyFocus.advance_enter` matches closure
+     consumption with the exact compiler-derived matcher, capture/argument,
+     and generated-entry path. It returns the evolved cache frame and matcher
+     capacity/store transports needed to restore the caller after recursive
+     execution. The per-step `advance` law and whole-control structural rank
+     are now the next proof boundary. Heap-valued cache misses and target-only
+     loop unwinding remain later widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
