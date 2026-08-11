@@ -1335,10 +1335,12 @@ acceptance tests pass.
      local's ABI relation, and the concrete slot writer preserves the same
      witness and entry-relative frame. Erased object-field mutation is now
      connected through the analogous exact object-local/constant-zero/call
-     path; the zero payload is justified only by `ValueRel.erased`. Subsequent
-     slices connect `USize` and packed-scalar field mutations and add saturated
-     closure calls, heap-valued cache misses, and target-only label/loop
-     unwinding to this induction.
+     path; the zero payload is justified only by `ValueRel.erased`. `USize`
+     mutation is now connected through an exact object-local/`i64`-local/call
+     path, with the checked absolute-slot writer preserving the witness and
+     heap frontier. Subsequent slices connect packed-scalar field mutations and
+     add saturated closure calls, heap-valued cache misses, and target-only
+     label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
