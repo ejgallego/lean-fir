@@ -208,10 +208,11 @@ and fails on any deficit. Source, direct-machine, and Wasm/V8 domains are
 evaluated independently, exposing whether a conjunction has reached the real
 engine. The mechanism is backend-neutral, so a later Talos tier uses the same
 conjunctive policy rather than adding an interpreter-specific counter.
-The current plan pins 94 domains and 1,469 witnessed memberships: 46 matching
-source and V8 domains cover numeric boundaries, external families, failures,
-closures, control flow, effects, ownership, mutation, and text/byte behavior,
-while two direct-machine domains cover recursive release and reset/reuse.
+The current plan pins 183 domains and 2,027 witnessed memberships: 90 matching
+source and V8 domains cover numeric boundaries, external families, closures,
+control flow, effects, ownership, mutation, and text/byte behavior; one
+source-only domain pins retain/release behavior, while two direct-machine
+domains cover recursive release and reset/reuse.
 Relocatable index snapshots retain the exact tag-to-case attribution; current
 input verification rederives it from the content-addressed corpus evidence.
 

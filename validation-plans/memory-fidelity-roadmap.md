@@ -1,24 +1,61 @@
-# Memory-fidelity validation roadmap
+# Interpreter semantic-fidelity roadmap
 
-This roadmap narrows the validation lane's near-term priority to Lean's logical
-memory lifecycle while preserving the broader interpreter-validation goal.
-Lean native execution remains the semantic oracle, final LCNF provides the
-compiler-path ownership witness, the LCNF interpreter provides exact dynamic
-execution evidence, and compiler-generated Wasm runs in a real engine when the
-corresponding W7 surface is linked.
+This roadmap turns the validation lane's broad interpreter-validation goal into
+a prioritized semantic portfolio. Lean's logical memory lifecycle remains the
+dominant near-term track, but calls and control, effects and termination,
+floating-point computation, and aggregate/initialization behavior are explicit
+tracks rather than unmeasured future work. Lean native execution remains the
+semantic oracle, final LCNF provides the compiler-path witness, the LCNF
+interpreter provides exact dynamic execution evidence, and compiler-generated
+Wasm runs in a real engine when the corresponding W7 surface is linked.
 
-The roadmap validates logical allocation, ownership, and release. It does not
-compare physical allocator addresses or require native, LCNF, and Wasm to use
-the same heap layout.
+The memory track validates logical allocation, ownership, and release. It does
+not compare physical allocator addresses or require native, LCNF, and Wasm to
+use the same heap layout. The adjacent tracks likewise compare portable Lean
+observations, not backend accidents such as native stack addresses, JavaScript
+exception text, or allocator identity.
 
-## Progress
+## Portfolio
+
+| Track | State | Scope | Immediate move |
+| --- | --- | --- | --- |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land the prepared closure baseline, then execute S2 and S3 |
+| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Use S4 tail-call ownership as the first joint slice |
+| C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
+| D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
+| E Aggregates, erasure, and initialization | queued | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Add a compact source-generated aggregate/erasure pair without duplicating direct-machine reset tests |
+| X Evidence and real-engine promotion | continuous | Exact traces/counts, semantic domains, native attestations, retained products, and V8 execution | Promote a representative pair from every eligible track |
+
+Memory remains the default source of new fixture slices. The other tracks enter
+the queue when they close a structurally different blind spot, not to construct
+another exhaustive scalar matrix.
+
+## Coverage gap snapshot
+
+At the current 637-case source checkpoint, case counts are concentrated in
+scalar and pure-external behavior: 411 cases are tagged `scalar`, 302 `signed`,
+300 `external`, and 146 `arithmetic`. In contrast, only 16 are tagged
+`constructor`, 12 `control-flow`, three `effect`, three `recursion`, one
+`tail-control`, and one `polymorphism`. The two float-tagged cases preserve
+captured `Float32`/`Float` words but return non-floating observations; they do
+not validate floating computation.
+
+The semantic protocol can represent returned values, exceptions, exits,
+runtime faults, and divergence, but the native and V8 source adapters currently
+produce only returned observations. Overapplication is covered by two
+direct-machine cases rather than a source-generated native/LCNF/V8 triangle,
+and `reset`/`reuse` execution is likewise confined to the direct-machine tier.
+These are portfolio gaps even though all current instruction-form, tag, and
+conjunctive-domain floors are green.
+
+## Track A: memory-fidelity progress
 
 | Milestone | State | Current checkpoint | Next acceptance step |
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the fixture-only admission on `main` |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair pass native/LCNF/V8 | Cover zero/three uses and unique/shared final application |
-| M3 Tail-call ownership | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
+| M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
@@ -158,12 +195,146 @@ after argument-alias materialization and the boxed effect protocol are linked.
 Add caught exceptions after the source-entry/error contract is accepted by all
 participating backends.
 
+## Track B: calls and control
+
+The scalar closure matrix gives broad ABI coverage, but most closures execute
+once and return a scalar. Control coverage is similarly shallow: `local-tail`
+uses four calls, recursion has three tagged cases, and source compilation does
+not yet cover overapplication.
+
+### B1: tail ownership bridge
+
+Execute S4 as the first B-track slice. Keep the compact semantic pair separate
+from the large-depth W7 transform probe so agreement with native Lean and
+stack-safe rewrite execution remain independently attributable claims.
+
+### B2: application shapes
+
+Add compact source-generated pairs for nullary application, underapplication
+followed by later saturation, overapplication, and a closure returned and then
+applied internally. Vary result shape once between tagged/scalar and heap
+results; do not repeat the scalar ABI matrix. Pin exact `pap`, `fap`, closure
+projection, return, and ownership counts. Effectful nullary application waits
+in Track C behind the compiler-admissibility question already recorded by
+`FIR-BUG-impure-elimDeadVars-nullary-fap-effects`.
+
+### B3: recursion and depth
+
+Compare non-tail recursion, direct self-tail recursion, and mutual recursion on
+the same compact observation. Carry one representative heap value so control
+and ownership interact without multiplying the matrix. Use separate bounded
+semantic fixtures and large-depth artifact probes; stack safety is not inferred
+from a four-step semantic example.
+
+## Track C: effects and termination
+
+Three controlled-effect cases establish the protocol, including one ByteArray
+snapshot, but they do not cover calls or ownership crossing an effect, output,
+or source-level abnormal termination.
+
+### C1: ordered-effect boundaries
+
+Add pairs that perform an effect before versus after closure application,
+retain an alias across the effect, and ignore versus consume the effectful
+call's result. Observe exact event order and event-time heap snapshots as well
+as the returned value. Include an effectful nullary call only after the shared
+compiler-admissibility contract is settled; do not normalize away the known
+semantic discrepancy.
+
+### C2: semantic termination
+
+Extend the shared source-entry/error contract so native, LCNF, and V8 can all
+produce comparable `exception`, `runtimeFault`, and `exited` observations.
+Then add returned-versus-thrown and caught-versus-uncaught pairs, including an
+ordered effect before termination. Keep semantic faults distinct from harness
+timeouts, engine crashes, unsupported cases, and malformed protocol output.
+
+### C3: controlled divergence and resource probes
+
+Admit semantic divergence only through a deterministic shared contract. Fuel
+exhaustion and timeout remain harness/backend statuses rather than substitutes
+for Lean source behavior. Large-depth and stack probes are acceptance artifacts
+attached to a compact native-oracle case, not new semantic outcomes invented by
+one backend.
+
+## Track D: floating semantics
+
+The current mixed-closure pair proves bit-exact storage and capture transport
+for a NaN payload and negative zero, but FIR's shared abstract runtime still
+lacks executable `Float32` and `Float` scalar values. This track therefore
+starts at a shared-contract boundary rather than in a fixture-only branch.
+
+### D0: shared value and observation contract
+
+Resolve `FIR-BUG-wasm-none-float-runtime-gap` through the integration owner.
+Define bit-preserving protocol values and result decoding for both widths, and
+rebase LCNF, W6, W7, and fixture consumers before dependent work continues.
+
+### D1: bit-exact transport
+
+Once D0 lands, cover entry, return, closure capture, aggregate fields, and
+effect payloads for positive/negative zero, infinities, representative normal
+and subnormal values, quiet NaNs, and signaling-NaN inputs where Lean exposes a
+stable observation. Compare words when payload preservation is the claim;
+never replace it with JavaScript numeric equality.
+
+### D2: computation
+
+Add a compact matrix for arithmetic, comparison, conversion, and special-value
+propagation. Separate Lean-defined semantic results from platform-sensitive
+payload details, and retain V8 engine/version provenance for every real-engine
+claim.
+
+## Track E: aggregates, erasure, and initialization
+
+### E1: aggregate and erased shapes
+
+Cover `Option`, `Sum`, small arrays, nested inductives, erased/proof fields, and
+mixed object/scalar structures using pairwise representative shapes. Require
+final-LCNF and executed-form evidence that erasure, construction, case
+selection, projection, and return actually ran. Add a schema contract through
+integration when the current observation vocabulary cannot express a result;
+do not flatten a structure merely to avoid that boundary.
+
+### E2: polymorphic and dictionary traffic
+
+Exercise a polymorphic function at multiple runtime shapes, a captured
+typeclass dictionary, and a higher-order dictionary method. The claim is
+runtime representation and call fidelity, not elaborator or proof irrelevance.
+
+### E3: constants, caches, and initialization
+
+Add native-oracle cases for zero-argument constants, initialization order,
+cached heap results, repeated entry calls, and persistence across resident
+invocations. Coordinate with W7 for executable resident helpers and with W6
+for refinement, while the fixture lane owns only corpus cases, observations,
+and coverage requirements.
+
+## Portfolio cadence
+
+1. Land the prepared closure-ownership stack.
+2. Complete S2 closure multiplicity and S3 capture topology.
+3. Execute S4/B1 tail-call ownership as the memory/control bridge.
+4. Take one compact C1 ordered-effect slice and one E1 aggregate/erasure slice
+   before returning to S5 recursive release and reuse.
+5. Queue D0 and C2 as shared contracts, but do not overlap the integration,
+   W6, or W7 implementation work while they are unresolved.
+6. Promote at least one pair from each executable track to real V8 and add a
+   conjunctive coverage domain for the precise semantic intersection claimed.
+
+Fixed-width integer boundaries, Nat/Int arithmetic and conversions, pure
+numeric externals, Unicode string operations, and the scalar ABI are maintenance
+domains. Raise their floors when existing cases grow, but do not spend the
+near-term fixture budget expanding those matrices unless a discrepancy or new
+compiler surface gives a specific reason.
+
 ## Lane boundaries
 
 The validation lane owns source fixtures, validation projections, exact traces,
 coverage requirements, evidence, validation documentation, and discrepancy
-cards. It does not modify shared interpreter semantics, pass proofs, the W6
-concrete heap/runtime or its refinement, or W7 generation and artifact
-adapters. A fixture that exposes a missing shared contract is parked behind a
-coordination handoff rather than locally weakening or duplicating that
-contract.
+cards. It does not modify shared interpreter semantics or protocol termination,
+pass proofs, the W6 concrete heap/runtime or its refinement, or W7 generation
+and artifact adapters. Float values, source-error entry behavior, result-schema
+extensions, effectful nullary-call admissibility, and resident-helper signatures
+are shared contracts. A fixture that exposes one is parked behind a coordination
+handoff rather than locally weakening or duplicating that contract.
