@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-SATURATED-PER-STEP-RANK`.
+- Integration owner: `wasm-proof`; this short lease closes the final missing
+  per-source-step saturated-closure control boundary and establishes the
+  structured silence rank used by the forthcoming unified simulation.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `5dfa5778` after the
+  mapped-owner proof and recursive-release fixture acceptances.
+- Published stack: active-slice record `cd1f713c`, saturated staging proof
+  `6d6a34a2`, functional head `fc86daf1`, and ready mailbox `a76c343a`.
+- Accepted proof: `ConcreteStructuredControlRel` now has ten constructors.
+  The first saturated-call source step stages `.invokeValue` against a
+  reflexive target path; the second consumes the closure against an exact
+  compiler-derived matcher, capture/argument, and generated-callee-entry path.
+  The proof returns the evolved cache frame and matcher store/capacity
+  transports and accepts no target program, path, or selection certificate.
+- Rank: `compilerStructuredControlRank` is a source-state-only measure that
+  combines the code/invocation phase with recursive silence depth. It strictly
+  decreases for empty-argument staging, persistent ownership erasure, and
+  nested default-only case erasure; the latter now has its own exact
+  one-source/zero-target transition theorem.
+- Contracts: none. The stack changes only W6-owned proof code and roadmap
+  documentation; it changes no shared semantic, concrete-runtime,
+  resident-helper, or symbolic-Wasm contract.
+- Acceptance: `git diff --check`; post-rebase Lean Beam update/sync with zero
+  errors; all 3,133 Talos jobs; and complete post-rebase `make check` with
+  649/649 source, LCNF, and V8 cases, 9/9 direct-machine cases, 1,947/1,947
+  three-backend results, 1,956/1,956 indexed equal comparisons, 658 unique
+  cases, 6,563 machine steps, 116 tag floors, 221 semantic domains, and zero
+  findings. Bug-card and trusted-assumption audits pass; no bug card was
+  required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next defines the
+  non-terminating pointwise source-admission/resource relation and assembles
+  the relation-wide per-source-step `advance` theorem from the ten local
+  control rules and this rank.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-RECURSIVE-RELEASE-S5A`.
 - Integration owner: `test-fixtures`; the user previously authorized this
   lane to take the integration role when needed, and the owner waited for the
