@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5864,16 +5864,21 @@ and scalar external result. Production compiler/adapter inversion derives the
 flat argument/import/result-store prefix, whole-pipeline external alignment
 proves that the selected declaration call is a target import, and the existing
 entry-relative runtime theorem supplies the evolved heap witness and exact
-three-step source request protocol. Generated lazy-cache hits are now in that
-same recursive theorem. Compiler inversion recovers the flag/value indices and
-miss body, the generated cache relation supplies the populated physical slot,
-and the structured machine takes the exact five-step hit path without entering
-the miss body. The cache/resource invariant and arbitrary saved frame suffixes
-are preserved into the recursive continuation. The current no-case fragment
-records its empty source join environment explicitly. The next construction
-slice enters a cache miss's generated initializer and structurally executes its
-publication suffix, then connects case, effect, and saturated-closure
-transitions to the same induction.
+three-step source request protocol. Generated lazy-cache hits and non-heap
+misses are now in that same recursive theorem. Compiler inversion recovers the
+flag/value indices and miss body. A populated slot takes the exact five-step
+hit path without entering the miss body. An empty slot takes the three-step
+initializer-entry prefix, applies the same theorem recursively to the exact
+generated declaration row, and then takes the eight-step concrete
+cache/publication suffix before resuming the caller continuation. The source
+and target paths retain exact step counts, and the complete cache/resource
+invariant plus arbitrary saved frame suffixes are reconstructed. Non-heap miss
+results make publication disjoint from retained ordinary reuse tokens;
+heap-valued misses still require reachability-sensitive fact invalidation. The
+current no-case fragment records its empty source join environment explicitly.
+The next construction slices connect selected cases, effects,
+saturated-closure transitions, and heap-valued cache misses to the same
+induction.
 
 ## Parallel agent packages
 

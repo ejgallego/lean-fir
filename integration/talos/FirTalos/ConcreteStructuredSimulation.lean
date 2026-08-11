@@ -2439,6 +2439,287 @@ theorem structuredWasmLazyHitFinitePath
       (.cons enterThen
         (.cons leaveThen (.cons loadValue (.cons setResult (.refl _)))))
 
+/-- The generated cache-miss prefix loads an empty flag, enters the emitted
+`else` body, and enters the selected internal initializer. -/
+theorem structuredWasmLazyMissPrefixFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {flagIndex valueIndex resultIndex declarationId cacheSetId : Nat}
+    {function : Wasm.Function} {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (tail : List Wasm.Value)
+    (flagEmpty : store.globals.globals[flagIndex]? = some (.i32 0))
+    (notImport : module.imports[declarationId]? = none)
+    (functionFound :
+      module.funcs[declarationId - module.imports.length]? = some function)
+    (parameterCount : function.numParams = 0)
+    (resultCount : function.results.length = 1) :
+    FinitePath (StructuredWasmStep module hostEnv) 3
+      ⟨store, .running { locals with values := tail }
+        ([.globalGet flagIndex,
+          .iff 0 0 [] [
+            .call declarationId,
+            .call cacheSetId,
+            .globalSet valueIndex,
+            .const 1,
+            .globalSet flagIndex],
+          .globalGet valueIndex,
+          .localSet resultIndex] ++ rest), frames⟩
+      ⟨store, .running (function.toLocals []) function.body,
+        .call 1 tail { locals with values := tail } [
+            .call cacheSetId,
+            .globalSet valueIndex,
+            .const 1,
+            .globalSet flagIndex] ::
+          .label 0 tail
+            ([.globalGet valueIndex, .localSet resultIndex] ++ rest) ::
+            frames⟩ := by
+  let afterFlag : StructuredWasmState Host :=
+    ⟨store, .running { locals with values := .i32 0 :: tail }
+      ([.iff 0 0 [] [
+          .call declarationId,
+          .call cacheSetId,
+          .globalSet valueIndex,
+          .const 1,
+          .globalSet flagIndex],
+        .globalGet valueIndex,
+        .localSet resultIndex] ++ rest), frames⟩
+  let inElse : StructuredWasmState Host :=
+    ⟨store, .running { locals with values := tail } [
+        .call declarationId,
+        .call cacheSetId,
+        .globalSet valueIndex,
+        .const 1,
+        .globalSet flagIndex],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  have loadFlag :
+      StructuredWasmStep module hostEnv
+        ⟨store, .running { locals with values := tail }
+          ([.globalGet flagIndex,
+            .iff 0 0 [] [
+              .call declarationId,
+              .call cacheSetId,
+              .globalSet valueIndex,
+              .const 1,
+              .globalSet flagIndex],
+            .globalGet valueIndex,
+            .localSet resultIndex] ++ rest), frames⟩
+        afterFlag := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, flagEmpty]
+  have enterElse : StructuredWasmStep module hostEnv afterFlag inElse := by
+    exact StructuredWasmStep.enterIffElse
+  have enterCall :
+      StructuredWasmStep module hostEnv inElse
+        ⟨store, .running (function.toLocals []) function.body,
+          .call 1 tail { locals with values := tail } [
+              .call cacheSetId,
+              .globalSet valueIndex,
+              .const 1,
+              .globalSet flagIndex] ::
+            .label 0 tail
+              ([.globalGet valueIndex, .localSet resultIndex] ++ rest) ::
+              frames⟩ := by
+    simpa [inElse, parameterCount, resultCount] using
+      (StructuredWasmStep.enterCall (env := hostEnv)
+        (module := module) (store := store)
+        (locals := { locals with values := tail })
+        (rest := [
+          .call cacheSetId,
+          .globalSet valueIndex,
+          .const 1,
+          .globalSet flagIndex])
+        (frames :=
+          .label 0 tail
+            (.globalGet valueIndex :: .localSet resultIndex :: rest) :: frames)
+        notImport functionFound)
+  exact .cons loadFlag (.cons enterElse (.cons enterCall (.refl _)))
+
+/-- After a generated initializer returns, the structured machine performs
+the value-preserving concrete cache update, publishes the physical value and
+the populated flag, exits the conditional, reloads the value, and writes the
+caller's destination local. -/
+theorem structuredWasmLazyMissSuffixFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {cacheSetId : Nat} {imp : Wasm.ImportDecl}
+    {declaration : Lean.Name} {kind : AbiKind}
+    {afterCall afterCache valueStore : Wasm.Store Host}
+    {callerLocals calleeLocals nextLocals : Wasm.Locals}
+    {physical oldValue oldFlag : Wasm.Value}
+    {flagIndex valueIndex resultIndex : Nat}
+    {rest : Wasm.Program} {frames : List StructuredWasmFrame}
+    (tail : List Wasm.Value)
+    (importFound : module.imports[cacheSetId]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : cacheSetId < module.imports.length)
+    (contractFound :
+      spec.contracts[cacheSetId]? =
+        some (cacheSetContract declaration kind))
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (operation :
+      cacheSetStep declaration kind afterCall [physical] =
+        .Return [physical] afterCache)
+    (valueGlobal :
+      afterCache.globals.globals[valueIndex]? = some oldValue)
+    (valueStoreEq :
+      valueStore = writeWasmGlobal afterCache valueIndex physical)
+    (flagGlobal :
+      valueStore.globals.globals[flagIndex]? = some oldFlag)
+    (distinct : valueIndex ≠ flagIndex)
+    (targetSet : callerLocals.set? resultIndex physical = some nextLocals) :
+    FinitePath (StructuredWasmStep module hostEnv) 8
+      ⟨afterCall, .returning (physical :: calleeLocals.values),
+        .call 1 tail { callerLocals with values := tail } [
+            .call cacheSetId,
+            .globalSet valueIndex,
+            .const 1,
+            .globalSet flagIndex] ::
+          .label 0 tail
+            ([.globalGet valueIndex, .localSet resultIndex] ++ rest) ::
+            frames⟩
+      ⟨writeWasmGlobal valueStore flagIndex (.i32 1),
+        .running { nextLocals with values := tail } rest, frames⟩ := by
+  let afterReturn : StructuredWasmState Host :=
+    ⟨afterCall,
+      .running { callerLocals with values := physical :: tail } [
+        .call cacheSetId,
+        .globalSet valueIndex,
+        .const 1,
+        .globalSet flagIndex],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  let afterHost : StructuredWasmState Host :=
+    ⟨afterCache,
+      .running { callerLocals with values := physical :: tail } [
+        .globalSet valueIndex,
+        .const 1,
+        .globalSet flagIndex],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  let afterValue : StructuredWasmState Host :=
+    ⟨valueStore,
+      .running { callerLocals with values := tail }
+        [.const 1, .globalSet flagIndex],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  let afterConst : StructuredWasmState Host :=
+    ⟨valueStore,
+      .running { callerLocals with values := .i32 1 :: tail }
+        [.globalSet flagIndex],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  let published := writeWasmGlobal valueStore flagIndex (.i32 1)
+  let afterFlag : StructuredWasmState Host :=
+    ⟨published, .running { callerLocals with values := tail } [],
+      .label 0 tail
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest) :: frames⟩
+  let afterLabel : StructuredWasmState Host :=
+    ⟨published,
+      .running { callerLocals with values := tail }
+        ([.globalGet valueIndex, .localSet resultIndex] ++ rest), frames⟩
+  let afterReload : StructuredWasmState Host :=
+    ⟨published,
+      .running { callerLocals with values := physical :: tail }
+        (.localSet resultIndex :: rest), frames⟩
+  have returnToCaller :
+      StructuredWasmStep module hostEnv
+        ⟨afterCall, .returning (physical :: calleeLocals.values),
+          .call 1 tail { callerLocals with values := tail } [
+              .call cacheSetId,
+              .globalSet valueIndex,
+              .const 1,
+              .globalSet flagIndex] ::
+            .label 0 tail
+              ([.globalGet valueIndex, .localSet resultIndex] ++ rest) ::
+              frames⟩
+        afterReturn := by
+    simpa [afterReturn] using
+      (StructuredWasmStep.returnCall (module := module) (env := hostEnv)
+        (values := physical :: calleeLocals.values) (resultArity := 1)
+        (callerRemainder := tail)
+        (callerLocals := { callerLocals with values := tail })
+        (rest := [.call cacheSetId, .globalSet valueIndex, .const 1,
+          .globalSet flagIndex])
+        (frames := .label 0 tail
+          (.globalGet valueIndex :: .localSet resultIndex :: rest) :: frames))
+  obtain ⟨hostFunction, hostFound, hostContract⟩ :=
+    hostSatisfies.lookup_contract importInBounds contractFound
+  have invoked :
+      hostFunction.invoke afterCall [physical] =
+        .Return [physical] afterCache := by
+    have contract := hostContract afterCall [physical]
+    change hostFunction.invoke afterCall [physical] =
+      cacheSetStep declaration kind afterCall [physical] at contract
+    rw [operation] at contract
+    exact contract
+  have callHost :
+      StructuredWasmStep module hostEnv afterReturn afterHost := by
+    apply StructuredWasmStep.importedCall (fuel := 1) importFound
+    simp only [Wasm.execOne.eq_def, Wasm.run,
+      importFound, hostFound, parameterCount, resultCount, invoked,
+      List.take, List.drop, List.reverse_cons, List.reverse_nil,
+      List.nil_append, List.singleton_append]
+  have storeValue :
+      StructuredWasmStep module hostEnv afterHost afterValue := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · subst valueStore
+      simp only [Wasm.execOne.eq_def, valueGlobal, writeWasmGlobal]
+  have pushFlag :
+      StructuredWasmStep module hostEnv afterValue afterConst := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def]
+  have storeFlag :
+      StructuredWasmStep module hostEnv afterConst afterFlag := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [published, Wasm.execOne.eq_def, flagGlobal, writeWasmGlobal]
+  have leaveConditional :
+      StructuredWasmStep module hostEnv afterFlag afterLabel := by
+    simpa [afterFlag, afterLabel, published] using
+      (StructuredWasmStep.leaveLabel (module := module) (env := hostEnv)
+        (resultArity := 0) (belowStack := tail)
+        (rest := .globalGet valueIndex :: .localSet resultIndex :: rest)
+        (store := published) (locals := { callerLocals with values := tail })
+        (frames := frames))
+  have valueAtValueStore :
+      valueStore.globals.globals[valueIndex]? = some physical := by
+    rw [valueStoreEq]
+    exact writeWasmGlobal_get_self valueGlobal
+  have valuePublished :
+      published.globals.globals[valueIndex]? = some physical := by
+    simp only [published]
+    rw [writeWasmGlobal_get_ne distinct.symm]
+    exact valueAtValueStore
+  have reloadValue :
+      StructuredWasmStep module hostEnv afterLabel afterReload := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, valuePublished]
+  have stackSet :
+      ({ callerLocals with values := physical :: tail }.set? resultIndex
+          physical) = some { nextLocals with values := physical :: tail } :=
+    locals_set?_with_values (physical :: tail) targetSet
+  have setResult :
+      StructuredWasmStep module hostEnv afterReload
+        ⟨published, .running { nextLocals with values := tail } rest,
+          frames⟩ := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, stackSet]
+  exact .cons returnToCaller
+    (.cons callHost
+      (.cons storeValue
+        (.cons pushFlag
+          (.cons storeFlag
+            (.cons leaveConditional
+              (.cons reloadValue (.cons setResult (.refl _))))))))
+
 /-- Compiler-derived structured simulation of one generated lazy-cache hit.
 
 The source admission contains only the nullary declaration facts.  Compiler
@@ -3917,41 +4198,188 @@ abbrev ReuseCapacityStructuredDirectCallCodeEvaluates
     (fun _context => NoEffectsSupported)
     directLetAllocationCost
 
-/-- Recursive admission after connecting the complete pure external-result
-family to the structured target. -/
-inductive ReuseCapacityStructuredLazyHitSupported
-    (context : Fir.Wasm.Context) :
-    LazyCachePath → RuntimeState → Env →
-      Lean.Compiler.LCNF.LetDecl .impure →
-        Lean.Compiler.LCNF.Code .impure → RuntimeState → Value → Nat →
-          Prop where
-  | hit
-      {sourceRuntime nextRuntime : RuntimeState}
-      {sourceEnv : Env}
-      {decl : Lean.Compiler.LCNF.LetDecl .impure}
-      {continuation : Lean.Compiler.LCNF.Code .impure}
-      {sourceValue : Value}
-      {declaration : Lean.Name}
-      {sourceDeclaration : Lean.Compiler.LCNF.Decl .impure}
-      {resultKind : AbiKind}
+/-- Source-only recursive admission for the structured fragment proved here.
+
+Lazy initializers are recursive arguments of this relation, just like named
+calls.  This is important for compiler correctness: the structured target
+proof receives an induction hypothesis for the generated initializer rather
+than an opaque runtime certificate.  The cache constructors cover hits and
+non-heap misses; a miss recursively evaluates the initializer and then
+publishes its result through the concrete host cache and generated Wasm
+globals.  Heap-valued miss publication, cases, and effects remain separate
+later widenings. -/
+inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
+    (externals : ExternalImpl) :
+    Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState →
+      Env → Lean.Compiler.LCNF.Code .impure → ReuseCapacityFacts →
+        RuntimeState → Env → Value → Nat → Prop where
+  | ret
+      {actualResultKind : AbiKind}
+      (sourceLookup : lookup sourceEnv result = some sourceValue)
+      (resultCompiled :
+        Fir.Wasm.getLocal context result =
+          .ok (.localGet result, actualResultKind))
+      (resultRefines : actualResultKind.refines expectedResult = true) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.return result) facts
+        sourceRuntime sourceEnv sourceValue 0
+  | letValue
+      (supported : ReuseBudgetedDirectSupported context facts decl)
+      (sourceStep :
+        SourceLetResult context sourceRuntime sourceEnv decl nextRuntime
+          sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (directLetAllocationCost decl + continuationCost)
+  | externalLet
+      (supported :
+        PureExternalSupported context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue stepCost)
+      (sourceStep :
+        SourceExternalLetResult context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+
+  | directCallLet
+      {calleeFunction : Fir.Wasm.Function}
+      (site : DirectInternalCallSite context decl sourceEnv)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          site.sourceDeclaration site.calleeCode calleeFunction)
+      (callee :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals
+          row.context site.calleeResultKind [] sourceRuntime site.calleeEnv
+          site.calleeCode calleeResultFacts nextRuntime calleeResultEnv
+          sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
+  | lazyHit
       (call :
         LazyCacheCallSupported context decl declaration sourceDeclaration
-          resultKind) :
-      ReuseCapacityStructuredLazyHitSupported context .hit sourceRuntime
-        sourceEnv decl continuation nextRuntime sourceValue 0
+          resultKind)
+      (sourceStep :
+        SourceLazyLetResult .hit context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue continuationCost
+  | lazyMiss
+      {calleeFunction : Fir.Wasm.Function}
+      (call :
+        LazyCacheInternalMissSupported context decl declaration
+          sourceDeclaration resultKind calleeCode)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          sourceDeclaration calleeCode calleeFunction)
+      (resultClassified :
+        Fir.Wasm.abiKind? sourceDeclaration.type = .ok (some resultKind))
+      (notObject : resultKind ≠ .object)
+      (notTObject : resultKind ≠ .tobject)
+      (sourceStep :
+        SourceLazyLetResult .miss context externals sourceRuntime sourceEnv decl
+          continuation nextRuntime sourceValue)
+      (callee :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals
+          row.context resultKind [] sourceRuntime [] calleeCode
+          calleeResultFacts callRuntime calleeResultEnv sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
 
-/-- Recursive admission after connecting pure external results and generated
-lazy-cache hits to the structured target.  Misses, cases, and effects remain
-disabled at this layer; the hit-only family makes that frontier explicit. -/
-abbrev ReuseCapacityStructuredPureExternalCallCodeEvaluates
-    (externals : ExternalImpl) :=
-  ReuseCapacityDirectHereditaryCodeEvaluates externals
-    (fun context => ReuseBudgetedDirectSupported context)
-    (fun context => PureExternalSupported context externals)
-    (fun context => ReuseCapacityStructuredLazyHitSupported context)
-    NoStructuredCasesSupported
-    (fun _context => NoEffectsSupported)
-    directLetAllocationCost
+/-- The structured admission remains an exact finite source execution.  In
+particular, the recursive initializer premise of a miss is semantic evidence,
+not merely a target-side proof device. -/
+theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
+    {externals : ExternalImpl} {context : Fir.Wasm.Context}
+    {expectedResult : AbiKind} {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState} {sourceEnv resultEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure} {resultValue : Value}
+    {requiredBytes : Nat}
+    (evaluation :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes) :
+    SourceCodeResult context externals sourceRuntime sourceEnv sourceCode
+      resultRuntime resultValue := by
+  induction evaluation with
+  | ret sourceLookup _resultCompiled _resultRefines =>
+      exact (CodeEvaluates.ret sourceLookup).sourceResult externals
+  | @letValue context facts decl sourceRuntime sourceEnv nextRuntime
+      sourceValue nextFacts expectedResult continuation resultFacts
+      resultRuntime resultEnv resultValue continuationCost supported sourceStep
+      transfer continued ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          have evaluated :
+              evalLetValue
+                  (sourceCodeState context sourceRuntime sourceEnv
+                    (.let decl continuation)) decl =
+                .ok (nextRuntime, .value sourceValue) := by
+            unfold SourceLetResult at sourceStep
+            cases decl.value <;> exact sourceStep
+          unfold sourceCodeState at evaluated
+          simp [executeStep, coreStep, sourceCodeState, evaluated])
+          (.refl _))
+        ih
+  | externalLet _ sourceStep _ _ ih =>
+      apply SourceCodeResult.ofSteps (prefixCount := 3) ?_ ih
+      simpa [SourceExternalLetResult, sourceCodeState] using sourceStep
+  | @directCallLet callContext decl sourceEnv sourceRuntime calleeResultFacts
+      nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
+      expectedResult continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction site row callee transfer continued
+      calleeIH continuedIH =>
+      have contexts : DeclarationContextsCoherent callContext row.context :=
+        row.contextsCoherent rfl rfl
+      obtain ⟨count, steps⟩ :=
+        site.sourceCallLetResult contexts calleeIH
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
+      simpa [sourceCodeState] using steps
+  | lazyHit _ sourceStep _ _ ih =>
+      obtain ⟨count, steps⟩ := sourceStep.execSteps
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ ih
+      simpa [sourceCodeState] using steps
+  | lazyMiss _ _ _ _ _ sourceStep _ _ _ _ continuedIH =>
+      obtain ⟨count, steps⟩ := sourceStep.execSteps
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
+      simpa [sourceCodeState] using steps
 
 /-- Recover the ordinary ABI classifier from the direct-call classifier. -/
 theorem abiKind?_of_directAbiKind?_eq_some
@@ -4042,7 +4470,7 @@ frame, the result ABI refinement, and exact restoration of the enclosing frame
 stacks are retained. No target trace, callee execution package, or translation
 certificate is a premise. -/
 theorem
-    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyHits_generated
+    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCache_generated
     {program : Fir.LeanIR.ImpureProgram}
     {rootContext : Fir.Wasm.Context}
     {rootCode : Lean.Compiler.LCNF.Code .impure}
@@ -4075,7 +4503,7 @@ theorem
     {targetCode : Wasm.Program}
     {source : MachineState} {target : StructuredWasmState Host}
     (evaluation :
-      ReuseCapacityStructuredPureExternalCallCodeEvaluates externals context
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes)
     (related :
@@ -4382,12 +4810,10 @@ theorem
         resultInvariant, resultRefines, resultJoins,
         tailSourceFramesEq.trans firstSourceFramesEq,
         tailTargetFramesEq.trans firstTargetFramesEq⟩
-  | @lazyLet context sourceRuntime sourceEnv decl continuation nextRuntime
-      sourceValue stepCost facts nextFacts expectedResult resultFacts
-      resultRuntime resultEnv resultValue continuationCost path supported
-      sourceStep transfer continued ih =>
-      cases supported with
-      | @hit _ _ _ _ _ _ declaration sourceDeclaration resultKind call =>
+  | @lazyHit context decl declaration sourceDeclaration resultKind
+      sourceRuntime sourceEnv continuation nextRuntime sourceValue facts
+      nextFacts expectedResult resultFacts resultRuntime resultEnv resultValue
+      continuationCost call sourceStep transfer continued ih =>
         obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
             valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
             targetCodeEq⟩ :=
@@ -4424,7 +4850,7 @@ theorem
             nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
           Option.some.inj producedTransfer
         have stepFits :
-            0 ≤ 0 + continuationCost + slack := by omega
+            0 ≤ continuationCost + slack := by omega
         obtain ⟨_simulates, _externalsPreserved,
             _hostDescriptorsPreserved, _witnessDescriptorsPreserved,
             _nextTransfer, nextCacheInvariant⟩ :=
@@ -4455,7 +4881,7 @@ theorem
                   externals)
                 entryRuntime entryStore entryWitness
                 (eraseReuseCapacityFact facts decl.fvarId)
-                ((0 + continuationCost + slack) - 0) nextRuntime
+                ((continuationCost + slack) - 0) nextRuntime
                 (bind sourceEnv decl.fvarId sourceValue) targetStore nextLocals
                 witness from ⟨nextCacheInvariant, nextEntry⟩)
         obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -4471,10 +4897,596 @@ theorem
           resultRefines, resultJoins,
           tailSourceFramesEq.trans firstSourceFramesEq,
           tailTargetFramesEq.trans firstTargetFramesEq⟩
-  | caseOf supported _sourceStep _continued _ih =>
-      exact False.elim supported
-  | effect supported _sourceStep _continued _ih =>
-      exact False.elim supported
+  | @lazyMiss context decl declaration sourceDeclaration resultKind calleeCode
+      sourceRuntime sourceEnv continuation nextRuntime sourceValue
+      calleeResultFacts callRuntime calleeResultEnv stepCost facts nextFacts
+      expectedResult resultFacts resultRuntime resultEnv resultValue
+      continuationCost calleeFunction call loweredRow resultClassified
+      notObject notTObject sourceStep callee transfer continued calleeIH
+      continuedIH =>
+      rcases call with
+        ⟨⟨valueEq, kindEq, targetEq, targetResultEq, resultRefines, paramsEq,
+          resultCompiled⟩, bodyEq⟩
+      have programEq : context.program = program := functionSpec.contextProgram
+      subst program
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+          targetCodeEq⟩ :=
+        CodeAdapted.let_eq related.adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
+          recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall,
+          _valueCodeEq, targetValueEq⟩ :=
+        compileCachedLetValue_adapted_inv context sourceModule sourceFunction []
+          decl declaration sourceDeclaration _ valueCode targetValue valueEq
+          kindEq targetEq paramsEq valueCompiled valueAdapted
+      have targetKindEq : targetResultKind = resultKind :=
+        Option.some.inj (recoveredTargetResultEq.symm.trans targetResultEq)
+      subst targetResultKind
+      obtain ⟨generatedRow⟩ :=
+        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLowered
+          rfl contextCaches rootSpec.programNamesUnique rootSpec.lowered
+          rootSpec.adapted targetEq loweredRow resultClassified
+      have parametersEmpty : sourceDeclaration.params = #[] :=
+        Array.isEmpty_iff.mp paramsEq
+      have ordinaryLowering :
+          Fir.Wasm.lower context.program = .ok sourceModule :=
+        LazyCacheGeneratedEnvironment.lower_of_lowerSupported rootSpec.lowered
+      have emittedCacheNames :
+          sourceModule.initializers =
+            Fir.Wasm.cachedDeclarationNames context.program :=
+        LazyCacheGeneratedEnvironment.initializers_of_lower ordinaryLowering
+      have contexts : DeclarationContextsCoherent rootContext context := {
+        program :=
+          rootSpec.contextProgram.trans functionSpec.contextProgram.symm
+        cachedDeclarations :=
+          (rootGenerated.cacheNames.trans emittedCacheNames).trans
+            contextCaches.symm }
+      have generated : LazyCacheGeneratedEnvironment context sourceModule :=
+        rootGenerated.ofCoherent contexts
+      have declarationNameEq : sourceDeclaration.name = declaration :=
+        by
+          have selected := (Array.find?_eq_some_iff_getElem.mp targetEq).1
+          simpa [Fir.LeanIR.Program.findDecl?] using selected
+      have exactCallIndex :
+          callIndex? sourceModule (.declaration declaration) =
+            some generatedRow.targetFunctionIndex := by
+        simpa [declarationNameEq] using generatedRow.callIndexEq
+      have declarationIdEq :
+          declarationId = generatedRow.targetFunctionIndex :=
+        Option.some.inj (declarationCall.symm.trans exactCallIndex)
+      subst declarationId
+      obtain ⟨initializerFound, signature⟩ :=
+        generated.select kindEq targetEq targetResultEq paramsEq cacheEq
+      obtain ⟨imp, importFound, importInBounds, contractFound,
+          parameterCount, resultCount⟩ :=
+        functionSpec.cacheSetCall cacheSetCall
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        functionSpec.localsAligned resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      have cacheFacts :=
+        SourceLazyLetResult.miss_cacheFacts_of_callee valueEq targetEq
+          parametersEmpty bodyEq sourceStep callee.sourceResult
+      have semanticEmpty :
+          findGlobal? sourceRuntime.globals declaration = none := cacheFacts.1
+      have publicationRuntimeEq :
+          nextRuntime = callRuntime.setGlobal declaration sourceValue :=
+        cacheFacts.2
+      let sourceStaged : MachineState :=
+        { program := context.program
+          control := .invokeName declaration #[]
+          env := sourceEnv
+          joins := []
+          frames :=
+            .bind decl.fvarId continuation sourceEnv [] :: source.frames
+          runtime := sourceRuntime }
+      let sourceEntry : MachineState :=
+        { program := context.program
+          control := .code calleeCode
+          env := []
+          joins := []
+          frames := .cache declaration ::
+            .bind decl.fvarId continuation sourceEnv [] :: source.frames
+          runtime := sourceRuntime }
+      let targetEntry : StructuredWasmState Host :=
+        { store := targetStore
+          control := .running (generatedRow.targetFunction.toLocals [])
+            generatedRow.targetFunction.body
+          frames :=
+            .call 1 targetLocals.values
+                { targetLocals with values := targetLocals.values } [
+                  .call cacheSetId,
+                  .globalSet (2 * cacheIndex + 1),
+                  .const 1,
+                  .globalSet (2 * cacheIndex)] ::
+              .label 0 targetLocals.values
+                ([.globalGet (2 * cacheIndex + 1),
+                  .localSet resultIndex] ++ targetRest) :: target.frames }
+      have stageSourceStep :
+          executeStep externals source = .next sourceStaged := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, sourceStateEnv, sourceStateJoins,
+            sourceFrames, sourceStateRuntime⟩
+        have programEq := related.sourceProgramEq
+        change sourceProgram = context.program at programEq
+        subst sourceProgram
+        have controlEq := related.sourceControlEq
+        change sourceControl = .code (.let decl continuation) at controlEq
+        subst sourceControl
+        have envEq := related.sourceEnvEq
+        change sourceStateEnv = sourceEnv at envEq
+        subst sourceStateEnv
+        have runtimeEq := related.sourceRuntimeEq
+        change sourceStateRuntime = sourceRuntime at runtimeEq
+        subst sourceStateRuntime
+        change sourceStateJoins = [] at sourceJoins
+        subst sourceStateJoins
+        simp [sourceStaged, executeStep, coreStep, evalLetValue, valueEq,
+          evalArgs, Bind.bind, Except.bind, pure, Except.pure, pushBindFrame]
+      have enterSourceStep :
+          executeStep externals sourceStaged = .next sourceEntry := by
+        have enteredCanonical :
+            executeStep externals {
+                program := context.program
+                control := .invokeName declaration #[]
+                env := sourceEnv
+                frames := [.bind decl.fvarId continuation sourceEnv []]
+                runtime := sourceRuntime } =
+              .next {
+                program := context.program
+                control := .code calleeCode
+                env := []
+                frames := [
+                  .cache declaration,
+                  .bind decl.fvarId continuation sourceEnv []]
+                runtime := sourceRuntime } := by
+          simp [executeStep, coreStep, semanticEmpty, invokeDecl, targetEq,
+            parametersEmpty, bodyEq, bindParams]
+        have lifted :=
+          FirTalos.Correctness.ExecSteps.withFrameSuffix
+            (suffix := source.frames)
+            (ExecSteps.step enteredCanonical (ExecSteps.refl _))
+        cases lifted with
+        | step head tail =>
+            cases tail
+            simpa [sourceStaged, sourceEntry, withFrameSuffix] using head
+      have sourcePrefix :
+          FinitePath
+            (fun before after => executeStep externals before = .next after)
+            2 source sourceEntry :=
+        .cons stageSourceStep (.cons enterSourceStep (.refl _))
+      have flagEmpty :
+          targetStore.globals.globals[2 * cacheIndex]? = some (.i32 0) :=
+        invariant.1.2.1.emptySlot initializerFound signature semanticEmpty
+      have targetParameterCount : generatedRow.targetFunction.numParams = 0 :=
+        (generatedRow.targetParameterCount_nullary parametersEmpty).symm
+      have targetPrefix :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env) 3 target
+              targetEntry := by
+        rcases target with ⟨targetStateStore, targetControl, targetFrames⟩
+        have storeEq := related.targetStoreEq
+        change targetStateStore = targetStore at storeEq
+        subst targetStateStore
+        have controlEq := related.targetControlEq
+        rw [targetCodeEq, targetValueEq] at controlEq
+        change targetControl = .running targetLocals
+          ([.globalGet (2 * cacheIndex),
+            .iff 0 0 [] [
+              .call generatedRow.targetFunctionIndex,
+              .call cacheSetId,
+              .globalSet (2 * cacheIndex + 1),
+              .const 1,
+              .globalSet (2 * cacheIndex)],
+            .globalGet (2 * cacheIndex + 1),
+            .localSet resultIndex] ++ targetRest) at controlEq
+        subst targetControl
+        simpa [targetEntry] using
+          structuredWasmLazyMissPrefixFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (store := targetStore) (locals := targetLocals)
+            (flagIndex := 2 * cacheIndex)
+            (valueIndex := 2 * cacheIndex + 1)
+            (resultIndex := resultIndex)
+            (declarationId := generatedRow.targetFunctionIndex)
+            (cacheSetId := cacheSetId)
+            (function := generatedRow.targetFunction)
+            (rest := targetRest) (frames := targetFrames)
+            targetLocals.values flagEmpty generatedRow.notImport
+            generatedRow.targetFunctionFound targetParameterCount
+            generatedRow.singleResult
+      have calleeFrame :
+          ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals
+            [] (stepCost + (continuationCost + slack)) sourceRuntime []
+            targetStore (generatedRow.targetFunction.toLocals []) witness :=
+        invariant.1.generatedNullaryCalleeEntryAtCost generatedRow
+          parametersEmpty (by omega)
+      have calleeFocus :
+          ConcreteStructuredCodeFocus loweredRow.context sourceModule
+            calleeFunction [] sourceRuntime [] calleeCode targetStore
+            (generatedRow.targetFunction.toLocals [])
+            generatedRow.targetFunction.body witness sourceEntry targetEntry := {
+        sourceProgramEq := by
+          calc
+            sourceEntry.program = context.program := by
+              simp [sourceEntry]
+            _ = loweredRow.context.program := generatedRow.contextProgram.symm
+        sourceControlEq := by simp [sourceEntry]
+        sourceEnvEq := by simp [sourceEntry]
+        sourceRuntimeEq := by simp [sourceEntry]
+        targetStoreEq := by simp [targetEntry]
+        targetControlEq := by simp [targetEntry]
+        adapted := generatedRow.bodyAdapted
+        stateRelated := calleeFrame.1.1.1.1.1
+        frameAligned := calleeFrame.1.1.1.2.2.1 }
+      have calleeEntryInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              externals)
+            sourceRuntime targetStore witness []
+            (stepCost + (continuationCost + slack)) sourceRuntime []
+            targetStore (generatedRow.targetFunction.toLocals []) witness :=
+        ⟨calleeFrame,
+          ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore
+            witness⟩
+      obtain ⟨sourceYield, targetYield, afterCall, calleeLocals, callWitness,
+          actualKind, physical, calleeSourceCount, calleeTargetCount,
+          calleeSourcePath, calleeTargetPath, calleeYielded, calleeInvariant,
+          calleeResultRefines, _calleeResultJoins, calleeSourceFramesEq,
+          calleeTargetFramesEq⟩ :=
+        calleeIH (generatedRow.toSupportedFunction rootSpec)
+          generatedRow.contextCaches calleeFocus rfl calleeEntryInvariant
+      have sourceCallFramesEq :
+          sourceYield.frames =
+            .cache declaration ::
+              .bind decl.fvarId continuation sourceEnv [] :: source.frames := by
+        rw [calleeSourceFramesEq]
+      have targetCallFramesEq :
+          targetYield.frames =
+            .call 1 targetLocals.values targetLocals [
+                .call cacheSetId,
+                .globalSet (2 * cacheIndex + 1),
+                .const 1,
+                .globalSet (2 * cacheIndex)] ::
+              .label 0 targetLocals.values
+                ([.globalGet (2 * cacheIndex + 1),
+                  .localSet resultIndex] ++ targetRest) :: target.frames := by
+        rw [calleeTargetFramesEq]
+      obtain ⟨cacheSlot, cacheFound, cacheKindEq⟩ :=
+        calleeInvariant.1.2.1.hostSlot initializerFound signature
+      have valueRelated :
+          PhysicalValueRel callWitness resultKind physical sourceValue :=
+        calleeYielded.valueRelated.ofRefines calleeResultRefines
+      have cacheDescriptorsEq :
+          afterCall.host.closureDescriptors = callWitness.closureDescriptors :=
+        calleeInvariant.1.1.2
+      obtain ⟨runtimeAfter, operation, _runtimeAfterRelated,
+          _valueStillRelated, _mappedCapacity⟩ :=
+        cacheSetStep_of_refines calleeYielded.stateRelated.1 valueRelated
+          cacheFound cacheKindEq cacheDescriptorsEq
+      let afterCache := replaceRuntime afterCall runtimeAfter
+      have operationEq :
+          cacheSetStep declaration resultKind afterCall [physical] =
+            .Return [physical] afterCache := by
+        simpa [afterCache] using operation
+      obtain ⟨oldFlag, oldValue, flagAfterCall, valueAfterCall⟩ :=
+        calleeInvariant.1.2.1.slotLanesPresent initializerFound signature
+      have valueAfterCache :
+          afterCache.globals.globals[2 * cacheIndex + 1]? = some oldValue := by
+        rw [cacheSetStep_preserves_wasmGlobals operationEq]
+        exact valueAfterCall
+      have flagAfterCache :
+          afterCache.globals.globals[2 * cacheIndex]? = some oldFlag := by
+        rw [cacheSetStep_preserves_wasmGlobals operationEq]
+        exact flagAfterCall
+      let valueStore :=
+        writeWasmGlobal afterCache (2 * cacheIndex + 1) physical
+      have valueStoreEq :
+          valueStore =
+            writeWasmGlobal afterCache (2 * cacheIndex + 1) physical := rfl
+      have flagAfterValue :
+          valueStore.globals.globals[2 * cacheIndex]? = some oldFlag := by
+        rw [valueStoreEq, writeWasmGlobal_get_ne (by omega)]
+        exact flagAfterCache
+      let nextStore :=
+        writeWasmGlobal valueStore (2 * cacheIndex) (.i32 1)
+      obtain ⟨nextLocals, targetSet, nextAligned⟩ :=
+        invariant.1.1.1.1.2.2.1.set?
+          (nextRuntime := nextRuntime)
+          (nextEnv := bind sourceEnv decl.fvarId sourceValue)
+          (nextStore := nextStore) (nextWitness := callWitness)
+          (physical := physical) resultFound
+      let sourcePublished : MachineState := {
+        program := context.program
+        control := .yielded sourceValue
+        env := calleeResultEnv
+        joins := []
+        frames := .bind decl.fvarId continuation sourceEnv [] :: source.frames
+        runtime := nextRuntime }
+      let sourceResumed : MachineState := {
+        program := context.program
+        control := .code continuation
+        env := bind sourceEnv decl.fvarId sourceValue
+        joins := []
+        frames := source.frames
+        runtime := nextRuntime }
+      let targetResumed : StructuredWasmState Host := {
+        store := nextStore
+        control := .running
+          { nextLocals with values := targetLocals.values } targetRest
+        frames := target.frames }
+      have publishSourceStep :
+          executeStep externals sourceYield = .next sourcePublished := by
+        rcases sourceYield with
+          ⟨yieldProgram, yieldControl, yieldEnv, yieldJoins, yieldFrames,
+            yieldRuntime⟩
+        have programEq := calleeYielded.sourceProgramEq
+        change yieldProgram = loweredRow.context.program at programEq
+        rw [generatedRow.contextProgram] at programEq
+        subst yieldProgram
+        have controlEq := calleeYielded.sourceControlEq
+        change yieldControl = .yielded sourceValue at controlEq
+        subst yieldControl
+        have envEq := calleeYielded.sourceEnvEq
+        change yieldEnv = calleeResultEnv at envEq
+        subst yieldEnv
+        have runtimeEq := calleeYielded.sourceRuntimeEq
+        change yieldRuntime = callRuntime at runtimeEq
+        subst yieldRuntime
+        change yieldJoins = [] at _calleeResultJoins
+        subst yieldJoins
+        change yieldFrames = _ at sourceCallFramesEq
+        subst yieldFrames
+        simp [sourcePublished, executeStep, coreStep, publicationRuntimeEq]
+      have bindSourceStep :
+          executeStep externals sourcePublished = .next sourceResumed := by
+        simp [sourcePublished, sourceResumed, executeStep, coreStep]
+      have sourceSuffix :
+          FinitePath
+            (fun before after => executeStep externals before = .next after)
+            2 sourceYield sourceResumed :=
+        .cons publishSourceStep (.cons bindSourceStep (.refl _))
+      have targetSuffix :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env) 8
+            targetYield targetResumed := by
+        rcases targetYield with
+          ⟨yieldStore, yieldControl, yieldFrames⟩
+        have storeEq := calleeYielded.targetStoreEq
+        change yieldStore = afterCall at storeEq
+        subst yieldStore
+        have controlEq := calleeYielded.targetControlEq
+        change yieldControl = .returning (physical :: calleeLocals.values)
+          at controlEq
+        subst yieldControl
+        change yieldFrames = _ at targetCallFramesEq
+        subst yieldFrames
+        simpa [targetResumed, nextStore] using
+          structuredWasmLazyMissSuffixFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (spec := hosts.spec) (cacheSetId := cacheSetId) (imp := imp)
+            (declaration := declaration) (kind := resultKind)
+            (afterCall := afterCall) (afterCache := afterCache)
+            (valueStore := valueStore) (callerLocals := targetLocals)
+            (calleeLocals := calleeLocals) (nextLocals := nextLocals)
+            (physical := physical) (oldValue := oldValue)
+            (oldFlag := oldFlag) (flagIndex := 2 * cacheIndex)
+            (valueIndex := 2 * cacheIndex + 1)
+            (resultIndex := resultIndex) (rest := targetRest)
+            (frames := target.frames) targetLocals.values importFound
+            functionSpec.hostsSatisfy importInBounds contractFound
+            parameterCount resultCount operationEq valueAfterCache
+            valueStoreEq flagAfterValue (by omega) targetSet
+      have nextRelated :
+          StateRelated sourceFunction nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness := by
+        rw [publicationRuntimeEq]
+        exact invariant.1.1.1.1.1.1.bindAfterCacheSet
+          calleeYielded.stateRelated.1 calleeInvariant.2.witness valueRelated
+          cacheFound cacheKindEq cacheDescriptorsEq operationEq valueStoreEq
+          resultFound resultKindAt targetSet
+      have nonHeap : IsNonHeapReference sourceValue :=
+        valueRelated.isNonHeapReference_of_kind notObject notTObject
+      have publicationOrdinary :
+          ReuseTokenOrdinaryBindTransport facts decl.fvarId callRuntime
+            nextRuntime sourceEnv sourceValue := by
+        rw [publicationRuntimeEq]
+        exact ReuseTokenOrdinaryBindTransport.ofPublicationDisjoint declaration
+          (ReuseTokenPublicationDisjoint.of_nonHeapReference nonHeap)
+      have nextOrdinary :
+          ReuseTokenOrdinaryRel (eraseReuseCapacityFact facts decl.fvarId)
+            nextRuntime (bind sourceEnv decl.fvarId sourceValue) :=
+        publicationOrdinary
+          (invariant.1.1.1.1.2.1.transport calleeInvariant.2.ordinary)
+      have publicationCapacity :
+          HeaderCapacityTransport afterCall.host.runtime.heap
+            nextStore.host.runtime.heap callWitness := by
+        simpa [nextStore, writeWasmGlobal, valueStoreEq] using
+          cacheSetStep_preserves_mappedHeaderCapacity_of_related
+            calleeYielded.stateRelated.1 valueRelated cacheFound cacheKindEq
+            cacheDescriptorsEq operationEq
+      have currentCapacity :
+          HeaderCapacityTransport targetStore.host.runtime.heap
+            nextStore.host.runtime.heap witness :=
+        calleeInvariant.2.capacity.transAcross calleeInvariant.2.witness
+          publicationCapacity
+      have nextReuseRelated :
+          ReuseCapacityStateRelated
+            (eraseReuseCapacityFact facts decl.fvarId) sourceFunction
+            nextRuntime (bind sourceEnv decl.fvarId sourceValue) nextStore
+            nextLocals callWitness :=
+        invariant.1.1.1.1.1.eraseResult nextRelated resultFound
+          (localUpdate_of_set? targetSet) calleeInvariant.2.witness
+          currentCapacity
+      have nextBudget :
+          nextStore.host.runtime.heap.AddressSpaceBudget
+            (continuationCost + slack) := by
+        simpa [nextStore] using
+          cachePublication_preserves_addressSpaceBudget operationEq valueStoreEq
+            calleeInvariant.1.1.1.1.2.2.2
+      have publicationExternals :
+          nextStore.host.externals = afterCall.host.externals := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have publicationDescriptors :
+          nextStore.host.closureDescriptors =
+            afterCall.host.closureDescriptors := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have publicationDispatch :
+          nextStore.host.closureDispatch = afterCall.host.closureDispatch := by
+        simp [nextStore, valueStore, afterCache, writeWasmGlobal,
+          replaceRuntime, clearFailure]
+      have nextInteger :
+          nextStore.host.externals.IntegerResultRefines externals := by
+        rw [publicationExternals, calleeInvariant.2.externals]
+        exact invariant.1.1.1.2.1
+      have nextNatural :
+          FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+            nextStore.host.externals externals := by
+        rw [publicationExternals, calleeInvariant.2.externals]
+        exact invariant.1.1.1.2.2.1
+      have nextScalar :
+          FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+            nextStore.host.externals externals := by
+        rw [publicationExternals, calleeInvariant.2.externals]
+        exact invariant.1.1.1.2.2.2
+      have nextDescriptors :
+          nextStore.host.closureDescriptors = callWitness.closureDescriptors :=
+        publicationDescriptors.trans cacheDescriptorsEq
+      have nextCache :
+          LazyCacheGlobalsRel callWitness sourceModule nextRuntime nextStore := by
+        have afterHost :=
+          calleeInvariant.1.2.1.afterCacheSet operationEq
+        simpa [nextStore] using
+          afterHost.publish initializerFound signature publicationRuntimeEq
+            valueRelated valueStoreEq
+      have nextClosureTables : ClosureTablesAgree nextStore callWitness := by
+        exact {
+          dispatch :=
+            calleeInvariant.1.2.2.dispatch.trans publicationDispatch.symm
+          descriptors :=
+            publicationDescriptors.trans
+              calleeInvariant.1.2.2.descriptors }
+      have nextBase :
+          ConcreteReuseCapacityFrame sourceFunction
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness :=
+        ⟨nextReuseRelated, nextOrdinary, nextAligned, nextBudget⟩
+      have nextPure :
+          ConcreteReuseCapacityPureExternalFrame sourceFunction externals
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness :=
+        ⟨nextBase, nextInteger, nextNatural, nextScalar⟩
+      have nextOwnership :
+          ConcreteReuseCapacityPureExternalOwnershipFrame sourceFunction
+            externals (eraseReuseCapacityFact facts decl.fvarId)
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness :=
+        ⟨nextPure, nextDescriptors⟩
+      have nextFrame :
+          ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals
+            (eraseReuseCapacityFact facts decl.fvarId)
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness :=
+        ⟨nextOwnership, nextCache, nextClosureTables⟩
+      have publicationOrdinaryPersistence :
+          OrdinaryPersistenceTransport callRuntime nextRuntime := by
+        apply (OrdinaryPersistenceTransport.refl callRuntime).congrAfter
+        rw [publicationRuntimeEq]
+        exact
+          (RuntimeState.setGlobal_heap_eq_of_nonHeapReference callRuntime
+            declaration sourceValue nonHeap).symm
+      have publicationClosureTables :
+          ClosureTablesTransport afterCall nextStore callWitness
+            callWitness := {
+        hostDispatchPreserved := publicationDispatch
+        witnessDispatchPreserved := rfl
+        hostDescriptorsPreserved := publicationDescriptors
+        witnessDescriptorsPreserved := rfl }
+      have currentToNext :
+          ReuseCapacityCodeEntryTransports sourceRuntime nextRuntime
+            targetStore nextStore witness callWitness :=
+        calleeInvariant.2.step (WitnessTransport.refl callWitness)
+          (ClosureAllocationsPersistent.refl callWitness)
+          publicationCapacity publicationOrdinaryPersistence
+          publicationExternals publicationClosureTables
+      have nextEntry :
+          ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+            nextStore entryWitness callWitness :=
+        invariant.2.step currentToNext.witness
+          currentToNext.closureAllocationsPersistent currentToNext.capacity
+          currentToNext.ordinary currentToNext.externals
+          currentToNext.toClosureTablesTransport
+      have expectedTransfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [reuseCapacityLetFacts?, valueEq]
+      have nextFactsEq :
+          nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
+        Option.some.inj (transfer.symm.trans expectedTransfer)
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              externals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            callWitness := by
+        simpa [nextFactsEq] using
+          (show
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness
+              (eraseReuseCapacityFact facts decl.fvarId)
+              (continuationCost + slack) nextRuntime
+              (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+              callWitness from ⟨nextFrame, nextEntry⟩)
+      have nextFocus :
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+            nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+            nextStore { nextLocals with values := targetLocals.values }
+            targetRest callWitness sourceResumed targetResumed := {
+        sourceProgramEq := by simp [sourceResumed]
+        sourceControlEq := by simp [sourceResumed]
+        sourceEnvEq := by simp [sourceResumed]
+        sourceRuntimeEq := by simp [sourceResumed]
+        targetStoreEq := by simp [targetResumed]
+        targetControlEq := by simp [targetResumed]
+        adapted := continuationAdapted
+        stateRelated := by simpa using nextRelated.withValues targetLocals.values
+        frameAligned := by simpa using nextAligned.withValues targetLocals.values }
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, resultPhysical, continuationSourceCount,
+          continuationTargetCount, continuationSourcePath,
+          continuationTargetPath, yielded, resultInvariant, resultRefines,
+          resultJoins, continuationSourceFramesEq,
+          continuationTargetFramesEq⟩ :=
+        continuedIH functionSpec contextCaches nextFocus rfl
+          (continuationInvariant.withValues targetLocals.values)
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, resultPhysical,
+        2 + calleeSourceCount + 2 + continuationSourceCount,
+        3 + calleeTargetCount + 8 + continuationTargetCount,
+        ((sourcePrefix.trans calleeSourcePath).trans sourceSuffix).trans
+          continuationSourcePath,
+        ((targetPrefix.trans calleeTargetPath).trans targetSuffix).trans
+          continuationTargetPath,
+        yielded, resultInvariant, resultRefines, resultJoins,
+        continuationSourceFramesEq, continuationTargetFramesEq⟩
 
 /-- Structural rank used when lowering erases a source control step.  Later
 frame slices add their own continuation component; the local erased-step laws

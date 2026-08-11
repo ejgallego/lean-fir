@@ -1255,7 +1255,7 @@ acceptance tests pass.
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
      structured target return with both path lengths exposed.
-     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyHits_generated` now performs
+     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyCache_generated` now performs
      the same construction over the existing source-only hereditary relation.
      A named
      call executes its compiler-derived argument prefix and structured call
@@ -1271,15 +1271,25 @@ acceptance tests pass.
      `advance_flatExternalLet` combines its exact structured target path with
      the interpreter's three-step external request path, retains the evolved
      entry-relative cache/resource frame, and resumes the same induction. The
-     Generated lazy-cache hits are now recursive too.
+     Generated lazy-cache hits and non-heap misses are now recursive too.
      `advance_lazyHit_of_compiler` derives the exact five-step flag/conditional/
      value/destination path from compiler inversion and the populated generated
      cache relation; the unselected miss body is never executed. It restores
      the evolved cache/resource frame and recursively compiled continuation
-     beneath arbitrary saved source and target frames. The current no-case
-     fragment makes its empty join environment explicit. Subsequent slices
-     connect the miss initializer and publication path, selected cases,
-     effects, saturated closure calls, and target-only label/loop unwinding to
+     beneath arbitrary saved source and target frames. For an empty flag,
+     compiler inversion identifies the exact generated initializer row. The
+     proof enters that internal function, applies the same source-only
+     induction recursively, returns through the saved call/conditional frames,
+     executes concrete `cacheSet`, publishes the value and flag globals, and
+     resumes the caller continuation. The resulting paths have exact source
+     and target step counts and reconstruct the complete entry-relative cache,
+     ownership, budget, closure-table, and ABI frame. This first miss theorem
+     admits non-heap results, for which cache publication is provably disjoint
+     from every retained ordinary reuse token. Heap-valued miss publication
+     needs the existing reachability-sensitive fact invalidation boundary.
+     The current no-case fragment makes its empty join environment explicit.
+     Subsequent slices connect selected cases, effects, saturated closure
+     calls, heap-valued cache misses, and target-only label/loop unwinding to
      this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
