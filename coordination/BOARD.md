@@ -15,6 +15,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-BIND-FRAME`.
+- Integration owner: `wasm-proof`; this is the first continuation-stack slice
+  of W6.7e.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `3e362ba0`.
+- Published stack: active-slice record `6cbe5ec2`, functional head `dd375d94`,
+  and ready mailbox `c7347f52`.
+- Accepted proof: `ConcreteStructuredBindFrameFocus` precisely relates a
+  yielded source bind frame to a returning structured target with a one-result
+  call frame and generated result-local write. Its restoration theorem matches
+  one source bind-resume step by exactly two target steps (`returnCall`, then
+  `localSet`), restores the caller operand tail, and re-establishes
+  `ConcreteStructuredCodeFocus` for the continuation with the semantic result
+  bound in the source environment.
+- Frame boundary: code and yield focus now retain
+  `ConcreteLocalFrameAligned`, making the compiler-assigned destination
+  local's writability an explicit invariant. The deterministic wrapper derives
+  the exact source successor from a generic successful source-step premise.
+  Establishing this relation from compiled direct-call entry is the next
+  W6.7e slice; label/loop administrative unwinding and apply/cache frames
+  remain later layers.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam update/sync/save with zero diagnostics; focused 3,107-
+  job dependency-cone build; `git diff --check`; complete `make check` with 642
+  validation cases and 1,844/1,844 backend comparisons; Talos pinned at
+  `a01d01c`; and all 3,133 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-RETURN-SIMULATION`.
 - Integration owner: `wasm-proof`; this is the first positive target-path
   slice of W6.7e.
