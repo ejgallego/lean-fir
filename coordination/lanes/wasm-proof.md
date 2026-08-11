@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 0a95c890 on main
+state: active
+base: 45bb086c on main
 functional-head: a4366d32 (recursive structured simulation now includes ordered two-arm object-constructor dispatch)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 96 hash 1bfc85b2d0846be7 (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for integration; base 0a95c890, functional head a4366d32, proof-only ordered object-case slice.
+handoff: none; the ordered two-arm object-case slice landed on main at 45bb086c and the lane is active on arbitrary case chains.
 next: Generalize the now-checked hit/miss/label interface from two arms to arbitrary ObjectConstructorCaseAltsSupported chains. Then connect tagged scalar/UInt8 chains, whose generated tests omit the getTag import but use the same branch-label recursion.
 ```
