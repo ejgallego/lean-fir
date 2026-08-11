@@ -13,6 +13,25 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `ELIMDEAD-GENERIC-MAPPED-OWNER-READINESS`.
+- Integration owner: `lcnf-proof`; the user assigned this lane the temporary
+  integration role to land its clean mapped-owner readiness handoff.
+- Integration branch/worktree: `proof/simpcase` in
+  `.worktrees/proof-simpcase`; its published handoff was based on `e2064631`
+  and will be rebased directly onto current `main` at `af7f9a89` before
+  acceptance.
+- Candidate: derive `TargetMappedOwnerPrefix` uniformly from compiler-live
+  heap bindings and migrate the retained-prefix reset/reuse clients away from
+  manually reconstructed singleton address mappings.
+- Contracts: none. This is proof-only compiler-readiness strengthening; the
+  intervening W6 external-evidence integration changes no LCNF proof or shared
+  semantic contract.
+- Acceptance gate: clean rebased branch, Lean dependency cone,
+  `git diff --check`, and complete `make check`; then fast-forward `main`,
+  record acceptance here, and release the lease.
+
 ## Latest completed integration lease
 
 - Milestone: `W6-CERTIFICATE-FREE-EXTERNAL-EXECUTION`.
