@@ -1318,9 +1318,14 @@ acceptance tests pass.
      local-read/imported-call prefix, the concrete host contract supplies a
      two-step structured path and updated heap, and the existing effect
      transports rebuild the complete entry-relative frame before continuation
-     recursion. Subsequent slices connect ordinary decrement, delete, and
-     mutation effects and add saturated closure calls, heap-valued cache
-     misses, and target-only label/loop unwinding to this induction.
+     recursion. Successful ordinary decrement is now connected through the
+     same exact two-instruction prefix. Its concrete operation may recursively
+     release an ownership tree; closure-descriptor agreement and the existing
+     recursive ordinary-persistence theorem establish the updated heap
+     relation, while a shared same-witness effect theorem reconstructs the
+     complete entry-relative cache/resource frame. Subsequent slices connect
+     delete and mutation effects and add saturated closure calls, heap-valued
+     cache misses, and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

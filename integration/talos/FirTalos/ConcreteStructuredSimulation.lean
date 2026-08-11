@@ -1715,6 +1715,111 @@ theorem ReuseCapacityEntryRelativeFrame.withValues
       currentEnv currentStore { currentLocals with values } currentWitness :=
   ⟨frame.1.withValues values, frame.2⟩
 
+/-- Rebuild the complete entry-relative cache frame after a same-witness heap
+effect.  This is the common algebra behind reference-count and field-mutation
+steps: the operation law supplies the executable effect, capacity and source
+ownership transports, while this theorem preserves pure external handlers,
+cache globals, immutable closure tables, and the cumulative entry relation. -/
+theorem ReuseCapacityEntryRelativeFrame.ofReplaceHeapEffectStep
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl} {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {entryStore targetStore : Wasm.Store Host} {heap : MemoryState}
+    {targetLocals : Wasm.Locals}
+    {entryWitness witness : RefinementWitness}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    {target targetRest : Wasm.Program}
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness)
+    (step :
+      EffectStepSimulates context sourceModule sourceFunction labels module
+        hostEnv sourceRuntime nextRuntime sourceEnv code continuation target
+        targetRest targetStore (replaceHeap targetStore heap) targetLocals
+        witness witness)
+    (capacity :
+      HeaderCapacityTransport targetStore.host.runtime.heap heap witness)
+    (ordinary : OrdinaryPersistenceTransport sourceRuntime nextRuntime)
+    (sourceGlobals : nextRuntime.globals = sourceRuntime.globals)
+    (cursor : heap.heapCursor = targetStore.host.runtime.heap.heapCursor) :
+    ReuseCapacityEntryRelativeFrame
+      (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+      entryRuntime entryStore entryWitness facts remainingBytes nextRuntime
+      sourceEnv (replaceHeap targetStore heap) targetLocals witness := by
+  have currentBase := invariant.1.1.1.1
+  have integerImplementation :
+      targetStore.host.externals.IntegerResultRefines externals :=
+    invariant.1.1.1.2.1
+  have naturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        targetStore.host.externals externals :=
+    invariant.1.1.1.2.2.1
+  have scalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        targetStore.host.externals externals :=
+    invariant.1.1.1.2.2.2
+  have currentOwnership :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+        sourceRuntime sourceEnv targetStore targetLocals witness :=
+    ⟨currentBase, invariant.1.1.2⟩
+  have nextOwnership :
+      ConcreteReuseCapacityOwnershipFrame sourceFunction facts remainingBytes
+        nextRuntime sourceEnv (replaceHeap targetStore heap) targetLocals
+        witness :=
+    currentOwnership.ofReplaceHeapEffectStep step capacity ordinary cursor
+  have externalsEq :
+      (replaceHeap targetStore heap).host.externals =
+        targetStore.host.externals := by
+    simp [replaceHeap, clearFailure]
+  have nextIntegerImplementation :
+      (replaceHeap targetStore heap).host.externals.IntegerResultRefines
+        externals := by
+    rw [externalsEq]
+    exact @integerImplementation
+  have nextNaturalImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
+        (replaceHeap targetStore heap).host.externals externals := by
+    rw [externalsEq]
+    exact @naturalImplementation
+  have nextScalarImplementation :
+      FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
+        (replaceHeap targetStore heap).host.externals externals := by
+    rw [externalsEq]
+    exact @scalarImplementation
+  let transports :
+      EffectStepTransports sourceRuntime nextRuntime targetStore
+        (replaceHeap targetStore heap) witness witness :=
+    EffectStepTransports.replaceHeap capacity ordinary sourceGlobals
+  have nextCache :
+      LazyCacheGlobalsRel witness sourceModule nextRuntime
+        (replaceHeap targetStore heap) :=
+    invariant.1.2.1.transport transports.witnessTransport
+      transports.sourceGlobals transports.wasmGlobals
+      transports.hostStaticLayout
+  have nextClosureTables :
+      ClosureTablesAgree (replaceHeap targetStore heap) witness :=
+    transports.toClosureTablesTransport.agree invariant.1.2.2
+  have nextEntry :
+      ReuseCapacityCodeEntryTransports entryRuntime nextRuntime entryStore
+        (replaceHeap targetStore heap) entryWitness witness :=
+    invariant.2.step transports.witnessTransport
+      transports.closureAllocationsPersistent transports.capacity
+      transports.ordinary externalsEq transports.toClosureTablesTransport
+  exact
+    ⟨⟨⟨⟨nextOwnership.1, nextIntegerImplementation,
+            nextNaturalImplementation, nextScalarImplementation⟩,
+          nextOwnership.2⟩,
+        nextCache, nextClosureTables⟩,
+      nextEntry⟩
+
 /-- One direct source `let` whose generated prefix is straight-line advances
 both machines to the recursively compiled continuation.  The target path is
 derived from the runtime law's exact WP execution plus compiler-side flatness;
@@ -5248,6 +5353,20 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | ordinaryDecrementEffect
+      (supported :
+        OrdinaryDecrementEffectSupported context sourceRuntime sourceEnv code
+          continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -5345,6 +5464,9 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
   | ordinaryIncrementEffect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (sourceStep externals) (.refl _)) ih
+  | ordinaryDecrementEffect _ sourceStep _ ih =>
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
 
@@ -5539,92 +5661,14 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
             · exact parameterCount
             · exact resultCount
             · exact operation
-          have currentBase := invariant.1.1.1.1
-          have integerImplementation :
-              targetStore.host.externals.IntegerResultRefines externals :=
-            invariant.1.1.1.2.1
-          have naturalImplementation :
-              FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-                targetStore.host.externals externals :=
-            invariant.1.1.1.2.2.1
-          have scalarImplementation :
-              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-                targetStore.host.externals externals :=
-            invariant.1.1.1.2.2.2
-          have descriptorAgreement := invariant.1.1.2
-          have cacheTable := invariant.1.2.1
-          have closureTables := invariant.1.2.2
-          have entryTransports := invariant.2
           have ordinaryTransport :
               OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
             incValue_ordinaryPersistenceTransport updated
-          have currentOwnership :
-              ConcreteReuseCapacityOwnershipFrame sourceFunction facts
-                remainingBytes sourceRuntime sourceEnv targetStore targetLocals
-                witness :=
-            ⟨currentBase, descriptorAgreement⟩
-          have nextOwnership :
-              ConcreteReuseCapacityOwnershipFrame sourceFunction facts
-                remainingBytes nextRuntime sourceEnv
-                (replaceHeap targetStore heap) targetLocals witness :=
-            currentOwnership.ofReplaceHeapEffectStep effectStep capacity
-              ordinaryTransport cursor
-          have nextBase := nextOwnership.1
-          have nextDescriptorAgreement := nextOwnership.2
-          have nextIntegerImplementation :
-              (replaceHeap targetStore heap).host.externals.IntegerResultRefines
-                externals := by
-            have externalsEq :
-                (replaceHeap targetStore heap).host.externals =
-                  targetStore.host.externals := by
-              simp [replaceHeap, clearFailure]
-            rw [externalsEq]
-            exact @integerImplementation
-          have nextNaturalImplementation :
-              FirTalos.Concrete.ConcreteExternalImpl.NaturalResultRefines
-                (replaceHeap targetStore heap).host.externals externals := by
-            have externalsEq :
-                (replaceHeap targetStore heap).host.externals =
-                  targetStore.host.externals := by
-              simp [replaceHeap, clearFailure]
-            rw [externalsEq]
-            exact @naturalImplementation
-          have nextScalarImplementation :
-              FirTalos.Concrete.ConcreteExternalImpl.ScalarResultRefines
-                (replaceHeap targetStore heap).host.externals externals := by
-            have externalsEq :
-                (replaceHeap targetStore heap).host.externals =
-                  targetStore.host.externals := by
-              simp [replaceHeap, clearFailure]
-            rw [externalsEq]
-            exact @scalarImplementation
           have sourceGlobals :
               nextRuntime.globals = sourceRuntime.globals := by
             rcases incValue_heapOnly updated with ⟨semanticHeap, runtimeEq⟩
             subst nextRuntime
             rfl
-          let transports :
-              EffectStepTransports sourceRuntime nextRuntime targetStore
-                (replaceHeap targetStore heap) witness witness :=
-            EffectStepTransports.replaceHeap capacity ordinaryTransport
-              sourceGlobals
-          have nextCache :
-              LazyCacheGlobalsRel witness sourceModule nextRuntime
-                (replaceHeap targetStore heap) :=
-            cacheTable.transport transports.witnessTransport
-              transports.sourceGlobals transports.wasmGlobals
-              transports.hostStaticLayout
-          have nextClosureTables :
-              ClosureTablesAgree (replaceHeap targetStore heap) witness :=
-            transports.toClosureTablesTransport.agree closureTables
-          have nextEntry :
-              ReuseCapacityCodeEntryTransports entryRuntime nextRuntime
-                entryStore (replaceHeap targetStore heap) entryWitness witness :=
-            entryTransports.step transports.witnessTransport
-              transports.closureAllocationsPersistent transports.capacity
-              transports.ordinary
-              (by simp [replaceHeap, clearFailure])
-              transports.toClosureTablesTransport
           have nextInvariant :
               ReuseCapacityEntryRelativeFrame
                 (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
@@ -5632,11 +5676,8 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
                 entryRuntime entryStore entryWitness facts remainingBytes
                 nextRuntime sourceEnv (replaceHeap targetStore heap)
                 targetLocals witness :=
-            ⟨⟨⟨⟨nextBase, nextIntegerImplementation,
-                    nextNaturalImplementation, nextScalarImplementation⟩,
-                  nextDescriptorAgreement⟩,
-                nextCache, nextClosureTables⟩,
-              nextEntry⟩
+            invariant.ofReplaceHeapEffectStep effectStep capacity
+              ordinaryTransport sourceGlobals cursor
           let sourceAfter : MachineState := {
             source with control := .code continuation
                         runtime := nextRuntime }
@@ -5702,7 +5743,214 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
             targetControlEq := by simp [targetAfter]
             adapted := continuationAdapted
             stateRelated := nextRelated
-            frameAligned := nextBase.2.2.1 }
+            frameAligned := nextInvariant.1.1.1.1.2.2.1 }
+          exact ⟨sourceAfter, targetAfter, replaceHeap targetStore heap,
+            targetRest, .single sourcePath, targetPath, nextFocus,
+            nextInvariant, by simp [sourceAfter], by simp [sourceAfter],
+            by simp [targetAfter]⟩
+      | word64 objectRelated => cases objectRelated
+      | float32Bits objectRelated => cases objectRelated
+      | float64Bits objectRelated => cases objectRelated
+
+/-- One successful ordinary reference-count decrement advances the source by
+one effect step and the structured target by the exact generated unary-host
+prefix. Recursive release may update an ownership tree, but the concrete
+operation supplies the same capacity and ordinary-persistence transports used
+to rebuild the full entry-relative frame. -/
+theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (functionSpec :
+      ConcreteSupportedFunction program context functionCode sourceModule
+        sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime nextRuntime entryRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore entryStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    {targetCode : Wasm.Program}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (supported :
+      OrdinaryDecrementEffectSupported context sourceRuntime sourceEnv code
+        continuation nextRuntime)
+    (sourceStep :
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
+        source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness) :
+    ∃ sourceAfter targetAfter nextStore targetRest,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          1 source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            2 target targetAfter ∧
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+              nextRuntime sourceEnv continuation nextStore targetLocals
+              targetRest witness sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness facts remainingBytes
+              nextRuntime sourceEnv nextStore targetLocals witness ∧
+            sourceAfter.joins = source.joins ∧
+              sourceAfter.frames = source.frames ∧
+                targetAfter.frames = target.frames := by
+  cases supported with
+  | dec sourceRuntime nextRuntime sourceEnv objectId amount check objectFields?
+      continuation objectKind sourceObject objectCompiled objectRefines
+      objectLookup updated =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdapted.dec_eq functionSpec.localsAligned objectCompiled
+          related.adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+          resultCount⟩ :=
+        functionSpec.decrementCall callFound
+      have sourceLookup : lookup sourceEnv objectId = some sourceObject := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value found
+          injection objectLookup with valueEq
+          subst value
+          exact found
+        · contradiction
+      obtain ⟨physicalObject, targetLookup, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup objectFound kindAt
+      have tobjectRelated := physicalRelated.toTObject objectRefines
+      cases tobjectRelated with
+      | word32 objectRelated =>
+          rename_i word
+          obtain ⟨heap, operation, runtimeRelated, cursor, capacity⟩ :=
+            decrementStep_of_refines_with_capacity
+              (objectFields? := objectFields?) related.stateRelated.1
+              objectRelated invariant.1.1.2 updated
+          have nextRelated :
+              StateRelated sourceFunction nextRuntime sourceEnv
+                (replaceHeap targetStore heap) targetLocals witness :=
+            ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              related.stateRelated.2.2⟩
+          have effectStep :
+              EffectStepSimulates context sourceModule sourceFunction []
+                targetModule.wasmModule hosts.env sourceRuntime nextRuntime
+                sourceEnv
+                (.dec objectId amount check false objectFields? continuation)
+                continuation
+                ([.localGet objectIndex, .call callIndex] ++ targetRest)
+                targetRest targetStore (replaceHeap targetStore heap)
+                targetLocals witness witness := by
+            apply effectStepSimulates_unaryHost
+              (spec := hosts.spec)
+              (step := decrementStep amount check objectFields?)
+            · exact sourceStep
+            · exact codeAdapted_dec objectCompiled objectFound callFound
+                continuationAdapted
+            · exact related.stateRelated
+            · exact nextRelated
+            · exact targetLookup
+            · exact imported
+            · exact functionSpec.hostsSatisfy
+            · exact inBounds
+            · exact contracted
+            · exact parameterCount
+            · exact resultCount
+            · exact operation
+          have ordinaryTransport :
+              OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+            decValue_ordinaryPersistenceTransport updated
+          have sourceGlobals :
+              nextRuntime.globals = sourceRuntime.globals :=
+            (decValue_runtimeAux updated).globals
+          have nextInvariant :
+              ReuseCapacityEntryRelativeFrame
+                (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                  externals)
+                entryRuntime entryStore entryWitness facts remainingBytes
+                nextRuntime sourceEnv (replaceHeap targetStore heap)
+                targetLocals witness :=
+            invariant.ofReplaceHeapEffectStep effectStep capacity
+              ordinaryTransport sourceGlobals cursor
+          let sourceAfter : MachineState := {
+            source with control := .code continuation
+                        runtime := nextRuntime }
+          have sourcePath :
+              executeStep externals source = .next sourceAfter := by
+            rcases source with
+              ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+                sourceFrames, actualRuntime⟩
+            have programEq := related.sourceProgramEq
+            change sourceProgram = context.program at programEq
+            subst sourceProgram
+            have controlEq := related.sourceControlEq
+            change sourceControl = _ at controlEq
+            subst sourceControl
+            have envEq := related.sourceEnvEq
+            change actualEnv = sourceEnv at envEq
+            subst actualEnv
+            have runtimeEq := related.sourceRuntimeEq
+            change actualRuntime = sourceRuntime at runtimeEq
+            subst actualRuntime
+            simp [sourceAfter, executeStep, coreStep, objectLookup, updated]
+          let targetAfter : StructuredWasmState Host := {
+            store := replaceHeap targetStore heap
+            control := .running
+              { targetLocals with values := targetLocals.values } targetRest
+            frames := target.frames }
+          have targetPath :
+              FinitePath
+                (StructuredWasmStep targetModule.wasmModule hosts.env) 2
+                target targetAfter := by
+            rcases target with ⟨actualStore, actualControl, actualFrames⟩
+            have storeEq := related.targetStoreEq
+            change actualStore = targetStore at storeEq
+            subst actualStore
+            have controlEq := related.targetControlEq
+            change actualControl =
+              .running targetLocals
+                ([.localGet objectIndex, .call callIndex] ++ targetRest)
+              at controlEq
+            subst actualControl
+            simpa [targetAfter] using
+              structuredWasmUnaryHostEffectPrefixFinitePath
+                (module := targetModule.wasmModule) (env := hosts.env)
+                (spec := hosts.spec)
+                (step := decrementStep amount check objectFields?)
+                (initial := targetStore) (final := replaceHeap targetStore heap)
+                (locals := targetLocals) (objectIndex := objectIndex)
+                (physicalObject := .i32 (UInt32.ofNat word.value))
+                (targetRest := targetRest) (tail := targetLocals.values)
+                (frames := actualFrames) targetLookup imported
+                functionSpec.hostsSatisfy inBounds contracted parameterCount
+                resultCount operation
+          have nextFocus :
+              ConcreteStructuredCodeFocus context sourceModule sourceFunction
+                [] nextRuntime sourceEnv continuation
+                (replaceHeap targetStore heap) targetLocals targetRest witness
+                sourceAfter targetAfter := {
+            sourceProgramEq := by
+              simp [sourceAfter, related.sourceProgramEq]
+            sourceControlEq := by simp [sourceAfter]
+            sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+            sourceRuntimeEq := by simp [sourceAfter]
+            targetStoreEq := by simp [targetAfter]
+            targetControlEq := by simp [targetAfter]
+            adapted := continuationAdapted
+            stateRelated := nextRelated
+            frameAligned := nextInvariant.1.1.1.1.2.2.1 }
           exact ⟨sourceAfter, targetAfter, replaceHeap targetStore heap,
             targetRest, .single sourcePath, targetPath, nextFocus,
             nextInvariant, by simp [sourceAfter], by simp [sourceAfter],
@@ -5714,7 +5962,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
 /-- Recursive structured partial correctness for direct values, supported pure
 external results, statically named calls, generated lazy caches, erased
 default-case wrappers, arbitrary normalized object and scalar `UInt8`
-dispatchers, and persistent or ordinary-increment ownership effects.
+dispatchers, and persistent or ordinary increment/decrement ownership effects.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -6811,6 +7059,26 @@ theorem
           targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
           sourceMiddleFrames, targetMiddleFrames⟩ :=
         related.advance_ordinaryIncrement functionSpec supported sourceStep
+          invariant
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, targetFramesEq⟩ :=
+        ih functionSpec contextCaches nextFocus
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
+        sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
+        resultInvariant, resultRefines, resultJoins,
+        sourceFramesEq.trans sourceMiddleFrames,
+        targetFramesEq.trans targetMiddleFrames⟩
+  | @ordinaryDecrementEffect sourceRuntime sourceEnv code continuation
+      nextRuntime context expectedResult facts resultFacts resultRuntime
+      resultEnv resultValue requiredBytes supported sourceStep continued ih =>
+      obtain ⟨sourceMiddle, targetMiddle, nextStore, targetRest, sourcePrefix,
+          targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
+          sourceMiddleFrames, targetMiddleFrames⟩ :=
+        related.advance_ordinaryDecrement functionSpec supported sourceStep
           invariant
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
