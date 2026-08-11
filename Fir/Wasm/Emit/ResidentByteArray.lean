@@ -23,6 +23,7 @@ inductive LinkError where
   | missingAllocator
   | missingNumericHelper (name : Name)
   | missingScalarHelper (name : Name)
+  | missingOwnershipHelper (name : Name)
   | scalarHelperLink (error : ResidentScalarBox.LinkError)
   | reservedDeclaration (name : Name)
   | missingExternal (name : Name)
@@ -100,6 +101,7 @@ private def addressLocal : FVarId := ⟨`address⟩
 private def rawLocal : FVarId := ⟨`rawValue⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
+private def arrayTobjectLocal : FVarId := ⟨`arrayTobject⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def allocationLocal : FVarId := ⟨`allocationBytes⟩
 private def unitsLocal : FVarId := ⟨`allocationUnits⟩
@@ -436,13 +438,32 @@ private def requireArray : List Instruction :=
   requireHeapAddress arrayParam ++
   trapUnlessTrue (load32 arrayParam headerKindOffset ++
     equalsConst .uint32 ObjectKind.opaque.code) ++
-  trapUnlessTrue (load32 arrayParam headerFlagsOffset ++ [
-    .i32Const .uint32 (persistentFlag + liveFlag),
-    .i32And] ++ equalsConst .uint32 (persistentFlag + liveFlag)) ++
+  (load32 arrayParam headerFlagsOffset ++ equalsConst .uint32 liveFlag ++
+    [.ifElse
+      (trapWhenTrue (load32 arrayParam headerRefCountOffset ++
+        equalsConst .uint32 0))
+      (trapUnlessTrue (load32 arrayParam headerFlagsOffset ++
+          equalsConst .uint32 (persistentFlag + liveFlag)) ++
+        trapWhenTrue (load32 arrayParam headerRefCountOffset))]) ++
   trapUnlessTrue (load32 arrayParam headerAux0Offset ++
     equalsConst .uint32 ResidentArray.arrayMarker) ++
+  trapWhenTrue (load32 arrayParam headerAux3Offset) ++
   trapWhenTrue (load32 arrayParam headerAux2Offset ++
     load32 arrayParam headerAux1Offset ++ [.i32LtU])
+
+private def captureArrayTobject : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet arrayParam,
+  .i32Store .object 0,
+  .i32Const .uint32 0,
+  .i32Load .tobject 0,
+  .localSet arrayTobjectLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0]
 
 def mkFunction : Function := {
   name := externalName `ByteArray.mk
@@ -452,8 +473,8 @@ def mkFunction : Function := {
     (sourceCursorLocal, .uint32), (destinationCursorLocal, .uint32),
     (countParam, .uint32), (elementLocal, .tobject),
     (rawLocal, .uint32), (savedScratchLocal, .uint32),
-    (objectResultLocal, .object)]
-  body := requireArray ++ [
+    (objectResultLocal, .object), (arrayTobjectLocal, .tobject)]
+  body := requireArray ++ captureArrayTobject ++ [
     .localGet arrayParam,
     .i32Load .uint32 (u32 headerAux1Offset),
     .localSet sizeLocal,
@@ -496,6 +517,9 @@ def mkFunction : Function := {
         .i32Add,
         .localSet countParam,
         .br packLoopLabel] []],
+    .localGet arrayTobjectLocal,
+    .i32Const .uint32 1,
+    .call (.declaration ResidentRelease.decrementOnceName),
     .localGet addressLocal,
     .call (.declaration retypeObjectName),
     .ret] }
@@ -717,6 +741,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
   if declarations.contains `ByteArray.mk then
     unless module.functions.any (·.name == ResidentScalarBox.unboxUInt8Name) do
       throw (.missingScalarHelper ResidentScalarBox.unboxUInt8Name)
+    unless module.functions.any (·.name == ResidentRelease.decrementOnceName) do
+      throw (.missingOwnershipHelper ResidentRelease.decrementOnceName)
   let selectedExternalHelperNames := declarations.map externalName
   let selectedHelperNames :=
     selectedInternalHelperNames declarations ++ selectedExternalHelperNames
@@ -804,6 +830,8 @@ def residentExampleModule : Except String Module := do
     runtimeOperations := numeric.runtimeOperations.push unboxOperation }
   let scalar ← ResidentScalarBox.internalizeAvailable scalarInput
     |>.mapError fun error => s!"byte-array scalar prerequisite: {repr error}"
+  let scalar ← ResidentRelease.internalizeReleases scalar
+    |>.mapError fun error => s!"byte-array releases: {repr error}"
   let module : Module := {
     scalar with
     imports := scalar.imports ++ externalDeclarations.map externalImport }

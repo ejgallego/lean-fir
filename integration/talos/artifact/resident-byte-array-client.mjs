@@ -43,20 +43,22 @@ function expectTrap(action, message) {
   expect(trapped, message);
 }
 
-function writeHeader(view, address, kind, allocation, aux0, aux1, aux2) {
+function writeHeader(view, address, kind, allocation, aux0, aux1, aux2,
+    flags = LIVE_PERSISTENT, refCount = 0) {
   for (const [index, value] of [
-    kind, LIVE_PERSISTENT, 0, allocation, aux0, aux1, aux2, 0,
+    kind, flags, refCount, allocation, aux0, aux1, aux2, 0,
   ].entries()) {
     view.setUint32(address + 4 * index, value, true);
   }
 }
 
-function encodeArray(exports, bytes) {
+function encodeArray(exports, bytes, { persistent = true } = {}) {
   const allocation = align8(HEADER_BYTES + SLOT_BYTES * bytes.length);
   const address = exports.fir_heap_alloc(allocation) >>> 0;
   const view = new DataView(exports.memory.buffer);
   writeHeader(view, address, KIND_OPAQUE, allocation,
-    ARRAY_MARKER, bytes.length, bytes.length);
+    ARRAY_MARKER, bytes.length, bytes.length,
+    persistent ? LIVE_PERSISTENT : LIVE, persistent ? 0 : 1);
   bytes.forEach((byte, index) => {
     view.setUint32(address + HEADER_BYTES + SLOT_BYTES * index,
       2 * byte + 1, true);
@@ -120,6 +122,25 @@ export async function checkResidentByteArray(bytes) {
   equal(decodedSource.capacity, sourceBytes.length, "ByteArray.mk capacity");
   equal(exports.fir_ext_ByteArray_size(source) >>> 0,
     nat(sourceBytes.length), "ByteArray.size tagged result");
+
+  const liveSourceArray = encodeArray(
+    exports, [3, 2, 1], { persistent: false });
+  const liveSource = exports.fir_ext_ByteArray_mk(liveSourceArray) >>> 0;
+  deepEqual(decodeByteArray(exports, liveSource).bytes, [3, 2, 1],
+    "ByteArray.mk live Array bytes");
+  equal(new DataView(exports.memory.buffer).getUint32(liveSourceArray, true),
+    KIND_FREED, "ByteArray.mk did not consume its exclusive Array input");
+
+  const sharedSourceArray = encodeArray(
+    exports, [4, 5], { persistent: false });
+  new DataView(exports.memory.buffer).setUint32(
+    sharedSourceArray + 8, 2, true);
+  const sharedSource = exports.fir_ext_ByteArray_mk(sharedSourceArray) >>> 0;
+  deepEqual(decodeByteArray(exports, sharedSource).bytes, [4, 5],
+    "ByteArray.mk shared Array bytes");
+  equal(new DataView(exports.memory.buffer).getUint32(
+    sharedSourceArray + 8, true), 1,
+  "ByteArray.mk did not consume one shared Array reference");
 
   const makeByteArray = (bytes) =>
     exports.fir_ext_ByteArray_mk(encodeArray(exports, bytes)) >>> 0;

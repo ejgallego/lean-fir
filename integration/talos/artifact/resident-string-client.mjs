@@ -90,6 +90,92 @@ export async function checkResidentString({ bytes, manifest }) {
   const positionNext = optionalExport(instance, "fir_ext_String_Pos_next");
   const decodeChar = optionalExport(instance, "fir_ext_String_decodeChar");
 
+  const zeroPushSource = stringInput(host, "unique");
+  const zeroPushFrontier = instance.exports.fir_heap_frontier();
+  const zeroPushResult = pushn(
+    zeroPushSource, 0x21, naturalInput(host, 0n));
+  assert.equal(zeroPushResult, zeroPushSource,
+    "String.Internal.pushn zero must return its owned source");
+  assert.equal(instance.exports.fir_heap_frontier(), zeroPushFrontier,
+    "String.Internal.pushn zero must not allocate");
+
+  const reusableLeft = stringInput(host, "abc");
+  const reusableRight = stringInput(host, "d");
+  const reusableRightHeader = host.readHeader(reusableRight);
+  const reusableFrontier = instance.exports.fir_heap_frontier();
+  const reusedAppend = append(reusableLeft, reusableRight);
+  assert.equal(reusedAppend, reusableLeft,
+    "String append must reuse an exclusive input with capacity");
+  assert.equal(instance.exports.fir_heap_frontier(), reusableFrontier,
+    "reused String append must not allocate");
+  assert.equal(stringValue(host, reusedAppend), "abcd",
+    "reused String append payload");
+  assert.equal(host.readHeader(reusableRight).rc, reusableRightHeader.rc,
+    "String append consumed its borrowed right input");
+
+  const growthLeft = stringInput(host, "12345678");
+  const growthRight = stringInput(host, "9");
+  const grownAppend = append(growthLeft, growthRight);
+  assert.notEqual(grownAppend, growthLeft,
+    "full exclusive String did not grow");
+  assert.equal(stringValue(host, grownAppend), "123456789",
+    "grown String append payload");
+  assert.equal(host.readHeader(growthLeft, false).live, false,
+    "grown String append did not consume its exclusive input");
+  const grownHeader = host.readHeader(grownAppend);
+  assert.ok(grownHeader.bytes - 32 > grownHeader.aux1,
+    "grown String did not retain spare capacity");
+  const grownFrontier = instance.exports.fir_heap_frontier();
+  const grownAgain = pushn(grownAppend, 0x21, naturalInput(host, 1n));
+  assert.equal(grownAgain, grownAppend,
+    "grown String did not reuse retained capacity");
+  assert.equal(instance.exports.fir_heap_frontier(), grownFrontier,
+    "String push within grown capacity allocated");
+  assert.equal(stringValue(host, grownAgain), "123456789!",
+    "String push within grown capacity payload");
+
+  const sharedLeft = stringInput(host, "share");
+  host.writeHeader(sharedLeft, { ...host.readHeader(sharedLeft), rc: 2 });
+  const sharedRight = stringInput(host, "d");
+  const sharedAppend = append(sharedLeft, sharedRight);
+  assert.notEqual(sharedAppend, sharedLeft,
+    "String append mutated a shared input");
+  assert.equal(host.readHeader(sharedLeft).rc, 1,
+    "String append did not consume one shared input reference");
+  assert.equal(stringValue(host, sharedLeft), "share",
+    "String append mutated a shared alias");
+  assert.equal(stringValue(host, sharedAppend), "shared",
+    "shared String append payload");
+  assert.equal(host.readHeader(sharedRight).rc, 1,
+    "shared String append consumed its borrowed right input");
+
+  const persistentLeft = stringInput(host, "fixed");
+  host.markPersistentWord(persistentLeft);
+  const persistentRight = stringInput(host, "!");
+  const persistentAppend = append(persistentLeft, persistentRight);
+  assert.notEqual(persistentAppend, persistentLeft,
+    "String append mutated a persistent input");
+  assert.equal(stringValue(host, persistentLeft), "fixed",
+    "String append changed persistent source bytes");
+  assert.equal(stringValue(host, persistentAppend), "fixed!",
+    "persistent String append payload");
+  assert.equal(host.readHeader(persistentLeft).persistent, true,
+    "String append changed persistent source ownership");
+
+  let pushed = stringInput(host, "");
+  pushed = pushn(pushed, 0x61, naturalInput(host, 1n));
+  const pushCapacityFrontier = instance.exports.fir_heap_frontier();
+  for (let index = 0; index < 7; index += 1) {
+    const next = pushn(pushed, 0x61, naturalInput(host, 1n));
+    assert.equal(next, pushed,
+      `String push did not reuse capacity at step ${index}`);
+    pushed = next;
+  }
+  assert.equal(instance.exports.fir_heap_frontier(), pushCapacityFrontier,
+    "repeated String pushes within capacity allocated");
+  assert.equal(stringValue(host, pushed), "aaaaaaaa",
+    "repeated String push payload");
+
   assert.equal(stringValue(host,
     append(stringInput(host, "λ"), stringInput(host, "💩"))), "λ💩");
   if (publicAppend !== undefined) {

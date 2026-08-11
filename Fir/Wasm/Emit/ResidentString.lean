@@ -1,5 +1,6 @@
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentRelease
 
 namespace Fir.Wasm.Emit.ResidentString
 
@@ -27,6 +28,7 @@ inductive LinkError where
   | invalidInput (error : SymbolicError)
   | missingAllocator
   | missingNumericHelper (name : Name)
+  | missingOwnershipHelper (name : Name)
   | reservedDeclaration (name : Name)
   | missingExternal (name : Name)
   | incompatibleExternal (name : Name)
@@ -47,6 +49,7 @@ private def beginParam : FVarId := ⟨`begin⟩
 private def endParam : FVarId := ⟨`end⟩
 private def rawParam : FVarId := ⟨`raw⟩
 private def byteCountParam : FVarId := ⟨`byteCount⟩
+private def capacityParam : FVarId := ⟨`capacity⟩
 private def destinationParam : FVarId := ⟨`destination⟩
 private def indexParam : FVarId := ⟨`index⟩
 private def widthParam : FVarId := ⟨`width⟩
@@ -61,12 +64,18 @@ private def fillCodePointLoop : FVarId := ⟨`fillCodePointLoop⟩
 private def findCodePointLoop : FVarId := ⟨`findCodePointLoop⟩
 
 private def addressLocal : FVarId := ⟨`address⟩
+private def inputAddressLocal : FVarId := ⟨`inputAddress⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def tobjectResultLocal : FVarId := ⟨`tobjectResult⟩
+private def inputTobjectLocal : FVarId := ⟨`inputTobject⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 private def rawLocal : FVarId := ⟨`rawValue⟩
 private def allocationLocal : FVarId := ⟨`allocationBytes⟩
+private def capacityLocal : FVarId := ⟨`capacityValue⟩
+private def newCapacityLocal : FVarId := ⟨`newCapacity⟩
+private def exclusiveLocal : FVarId := ⟨`exclusive⟩
+private def reuseLocal : FVarId := ⟨`reuse⟩
 private def unitsLocal : FVarId := ⟨`allocationUnits⟩
 private def byteLocal : FVarId := ⟨`byte⟩
 private def incrementLocal : FVarId := ⟨`increment⟩
@@ -94,7 +103,9 @@ private def decodedCodePointLocal : FVarId := ⟨`decodedCodePoint⟩
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
 def expectedAllocationName : Name := `fir_string_expected_allocation
+def capacityName : Name := `fir_string_capacity
 def allocateName : Name := `fir_string_allocate
+def allocateCapacityName : Name := `fir_string_allocate_capacity
 def retypeObjectName : Name := `fir_string_retype_object
 def makeNatural32Name : Name := `fir_string_make_natural32
 def copyBytesName : Name := `fir_string_copy_bytes
@@ -110,7 +121,9 @@ def internalHelperNames : Array Name := #[
   validateName,
   byteLengthName,
   expectedAllocationName,
+  capacityName,
   allocateName,
+  allocateCapacityName,
   retypeObjectName,
   makeNatural32Name,
   copyBytesName,
@@ -251,13 +264,13 @@ def validateFunction : Function := {
     trapWhenTrue (load32 sourceParam headerAux3Offset) ++ [
       .localGet sourceParam,
       .i32Load .uint32 (u32 headerAux1Offset),
-      .localSet sourceLengthLocal,
+      .localSet sourceLengthLocal] ++
+    trapWhenTrue [
       .localGet sourceParam,
       .i32Load .uint32 (u32 headerAllocationBytesOffset),
       .localGet sourceLengthLocal,
       .call (.declaration expectedAllocationName),
-      .i32Eq] ++
-    trapUnlessTrue [] ++
+      .i32LtU] ++
     load32 sourceParam headerFlagsOffset ++
     equalsConst .uint32 liveFlag ++ [
       .ifElse
@@ -278,15 +291,30 @@ def byteLengthFunction : Function := {
   locals := #[]
   body := load32 sourceParam headerAux1Offset ++ [.ret] }
 
-def allocateFunction : Function := {
-  name := allocateName
-  params := #[(byteCountParam, .uint32)]
+def capacityFunction : Function := {
+  name := capacityName
+  params := #[(sourceParam, .object)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet sourceParam,
+    .i32Load .uint32 (u32 headerAllocationBytesOffset),
+    .i32Const .uint32 (u32 headerBytes),
+    .i32Sub,
+    .ret] }
+
+def allocateCapacityFunction : Function := {
+  name := allocateCapacityName
+  params := #[(byteCountParam, .uint32), (capacityParam, .uint32)]
   results := #[.uint32]
   locals := #[
     (addressLocal, .uint32),
     (allocationLocal, .uint32)]
-  body := [
+  body := trapWhenTrue [
+    .localGet capacityParam,
     .localGet byteCountParam,
+    .i32LtU] ++ [
+    .localGet capacityParam,
     .call (.declaration expectedAllocationName),
     .localSet allocationLocal,
     .localGet allocationLocal,
@@ -317,6 +345,17 @@ def allocateFunction : Function := {
     .i32Const .uint32 0,
     .i32Store .uint32 (u32 headerAux3Offset),
     .localGet addressLocal,
+    .ret] }
+
+def allocateFunction : Function := {
+  name := allocateName
+  params := #[(byteCountParam, .uint32)]
+  results := #[.uint32]
+  locals := #[]
+  body := [
+    .localGet byteCountParam,
+    .localGet byteCountParam,
+    .call (.declaration allocateCapacityName),
     .ret] }
 
 def retypeObjectFunction : Function := {
@@ -778,6 +817,74 @@ private def callCopyPayload
     [.i32Add, .localGet sourceObject] ++ sourceOffset ++
     [.i32Add, .localGet count, .call (.declaration copyBytesName)]
 
+private def captureOwnedObject (object : FVarId) : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet object,
+  .i32Store .object 0,
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Load .tobject 0,
+  .localSet inputTobjectLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0]
+
+private def selectExclusive (object : FVarId) : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet exclusiveLocal] ++
+  load32 object headerFlagsOffset ++
+  equalsConst .uint32 liveFlag ++ [
+  .ifElse
+    (load32 object headerRefCountOffset ++
+      equalsConst .uint32 1 ++ [
+      .ifElse [
+        .i32Const .uint32 1,
+        .localSet exclusiveLocal] []])
+    []]
+
+private def selectReusable : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet reuseLocal,
+  .localGet exclusiveLocal,
+  .ifElse [
+    .localGet capacityLocal,
+    .localGet totalLengthLocal,
+    .i32LtU,
+    .ifElse [] [
+      .i32Const .uint32 1,
+      .localSet reuseLocal]] []]
+
+private def selectGrowthCapacity : List Instruction := [
+  .localGet exclusiveLocal,
+  .ifElse [
+    .localGet capacityLocal,
+    .localGet totalLengthLocal,
+    .i32Add,
+    .localSet newCapacityLocal] [
+    .localGet totalLengthLocal,
+    .localGet totalLengthLocal,
+    .i32Add,
+    .localSet newCapacityLocal]] ++
+  trapWhenTrue [
+    .localGet newCapacityLocal,
+    .localGet totalLengthLocal,
+    .i32LtU]
+
+private def setInputLength : List Instruction := [
+  .localGet inputAddressLocal,
+  .localGet totalLengthLocal,
+  .i32Store .uint32 (u32 headerAux1Offset)]
+
+private def releaseOwnedInput : List Instruction := [
+  .localGet inputTobjectLocal,
+  .i32Const .uint32 1,
+  .call (.declaration ResidentRelease.decrementOnceName)]
+
 def appendFunction : Function := {
   name := externalName `String.Internal.append
   params := #[
@@ -785,15 +892,22 @@ def appendFunction : Function := {
     (rightParam, .object)]
   results := #[.object]
   locals := objectResultLocals ++ #[
+    (inputAddressLocal, .uint32),
+    (inputTobjectLocal, .tobject),
     (leftLengthLocal, .uint32),
     (rightLengthLocal, .uint32),
     (totalLengthLocal, .uint32),
+    (capacityLocal, .uint32),
+    (newCapacityLocal, .uint32),
+    (exclusiveLocal, .uint32),
+    (reuseLocal, .uint32),
     (addressLocal, .uint32)]
   body := [
     .localGet leftParam,
     .call (.declaration validateName),
     .localGet rightParam,
     .call (.declaration validateName),
+    ] ++ captureOwnedObject leftParam ++ [
     .localGet leftParam,
     .call (.declaration byteLengthName),
     .localSet leftLengthLocal,
@@ -801,8 +915,30 @@ def appendFunction : Function := {
     .call (.declaration byteLengthName),
     .localSet rightLengthLocal] ++
     checkedAdd leftLengthLocal rightLengthLocal totalLengthLocal ++ [
+    .localGet leftParam,
+    .call (.declaration capacityName),
+    .localSet capacityLocal] ++
+    selectExclusive leftParam ++ selectReusable ++ [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32Eq,
+    .ifElse [
+      .i32Const .uint32 0,
+      .localSet reuseLocal] [],
+    .localGet reuseLocal,
+    .ifElse
+      (callCopyPayload inputAddressLocal rightParam
+        [.i32Const .uint32 (u32 headerBytes),
+          .localGet leftLengthLocal, .i32Add]
+        [.i32Const .uint32 (u32 headerBytes)]
+        rightLengthLocal ++ setInputLength ++ [
+        .localGet leftParam,
+        .ret])
+      []] ++
+    selectGrowthCapacity ++ [
     .localGet totalLengthLocal,
-    .call (.declaration allocateName),
+    .localGet newCapacityLocal,
+    .call (.declaration allocateCapacityName),
     .localSet addressLocal] ++
     callCopyPayload addressLocal leftParam
       [.i32Const .uint32 (u32 headerBytes)]
@@ -812,6 +948,7 @@ def appendFunction : Function := {
       [.i32Const .uint32 (u32 headerBytes), .localGet leftLengthLocal, .i32Add]
       [.i32Const .uint32 (u32 headerBytes)]
       rightLengthLocal ++
+    releaseOwnedInput ++
     [.localGet addressLocal] ++ retypeRaw .object objectResultLocal }
 
 def pushnFunction : Function := {
@@ -822,18 +959,31 @@ def pushnFunction : Function := {
     (countParam, .tobject)]
   results := #[.object]
   locals := objectResultLocals ++ encodedLocals ++ #[
+    (inputAddressLocal, .uint32),
+    (inputTobjectLocal, .tobject),
     (sourceLengthLocal, .uint32),
     (extraLengthLocal, .uint32),
     (totalLengthLocal, .uint32),
+    (capacityLocal, .uint32),
+    (newCapacityLocal, .uint32),
+    (exclusiveLocal, .uint32),
+    (reuseLocal, .uint32),
     (addressLocal, .uint32),
     (lowLocal, .uint32),
     (highLocal, .uint32)]
   body := [
     .localGet sourceParam,
     .call (.declaration validateName)] ++
+    captureOwnedObject sourceParam ++
     validateNatural countParam ++
     loadNaturalParts countParam ++
-    trapWhenTrue [.localGet highLocal] ++
+    [
+      .localGet countParam,
+      .i32Const .uint32 1,
+      .call (.declaration ResidentRelease.decrementOnceName)] ++
+    trapWhenTrue [.localGet highLocal] ++ [
+    .localGet lowLocal] ++ equalsConst .uint32 0 ++ [
+    .ifElse [.localGet sourceParam, .ret] []] ++
     receiveEncodedCodePoint ++ [
     .localGet sourceParam,
     .call (.declaration byteLengthName),
@@ -843,8 +993,30 @@ def pushnFunction : Function := {
     .call (.declaration scaledCountName),
     .localSet extraLengthLocal] ++
     checkedAdd sourceLengthLocal extraLengthLocal totalLengthLocal ++ [
+    .localGet sourceParam,
+    .call (.declaration capacityName),
+    .localSet capacityLocal] ++
+    selectExclusive sourceParam ++ selectReusable ++ [
+    .localGet reuseLocal,
+    .ifElse ([
+      .localGet inputAddressLocal,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet sourceLengthLocal,
+      .i32Add,
+      .localGet widthLocal,
+      .localGet byte0Local,
+      .localGet byte1Local,
+      .localGet byte2Local,
+      .localGet byte3Local,
+      .localGet lowLocal,
+      .call (.declaration fillCodePointName)] ++ setInputLength ++ [
+      .localGet sourceParam,
+      .ret]) []] ++
+    selectGrowthCapacity ++ [
     .localGet totalLengthLocal,
-    .call (.declaration allocateName),
+    .localGet newCapacityLocal,
+    .call (.declaration allocateCapacityName),
     .localSet addressLocal] ++
     callCopyPayload addressLocal sourceParam
       [.i32Const .uint32 (u32 headerBytes)]
@@ -862,6 +1034,7 @@ def pushnFunction : Function := {
     .localGet byte3Local,
     .localGet lowLocal,
     .call (.declaration fillCodePointName),
+    ] ++ releaseOwnedInput ++ [
     .localGet addressLocal] ++
     retypeRaw .object objectResultLocal }
 
@@ -1279,6 +1452,8 @@ def internalFunctions : Array Function := #[
   expectedAllocationFunction,
   validateFunction,
   byteLengthFunction,
+  capacityFunction,
+  allocateCapacityFunction,
   allocateFunction,
   retypeObjectFunction,
   makeNatural32Function,
@@ -1357,6 +1532,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
   for name in ResidentNumeric.helperNames do
     unless module.functions.any (·.name == name) do
       throw (.missingNumericHelper name)
+  unless module.functions.any (·.name == ResidentRelease.decrementOnceName) do
+    throw (.missingOwnershipHelper ResidentRelease.decrementOnceName)
   let selectedExternalHelperNames := declarations.map externalName
   let selectedImplementationHelperNames :=
     let names := selectedExternalHelperNames
@@ -1505,6 +1682,8 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"allocator: {repr error}"
   let module ← ResidentNumeric.internalize module
     |>.mapError fun error => s!"numeric: {repr error}"
+  let module ← ResidentRelease.internalizeReleases module
+    |>.mapError fun error => s!"releases: {repr error}"
   let module ← internalizeAvailable module
     |>.mapError fun error => s!"string: {repr error}"
   ResidentLiteral.internalizeStrings module
