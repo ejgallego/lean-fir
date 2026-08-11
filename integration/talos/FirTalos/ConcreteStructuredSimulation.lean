@@ -14189,20 +14189,209 @@ theorem
     by simpa [targetInitial, concreteStructuredFunctionEntry] using
       targetFrames⟩
 
-/-- Structural rank used when lowering erases a source control step.  Later
-frame slices add their own continuation component; the local erased-step laws
-need only this strictly decreasing code-control component. -/
+/-- Structural rank used when lowering erases a source control step.  It
+counts the currently admitted chains of persistent ownership instructions and
+default-only case wrappers.  Later frame slices add their own continuation
+component; the local erased-step laws need only this strictly decreasing
+code-control component. -/
 def compilerCodeSilenceDepth : Lean.Compiler.LCNF.Code .impure → Nat
   | .inc _ _ _ true continuation =>
       compilerCodeSilenceDepth continuation + 1
   | .dec _ _ _ true _ continuation =>
       compilerCodeSilenceDepth continuation + 1
+  | .cases ⟨_, _, _, ⟨[.default selected]⟩⟩ =>
+      compilerCodeSilenceDepth selected + 1
   | _ => 0
 
 def compilerCodeSilenceRank (state : MachineState) : Nat :=
   match state.control with
   | .code code => compilerCodeSilenceDepth code
   | _ => 0
+
+theorem compilerCodeSilenceDepth_defaultOnly_lt
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    (supported :
+      DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected) :
+    compilerCodeSilenceDepth selected <
+      compilerCodeSilenceDepth (.cases cases) := by
+  rcases cases with ⟨name, type, discr, alts⟩
+  rcases alts with ⟨alts⟩
+  change alts = [.default selected] at supported
+  subst alts
+  simp [compilerCodeSilenceDepth]
+
+/-- Rank for the currently exposed structured-control protocols.  The low bit
+distinguishes a compiler code node from its staged invocation state; the high
+component counts chains of compiler-erased ownership and default-only case
+operations.
+Consequently both an empty generated argument prefix and a genuinely erased
+instruction still make strict source-side progress.  Later erased join slices
+extend the high component without changing the protocol phase convention. -/
+def compilerStructuredControlRank (state : MachineState) : Nat :=
+  2 * compilerCodeSilenceRank state +
+    match state.control with
+    | .code _ => 1
+    | _ => 0
+
+theorem compilerStructuredControlRank_invokeName_lt_code
+    {before after : MachineState}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {name : Lean.Name} {args : Array Value}
+    (beforeControl : before.control = .code code)
+    (afterControl : after.control = .invokeName name args) :
+    compilerStructuredControlRank after <
+      compilerStructuredControlRank before := by
+  simp [compilerStructuredControlRank, compilerCodeSilenceRank,
+    beforeControl, afterControl]
+
+theorem compilerStructuredControlRank_invokeValue_lt_code
+    {before after : MachineState}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {value : Value} {args : Array Value}
+    (beforeControl : before.control = .code code)
+    (afterControl : after.control = .invokeValue value args) :
+    compilerStructuredControlRank after <
+      compilerStructuredControlRank before := by
+  simp [compilerStructuredControlRank, compilerCodeSilenceRank,
+    beforeControl, afterControl]
+
+theorem compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+    {before after : MachineState}
+    {beforeCode afterCode : Lean.Compiler.LCNF.Code .impure}
+    (beforeControl : before.control = .code beforeCode)
+    (afterControl : after.control = .code afterCode)
+    (decreases :
+      compilerCodeSilenceRank after < compilerCodeSilenceRank before) :
+    compilerStructuredControlRank after <
+      compilerStructuredControlRank before := by
+  simp [compilerStructuredControlRank, compilerCodeSilenceRank,
+    beforeControl, afterControl] at decreases ⊢
+  omega
+
+/-- A default-only source case is erased by production compilation.  This
+local rule exposes the exact one-source/zero-target transition and the strict
+syntactic rank decrease needed by the unified simulation. -/
+theorem ConcreteStructuredCodeFocus.advance_defaultOnlyCase_ranked
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (supported :
+      DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+    (sourceStep : SourceCaseResult sourceRuntime sourceEnv cases selected)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.cases cases) targetStore targetLocals
+      targetCode witness source target) :
+    ∃ sourceAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 0 target target ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv selected targetStore targetLocals targetCode
+        witness sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  let sourceAfter : MachineState := { source with control := .code selected }
+  have selectSourceStep :
+      executeStep externals source = .next sourceAfter := by
+    rcases source with
+      ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv, sourceFrames,
+        actualRuntime⟩
+    have programEq := related.sourceProgramEq
+    change sourceProgram = context.program at programEq
+    subst sourceProgram
+    have controlEq := related.sourceControlEq
+    change sourceControl = .code (.cases cases) at controlEq
+    subst sourceControl
+    have envEq := related.sourceEnvEq
+    change actualEnv = sourceEnv at envEq
+    subst actualEnv
+    have runtimeEq := related.sourceRuntimeEq
+    change actualRuntime = sourceRuntime at runtimeEq
+    subst actualRuntime
+    rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+    simp [sourceAfter, executeStep, coreStep, found, tagged, chosen]
+  have selectedFocus :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv selected targetStore targetLocals targetCode
+        witness sourceAfter target := {
+    sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+    sourceControlEq := by simp [sourceAfter]
+    sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+    sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
+    targetStoreEq := related.targetStoreEq
+    targetControlEq := related.targetControlEq
+    adapted := CodeAdapted.defaultOnlyCases_selected supported related.adapted
+    stateRelated := related.stateRelated
+    frameAligned := related.frameAligned }
+  have silenceDecreases :
+      compilerCodeSilenceRank sourceAfter <
+        compilerCodeSilenceRank source := by
+    simp only [compilerCodeSilenceRank, selectedFocus.sourceControlEq,
+      related.sourceControlEq]
+    exact compilerCodeSilenceDepth_defaultOnly_lt supported
+  exact ⟨sourceAfter, selectSourceStep, .refl target, selectedFocus,
+    compilerStructuredControlRank_lt_of_codeSilenceRank_lt
+      related.sourceControlEq selectedFocus.sourceControlEq silenceDecreases⟩
+
+/-- Ranked form of saturated-call staging.  Its target path is reflexive by
+construction, and the code-to-invocation phase change supplies the strict
+rank decrease required by `ConcreteRankedTraceSimulation.advance`. -/
+theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage_ranked
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    (site : SaturatedClosureCallSite context decl callerEnv)
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime callerEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target) :
+    ∃ targetValue targetRest resultIndex sourceAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hostEnv) 0 target
+        target ∧
+      ConcreteStructuredSaturatedCallReadyFocus context sourceModule
+        sourceFunction targetModule site labels sourceRuntime continuation
+        source.joins source.frames targetStore targetLocals targetValue
+        targetRest target.frames witness resultIndex sourceAfter target ∧
+      compilerStructuredControlRank sourceAfter <
+        compilerStructuredControlRank source := by
+  obtain ⟨targetValue, targetRest, resultIndex, sourceAfter, sourceStep,
+      targetPath, ready⟩ :=
+    related.advance_saturatedCall_stage (targetModule := targetModule)
+      (hostEnv := hostEnv) site localsAligned
+  exact ⟨targetValue, targetRest, resultIndex, sourceAfter, sourceStep,
+    targetPath, ready,
+    compilerStructuredControlRank_invokeValue_lt_code
+      related.sourceControlEq ready.sourceControlEq⟩
 
 /-- A persistent increment is one source step, no target steps, and a strict
 drop in the local silence rank. -/

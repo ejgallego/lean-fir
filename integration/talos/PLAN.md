@@ -6001,8 +6001,12 @@ closure in one source step while independently deriving the complete matcher,
 capture/argument, and generated-callee-entry target path from compiler
 adaptation plus the cache/ABI frame. It returns the evolved cache frame and
 matcher capacity/store transports, without accepting a target program, path,
-or candidate-selection certificate. The unified per-source-step `advance` law
-and whole-control structural rank are now the next proof boundary.
+or candidate-selection certificate. `compilerStructuredControlRank` now
+combines the staging phase with recursive silence depth, proving strict descent
+for empty-argument staging, persistent ownership erasure, and nested
+default-only case erasure. `advance_defaultOnlyCase_ranked` packages that last
+zero-target transition locally. The relation-wide per-source-step `advance`
+law is now the next proof boundary.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

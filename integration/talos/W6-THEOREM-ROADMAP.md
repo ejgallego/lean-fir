@@ -1415,9 +1415,14 @@ acceptance tests pass.
      consumption with the exact compiler-derived matcher, capture/argument,
      and generated-entry path. It returns the evolved cache frame and matcher
      capacity/store transports needed to restore the caller after recursive
-     execution. The per-step `advance` law and whole-control structural rank
-     are now the next proof boundary. Heap-valued cache misses and target-only
-     loop unwinding remain later widenings.
+     execution. `compilerStructuredControlRank` now combines the staging phase
+     with recursive silence depth. It proves strict descent for empty-argument
+     call staging, persistent ownership erasure, and nested default-only case
+     erasure; `advance_defaultOnlyCase_ranked` exposes the last of those as an
+     exact one-source/zero-target local rule. Assembling these local rules into
+     the relation-wide per-step `advance` law is now the next proof boundary.
+     Heap-valued cache misses and target-only loop unwinding remain later
+     widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
