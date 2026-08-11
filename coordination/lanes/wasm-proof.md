@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: c90db59d on main
+state: active
+base: cf0b6e89 on main
 functional-head: 536fd94b (exact saturated-closure callee return, matcher unwind, and caller resumption)
 contract-base: c90db59d; proof-only extension over the accepted saturated callee-entry and generic Flat contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: rebased onto c90db59d; Lean Beam 0.2.0-beta (source 662b514f) update/sync/save ConcreteStructuredSimulation version 8 hash ed75aa0173077884 with zero errors and zero warnings; forced lake env lean FirTalos/ConcreteStructuredSimulation.lean; lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (122 tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 indexed comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green after rebase
 bug-cards: none
 blockers: none
-handoff: ready for integration; resolve the mailbox-containing head from wasm/talos-runtime and fast-forward main from c90db59d.
+handoff: none; the exact saturated callee-return slice landed on main at cf0b6e89 and the lane is active on hereditary-induction integration.
 next: Connect the exact saturated entry theorem, recursive callee induction hypothesis, and this return/resume focus inside ReuseCapacityStructuredPureExternalLazyCodeEvaluates, then restore the enclosing ownership/resource frame with the entry-relative transports before continuation recursion. Defer heap-valued lazy publication until the entry transport is made facts-aware.
 ```
