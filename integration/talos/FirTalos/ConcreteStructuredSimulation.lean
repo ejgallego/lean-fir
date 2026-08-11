@@ -2720,6 +2720,120 @@ theorem structuredWasmLazyMissSuffixFinitePath
             (.cons leaveConditional
               (.cons reloadValue (.cons setResult (.refl _))))))))
 
+/-- The singleton object-case dispatcher emitted by the compiler takes five
+structured steps before entering its selected arm: local read, concrete tag
+import, expected-tag constant, equality, and conditional entry. -/
+theorem structuredWasmSingletonObjectCasePrefixFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {store : Wasm.Store Host}
+    {locals : Wasm.Locals} {frames : List StructuredWasmFrame}
+    {selectedTarget : Wasm.Program} {discrIndex getTagIndex : Nat}
+    {imp : Wasm.ImportDecl} {word : Word32} {tag : Nat}
+    (localFound :
+      locals.get discrIndex =
+        some (.i32 (UInt32.ofNat word.value)))
+    (importFound : module.imports[getTagIndex]? = some imp)
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (importInBounds : getTagIndex < module.imports.length)
+    (contractFound : spec.contracts[getTagIndex]? = some getTagContract)
+    (parameterCount : imp.params.length = 1)
+    (resultCount : imp.results.length = 1)
+    (operation :
+      getTagStep store [.i32 (UInt32.ofNat word.value)] =
+        .Return [.i32 (UInt32.ofNat tag)] store) :
+    FinitePath (StructuredWasmStep module hostEnv) 5
+      ⟨store, .running locals [
+          .localGet discrIndex,
+          .call getTagIndex,
+          .const (UInt32.ofNat tag),
+          .eq,
+          .iff 0 0 selectedTarget [.unreachable]], frames⟩
+      ⟨store, .running { locals with values := locals.values } selectedTarget,
+        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+  let afterLocal : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with
+        values := .i32 (UInt32.ofNat word.value) :: locals.values } [
+          .call getTagIndex,
+          .const (UInt32.ofNat tag),
+          .eq,
+          .iff 0 0 selectedTarget [.unreachable]],
+      frames⟩
+  let afterHost : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with
+        values := .i32 (UInt32.ofNat tag) :: locals.values } [
+          .const (UInt32.ofNat tag),
+          .eq,
+          .iff 0 0 selectedTarget [.unreachable]],
+      frames⟩
+  let afterConst : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values :=
+        (.i32 (UInt32.ofNat tag) ::
+          .i32 (UInt32.ofNat tag) :: locals.values) } [
+          .eq,
+          .iff 0 0 selectedTarget [.unreachable]],
+      frames⟩
+  let afterEq : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values := .i32 1 :: locals.values }
+        [.iff 0 0 selectedTarget [.unreachable]],
+      frames⟩
+  have loadLocal :
+      StructuredWasmStep module hostEnv
+        ⟨store, .running locals [
+            .localGet discrIndex,
+            .call getTagIndex,
+            .const (UInt32.ofNat tag),
+            .eq,
+            .iff 0 0 selectedTarget [.unreachable]], frames⟩
+        afterLocal := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, localFound]
+  obtain ⟨hostFunction, hostFound, hostContract⟩ :=
+    hostSatisfies.lookup_contract importInBounds contractFound
+  have invoked :
+      hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
+        .Return [.i32 (UInt32.ofNat tag)] store := by
+    have contract :=
+      hostContract store [.i32 (UInt32.ofNat word.value)]
+    change hostFunction.invoke store [.i32 (UInt32.ofNat word.value)] =
+      getTagStep store [.i32 (UInt32.ofNat word.value)] at contract
+    rw [operation] at contract
+    exact contract
+  have callHost :
+      StructuredWasmStep module hostEnv afterLocal afterHost := by
+    apply StructuredWasmStep.importedCall (fuel := 1) importFound
+    simp only [Wasm.execOne.eq_def, Wasm.run,
+      importFound, hostFound, parameterCount, resultCount, invoked,
+      List.take, List.drop, List.reverse_cons, List.reverse_nil,
+      List.nil_append, List.singleton_append]
+  have pushExpected :
+      StructuredWasmStep module hostEnv afterHost afterConst := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def]
+  have compare : StructuredWasmStep module hostEnv afterConst afterEq := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp [Wasm.execOne.eq_def]
+  have enterSelected :
+      StructuredWasmStep module hostEnv afterEq
+        ⟨store,
+          .running { locals with values := locals.values } selectedTarget,
+          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+    simpa only [afterEq] using
+      (StructuredWasmStep.enterIffThen (module := module) (env := hostEnv)
+        (store := store) (locals := locals) (thenBody := selectedTarget)
+        (elseBody := [.unreachable]) (rest := []) (frames := frames)
+        (condition := 1) (by decide))
+  exact .cons loadLocal
+    (.cons callHost
+      (.cons pushExpected
+        (.cons compare (.cons enterSelected (.refl _)))))
+
 /-- Compiler-derived structured simulation of one generated lazy-cache hit.
 
 The source admission contains only the nullary declaration facts.  Compiler
@@ -4206,9 +4320,10 @@ proof receives an induction hypothesis for the generated initializer rather
 than an opaque runtime certificate.  The cache constructors cover hits and
 non-heap misses; a miss recursively evaluates the initializer and then
 publishes its result through the concrete host cache and generated Wasm
-globals.  Default-only cases are included as compiler-erased control steps.
-Heap-valued miss publication, generated discriminator cases, and effects
-remain separate later widenings. -/
+globals.  Default-only cases are included as compiler-erased control steps,
+and singleton object-constructor cases execute the compiler-generated `getTag`
+dispatcher.  Heap-valued miss publication, ordered multi-arm and scalar
+cases, and effects remain separate later widenings. -/
 inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
     (externals : ExternalImpl) :
     Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState →
@@ -4335,6 +4450,19 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | singleObjectCase
+      (supported :
+        SingleObjectConstructorCaseSupported context sourceRuntime sourceEnv
+          cases selected)
+      (sourceStep :
+        SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts sourceRuntime sourceEnv selected resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -4394,6 +4522,13 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
       simpa [sourceCodeState] using steps
   | defaultCase _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+          simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
+          (.refl _))
+        ih
+  | singleObjectCase _ sourceStep _ ih =>
       apply SourceCodeResult.ofSteps
         (.step (by
           rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
@@ -4479,8 +4614,8 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
   exact ⟨targetAfter, resumedLocals, path, focus⟩
 
 /-- Recursive structured partial correctness for direct values, supported pure
-external results, statically named calls, generated lazy caches, and erased
-default-case wrappers.
+external results, statically named calls, generated lazy caches, erased
+default-case wrappers, and singleton object-constructor dispatchers.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -4491,7 +4626,7 @@ frame, the result ABI refinement, and exact restoration of the enclosing frame
 stacks are retained. No target trace, callee execution package, or translation
 certificate is a premise. -/
 theorem
-    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheDefaultCases_generated
+    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheCases_generated
     {program : Fir.LeanIR.ImpureProgram}
     {rootContext : Fir.Wasm.Context}
     {rootCode : Lean.Compiler.LCNF.Code .impure}
@@ -4624,6 +4759,194 @@ theorem
           selectSourceStep).trans sourceTail,
         targetPath, yielded, resultInvariant, resultRefines, resultJoins,
         by simpa [sourceSelected] using sourceFramesEq, targetFramesEq⟩
+  | @singleObjectCase context sourceRuntime sourceEnv cases selected
+      expectedResult facts resultFacts resultRuntime resultEnv resultValue
+      requiredBytes supported sourceStep continued ih =>
+      rcases supported with
+        ⟨info, altsEq, modeEq, expectedTagFits, discrCompiled,
+          actualTagFits⟩
+      rcases sourceStep with
+        ⟨sourceObject, actualTag, lookupFound, tagged, chosen⟩
+      have sourceLookup :
+          lookup sourceEnv cases.discr = some sourceObject := by
+        cases lookupEq : lookup sourceEnv cases.discr with
+        | none => simp [lookupValue, lookupEq] at lookupFound
+        | some value =>
+            have valueEq : value = sourceObject := by
+              simpa [lookupValue, lookupEq] using lookupFound
+            subst value
+            rfl
+      have tagEq : actualTag = info.cidx := by
+        rw [altsEq] at chosen
+        simp [chooseAlt, findCtorAlt, findDefaultAlt] at chosen
+        omega
+      have actualFits : actualTag < UInt32.size :=
+        actualTagFits lookupFound tagged
+      have expectedFits : info.cidx < UInt32.size := by
+        simpa [Fir.Wasm.constructorTagFitsI32] using expectedTagFits
+      obtain ⟨selectedTarget, discrIndex, getTagIndex, selectedAdapted,
+          discrFound, getTagFound, targetCodeEq⟩ :=
+        CodeAdapted.singleObjectConstructorCases_eq altsEq modeEq
+          expectedTagFits related.adapted
+      obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+        functionSpec.localsAligned discrCompiled
+      rw [discrFound] at alignedFound
+      have alignedEq : alignedIndex = discrIndex :=
+        Option.some.inj alignedFound.symm
+      subst alignedIndex
+      obtain ⟨discrPhysical, targetLookup, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup discrFound discrKind
+      obtain ⟨word, physicalEq, objectRelated⟩ :
+          ∃ word : Word32,
+            discrPhysical = .i32 (UInt32.ofNat word.value) ∧
+              ValueRel witness .tobject (.word32 word) sourceObject := by
+        cases physicalRelated with
+        | word32 valueRelated => exact ⟨_, rfl, valueRelated⟩
+        | word64 valueRelated => cases valueRelated
+        | float32Bits valueRelated => cases valueRelated
+        | float64Bits valueRelated => cases valueRelated
+      subst discrPhysical
+      obtain ⟨imp, imported, inBounds, contracted, params, results⟩ :=
+        functionSpec.runtimeCallsAligned getTagFound
+      have getTagContracted :
+          hosts.spec.contracts[getTagIndex]? = some getTagContract := by
+        change hosts.spec.contracts[getTagIndex]? =
+          some (fun initial args result => result = getTagStep initial args)
+        simpa only [resolvedContract?, hostFn?, Option.map_some, getTagFn]
+          using contracted
+      have parameterCount : imp.params.length = 1 := by
+        change imp.params.length = 1 at params
+        exact params
+      have resultCount : imp.results.length = 1 := by
+        change imp.results.length = 1 at results
+        exact results
+      have tagOperation :
+          getTagStep targetStore [.i32 (UInt32.ofNat word.value)] =
+            .Return [.i32 (UInt32.ofNat info.cidx)] targetStore := by
+        have operation :=
+          getTagStep_of_refines related.stateRelated.1 objectRelated tagged
+            actualFits
+        rw [related.stateRelated.clearFailure, tagEq] at operation
+        exact operation
+      let sourceSelected : MachineState := {
+        source with control := .code selected }
+      have selectSourceStep :
+          executeStep externals source = .next sourceSelected := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+            sourceFrames, actualRuntime⟩
+        have programEq := related.sourceProgramEq
+        change sourceProgram = context.program at programEq
+        subst sourceProgram
+        have controlEq := related.sourceControlEq
+        change sourceControl = .code (.cases cases) at controlEq
+        subst sourceControl
+        have envEq := related.sourceEnvEq
+        change actualEnv = sourceEnv at envEq
+        subst actualEnv
+        have runtimeEq := related.sourceRuntimeEq
+        change actualRuntime = sourceRuntime at runtimeEq
+        subst actualRuntime
+        simp [sourceSelected, executeStep, coreStep, lookupFound, tagged,
+          chosen]
+      let targetSelected : StructuredWasmState Host := {
+        store := targetStore
+        control := .running
+          { targetLocals with values := targetLocals.values } selectedTarget
+        frames :=
+          .label 0 (targetLocals.values.drop 0) [] :: target.frames }
+      have targetPrefix :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
+            targetSelected := by
+        rcases target with ⟨actualStore, actualControl, actualFrames⟩
+        have storeEq := related.targetStoreEq
+        change actualStore = targetStore at storeEq
+        subst actualStore
+        have controlEq := related.targetControlEq
+        change actualControl = .running targetLocals targetCode at controlEq
+        subst actualControl
+        subst targetCode
+        simpa [targetSelected] using
+          structuredWasmSingletonObjectCasePrefixFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (spec := hosts.spec) (store := targetStore)
+            (locals := targetLocals) (frames := actualFrames)
+            (selectedTarget := selectedTarget) (discrIndex := discrIndex)
+            (getTagIndex := getTagIndex) (imp := imp) (word := word)
+            (tag := info.cidx) targetLookup imported functionSpec.hostsSatisfy
+            inBounds getTagContracted parameterCount resultCount tagOperation
+      have selectedFocus :
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+            sourceRuntime sourceEnv selected targetStore
+            { targetLocals with values := targetLocals.values } selectedTarget
+            witness sourceSelected targetSelected := {
+        sourceProgramEq := by simp [sourceSelected, related.sourceProgramEq]
+        sourceControlEq := by simp [sourceSelected]
+        sourceEnvEq := by simp [sourceSelected, related.sourceEnvEq]
+        sourceRuntimeEq := by simp [sourceSelected, related.sourceRuntimeEq]
+        targetStoreEq := by simp [targetSelected]
+        targetControlEq := by simp [targetSelected]
+        adapted := selectedAdapted
+        stateRelated := related.stateRelated.withValues targetLocals.values
+        frameAligned := related.frameAligned.withValues targetLocals.values }
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, selectedTargetFramesEq⟩ :=
+        ih functionSpec contextCaches selectedFocus
+          (by simpa [sourceSelected] using sourceJoins)
+          (invariant.withValues targetLocals.values)
+      let targetFinal : StructuredWasmState Host := {
+        store := resultStore
+        control := .returning (physical :: resultLocals.values)
+        frames := target.frames }
+      have unwindTarget :
+          StructuredWasmStep targetModule.wasmModule hosts.env targetAfter
+            targetFinal := by
+        rcases targetAfter with
+          ⟨afterStore, afterControl, afterFrames⟩
+        have storeEq := yielded.targetStoreEq
+        change afterStore = resultStore at storeEq
+        subst afterStore
+        have controlEq := yielded.targetControlEq
+        change afterControl = .returning (physical :: resultLocals.values)
+          at controlEq
+        subst afterControl
+        change afterFrames = _ at selectedTargetFramesEq
+        rw [show targetSelected.frames =
+          .label 0 (targetLocals.values.drop 0) [] :: target.frames by
+            simp [targetSelected]] at selectedTargetFramesEq
+        subst afterFrames
+        simpa [targetFinal] using
+          (StructuredWasmStep.returnLabel
+            (module := targetModule.wasmModule) (env := hosts.env)
+            (values := physical :: resultLocals.values) (resultArity := 0)
+            (belowStack := targetLocals.values.drop 0) (rest := [])
+            (store := resultStore) (frames := target.frames))
+      have finalYielded :
+          ConcreteStructuredYieldFocus context sourceFunction resultRuntime
+            resultEnv resultValue resultStore resultLocals resultWitness kind
+            physical sourceAfter targetFinal := {
+        sourceProgramEq := yielded.sourceProgramEq
+        sourceControlEq := yielded.sourceControlEq
+        sourceEnvEq := yielded.sourceEnvEq
+        sourceRuntimeEq := yielded.sourceRuntimeEq
+        targetStoreEq := by simp [targetFinal]
+        targetControlEq := by simp [targetFinal]
+        stateRelated := yielded.stateRelated
+        frameAligned := yielded.frameAligned
+        valueRelated := yielded.valueRelated }
+      exact ⟨sourceAfter, targetFinal, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, 5 + targetCount + 1,
+        (FinitePath.single
+          (step := fun before after =>
+            executeStep externals before = .next after)
+          selectSourceStep).trans sourceTail,
+        (targetPrefix.trans targetTail).trans (.single unwindTarget),
+        finalYielded, resultInvariant, resultRefines, resultJoins,
+        by simpa [sourceSelected] using sourceFramesEq,
+        by simp [targetFinal]⟩
   | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
       nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>

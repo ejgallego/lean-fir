@@ -1255,7 +1255,7 @@ acceptance tests pass.
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
      structured target return with both path lengths exposed.
-     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheDefaultCases_generated` now performs
+     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheCases_generated` now performs
      the same construction over the existing source-only hereditary relation.
      A named
      call executes its compiler-derived argument prefix and structured call
@@ -1292,10 +1292,15 @@ acceptance tests pass.
      lowering erased the wrapper to the identical selected target branch. The
      target path is therefore reflexive, the resource frame is unchanged, and
      this supplies the first genuine zero-target transition for the later
-     ranked relation. The current fragment makes its empty join environment
-     explicit. Subsequent slices connect generated object/scalar case
-     dispatch, effects, saturated closure calls, heap-valued cache misses, and
-     target-only label/loop unwinding to this induction.
+     ranked relation. Singleton object-constructor selection is recursive too:
+     source/compiler facts determine the selected arm and exact generated
+     `getTag` test, the concrete host contract supplies its tag, and a five-step
+     target prefix enters the compiled arm beneath a saved label frame. After
+     recursively executing that arm, one structured `returnLabel` step restores
+     the enclosing frames. The current fragment makes its empty join environment
+     explicit. Subsequent slices connect ordered object and scalar case chains,
+     effects, saturated closure calls, heap-valued cache misses, and target-only
+     label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
