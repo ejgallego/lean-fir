@@ -40,6 +40,7 @@ private def sourceParam : FVarId := ⟨`source⟩
 private def leftParam : FVarId := ⟨`left⟩
 private def rightParam : FVarId := ⟨`right⟩
 private def codePointParam : FVarId := ⟨`codePoint⟩
+private def proofParam : FVarId := ⟨`proof⟩
 private def countParam : FVarId := ⟨`count⟩
 private def positionParam : FVarId := ⟨`position⟩
 private def beginParam : FVarId := ⟨`begin⟩
@@ -87,6 +88,8 @@ private def matchLocal : FVarId := ⟨`matches⟩
 private def leadingCountLocal : FVarId := ⟨`leadingCount⟩
 private def effectiveEndLocal : FVarId := ⟨`effectiveEnd⟩
 private def copyLengthLocal : FVarId := ⟨`copyLength⟩
+private def decodeIndexLocal : FVarId := ⟨`decodeIndex⟩
+private def decodedCodePointLocal : FVarId := ⟨`decodedCodePoint⟩
 
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
@@ -129,12 +132,26 @@ def externalDeclarations : Array Name := #[
   `String.Internal.extract,
   `String.Internal.next]
 
+/--
+Additional exposed Lean 4.32 String APIs linked only when a captured source
+closure imports them. The historical strict frontier above remains stable.
+-/
+def availableExternalDeclarations : Array Name :=
+  externalDeclarations ++ #[
+    `String.append,
+    `String.push,
+    `String.Pos.next,
+    `String.decodeChar]
+
 def externalName (declaration : Name) : Name :=
   ResidentNumeric.externalName declaration
 
 def externalHelperNames : Array Name := externalDeclarations.map externalName
 
-def helperNames : Array Name := internalHelperNames ++ externalHelperNames
+def availableExternalHelperNames : Array Name :=
+  availableExternalDeclarations.map externalName
+
+def helperNames : Array Name := internalHelperNames ++ availableExternalHelperNames
 
 private def equalsConst (kind : AbiKind) (value : UInt32) :
     List Instruction :=
@@ -1087,6 +1104,163 @@ def nextFunction : Function := {
             .call (.declaration (externalName `Nat.add)),
             .ret]]] }
 
+/-- Exposed `String.append` delegates to the same resident implementation as
+the historical `String.Internal.append` primitive. -/
+def publicAppendFunction : Function := {
+  name := externalName `String.append
+  params := #[(leftParam, .object), (rightParam, .object)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .call (.declaration (externalName `String.Internal.append)),
+    .ret] }
+
+/-- Exposed `String.push` is the one-character specialization of `pushn`. -/
+def publicPushFunction : Function := {
+  name := externalName `String.push
+  params := #[(sourceParam, .object), (codePointParam, .uint32)]
+  results := #[.object]
+  locals := #[]
+  body := [
+    .localGet sourceParam,
+    .localGet codePointParam,
+    .i32Const .tobject 3,
+    .call (.declaration (externalName `String.Internal.pushn)),
+    .ret] }
+
+private def retypeTobjectAsTagged : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet tobjectResultLocal,
+  .i32Store .tobject 0,
+  .i32Const .uint32 0,
+  .i32Load .tagged 0,
+  .localSet taggedResultLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0,
+  .localGet taggedResultLocal,
+  .ret]
+
+/-- Proof-carrying `String.Pos.next` shares the resident UTF-8 walker. -/
+def positionNextFunction : Function := {
+  name := externalName `String.Pos.next
+  params := #[(sourceParam, .object), (positionParam, .tobject),
+    (proofParam, .erased)]
+  results := #[.tagged]
+  locals := #[(tobjectResultLocal, .tobject), (savedScratchLocal, .uint32),
+    (taggedResultLocal, .tagged)]
+  body := [
+    .localGet sourceParam,
+    .localGet positionParam,
+    .call (.declaration (externalName `String.Internal.next)),
+    .localSet tobjectResultLocal] ++ retypeTobjectAsTagged }
+
+private def loadDecodeByte (offset : UInt32) (target : FVarId) :
+    List Instruction := [
+  .localGet lowLocal,
+  .i32Const .uint32 offset,
+  .i32Add,
+  .localSet decodeIndexLocal] ++
+  trapUnlessTrue [
+    .localGet decodeIndexLocal,
+    .localGet sourceLengthLocal,
+    .i32LtU] ++
+  dynamicByteLoad sourceParam decodeIndexLocal ++ [
+    .localSet target]
+
+private def doubleDecodedCodePoint : List Instruction := [
+  .localGet decodedCodePointLocal,
+  .localGet decodedCodePointLocal,
+  .i32Add,
+  .localSet decodedCodePointLocal]
+
+private def scaleDecodedCodePointBy64 : List Instruction :=
+  doubleDecodedCodePoint ++ doubleDecodedCodePoint ++
+  doubleDecodedCodePoint ++ doubleDecodedCodePoint ++
+  doubleDecodedCodePoint ++ doubleDecodedCodePoint
+
+private def appendContinuationByte (byte : FVarId) : List Instruction :=
+  scaleDecodedCodePointBy64 ++ [
+    .localGet decodedCodePointLocal,
+    .localGet byte,
+    .i32Const .uint32 63,
+    .i32And,
+    .i32Add,
+    .localSet decodedCodePointLocal]
+
+private def decodeTwoBytes : List Instruction := [
+  .localGet byte0Local,
+  .i32Const .uint32 31,
+  .i32And,
+  .localSet decodedCodePointLocal] ++
+  loadDecodeByte 1 byte1Local ++ appendContinuationByte byte1Local ++ [
+  .localGet decodedCodePointLocal,
+  .ret]
+
+private def decodeThreeBytes : List Instruction := [
+  .localGet byte0Local,
+  .i32Const .uint32 15,
+  .i32And,
+  .localSet decodedCodePointLocal] ++
+  loadDecodeByte 1 byte1Local ++ appendContinuationByte byte1Local ++
+  loadDecodeByte 2 byte2Local ++ appendContinuationByte byte2Local ++ [
+  .localGet decodedCodePointLocal,
+  .ret]
+
+private def decodeFourBytes : List Instruction := [
+  .localGet byte0Local,
+  .i32Const .uint32 7,
+  .i32And,
+  .localSet decodedCodePointLocal] ++
+  loadDecodeByte 1 byte1Local ++ appendContinuationByte byte1Local ++
+  loadDecodeByte 2 byte2Local ++ appendContinuationByte byte2Local ++
+  loadDecodeByte 3 byte3Local ++ appendContinuationByte byte3Local ++ [
+  .localGet decodedCodePointLocal,
+  .ret]
+
+private def decodeWidthBranch (width : UInt32) (value fallback : List Instruction) :
+    List Instruction := [
+  .localGet widthLocal,
+  .i32Const .uint32 width,
+  .i32Eq,
+  .ifElse value fallback]
+
+/-- Decode the Unicode scalar at a proof-carrying Lean String position. -/
+def decodeCharFunction : Function := {
+  name := externalName `String.decodeChar
+  params := #[(sourceParam, .object), (positionParam, .tobject),
+    (proofParam, .erased)]
+  results := #[.uint32]
+  locals := #[(sourceLengthLocal, .uint32), (lowLocal, .uint32),
+    (highLocal, .uint32), (decodeIndexLocal, .uint32),
+    (widthLocal, .uint32), (byte0Local, .uint32),
+    (byte1Local, .uint32), (byte2Local, .uint32),
+    (byte3Local, .uint32), (decodedCodePointLocal, .uint32)]
+  body := [
+    .localGet sourceParam,
+    .call (.declaration validateName)] ++
+    validateNatural positionParam ++ loadNaturalParts positionParam ++
+    trapUnlessTrue [
+      .localGet highLocal,
+      .i32Const .uint32 0,
+      .i32Eq] ++ [
+    .localGet sourceParam,
+    .call (.declaration byteLengthName),
+    .localSet sourceLengthLocal] ++
+    loadDecodeByte 0 byte0Local ++ [
+    .localGet byte0Local,
+    .call (.declaration utf8WidthName),
+    .localSet widthLocal] ++
+    (decodeWidthBranch 1 [.localGet byte0Local, .ret] <|
+      decodeWidthBranch 2 decodeTwoBytes <|
+      decodeWidthBranch 3 decodeThreeBytes <|
+      decodeWidthBranch 4 decodeFourBytes [.unreachable]) }
+
 def externalFunctions : Array Function := #[
   pushnFunction,
   appendFunction,
@@ -1095,7 +1269,11 @@ def externalFunctions : Array Function := #[
   offsetOfPosFunction,
   utf8ByteSizeFunction,
   extractFunction,
-  nextFunction]
+  nextFunction,
+  publicAppendFunction,
+  publicPushFunction,
+  positionNextFunction,
+  decodeCharFunction]
 
 def internalFunctions : Array Function := #[
   expectedAllocationFunction,
@@ -1113,22 +1291,24 @@ def internalFunctions : Array Function := #[
   fillCodePointFunction,
   findCodePointFunction]
 
-private partial def rewriteInstruction : Instruction → Instruction
+private partial def rewriteInstruction (declarations : Array Name) :
+    Instruction → Instruction
   | .call (.declaration declaration) =>
-      if externalDeclarations.contains declaration then
+      if declarations.contains declaration then
         .call (.declaration (externalName declaration))
       else
         .call (.declaration declaration)
   | .block label body =>
-      .block label (body.map rewriteInstruction)
+      .block label (body.map (rewriteInstruction declarations))
   | .ifElse thenBody elseBody =>
       .ifElse
-        (thenBody.map rewriteInstruction)
-        (elseBody.map rewriteInstruction)
+        (thenBody.map (rewriteInstruction declarations))
+        (elseBody.map (rewriteInstruction declarations))
   | instruction => instruction
 
-private def rewriteFunction (function : Function) : Function :=
-  { function with body := function.body.map rewriteInstruction }
+private def rewriteFunction (declarations : Array Name)
+    (function : Function) : Function :=
+  { function with body := function.body.map (rewriteInstruction declarations) }
 
 private def expectedSignature? (declaration : Name) : Option Signature :=
   if declaration == `String.Internal.pushn then
@@ -1150,10 +1330,23 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.object, .tobject, .tobject]
       results := #[.object] }
+  else if declaration == `String.append then
+    some { params := #[.object, .object], results := #[.object] }
+  else if declaration == `String.push then
+    some { params := #[.object, .uint32], results := #[.object] }
+  else if declaration == `String.Pos.next then
+    some {
+      params := #[.object, .tobject, .erased]
+      results := #[.tagged] }
+  else if declaration == `String.decodeChar then
+    some {
+      params := #[.object, .tobject, .erased]
+      results := #[.uint32] }
   else
     none
 
-def internalize (module : Module) : Except LinkError Module := do
+private def internalizeSelected (module : Module) (declarations : Array Name) :
+    Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
   | .error error => throw (.invalidInput error)
@@ -1164,12 +1357,26 @@ def internalize (module : Module) : Except LinkError Module := do
   for name in ResidentNumeric.helperNames do
     unless module.functions.any (·.name == name) do
       throw (.missingNumericHelper name)
-  for name in helperNames do
+  let selectedExternalHelperNames := declarations.map externalName
+  let selectedImplementationHelperNames :=
+    let names := selectedExternalHelperNames
+    let names := if declarations.contains `String.append then
+      Fir.Wasm.addUnique names (externalName `String.Internal.append)
+    else names
+    let names := if declarations.contains `String.push then
+      Fir.Wasm.addUnique names (externalName `String.Internal.pushn)
+    else names
+    if declarations.contains `String.Pos.next then
+      Fir.Wasm.addUnique names (externalName `String.Internal.next)
+    else names
+  let selectedHelperNames :=
+    internalHelperNames ++ selectedImplementationHelperNames
+  for name in selectedHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) ||
         module.exports.contains name then
       throw (.reservedDeclaration name)
-  for declaration in externalDeclarations do
+  for declaration in declarations do
     let imports := module.imports.filter (·.declaration? == some declaration)
     unless imports.size == 1 do
       throw (.missingExternal declaration)
@@ -1177,32 +1384,37 @@ def internalize (module : Module) : Except LinkError Module := do
       throw (.incompatibleExternal declaration)
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
+  let selectedExternalFunctions := externalFunctions.filter fun function =>
+    selectedImplementationHelperNames.contains function.name
   let functions :=
-    module.functions.map rewriteFunction ++ internalFunctions ++ externalFunctions
+    module.functions.map (rewriteFunction declarations) ++ internalFunctions ++
+      selectedExternalFunctions
   let imports := module.imports.filter fun import_ =>
     match import_.declaration? with
-    | some declaration => !externalDeclarations.contains declaration
+    | some declaration => !declarations.contains declaration
     | none => true
   let result : Module := {
     module with
     imports
     functions
-    exports := helperNames.foldl Fir.Wasm.addUnique module.exports }
+    exports := selectedHelperNames.foldl Fir.Wasm.addUnique module.exports
+    runtimeOperations := Fir.Wasm.collectRuntimeOps functions }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
-/--
-Internalize the complete resident String family when the source closure uses
-it, and otherwise leave the module unchanged. A partial frontier still fails
-through `internalize`, so source/runtime drift cannot be silently accepted.
--/
+/-- Internalize the complete historical String frontier, rejecting omissions. -/
+def internalize (module : Module) : Except LinkError Module :=
+  internalizeSelected module externalDeclarations
+
+/-- Internalize exactly the supported String operations imported by a source
+closure, including any resident implementation dependencies of exposed API
+wrappers. Each source import retains fail-closed signature checking. -/
 def internalizeAvailable (module : Module) : Except LinkError Module := do
-  if externalDeclarations.any fun declaration =>
-      module.imports.any (·.declaration? == some declaration) then
-    internalize module
-  else
-    return module
+  let declarations := availableExternalDeclarations.filter fun declaration =>
+    module.imports.any (·.declaration? == some declaration)
+  if declarations.isEmpty then return module
+  internalizeSelected module declarations
 
 private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let object := LCNF.ImpureType.object
@@ -1228,6 +1440,18 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some {
       params := #[object, tobject, tobject]
       result := object }
+  else if declaration == `String.append then
+    some { params := #[object, object], result := object }
+  else if declaration == `String.push then
+    some { params := #[object, uint32], result := object }
+  else if declaration == `String.Pos.next then
+    some {
+      params := #[object, tobject, LCNF.ImpureType.erased]
+      result := tagged }
+  else if declaration == `String.decodeChar then
+    some {
+      params := #[object, tobject, LCNF.ImpureType.erased]
+      result := uint32 }
   else
     none
 
@@ -1270,7 +1494,7 @@ def exampleModule : Module := {
           itemName := declaration.toString
           signature
           externalTypes? := types }) ++
-    externalDeclarations.map exampleExternalImport
+    availableExternalDeclarations.map exampleExternalImport
   functions := exampleStringFunctions
   exports := exampleStringFunctions.map (·.name)
   initializers := #[]
@@ -1281,7 +1505,7 @@ def residentExampleModule : Except String Module := do
     |>.mapError fun error => s!"allocator: {repr error}"
   let module ← ResidentNumeric.internalize module
     |>.mapError fun error => s!"numeric: {repr error}"
-  let module ← internalize module
+  let module ← internalizeAvailable module
     |>.mapError fun error => s!"string: {repr error}"
   ResidentLiteral.internalizeStrings module
     |>.mapError fun error => s!"literal: {repr error}"
@@ -1303,7 +1527,7 @@ def manifest : Json :=
   | .ok module =>
       module.imports.isEmpty &&
       module.runtimeOperations.isEmpty &&
-      externalHelperNames.all module.exports.contains &&
+      availableExternalHelperNames.all module.exports.contains &&
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)

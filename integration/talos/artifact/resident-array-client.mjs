@@ -34,7 +34,7 @@ function arrayWords(memory, address) {
     view.getUint32(address + 32 + 8 * index, true));
 }
 
-/** Check the zero-import resident Array.uget/uset/replicate frontier. */
+/** Check the zero-import resident Array.uget/uset/replicate/pop frontier. */
 export async function checkResidentArrays(bytes) {
   const module = await WebAssembly.compile(bytes);
   equal(WebAssembly.Module.imports(module).length, 0,
@@ -45,9 +45,11 @@ export async function checkResidentArrays(bytes) {
   const replicate = exports.fir_ext_Array_replicate;
   const uget = exports.fir_ext_Array_uget;
   const uset = exports.fir_ext_Array_uset;
+  const pop = exports.fir_ext_Array_pop;
   equal(typeof replicate, "function", "Array.replicate export");
   equal(typeof uget, "function", "Array.uget export");
   equal(typeof uset, "function", "Array.uset export");
+  equal(typeof pop, "function", "Array.pop export");
 
   const value = immediateNatural(21);
   const replacement = immediateNatural(49);
@@ -68,9 +70,19 @@ export async function checkResidentArrays(bytes) {
   equal(uget(0, updated, 1n, 0), replacement,
     "Array.uget updated element");
 
+  const popped = pop(0, updated);
+  expect(popped !== updated, "Array.pop did not preserve its nonempty input");
+  expect(arrayWords(exports.memory, popped).join(",") ===
+    [value, replacement].join(","),
+  "Array.pop copied the wrong prefix");
+  expect(arrayWords(exports.memory, updated).join(",") ===
+    [value, replacement, value].join(","),
+  "Array.pop mutated the persistent input array");
+
   const empty = replicate(0, immediateNatural(0), value);
   expect(arrayWords(exports.memory, empty).length === 0,
     "Array.replicate zero did not create an empty array");
+  equal(pop(0, empty), empty, "Array.pop empty identity");
   expectTrap(() => uget(0, original, 3n, 0), "Array.uget out of bounds");
   expectTrap(() => uset(0, original, 3n, replacement, 0),
     "Array.uset out of bounds");

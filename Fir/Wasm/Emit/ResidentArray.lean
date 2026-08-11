@@ -51,7 +51,7 @@ historical strict `internalize` frontier remains source-compatible.
 -/
 def availableExternalDeclarations : Array Name :=
   externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed, `Array.uget,
-    `Array.uset, `Array.replicate]
+    `Array.uset, `Array.replicate, `Array.pop]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -429,6 +429,29 @@ def pushFunction : Function := {
       .i32Store .tobject 0] ++
     retypeAddress }
 
+/-- Persistent-arena implementation of upstream `Array.pop`. -/
+def popFunction : Function := {
+  name := externalName `Array.pop
+  params := #[(erasedParam, .erased), (arrayParam, .object)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    .localGet sizeLocal,
+    .i32Const .uint32 0,
+    .i32Eq,
+    .ifElse [.localGet arrayParam, .ret] [],
+    .localGet sizeLocal,
+    .i32Const .uint32 1,
+    .i32Sub,
+    .localSet sizeLocal] ++ exactAllocationBytesBody ++ [
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
+    copyElementsBody ++ retypeAddress }
+
 private def copyUpdatedElementsBody : List Instruction := [
   .localGet arrayParam,
   .i32Const .uint32 (u32 headerBytes),
@@ -547,6 +570,7 @@ def functions : Array Function := #[
   ugetBorrowedFunction,
   ugetFunction,
   pushFunction,
+  popFunction,
   getBangOwnedFunction,
   usetFunction,
   replicateFunction]
@@ -598,6 +622,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
       results := #[.object] }
   else if declaration == `Array.push then
     some { params := #[.erased, .object, .tobject], results := #[.object] }
+  else if declaration == `Array.pop then
+    some { params := #[.erased, .object], results := #[.object] }
   else none
 
 private def internalizeSelected (module : Module) (declarations : Array Name) :
@@ -665,7 +691,7 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
   internalizeSelected module declarations
 
 private def exampleDeclarations : Array Name :=
-  #[`Array.uget, `Array.uset, `Array.replicate]
+  #[`Array.uget, `Array.uset, `Array.replicate, `Array.pop]
 
 private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
   let erased := LCNF.ImpureType.erased
@@ -676,6 +702,8 @@ private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
     { params := #[erased, object, usize, erased], result := tobject }
   else if declaration == `Array.uset then
     { params := #[erased, object, usize, tobject, erased], result := object }
+  else if declaration == `Array.pop then
+    { params := #[erased, object], result := object }
   else
     { params := #[erased, tobject, tobject], result := object }
 

@@ -10,6 +10,14 @@ function exported(instance, name) {
   return value;
 }
 
+function optionalExport(instance, name) {
+  const value = instance.exports[name];
+  if (value !== undefined) {
+    assert.equal(typeof value, "function", `${name} must be a function`);
+  }
+  return value;
+}
+
 function synchronize(host) {
   host.synchronizeResidentFrontierBeforeImport();
 }
@@ -77,15 +85,27 @@ export async function checkResidentString({ bytes, manifest }) {
   const utf8ByteSize = exported(instance, "fir_ext_String_utf8ByteSize");
   const extract = exported(instance, "fir_ext_String_Internal_extract");
   const next = exported(instance, "fir_ext_String_Internal_next");
+  const publicAppend = optionalExport(instance, "fir_ext_String_append");
+  const publicPush = optionalExport(instance, "fir_ext_String_push");
+  const positionNext = optionalExport(instance, "fir_ext_String_Pos_next");
+  const decodeChar = optionalExport(instance, "fir_ext_String_decodeChar");
 
   assert.equal(stringValue(host,
     append(stringInput(host, "λ"), stringInput(host, "💩"))), "λ💩");
+  if (publicAppend !== undefined) {
+    assert.equal(stringValue(host,
+      publicAppend(stringInput(host, "λ"), stringInput(host, "💩"))), "λ💩");
+  }
   assert.equal(stringValue(host,
     pushn(stringInput(host, "x"), 0x1f4a9, naturalInput(host, 2n))),
   "x💩💩");
   assert.equal(stringValue(host,
     pushn(stringInput(host, ""), 0x03bb, naturalInput(host, 3n))),
   "λλλ");
+  if (publicPush !== undefined) {
+    assert.equal(stringValue(host,
+      publicPush(stringInput(host, "x"), 0x1f4a9)), "x💩");
+  }
   assert.equal(naturalValue(host,
     length(stringInput(host, "A💩λ"))), 3n);
   assert.equal(naturalValue(host,
@@ -130,10 +150,27 @@ export async function checkResidentString({ bytes, manifest }) {
     next(
       stringInput(host, "A"),
       naturalInput(host, 0xffffffffn))), 0x100000000n);
+  if (positionNext !== undefined) {
+    assert.equal(naturalValue(host,
+      positionNext(stringInput(host, "A💩λ"), naturalInput(host, 1n), 0)), 5n);
+  }
+  if (decodeChar !== undefined) {
+    assert.equal(decodeChar(
+      stringInput(host, "A💩λ"), naturalInput(host, 0n), 0), 0x41);
+    assert.equal(decodeChar(
+      stringInput(host, "A💩λ"), naturalInput(host, 1n), 0), 0x1f4a9);
+    assert.equal(decodeChar(
+      stringInput(host, "A💩λ"), naturalInput(host, 5n), 0), 0x03bb);
+  }
 
   expectTrap(() =>
     pushn(stringInput(host, ""), 0x110000, naturalInput(host, 1n)),
   "out-of-range Unicode scalar must trap");
+  if (decodeChar !== undefined) {
+    expectTrap(() =>
+      decodeChar(stringInput(host, "A"), naturalInput(host, 1n), 0),
+    "past-end String.decodeChar must trap");
+  }
   const malformed = stringInput(host, "bad") >>> 0;
   new DataView(host.memory.buffer).setUint32(malformed + 16, 99, true);
   expectTrap(() => length(malformed),
