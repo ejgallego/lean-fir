@@ -1174,12 +1174,21 @@ acceptance tests pass.
      machine reifies label, loop, and call frames, including loop restart and
      outward branch/return propagation. `ConcreteGeneratedTraceSimulation`
      selects this machine.
-   - **W6.7d — structured terminal adequacy (next).** Prove that every finite
-     path from a canonical generated function entry to a halted empty-frame
-     state collapses through the frame laws to the instruction-boundary
-     theorem and hence to the exact Talos `Wasm.run` result. Establish the
-     reachable-frame stack/arity invariant needed by that induction; do not
-     add target execution evidence to a public compiler theorem.
+   - **W6.7d — structured terminal adequacy (complete).**
+     `StructuredWasmCompletion` gives each control state and explicit frame
+     stack its exact Talos continuation meaning.
+     `StructuredWasmCompletion.of_step` collapses every arity-safe structured
+     transition backwards, including
+     internal calls, loop restart, outward branch, and return. A finite path
+     from canonical generated-function entry to a halted empty-frame state
+     therefore yields the exact `Wasm.run` result uniformly above one fuel
+     bound. The only local side condition is loop restart arity. The adapter
+     emits zero-parameter loops; this shape is preserved by structured steps
+     and derives path arity safety automatically. Successful
+     `FirTalos.adapt` discharges the module shape in
+     `StructuredWasmStep.finitePath_run_of_adapt`. Path evidence remains an
+     internal terminal-adequacy input and is not a premise of the eventual
+     public compiler theorem; W6.7e constructs it from source execution.
    - **W6.7e — compiler relation and silence rank (largest remaining
      milestone).** Define one compiler-derived relation containing compiled
      residual code, source environment/Wasm locals, concrete heap refinement,
@@ -1204,8 +1213,8 @@ acceptance tests pass.
      supported target transition surface is closed enough for a useful weak
      bisimulation.
 
-   Thus W6.7d and W6.7e are the two remaining proof-bearing layers; W6.7f and
-   W6.7g are principally public packaging and consequences. W6.7e is the main
+   Thus W6.7e is the remaining proof-bearing construction; W6.7f and W6.7g
+   are principally public packaging and consequences. W6.7e is the main
    remaining integration risk because it must restore the complete relation
    across every source-step family.
 8. Let W7 generation proceed independently against the current concrete

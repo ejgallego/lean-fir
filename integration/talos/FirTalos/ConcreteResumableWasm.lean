@@ -1,6 +1,6 @@
 import FirTalos.ConcreteTraceSimulation
 import FirTalos.Correctness.ResumableWasm
-import FirTalos.Correctness.StructuredWasmMachine
+import FirTalos.Correctness.StructuredWasmAdequacy
 
 /-!
 # Concrete W6 resumable Wasm machine
