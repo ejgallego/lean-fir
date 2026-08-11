@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 1bdcddee on main
+state: active
+base: f1147aad on main
 functional-head: fcb697f4 (recursive structured simulation now includes successful explicit deletion)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 129 hash b0823f797b20717f (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready from base 1bdcddee at functional head fcb697f4; worktree was clean before this mailbox update.
-next: Land this slice, then connect successful constructor-tag mutation as the first mutation-family recursive case. Keep object-field/scalar-field mutations, heap-valued lazy publication, and saturated closure calls as separate slices.
+handoff: none; the explicit deletion slice landed on main at f1147aad and the lane is active on constructor-tag mutation.
+next: Connect successful constructor-tag mutation as the first mutation-family recursive case, deriving the exact generated prefix and full entry-relative frame reconstruction. Keep object-field/scalar-field mutations, heap-valued lazy publication, and saturated closure calls as separate slices.
 ```
