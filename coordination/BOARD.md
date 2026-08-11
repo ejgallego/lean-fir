@@ -13,28 +13,38 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `W7-GENERIC-BUILD-CLOSURE`.
 - Integration owner: `wasm-gen`; the user asked to remove application-specific
   build/runtime shortcuts before resuming interface adaptation.
 - Integration branch/worktree: `wasm/generation` in
   `.worktrees/wasm-generation`, based directly on `main` at `aa3940b6`.
-- Lease boundary: consumer packages must continue to compile their real final-
-  LCNF source closures. Remove declaration-name rewrites for application
-  constants, distinguish thin source/transport facades from compiler behavior,
-  and move reusable external-runtime selection or linking behind checked generic
-  APIs. Do not copy application algorithms, weaken runtime domains, or hide
-  residual externals behind host fallbacks.
-- First slice: remove the exact
-  `Illuminate.AnimationPlayer.elapsedFrame._closed_0/_closed_1` handling from
-  `ResidentFloat`; establish whether the ordinary captured
-  `Float.ofScientific`/`Float.ofNat` path is already sufficient, and implement
-  the smallest declaration-and-signature-driven runtime repair if not.
-- Acceptance: PrettyM, Illuminate full/selection player, and HitScene keep their
-  exact public semantics, ownership policies, import/export contracts, and
-  external-engine differentials. Root, Talos, deterministic resident-artifact,
-  and consumer package gates must pass before landing.
+- Published stack: active-slice record `0143a5f6`, generic build/runtime head
+  `1ab73d0e`, and ready mailbox `02fa20ee`.
+- Accepted build closure: consumer packages still compile their real final-LCNF
+  source closures. Exact Illuminate declaration-name rewrites and the captured
+  `Float.ofNat` source-body substitution are gone. Checked declaration/signature
+  selection retains the standard external frontier, generic pure-lazy arena
+  preparation removes source globals, and one shared standard-math linker closes
+  the full player, selection player, and HitScene modules without host imports.
+- Runtime ownership: package capability `fir.standard-math/v1` documents the
+  linked runtime's 65,536-byte low-memory reservation. Adapters validate that
+  record and advance the FIR arena before encoding. This fixes
+  `FIR-BUG-wasm-none-external-runtime-arena-overlap`, where the former 1,024-byte
+  initial frontier could overlap linked C runtime data. No shared semantic ABI,
+  concrete layout, or resident-helper signature changed.
+- Published artifacts: clean `1ab73d0e` PrettyM, full-player, and selection-player
+  packages remain zero-import; the deterministic HitScene package inventory is
+  `0fc210079c4346847bdcf06e67a9b09f51e036cc5de75f4ce8697e49abf8e6a3`
+  around the unchanged 45,595-byte zero-import Wasm. Exact local pointers and
+  hashes are recorded in `coordination/lanes/wasm-gen.md`.
+- Validation: Lean Beam checkpoints; focused dependency cones;
+  `git diff --check`; root `make check` with 642 cases and 1,844/1,844
+  comparisons; all 3,131 Talos jobs; the complete deterministic resident-
+  artifact gate; 107 full/selection player trace comparisons; 301 HitScene
+  oracle queries; and 10,000-call flat-frontier ownership smokes for every
+  persistent consumer.
 
 ## Parked integration lease
 
@@ -65,7 +75,7 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `integration/object-provenance` on the resulting `main` before interface
   adaptation resumes.
 
-## Latest completed integration lease
+## Previous completed integration lease
 
 - Milestone: `W7-ILLUMINATE-HITSCENE-PACKAGE`.
 - Integration owner: `wasm-gen`; the user asked to close the publication
