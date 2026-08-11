@@ -13,6 +13,29 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `VALIDATION-RECURSIVE-RELEASE-S5A`.
+- Integration owner: `test-fixtures`; the user previously authorized this
+  lane to take the integration role when needed, and the preceding mapped-owner
+  proof lease is released.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  current `main` at `d1bb3b55`.
+- Candidate: source-compiled recursive release compares a unique nested child
+  making its retained leaf reusable with an outside child alias that stops
+  recursion and forces the later leaf update to allocate.
+- Published handoff: functional head `101ecd8d` and refreshed ready mailbox
+  `6057a494`.
+- Contracts: none. This is fixture, exact-trace, oracle-floor, coverage-policy,
+  roadmap, and validation documentation work only.
+- Acceptance gate: the clean post-proof candidate already passes Lean Beam,
+  dependency builds, `git diff --check`, complete `make check`, all 649 source
+  native/LCNF/V8 cases, the nine direct ownership machines, 1,298 native-oracle
+  witnesses, and the exact aggregate coverage floors with zero findings. Rebase
+  over this lease record, confirm the stack identity/cleanliness, fast-forward
+  `main`, record acceptance here, push, and release the lease.
+
 ## Latest completed integration lease
 
 - Milestone: `ELIMDEAD-GENERIC-MAPPED-OWNER-READINESS`.
