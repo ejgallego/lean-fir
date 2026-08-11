@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-CALL-RESOURCES`.
+- Integration owner: `wasm-proof`; this lease closes the resource half of the
+  non-terminating direct and saturated call boundaries.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `5d4a9b3d` after the
+  recursive structured-stack acceptance.
+- Published stack: active-slice record `54ddd98f`, functional proof head
+  `382998c4`, and clean ready mailbox `eeac39b6`.
+- Accepted proof: `ConcreteStructuredCurrentResource` packages the active
+  function's entry-relative facts, allocation budget, cache, ownership, and
+  closure-ABI invariants. `ConcreteStructuredResourceScope` exposes the exact
+  runtime/store/witness triple at generated function entry. Direct and
+  saturated calls preserve the suspended caller and start a fresh callee
+  scope at that exact boundary.
+- Return composition: the common certificate-free `restoreCaller` theorem
+  folds an arbitrary finite callee resource evolution into the suspended
+  caller, provided the returned value is related and the generated local write
+  succeeds. Both direct and saturated return protocols now erase exactly the
+  bound result fact, restore the caller's complete resource invariant, and pop
+  the structural frame. No callee evaluation, termination premise, target
+  path, or body certificate is assumed.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: Lean Beam update/sync/save with zero errors; direct build of
+  `FirTalos.ConcreteStructuredSimulation` (3,110 jobs); `git diff --check`;
+  Talos setup at `a01d01c`; all 3,133 Talos jobs; and complete `make check`
+  with 651/651 native/LCNF/V8 cases, 1,962/1,962 equal backend comparisons,
+  660 unique cases, 6,689 interpreter steps, 122 tag floors, 227 semantic
+  domains, and zero findings. No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next indexes the
+  exact active and suspended scopes as a recursive resource stack over
+  `ConcreteStructuredFrameRel`, then starts the source-only pointwise
+  admission classifier and relation-wide successor preservation proof.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-RECURSIVE-STACK`.
 - Integration owner: `wasm-proof`; this lease adds the recursive saved-frame
   component required by the certificate-free finite-prefix simulation.
