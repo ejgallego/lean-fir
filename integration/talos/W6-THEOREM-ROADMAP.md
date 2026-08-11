@@ -1198,6 +1198,14 @@ acceptance tests pass.
      relation. A zero-step target match must strictly decrease a structural
      source rank. Discharge direct, external, lazy/cache, case, effect, named
      call, and saturated-closure call cases using existing W6 operation laws.
+     The first construction slice is now explicit:
+     `ConcreteStructuredCodeFocus` relates a source code focus to its running
+     structured-Wasm focus through the real compiler output and concrete
+     runtime/local refinement, and derives observation agreement directly.
+     Persistent `inc` and `dec` steps are proved to preserve that focus with a
+     reflexive target path while `compilerCodeSilenceRank` strictly decreases.
+     The next slices lift this local component through source/target frame
+     correspondence and add positive target paths for non-erased operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
