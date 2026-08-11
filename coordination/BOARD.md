@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-EXTERNAL-PROTOCOL`.
+- Integration owner: `wasm-proof`; this short lease lands the complete
+  per-source-step control protocol for generated pure external calls.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `d6a77d9d` after the
+  repeated-capture read fixture release.
+- Published stack: active-slice record `37c5d31a`, functional head `6ffb9528`,
+  and ready mailbox `989ddf2c`.
+- Accepted proof: production compilation now advances from ordinary code
+  focus through exact compiled-argument staging, a resolved imported call,
+  result-local binding, and back to ordinary code focus. The target path
+  lengths are respectively the compiled argument count, one, and one, and
+  each boundary preserves the concrete store/runtime witness, caller frames,
+  local/environment relation, and exact observation law.
+- Theorem boundary: `ConcreteStructuredControlRel` now has nine constructors.
+  `ConcreteExternalCallEvidence` isolates the remaining runtime/resource
+  construction used by the imported-call transition; it is internal proof
+  evidence, not a compiler certificate or a premise of the intended public
+  correctness theorem.
+- Contracts: none. The stack changes only W6-owned proof staging and roadmap
+  documentation; it does not change a shared semantic, concrete-runtime,
+  resident-helper, or symbolic-Wasm contract.
+- Acceptance: Lean Beam update/sync/save with zero errors; forced and
+  dependency-cone Lean builds; `git diff --check`; all 3,133 Talos jobs; and
+  complete post-rebase `make check` with 645/645 source and V8 cases, 9/9
+  direct cases, 1,935/1,935 three-backend results, 1,944/1,944 indexed equal
+  comparisons, and zero findings. One native-oracle build timeout was
+  transient and the exact rerun passed.
+- Result: `main` fast-forwards through the ready mailbox. W6 next derives the
+  external-call evidence uniformly from the existing `Nat`, `Int`, and scalar
+  runtime laws plus the concrete budget frame, then closes saturated-closure
+  pre-entry and assembles the ranked simulation theorem.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3B`.
 - Integration owner: `test-fixtures`; the user authorized this lane to act as
   integration owner when needed, and the owner accepted the clean S3b handoff
