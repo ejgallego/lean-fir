@@ -18147,6 +18147,8 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunctionOfFunction
   targetFunction := row.targetFunction
   notImport := row.notImport
   targetFunctionFound := row.targetFunctionFound
+  targetBody := row.targetBody
+  targetBodyEq := row.targetBodyEq
   bodyAdapted := row.bodyAdapted
   singleResult := row.singleResult }
 
