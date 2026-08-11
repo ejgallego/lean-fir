@@ -6,5 +6,5 @@
   "frontierFunctionSha256": "2d52c283a1f33ca4d9efebd5e297476bf07b3fe8320bc6edf1aaf88e8ee37253",
   "frontierImports": 15,
   "frontierImportSha256": "88bd7d8220d9cedd6938dbf378c46b96c9abdb095b22825e6c7b1699394a5dd7",
-  "completeWasmBytes": 45595
+  "completeWasmBytes": 45621
 }

@@ -131,6 +131,18 @@ def internalize (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/--
+Install the fail-closed fallback pair only when a captured closure retains it.
+If just one declaration is present, the strict linker reports the incomplete
+frontier instead of manufacturing an application-specific substitute.
+-/
+def internalizeAvailable (module : Module) : Except LinkError Module := do
+  if externalDeclarations.any fun declaration =>
+      module.imports.any (·.declaration? == some declaration) then
+    internalize module
+  else
+    return module
+
 private def exampleImport (declaration : Name) : Import := {
   key := .external declaration
   moduleName := "lean.extern"
@@ -167,6 +179,15 @@ def manifest : Json :=
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match internalizeAvailable {
+    imports := #[]
+    functions := #[]
+    exports := #[]
+    initializers := #[]
+    runtimeOperations := #[] } with
+  | .ok module => module.imports.isEmpty && module.functions.isEmpty
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentFallback

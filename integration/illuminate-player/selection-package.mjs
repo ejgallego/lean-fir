@@ -64,7 +64,7 @@ const expectedClosure = Object.freeze({
   residentHelperSha256:
     "fb51d0c3ed5efab80637dacfd431e9b71c860368bfe08428cffc4f701182b73f",
   baseWasmBytes: 21046,
-  completeWasmBytes: 31929,
+  completeWasmBytes: 31787,
 });
 const outputNames = [
   "BUILD.json",

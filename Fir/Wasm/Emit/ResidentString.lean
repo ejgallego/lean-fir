@@ -1192,6 +1192,18 @@ def internalize (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
+/--
+Internalize the complete resident String family when the source closure uses
+it, and otherwise leave the module unchanged. A partial frontier still fails
+through `internalize`, so source/runtime drift cannot be silently accepted.
+-/
+def internalizeAvailable (module : Module) : Except LinkError Module := do
+  if externalDeclarations.any fun declaration =>
+      module.imports.any (·.declaration? == some declaration) then
+    internalize module
+  else
+    return module
+
 private def externalTypes? (declaration : Name) : Option ExternalTypes :=
   let object := LCNF.ImpureType.object
   let tobject := LCNF.ImpureType.tobject
@@ -1295,6 +1307,15 @@ def manifest : Json :=
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match internalizeAvailable {
+    imports := #[]
+    functions := #[]
+    exports := #[]
+    initializers := #[]
+    runtimeOperations := #[] } with
+  | .ok module => module.imports.isEmpty && module.functions.isEmpty
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentString

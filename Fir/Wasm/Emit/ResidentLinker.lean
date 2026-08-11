@@ -51,8 +51,10 @@ inductive Step where
   | numericAvailable
   | bigNumeric
   | stringOperations
+  | stringOperationsAvailable
   | stringLiterals
   | fallbacks
+  | fallbacksAvailable
   | floatStrict
   | floatAvailable
   | arraysStrict
@@ -62,6 +64,7 @@ inductive Step where
   | natShiftAvailable
   | usizeAvailable
   | directSelfTailCallsRequired
+  | directSelfTailCallsAvailable
   deriving Inhabited, BEq, Repr
 
 /--
@@ -150,9 +153,13 @@ private def applyStep (step : Step) (module : Module) :
       transform "arbitrary-precision Nat/Int operations" ResidentBigNumeric.internalize module
   | .stringOperations =>
       transform "String operations" ResidentString.internalize module
+  | .stringOperationsAvailable =>
+      transform "available String operations" ResidentString.internalizeAvailable module
   | .stringLiterals =>
       transform "String literals" ResidentLiteral.internalizeStrings module
   | .fallbacks => transform "fallbacks" ResidentFallback.internalize module
+  | .fallbacksAvailable =>
+      transform "available fallbacks" ResidentFallback.internalizeAvailable module
   | .floatStrict => transform "Float operations" ResidentFloat.internalize module
   | .floatAvailable =>
       transform "available Float operations" ResidentFloat.internalizeAvailable module
@@ -172,6 +179,9 @@ private def applyStep (step : Step) (module : Module) :
       unless result.rewrittenCalls > 0 do
         throw (.manifest "resident linker found no direct self-tail calls")
       return result.module
+  | .directSelfTailCallsAvailable =>
+      return (← TailCall.eliminateDirectSelfCalls module
+        |>.mapError Source.CompileError.manifest).module
 
 private def applySteps (steps : List Step) (module : Module) :
     Except Source.CompileError Module := do
@@ -291,7 +301,9 @@ def closedApplicationExternalDeclarations : Array Name :=
     ExternalRuntime.mathDeclarations ++
     ResidentArray.availableExternalDeclarations ++
     #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
-    ResidentUSize.externalDeclarations
+    ResidentUSize.externalDeclarations ++
+    ResidentString.externalDeclarations ++
+    ResidentFallback.externalDeclarations
   declarations.foldl addUnique #[]
 
 def closedApplicationRetainedExternalNames : Array String :=
@@ -311,7 +323,10 @@ def closedApplicationPolicy (sourceExports : Array Name) : Policy := {
     .natModAvailable,
     .natShiftAvailable,
     .usizeAvailable,
-    .stringLiterals]
+    .stringOperationsAvailable,
+    .stringLiterals,
+    .fallbacksAvailable,
+    .directSelfTailCallsAvailable]
   publicExports := some (sourceExports ++ allocatorExports) }
 
 /--
