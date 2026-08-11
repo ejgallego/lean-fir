@@ -21,17 +21,59 @@ function immediateNatural(value) {
   return 2 * value + 1;
 }
 
-function arrayWords(memory, address) {
+const KIND_OPAQUE = 8;
+const KIND_FREED = 255;
+const LIVE = 2;
+const LIVE_PERSISTENT = 3;
+
+function arrayState(memory, address) {
   const view = new DataView(memory.buffer);
-  equal(view.getUint32(address, true), 8, "array object kind");
-  equal(view.getUint32(address + 4, true), 3, "array flags");
+  equal(view.getUint32(address, true), KIND_OPAQUE, "array object kind");
+  const flags = view.getUint32(address + 4, true);
+  const refCount = view.getUint32(address + 8, true);
+  expect(flags === LIVE || flags === LIVE_PERSISTENT,
+    `array flags: expected ${LIVE} or ${LIVE_PERSISTENT}, got ${flags}`);
+  if (flags === LIVE) {
+    expect(refCount > 0, "ordinary array has zero references");
+  } else {
+    equal(refCount, 0, "persistent array reference count");
+  }
   equal(view.getUint32(address + 16, true), 0x41525259, "array marker");
   const size = view.getUint32(address + 20, true);
-  equal(view.getUint32(address + 24, true), size, "array capacity");
-  equal(view.getUint32(address + 12, true), 32 + 8 * size,
+  const capacity = view.getUint32(address + 24, true);
+  expect(size <= capacity, "array size exceeds capacity");
+  equal(view.getUint32(address + 12, true), 32 + 8 * capacity,
     "array allocation size");
-  return Array.from({ length: size }, (_, index) =>
-    view.getUint32(address + 32 + 8 * index, true));
+  return {
+    flags,
+    refCount,
+    size,
+    capacity,
+    words: Array.from({ length: size }, (_, index) =>
+      view.getUint32(address + 32 + 8 * index, true)),
+  };
+}
+
+function heapObjectState(memory, address) {
+  const view = new DataView(memory.buffer);
+  return {
+    kind: view.getUint32(address, true),
+    flags: view.getUint32(address + 4, true),
+    refCount: view.getUint32(address + 8, true),
+  };
+}
+
+function allocateOwnedOpaque(exports) {
+  const address = exports.fir_heap_alloc(32);
+  const view = new DataView(exports.memory.buffer);
+  view.setUint32(address, KIND_OPAQUE, true);
+  view.setUint32(address + 4, LIVE, true);
+  view.setUint32(address + 8, 1, true);
+  view.setUint32(address + 12, 32, true);
+  for (let offset = 16; offset < 32; offset += 4) {
+    view.setUint32(address + offset, 0, true);
+  }
+  return address;
 }
 
 /** Check the zero-import resident Array.uget/uset/replicate/pop frontier. */
@@ -43,50 +85,184 @@ export async function checkResidentArrays(bytes) {
   expect(exports.memory instanceof WebAssembly.Memory,
     "resident array memory export is missing");
   const replicate = exports.fir_ext_Array_replicate;
+  const emptyWithCapacity = exports.fir_ext_Array_emptyWithCapacity;
+  const push = exports.fir_ext_Array_push;
   const uget = exports.fir_ext_Array_uget;
   const uset = exports.fir_ext_Array_uset;
   const pop = exports.fir_ext_Array_pop;
+  const release = exports.resident_array_release;
+  equal(typeof emptyWithCapacity, "function", "Array.emptyWithCapacity export");
+  equal(typeof push, "function", "Array.push export");
   equal(typeof replicate, "function", "Array.replicate export");
   equal(typeof uget, "function", "Array.uget export");
   equal(typeof uset, "function", "Array.uset export");
   equal(typeof pop, "function", "Array.pop export");
+  equal(typeof release, "function", "array release export");
 
   const value = immediateNatural(21);
   const replacement = immediateNatural(49);
+  let roomy = emptyWithCapacity(0, immediateNatural(4));
+  const roomyInitial = arrayState(exports.memory, roomy);
+  equal(roomyInitial.flags, LIVE, "emptyWithCapacity unique flags");
+  equal(roomyInitial.refCount, 1,
+    "emptyWithCapacity unique reference count");
+  equal(roomyInitial.size, 0, "emptyWithCapacity size");
+  equal(roomyInitial.capacity, 4, "emptyWithCapacity capacity");
+  const roomyFrontier = exports.fir_heap_frontier();
+  for (let index = 0; index < 4; index += 1) {
+    const pushed = push(0, roomy, immediateNatural(index + 1));
+    equal(pushed, roomy, `Array.push exclusive identity ${index}`);
+    roomy = pushed;
+  }
+  equal(exports.fir_heap_frontier(), roomyFrontier,
+    "Array.push allocated within exclusive capacity");
+  equal(arrayState(exports.memory, roomy).words.join(","),
+    [1, 2, 3, 4].map(immediateNatural).join(","),
+    "Array.push exclusive elements");
+  const grown = push(0, roomy, immediateNatural(5));
+  expect(grown !== roomy, "Array.push retained a full array");
+  const grownState = arrayState(exports.memory, grown);
+  equal(grownState.capacity, 10, "Array.push geometric capacity");
+  equal(grownState.words.join(","),
+    [1, 2, 3, 4, 5].map(immediateNatural).join(","),
+    "Array.push grown elements");
+  equal(new DataView(exports.memory.buffer).getUint32(roomy, true), KIND_FREED,
+    "Array.push did not consume the grown exclusive input");
+
   const original = replicate(0, immediateNatural(3), value);
   expect(original >= 1024 && original % 8 === 0,
     "Array.replicate returned an invalid address");
-  expect(arrayWords(exports.memory, original).every((word) => word === value),
+  const originalState = arrayState(exports.memory, original);
+  equal(originalState.flags, LIVE, "Array.replicate unique flags");
+  equal(originalState.refCount, 1, "Array.replicate unique reference count");
+  expect(originalState.words.every((word) => word === value),
     "Array.replicate did not fill every element");
   equal(uget(0, original, 1n, 0), value, "Array.uget middle element");
 
   const updated = uset(0, original, 1n, replacement, 0);
-  expect(updated !== original, "Array.uset did not preserve its input array");
-  expect(arrayWords(exports.memory, original).every((word) => word === value),
-    "Array.uset mutated the persistent input array");
-  expect(arrayWords(exports.memory, updated).join(",") ===
+  equal(updated, original, "Array.uset did not reuse its exclusive input");
+  expect(arrayState(exports.memory, updated).words.join(",") ===
     [value, replacement, value].join(","),
-  "Array.uset copied or replaced the wrong element");
+    "Array.uset replaced the wrong element");
   equal(uget(0, updated, 1n, 0), replacement,
     "Array.uget updated element");
 
   const popped = pop(0, updated);
-  expect(popped !== updated, "Array.pop did not preserve its nonempty input");
-  expect(arrayWords(exports.memory, popped).join(",") ===
+  equal(popped, updated, "Array.pop did not reuse its exclusive input");
+  expect(arrayState(exports.memory, popped).words.join(",") ===
     [value, replacement].join(","),
-  "Array.pop copied the wrong prefix");
-  expect(arrayWords(exports.memory, updated).join(",") ===
-    [value, replacement, value].join(","),
-  "Array.pop mutated the persistent input array");
+    "Array.pop retained the wrong prefix");
+
+  const shared = replicate(0, immediateNatural(3), value);
+  const sharedView = new DataView(exports.memory.buffer);
+  sharedView.setUint32(shared + 8, 2, true);
+  const sharedUpdated = uset(0, shared, 1n, replacement, 0);
+  expect(sharedUpdated !== shared, "Array.uset mutated a shared input");
+  equal(arrayState(exports.memory, shared).refCount, 1,
+    "Array.uset did not consume one shared input reference");
+  equal(arrayState(exports.memory, shared).words.join(","),
+    [value, value, value].join(","), "Array.uset mutated a shared alias");
+  equal(arrayState(exports.memory, sharedUpdated).words.join(","),
+    [value, replacement, value].join(","), "Array.uset shared copy");
+
+  const persistent = replicate(0, immediateNatural(3), value);
+  const persistentView = new DataView(exports.memory.buffer);
+  persistentView.setUint32(persistent + 4, LIVE_PERSISTENT, true);
+  persistentView.setUint32(persistent + 8, 0, true);
+  const persistentUpdated = uset(0, persistent, 1n, replacement, 0);
+  expect(persistentUpdated !== persistent,
+    "Array.uset mutated a persistent input");
+  equal(arrayState(exports.memory, persistent).words.join(","),
+    [value, value, value].join(","), "Array.uset mutated persistent input");
+  equal(arrayState(exports.memory, persistentUpdated).words.join(","),
+    [value, replacement, value].join(","), "Array.uset persistent copy");
+
+  const sharedPopInput = replicate(0, immediateNatural(3), value);
+  const sharedPopView = new DataView(exports.memory.buffer);
+  sharedPopView.setUint32(sharedPopInput + 8, 2, true);
+  const sharedPopped = pop(0, sharedPopInput);
+  expect(sharedPopped !== sharedPopInput, "Array.pop mutated a shared input");
+  equal(arrayState(exports.memory, sharedPopInput).refCount, 1,
+    "Array.pop did not consume one shared input reference");
+  equal(arrayState(exports.memory, sharedPopInput).size, 3,
+    "Array.pop mutated a shared alias");
+  equal(arrayState(exports.memory, sharedPopped).size, 2,
+    "Array.pop shared copy size");
 
   const empty = replicate(0, immediateNatural(0), value);
-  expect(arrayWords(exports.memory, empty).length === 0,
+  expect(arrayState(exports.memory, empty).words.length === 0,
     "Array.replicate zero did not create an empty array");
   equal(pop(0, empty), empty, "Array.pop empty identity");
   expectTrap(() => uget(0, original, 3n, 0), "Array.uget out of bounds");
   expectTrap(() => uset(0, original, 3n, replacement, 0),
     "Array.uset out of bounds");
   expectTrap(() => replicate(0, 0, value), "Array.replicate invalid Nat");
+
+  const child = allocateOwnedOpaque(exports);
+  const owned = replicate(0, immediateNatural(3), child);
+  equal(heapObjectState(exports.memory, child).refCount, 3,
+    "Array.replicate child references");
+  const ownedGet = uget(0, owned, 1n, 0);
+  equal(ownedGet, child, "Array.uget owned child");
+  equal(heapObjectState(exports.memory, child).refCount, 4,
+    "Array.uget did not retain its owned result");
+  const replacementChild = allocateOwnedOpaque(exports);
+  equal(uset(0, owned, 1n, replacementChild, 0), owned,
+    "Array.uset owned child identity");
+  equal(heapObjectState(exports.memory, child).refCount, 3,
+    "Array.uset did not release the replaced child");
+  equal(heapObjectState(exports.memory, replacementChild).refCount, 1,
+    "Array.uset did not transfer the replacement child");
+  equal(pop(0, owned), owned, "Array.pop owned child identity");
+  equal(heapObjectState(exports.memory, child).refCount, 2,
+    "Array.pop did not release the removed child");
+  release(owned);
+  equal(heapObjectState(exports.memory, owned).kind, KIND_FREED,
+    "final Array release did not retire its header");
+  equal(heapObjectState(exports.memory, replacementChild).kind, KIND_FREED,
+    "final Array release did not release replacement child");
+  equal(heapObjectState(exports.memory, child).refCount, 1,
+    "final Array release did not release retained child");
+  release(ownedGet);
+  equal(heapObjectState(exports.memory, child).kind, KIND_FREED,
+    "released Array.uget result remained live");
+
+  const zeroChild = allocateOwnedOpaque(exports);
+  replicate(0, immediateNatural(0), zeroChild);
+  equal(heapObjectState(exports.memory, zeroChild).kind, KIND_FREED,
+    "Array.replicate zero did not consume its value");
+
+  const sharedChild = allocateOwnedOpaque(exports);
+  const sharedOwned = replicate(0, immediateNatural(3), sharedChild);
+  new DataView(exports.memory.buffer).setUint32(sharedOwned + 8, 2, true);
+  const sharedReplacement = allocateOwnedOpaque(exports);
+  const sharedOwnedUpdated = uset(
+    0, sharedOwned, 1n, sharedReplacement, 0);
+  equal(heapObjectState(exports.memory, sharedChild).refCount, 5,
+    "shared Array.uset did not retain copied children");
+  equal(heapObjectState(exports.memory, sharedReplacement).refCount, 1,
+    "shared Array.uset did not transfer replacement child");
+  release(sharedOwned);
+  equal(heapObjectState(exports.memory, sharedChild).refCount, 2,
+    "shared Array.uset original release count");
+  release(sharedOwnedUpdated);
+  equal(heapObjectState(exports.memory, sharedChild).kind, KIND_FREED,
+    "shared Array.uset copied children remained live");
+  equal(heapObjectState(exports.memory, sharedReplacement).kind, KIND_FREED,
+    "shared Array.uset replacement remained live");
+
+  const sharedPopChild = allocateOwnedOpaque(exports);
+  const sharedPopOwned = replicate(0, immediateNatural(3), sharedPopChild);
+  new DataView(exports.memory.buffer).setUint32(sharedPopOwned + 8, 2, true);
+  const sharedPopResult = pop(0, sharedPopOwned);
+  equal(heapObjectState(exports.memory, sharedPopChild).refCount, 5,
+    "shared Array.pop did not retain copied children");
+  release(sharedPopOwned);
+  equal(heapObjectState(exports.memory, sharedPopChild).refCount, 2,
+    "shared Array.pop original release count");
+  release(sharedPopResult);
+  equal(heapObjectState(exports.memory, sharedPopChild).kind, KIND_FREED,
+    "shared Array.pop copied children remained live");
 
   return "PASS zero-import resident arrays";
 }

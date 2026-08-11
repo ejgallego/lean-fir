@@ -1,4 +1,7 @@
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentReferenceCount
+import Fir.Wasm.Emit.ResidentRelease
+import Fir.Wasm.Emit.ResidentContainerLayout
 
 namespace Fir.Wasm.Emit.ResidentArray
 
@@ -8,19 +11,20 @@ open Lean
 open Lean.Compiler
 
 /-!
-# Persistent arena arrays
+# Reference-counted resident arrays
 
 Closed applications transfer a complete input graph and decode copied output
-values. Arrays use a module-private persistent arena layout: every push
-allocates a fresh array, and reclamation happens when the Wasm instance is
-discarded. Hosts only write this documented layout; all Array semantics below
-execute in Wasm.
+values. Boundary arrays may be persistent, while arrays allocated by compiled
+Lean are ordinary live values with reference count one. Mutating operations
+follow Lean's exclusive-update and copy-on-write discipline inside the Wasm
+module; hosts only write the documented boundary layout.
 -/
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
   | missingAllocator
   | missingNumericHelper (name : Name)
+  | missingOwnershipHelper (name : Name)
   | reservedDeclaration (name : Name)
   | missingExternal (name : Name)
   | incompatibleExternal (name : Name)
@@ -31,7 +35,7 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /-- ASCII `ARRY`, stored in `opaque.aux0`. -/
-def arrayMarker : UInt32 := 0x41525259
+def arrayMarker : UInt32 := ResidentContainerLayout.arrayMarker
 
 def allocateEmptyName : Name := `fir_array_allocate_empty
 
@@ -69,7 +73,13 @@ private def capacityParam : FVarId := ⟨`capacity⟩
 private def valueParam : FVarId := ⟨`value⟩
 
 private def addressLocal : FVarId := ⟨`address⟩
+private def inputAddressLocal : FVarId := ⟨`inputAddress⟩
 private def sizeLocal : FVarId := ⟨`size⟩
+private def capacityLocal : FVarId := ⟨`capacityValue⟩
+private def newCapacityLocal : FVarId := ⟨`newCapacity⟩
+private def refCountLocal : FVarId := ⟨`refCount⟩
+private def exclusiveLocal : FVarId := ⟨`exclusive⟩
+private def reuseLocal : FVarId := ⟨`reuse⟩
 private def indexLocal : FVarId := ⟨`indexValue⟩
 private def countLocal : FVarId := ⟨`count⟩
 private def sourceCursorLocal : FVarId := ⟨`sourceCursor⟩
@@ -82,14 +92,20 @@ private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
 
 private def elementLoopLabel : FVarId := ⟨`elementLoop⟩
-private def byteLoopLabel : FVarId := ⟨`byteLoop⟩
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
+private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
   [.i32Const kind value, .i32Eq]
 
 private def trapUnless (condition : List Instruction) : List Instruction :=
   condition ++ [.ifElse [] [.unreachable]]
+
+private def trapWhenTrue (condition : List Instruction) : List Instruction :=
+  condition ++ [.ifElse [.unreachable] []]
+
+private def load32 (object : FVarId) (offset : Nat) : List Instruction :=
+  [.localGet object, .i32Load .uint32 (u32 offset)]
 
 private def requireArray (array : FVarId) : List Instruction :=
   trapUnless ([
@@ -100,11 +116,13 @@ private def requireArray (array : FVarId) : List Instruction :=
     [.localGet array,
       .i32Const .uint32 (u32 (target.heapAlignment - 1)),
       .i32And] ++ equalsConst .uint32 0) ++
-  trapUnless (
-    [.localGet array,
-      .i32Load .uint32 (u32 headerFlagsOffset),
-      .i32Const .uint32 (persistentFlag + liveFlag),
-      .i32And] ++ equalsConst .uint32 (persistentFlag + liveFlag)) ++
+  (load32 array headerFlagsOffset ++ equalsConst .uint32 liveFlag ++
+    [.ifElse
+      (trapWhenTrue (load32 array headerRefCountOffset ++
+        equalsConst .uint32 0))
+      (trapUnless (load32 array headerFlagsOffset ++
+          equalsConst .uint32 (persistentFlag + liveFlag)) ++
+        trapWhenTrue (load32 array headerRefCountOffset))]) ++
   trapUnless (
     [.localGet array,
       .i32Load .uint32 (u32 headerKindOffset)] ++
@@ -112,12 +130,20 @@ private def requireArray (array : FVarId) : List Instruction :=
   trapUnless (
     [.localGet array,
       .i32Load .uint32 (u32 headerAux0Offset)] ++
-      equalsConst .uint32 arrayMarker)
+      equalsConst .uint32 arrayMarker) ++
+  trapWhenTrue (load32 array headerAux3Offset) ++
+  trapWhenTrue (load32 array headerAux2Offset ++
+    load32 array headerAux1Offset ++ [.i32LtU])
 
 private def loadSize (array : FVarId) : List Instruction := [
   .localGet array,
   .i32Load .uint32 (u32 headerAux1Offset),
   .localSet sizeLocal]
+
+private def loadCapacity (array : FVarId) : List Instruction := [
+  .localGet array,
+  .i32Load .uint32 (u32 headerAux2Offset),
+  .localSet capacityLocal]
 
 private def decodeIndex : List Instruction := [
   .localGet indexParam,
@@ -135,20 +161,21 @@ private def storeHeaderWord (offset : Nat) (value : List Instruction) :
     List Instruction :=
   [.localGet addressLocal] ++ value ++ [.i32Store .uint32 (u32 offset)]
 
-private def initializeHeader (newSize : List Instruction) : List Instruction :=
+private def initializeHeader (newSize newCapacity : List Instruction) :
+    List Instruction :=
   storeHeaderWord headerKindOffset
       [.i32Const .uint32 ObjectKind.opaque.code] ++
   storeHeaderWord headerFlagsOffset
-      [.i32Const .uint32 (persistentFlag + liveFlag)] ++
-  storeHeaderWord headerRefCountOffset [.i32Const .uint32 0] ++
+      [.i32Const .uint32 liveFlag] ++
+  storeHeaderWord headerRefCountOffset [.i32Const .uint32 1] ++
   storeHeaderWord headerAllocationBytesOffset
       [.localGet allocationBytesLocal] ++
   storeHeaderWord headerAux0Offset [.i32Const .uint32 arrayMarker] ++
   storeHeaderWord headerAux1Offset newSize ++
-  storeHeaderWord headerAux2Offset newSize ++
+  storeHeaderWord headerAux2Offset newCapacity ++
   storeHeaderWord headerAux3Offset [.i32Const .uint32 0]
 
-private def retypeAddress : List Instruction := [
+private def retypeAddressValue : List Instruction := [
   .i32Const .uint32 0,
   .i32Load .uint32 0,
   .localSet savedScratchLocal,
@@ -161,8 +188,24 @@ private def retypeAddress : List Instruction := [
   .i32Const .uint32 0,
   .localGet savedScratchLocal,
   .i32Store .uint32 0,
-  .localGet objectResultLocal,
-  .ret]
+  .localGet objectResultLocal]
+
+private def retypeAddress : List Instruction :=
+  retypeAddressValue ++ [.ret]
+
+private def captureInputAddress : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet arrayParam,
+  .i32Store .object 0,
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet inputAddressLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0]
 
 private def retypeTagged : List Instruction := [
   .i32Const .uint32 0,
@@ -180,19 +223,72 @@ private def retypeTagged : List Instruction := [
   .localGet taggedResultLocal,
   .ret]
 
+private def allocationBytesBody : List Instruction := [
+  .localGet capacityLocal,
+  .localGet capacityLocal,
+  .i32Add,
+  .localSet allocationBytesLocal] ++
+  trapWhenTrue [
+    .localGet allocationBytesLocal,
+    .localGet capacityLocal,
+    .i32LtU] ++ [
+  .localGet allocationBytesLocal,
+  .localSet countLocal,
+  .localGet countLocal,
+  .localGet countLocal,
+  .i32Add,
+  .localSet allocationBytesLocal] ++
+  trapWhenTrue [
+    .localGet allocationBytesLocal,
+    .localGet countLocal,
+    .i32LtU] ++ [
+  .localGet allocationBytesLocal,
+  .localSet countLocal,
+  .localGet countLocal,
+  .localGet countLocal,
+  .i32Add,
+  .localSet allocationBytesLocal] ++
+  trapWhenTrue [
+    .localGet allocationBytesLocal,
+    .localGet countLocal,
+    .i32LtU] ++ [
+  .localGet allocationBytesLocal,
+  .localSet countLocal,
+  .localGet allocationBytesLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet allocationBytesLocal] ++
+  trapWhenTrue [
+    .localGet allocationBytesLocal,
+    .localGet countLocal,
+    .i32LtU]
+
+private def decodeCapacity : List Instruction := [
+  .localGet capacityParam,
+  .call (.declaration ResidentNumeric.validateNaturalName),
+  .localGet capacityParam,
+  .call (.declaration ResidentNumeric.naturalHighName),
+  .i32Const .uint32 0,
+  .i32Eq,
+  .ifElse [] [.unreachable],
+  .localGet capacityParam,
+  .call (.declaration ResidentNumeric.naturalLowName),
+  .localSet capacityLocal]
+
 def allocateEmptyFunction : Function := {
   name := allocateEmptyName
-  params := #[]
+  params := #[(capacityParam, .uint32)]
   results := #[.object]
-  locals := #[(addressLocal, .uint32), (allocationBytesLocal, .uint32),
+  locals := #[(addressLocal, .uint32), (capacityLocal, .uint32),
+    (countLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object)]
   body := [
-    .i32Const .uint32 (u32 headerBytes),
-    .localSet allocationBytesLocal,
+    .localGet capacityParam,
+    .localSet capacityLocal] ++ allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
     .localSet addressLocal] ++
-    initializeHeader [.i32Const .uint32 0] ++
+    initializeHeader [.i32Const .uint32 0] [.localGet capacityLocal] ++
     retypeAddress }
 
 def sizeFunction : Function := {
@@ -241,7 +337,7 @@ private def elementAddress : List Instruction := [
       .localSet countLocal,
       .br elementLoopLabel] []]]
 
-private def getBody (useDefault : Bool) : List Instruction :=
+private def getBody (useDefault owned : Bool) : List Instruction :=
   requireArray arrayParam ++ loadSize arrayParam ++ decodeIndex ++ [
     .localGet indexLocal,
     .localGet sizeLocal,
@@ -250,24 +346,31 @@ private def getBody (useDefault : Bool) : List Instruction :=
       (elementAddress ++ [
         .localGet sourceCursorLocal,
         .i32Load .tobject 0,
+        .localSet elementLocal] ++
+        (if owned then [
+          .localGet elementLocal,
+          .call (.declaration ResidentReferenceCount.incrementOnceName)]
+        else []) ++ [
+        .localGet elementLocal,
         .ret])
       (if useDefault then [.localGet defaultParam, .ret]
        else [.unreachable])]
 
-private def getBangFunction (declaration : Name) : Function := {
+private def getBangFunction (declaration : Name) (owned : Bool) : Function := {
   name := externalName declaration
   params := #[(erasedParam, .erased), (defaultParam, .tobject),
     (arrayParam, .object), (indexParam, .tobject)]
   results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
-    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
-  body := getBody true }
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (elementLocal, .tobject)]
+  body := getBody true owned }
 
 def getBangBorrowedFunction : Function :=
-  getBangFunction `Array.get!InternalBorrowed
+  getBangFunction `Array.get!InternalBorrowed false
 
 def getBangOwnedFunction : Function :=
-  getBangFunction `Array.get!Internal
+  getBangFunction `Array.get!Internal true
 
 def getBorrowedFunction : Function := {
   name := externalName `Array.getInternalBorrowed
@@ -275,8 +378,9 @@ def getBorrowedFunction : Function := {
     (indexParam, .tobject), (proofParam, .erased)]
   results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
-    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
-  body := getBody false }
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (elementLocal, .tobject)]
+  body := getBody false false }
 
 def ugetBorrowedFunction : Function := {
   name := externalName `Array.ugetBorrowed
@@ -304,7 +408,8 @@ def ugetFunction : Function := {
     (indexParam, .usize), (proofParam, .erased)]
   results := #[.tobject]
   locals := #[(sizeLocal, .uint32), (indexLocal, .uint32),
-    (countLocal, .uint32), (sourceCursorLocal, .uint32)]
+    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (elementLocal, .tobject)]
   body := requireArray arrayParam ++ loadSize arrayParam ++ [
     .localGet indexParam,
     .localGet sizeLocal,
@@ -316,61 +421,29 @@ def ugetFunction : Function := {
     .localSet indexLocal] ++ elementAddress ++ [
     .localGet sourceCursorLocal,
     .i32Load .tobject 0,
+    .localSet elementLocal,
+    .localGet elementLocal,
+    .call (.declaration ResidentReferenceCount.incrementOnceName),
+    .localGet elementLocal,
     .ret] }
 
 private def emptyWrapper (declaration : Name) : Function := {
   name := externalName declaration
   params := #[(erasedParam, .erased), (capacityParam, .tobject)]
   results := #[.object]
-  locals := #[]
-  body := [.call (.declaration allocateEmptyName), .ret] }
+  locals := #[(capacityLocal, .uint32)]
+  body := decodeCapacity ++ [
+    .localGet capacityLocal,
+    .call (.declaration allocateEmptyName),
+    .ret] }
 
 def emptyWithCapacityFunction : Function :=
   emptyWrapper `Array.emptyWithCapacity
 
 def mkEmptyFunction : Function := emptyWrapper `Array.mkEmpty
 
-private def allocationBytesBody : List Instruction := [
-  .i32Const .uint32 (u32 (headerBytes + target.semanticSlotBytes)),
-  .localSet allocationBytesLocal,
-  .i32Const .uint32 0,
-  .localSet countLocal,
-  .loop byteLoopLabel [
-    .localGet countLocal,
-    .localGet sizeLocal,
-    .i32LtU,
-    .ifElse [
-      .localGet allocationBytesLocal,
-      .i32Const .uint32 (u32 target.semanticSlotBytes),
-      .i32Add,
-      .localSet allocationBytesLocal,
-      .localGet countLocal,
-      .i32Const .uint32 1,
-      .i32Add,
-      .localSet countLocal,
-      .br byteLoopLabel] []]]
-
-private def exactAllocationBytesBody : List Instruction := [
-  .i32Const .uint32 (u32 headerBytes),
-  .localSet allocationBytesLocal,
-  .i32Const .uint32 0,
-  .localSet countLocal,
-  .loop byteLoopLabel [
-    .localGet countLocal,
-    .localGet sizeLocal,
-    .i32LtU,
-    .ifElse [
-      .localGet allocationBytesLocal,
-      .i32Const .uint32 (u32 target.semanticSlotBytes),
-      .i32Add,
-      .localSet allocationBytesLocal,
-      .localGet countLocal,
-      .i32Const .uint32 1,
-      .i32Add,
-      .localSet countLocal,
-      .br byteLoopLabel] []]]
-
-private def copyElementsBody : List Instruction := [
+private def copyElementsBody (retain : Bool)
+    (loopLabel : FVarId := copyLoopLabel) : List Instruction := [
   .localGet arrayParam,
   .i32Const .uint32 (u32 headerBytes),
   .i32Add,
@@ -381,15 +454,21 @@ private def copyElementsBody : List Instruction := [
   .localSet targetCursorLocal,
   .i32Const .uint32 0,
   .localSet countLocal,
-  .loop copyLoopLabel [
+  .loop loopLabel [
     .localGet countLocal,
     .localGet sizeLocal,
     .i32LtU,
-    .ifElse [
-      .localGet targetCursorLocal,
+    .ifElse ([
       .localGet sourceCursorLocal,
-      .i32Load .object 0,
-      .i32Store .object 0,
+      .i32Load .tobject 0,
+      .localSet elementLocal] ++
+      (if retain then [
+        .localGet elementLocal,
+        .call (.declaration ResidentReferenceCount.incrementOnceName)]
+      else []) ++ [
+      .localGet targetCursorLocal,
+      .localGet elementLocal,
+      .i32Store .tobject 0,
       .localGet sourceCursorLocal,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
       .i32Add,
@@ -402,7 +481,148 @@ private def copyElementsBody : List Instruction := [
       .i32Const .uint32 1,
       .i32Add,
       .localSet countLocal,
-      .br copyLoopLabel] []]]
+      .br loopLabel]) []]]
+
+private def selectExclusive : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet exclusiveLocal,
+  .localGet arrayParam,
+  .i32Load .uint32 (u32 headerFlagsOffset)] ++
+  equalsConst .uint32 liveFlag ++ [
+  .ifElse (
+    [.localGet arrayParam,
+      .i32Load .uint32 (u32 headerRefCountOffset)] ++
+    equalsConst .uint32 1 ++ [
+      .ifElse [
+        .i32Const .uint32 1,
+        .localSet exclusiveLocal] []]) []]
+
+private def retireTransferredArray : List Instruction := [
+  .localGet inputAddressLocal,
+  .i32Const .uint32 ObjectKind.freed.code,
+  .i32Store .uint32 (u32 headerKindOffset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerFlagsOffset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerRefCountOffset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerAux0Offset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerAux1Offset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerAux2Offset),
+  .localGet inputAddressLocal,
+  .i32Const .uint32 0,
+  .i32Store .uint32 (u32 headerAux3Offset)]
+
+private def consumeSharedArray : List Instruction := [
+  .localGet arrayParam,
+  .i32Load .uint32 (u32 headerFlagsOffset),
+  .i32Const .uint32 persistentFlag,
+  .i32And] ++ equalsConst .uint32 persistentFlag ++ [
+  .ifElse [] ([
+    .localGet inputAddressLocal,
+    .i32Load .uint32 (u32 headerRefCountOffset),
+    .localSet refCountLocal] ++
+    trapUnless [
+      .i32Const .uint32 1,
+      .localGet refCountLocal,
+      .i32LtU] ++ [
+    .localGet inputAddressLocal,
+    .localGet refCountLocal,
+    .i32Const .uint32 1,
+    .i32Sub,
+    .i32Store .uint32 (u32 headerRefCountOffset)])]
+
+private def growCapacityBody : List Instruction := [
+  .localGet capacityLocal,
+  .i32Const .uint32 1,
+  .i32Add,
+  .localSet countLocal] ++
+  trapWhenTrue [
+    .localGet countLocal,
+    .localGet capacityLocal,
+    .i32LtU] ++ [
+  .localGet countLocal,
+  .localGet countLocal,
+  .i32Add,
+  .localSet newCapacityLocal] ++
+  trapWhenTrue [
+    .localGet newCapacityLocal,
+    .localGet countLocal,
+    .i32LtU]
+
+private def sharedPushCapacityBody : List Instruction := [
+  .localGet sizeLocal,
+  .localGet sizeLocal,
+  .i32Add,
+  .localSet countLocal] ++
+  trapWhenTrue [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU] ++ [
+  .localGet countLocal,
+  .i32Const .uint32 1,
+  .i32Add,
+  .localSet countLocal] ++
+  trapWhenTrue ([.localGet countLocal] ++ equalsConst .uint32 0) ++ [
+  .localGet capacityLocal,
+  .localSet newCapacityLocal,
+  .localGet capacityLocal,
+  .localGet countLocal,
+  .i32LtU,
+  .ifElse growCapacityBody []]
+
+private def selectReusablePush : List Instruction := [
+  .i32Const .uint32 0,
+  .localSet reuseLocal,
+  .localGet exclusiveLocal,
+  .ifElse [
+    .localGet sizeLocal,
+    .localGet capacityLocal,
+    .i32LtU,
+    .ifElse [
+      .i32Const .uint32 1,
+      .localSet reuseLocal] []] []]
+
+private def pushInPlaceValue : List Instruction := [
+  .localGet sizeLocal,
+  .localSet indexLocal] ++ elementAddress ++ [
+  .localGet sourceCursorLocal,
+  .localGet valueParam,
+  .i32Store .tobject 0,
+  .localGet inputAddressLocal,
+  .localGet sizeLocal,
+  .i32Const .uint32 1,
+  .i32Add,
+  .i32Store .uint32 (u32 headerAux1Offset),
+  .localGet arrayParam,
+  .localSet objectResultLocal]
+
+private def pushAllocatedValue : List Instruction := [
+  .localGet exclusiveLocal,
+  .ifElse growCapacityBody sharedPushCapacityBody,
+  .localGet newCapacityLocal,
+  .localSet capacityLocal] ++ allocationBytesBody ++ [
+  .localGet allocationBytesLocal,
+  .call (.declaration ResidentAllocator.allocateName),
+  .localSet addressLocal] ++
+  initializeHeader
+    [.localGet sizeLocal, .i32Const .uint32 1, .i32Add]
+    [.localGet capacityLocal] ++ [
+  .localGet exclusiveLocal,
+  .ifElse
+    (copyElementsBody false ++ retireTransferredArray)
+    (copyElementsBody true retainedCopyLoopLabel ++ consumeSharedArray),
+  .localGet targetCursorLocal,
+  .localGet valueParam,
+  .i32Store .tobject 0] ++
+  retypeAddressValue ++ [.localSet objectResultLocal]
 
 def pushFunction : Function := {
   name := externalName `Array.push
@@ -410,47 +630,68 @@ def pushFunction : Function := {
     (valueParam, .tobject)]
   results := #[.object]
   locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
-    (countLocal, .uint32), (sourceCursorLocal, .uint32),
+    (inputAddressLocal, .uint32),
+    (capacityLocal, .uint32), (newCapacityLocal, .uint32),
+    (exclusiveLocal, .uint32), (reuseLocal, .uint32),
+    (refCountLocal, .uint32),
+    (indexLocal, .uint32), (countLocal, .uint32),
+    (sourceCursorLocal, .uint32),
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object),
-    (elementLocal, .object)]
-  body := requireArray arrayParam ++ loadSize arrayParam ++
-    allocationBytesBody ++ [
-      .localGet allocationBytesLocal,
-      .call (.declaration ResidentAllocator.allocateName),
-      .localSet addressLocal] ++
-    initializeHeader [
-      .localGet sizeLocal,
-      .i32Const .uint32 1,
-      .i32Add] ++
-    copyElementsBody ++ [
-      .localGet targetCursorLocal,
-      .localGet valueParam,
-      .i32Store .tobject 0] ++
-    retypeAddress }
+    (elementLocal, .tobject)]
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++
+    loadCapacity arrayParam ++ selectExclusive ++ selectReusablePush ++ [
+    .localGet reuseLocal,
+    .ifElse pushInPlaceValue pushAllocatedValue,
+    .localGet objectResultLocal,
+    .ret] }
 
-/-- Persistent-arena implementation of upstream `Array.pop`. -/
+/-- Reference-counted implementation of upstream `Array.pop`. -/
 def popFunction : Function := {
   name := externalName `Array.pop
   params := #[(erasedParam, .erased), (arrayParam, .object)]
   results := #[.object]
   locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (inputAddressLocal, .uint32),
+    (capacityLocal, .uint32), (exclusiveLocal, .uint32),
+    (refCountLocal, .uint32), (indexLocal, .uint32),
     (countLocal, .uint32), (sourceCursorLocal, .uint32),
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
-    (savedScratchLocal, .uint32), (objectResultLocal, .object)]
-  body := requireArray arrayParam ++ loadSize arrayParam ++ [
-    .localGet sizeLocal,
-    .i32Const .uint32 0,
-    .i32Eq,
-    .ifElse [.localGet arrayParam, .ret] [],
-    .localGet sizeLocal,
-    .i32Const .uint32 1,
-    .i32Sub,
-    .localSet sizeLocal] ++ exactAllocationBytesBody ++ [
+    (savedScratchLocal, .uint32), (objectResultLocal, .object),
+    (elementLocal, .tobject)]
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++
+    loadCapacity arrayParam ++ selectExclusive ++ [
+    .localGet exclusiveLocal,
+    .ifElse ([.localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
+      .ifElse [.localGet arrayParam, .ret] [],
+      .localGet sizeLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet sizeLocal,
+      .localGet sizeLocal,
+      .localSet indexLocal] ++ elementAddress ++ [
+      .localGet sourceCursorLocal,
+      .i32Load .tobject 0,
+      .localSet elementLocal,
+      .localGet inputAddressLocal,
+      .localGet sizeLocal,
+      .i32Store .uint32 (u32 headerAux1Offset),
+      .localGet elementLocal,
+      .i32Const .uint32 1,
+      .call (.declaration ResidentRelease.decrementOnceName),
+      .localGet arrayParam,
+      .ret]) [],
+    .localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
+    .ifElse [] [
+      .localGet sizeLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet sizeLocal]] ++ allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
-    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
-    copyElementsBody ++ retypeAddress }
+    .localSet addressLocal] ++
+    initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
+    copyElementsBody true ++ consumeSharedArray ++ retypeAddress }
 
 private def copyUpdatedElementsBody : List Instruction := [
   .localGet arrayParam,
@@ -468,6 +709,9 @@ private def copyUpdatedElementsBody : List Instruction := [
     .localGet sizeLocal,
     .i32LtU,
     .ifElse [
+      .localGet sourceCursorLocal,
+      .i32Load .tobject 0,
+      .localSet elementLocal,
       .localGet countLocal,
       .localGet indexLocal,
       .i32Eq,
@@ -475,9 +719,10 @@ private def copyUpdatedElementsBody : List Instruction := [
         .localGet targetCursorLocal,
         .localGet valueParam,
         .i32Store .tobject 0] [
+        .localGet elementLocal,
+        .call (.declaration ResidentReferenceCount.incrementOnceName),
         .localGet targetCursorLocal,
-        .localGet sourceCursorLocal,
-        .i32Load .tobject 0,
+        .localGet elementLocal,
         .i32Store .tobject 0],
       .localGet sourceCursorLocal,
       .i32Const .uint32 (u32 target.semanticSlotBytes),
@@ -499,11 +744,14 @@ def usetFunction : Function := {
     (indexParam, .usize), (valueParam, .tobject), (proofParam, .erased)]
   results := #[.object]
   locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
-    (indexLocal, .uint32), (countLocal, .uint32),
+    (inputAddressLocal, .uint32),
+    (capacityLocal, .uint32), (exclusiveLocal, .uint32),
+    (refCountLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32),
     (sourceCursorLocal, .uint32), (targetCursorLocal, .uint32),
     (allocationBytesLocal, .uint32), (savedScratchLocal, .uint32),
-    (objectResultLocal, .object)]
-  body := requireArray arrayParam ++ loadSize arrayParam ++ [
+    (objectResultLocal, .object), (elementLocal, .tobject)]
+  body := requireArray arrayParam ++ captureInputAddress ++ loadSize arrayParam ++ [
     .localGet indexParam,
     .localGet sizeLocal,
     .i64ExtendI32U .usize,
@@ -511,11 +759,25 @@ def usetFunction : Function := {
     .ifElse [] [.unreachable],
     .localGet indexParam,
     .i32WrapI64 .uint32,
-    .localSet indexLocal] ++ exactAllocationBytesBody ++ [
+    .localSet indexLocal] ++ loadCapacity arrayParam ++ selectExclusive ++ [
+    .localGet exclusiveLocal,
+    .ifElse (elementAddress ++ [
+      .localGet sourceCursorLocal,
+      .i32Load .tobject 0,
+      .localSet elementLocal,
+      .localGet sourceCursorLocal,
+      .localGet valueParam,
+      .i32Store .tobject 0,
+      .localGet elementLocal,
+      .i32Const .uint32 1,
+      .call (.declaration ResidentRelease.decrementOnceName),
+      .localGet arrayParam,
+      .ret]) []] ++ allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
-    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
-    copyUpdatedElementsBody ++ retypeAddress }
+    .localSet addressLocal] ++
+    initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
+    copyUpdatedElementsBody ++ consumeSharedArray ++ retypeAddress }
 
 private def fillElementsBody : List Instruction := [
   .localGet addressLocal,
@@ -524,23 +786,27 @@ private def fillElementsBody : List Instruction := [
   .localSet targetCursorLocal,
   .i32Const .uint32 0,
   .localSet countLocal,
-  .loop copyLoopLabel [
+  .loop copyLoopLabel ([
     .localGet countLocal,
     .localGet sizeLocal,
     .i32LtU,
-    .ifElse [
-      .localGet targetCursorLocal,
-      .localGet valueParam,
-      .i32Store .tobject 0,
-      .localGet targetCursorLocal,
-      .i32Const .uint32 (u32 target.semanticSlotBytes),
-      .i32Add,
-      .localSet targetCursorLocal,
-      .localGet countLocal,
-      .i32Const .uint32 1,
-      .i32Add,
-      .localSet countLocal,
-      .br copyLoopLabel] []]]
+    .ifElse (
+      ([.localGet countLocal] ++ equalsConst .uint32 0 ++ [
+        .ifElse [] [
+          .localGet valueParam,
+          .call (.declaration ResidentReferenceCount.incrementOnceName)],
+        .localGet targetCursorLocal,
+        .localGet valueParam,
+        .i32Store .tobject 0,
+        .localGet targetCursorLocal,
+        .i32Const .uint32 (u32 target.semanticSlotBytes),
+        .i32Add,
+        .localSet targetCursorLocal,
+        .localGet countLocal,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet countLocal,
+        .br copyLoopLabel])) []])]
 
 def replicateFunction : Function := {
   name := externalName `Array.replicate
@@ -548,16 +814,30 @@ def replicateFunction : Function := {
     (valueParam, .tobject)]
   results := #[.object]
   locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
-    (indexLocal, .uint32), (countLocal, .uint32),
+    (capacityLocal, .uint32), (indexLocal, .uint32),
+    (countLocal, .uint32),
     (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
     (savedScratchLocal, .uint32), (objectResultLocal, .object)]
   body := decodeIndex ++ [
     .localGet indexLocal,
-    .localSet sizeLocal] ++ exactAllocationBytesBody ++ [
+    .localSet sizeLocal,
+    .localGet indexLocal,
+    .localSet capacityLocal,
+    .localGet indexParam,
+    .i32Const .uint32 1,
+    .call (.declaration ResidentRelease.decrementOnceName)] ++
+    allocationBytesBody ++ [
     .localGet allocationBytesLocal,
     .call (.declaration ResidentAllocator.allocateName),
-    .localSet addressLocal] ++ initializeHeader [.localGet sizeLocal] ++
-    fillElementsBody ++ retypeAddress }
+    .localSet addressLocal] ++
+    initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
+    fillElementsBody ++ [
+    .localGet sizeLocal] ++ equalsConst .uint32 0 ++ [
+    .ifElse [
+      .localGet valueParam,
+      .i32Const .uint32 1,
+      .call (.declaration ResidentRelease.decrementOnceName)] []] ++
+    retypeAddress }
 
 def functions : Array Function := #[
   allocateEmptyFunction,
@@ -639,6 +919,10 @@ private def internalizeSelected (module : Module) (declarations : Array Name) :
       ResidentNumeric.naturalLowName, ResidentNumeric.naturalHighName] do
     unless module.functions.any (·.name == name) do
       throw (.missingNumericHelper name)
+  for name in #[ResidentReferenceCount.incrementOnceName,
+      ResidentRelease.decrementOnceName] do
+    unless module.functions.any (·.name == name) do
+      throw (.missingOwnershipHelper name)
   let needsEmptyAllocator := declarations.contains `Array.emptyWithCapacity ||
     declarations.contains `Array.mkEmpty
   let selectedHelperNames := declarations.map externalName
@@ -691,14 +975,33 @@ def internalizeAvailable (module : Module) : Except LinkError Module :=
   internalizeSelected module declarations
 
 private def exampleDeclarations : Array Name :=
-  #[`Array.uget, `Array.uset, `Array.replicate, `Array.pop]
+  #[`Array.emptyWithCapacity, `Array.push, `Array.uget, `Array.uset,
+    `Array.replicate, `Array.pop]
+
+private def exampleReleaseOperation : RuntimeOp := .dec 1 true none
+
+def exampleReleaseName : Name := `resident_array_release
+
+private def exampleReleaseFunction : Function := {
+  name := exampleReleaseName
+  params := #[(arrayParam, .tobject)]
+  results := #[]
+  locals := #[]
+  body := [
+    .localGet arrayParam,
+    .call (.runtime exampleReleaseOperation),
+    .ret] }
 
 private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
   let erased := LCNF.ImpureType.erased
   let object := LCNF.ImpureType.object
   let tobject := LCNF.ImpureType.tobject
   let usize := LCNF.ImpureType.usize
-  if declaration == `Array.uget then
+  if declaration == `Array.emptyWithCapacity then
+    { params := #[erased, tobject], result := object }
+  else if declaration == `Array.push then
+    { params := #[erased, object, tobject], result := object }
+  else if declaration == `Array.uget then
     { params := #[erased, object, usize, erased], result := tobject }
   else if declaration == `Array.uset then
     { params := #[erased, object, usize, tobject, erased], result := object }
@@ -718,9 +1021,20 @@ private def exampleExternalImport (declaration : Name) : Import := {
 Illuminate validation closure. -/
 def residentExampleModule : Except String Module := do
   let numeric ← ResidentNumeric.residentExampleModule
-  let module : Module := {
+  let numeric : Module := {
     numeric with
-    imports := numeric.imports ++ exampleDeclarations.map exampleExternalImport }
+    imports := numeric.imports.push <|
+      Fir.Wasm.runtimeImport numeric.imports.size exampleReleaseOperation
+    functions := numeric.functions.push exampleReleaseFunction
+    exports := Fir.Wasm.addUnique numeric.exports exampleReleaseName
+    runtimeOperations := numeric.runtimeOperations.push exampleReleaseOperation }
+  let references ← ResidentReferenceCount.internalizeIncrements numeric
+    |>.mapError fun error => s!"array reference counts: {repr error}"
+  let releases ← ResidentRelease.internalizeReleases references
+    |>.mapError fun error => s!"array releases: {repr error}"
+  let module : Module := {
+    releases with
+    imports := releases.imports ++ exampleDeclarations.map exampleExternalImport }
   internalizeSelected module exampleDeclarations
     |>.mapError fun error => s!"array: {repr error}"
 
@@ -730,6 +1044,7 @@ def manifest : Json :=
       Json.mkObj [
         ("sourceEntry", declaration.toString),
         ("entry", externalName declaration |>.toString)]),
+    ("releaseEntry", exampleReleaseName.toString),
     ("imports", Json.arr #[]),
     ("status", "generation-ready; W6 array contract proofs pending")]
 

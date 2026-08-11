@@ -1,4 +1,5 @@
 import Fir.Wasm.Emit.ResidentRuntime
+import Fir.Wasm.Emit.ResidentContainerLayout
 
 namespace Fir.Wasm.Emit.ResidentRelease
 
@@ -14,6 +15,10 @@ private def countLocal : FVarId := ⟨`count⟩
 private def captureCountLocal : FVarId := ⟨`captureCount⟩
 private def descriptorLocal : FVarId := ⟨`descriptor⟩
 private def refCountLocal : FVarId := ⟨`refCount⟩
+private def markerLocal : FVarId := ⟨`marker⟩
+private def arrayCursorLocal : FVarId := ⟨`arrayCursor⟩
+private def arrayIndexLocal : FVarId := ⟨`arrayIndex⟩
+private def arrayReleaseLoop : FVarId := ⟨`arrayReleaseLoop⟩
 
 inductive LinkError where
   | invalidInput (error : SymbolicError)
@@ -40,8 +45,8 @@ def isRelease : RuntimeOp → Bool
 def releaseName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_release_{ordinal}"
 
-private def releaseHeaderName : Name := `fir_release_header
-private def decrementOnceName : Name := `fir_dec_once
+def releaseHeaderName : Name := `fir_release_header
+def decrementOnceName : Name := `fir_dec_once
 
 /--
 The compiler-produced `prettyM` graph has at most five constructor object
@@ -108,6 +113,38 @@ private def constructorReleaseBody : List Instruction :=
       [.unreachable]
       (releaseConstructorFields ++ [.ret])]
 
+private def arrayReleaseBody : List Instruction := [
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet arrayCursorLocal,
+  .i32Const .uint32 0,
+  .localSet arrayIndexLocal,
+  .loop arrayReleaseLoop [
+    .localGet arrayIndexLocal,
+    .localGet countLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet arrayCursorLocal,
+      .i32Load .tobject 0,
+      .i32Const .uint32 1,
+      .call (.declaration decrementOnceName),
+      .localGet arrayCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet arrayCursorLocal,
+      .localGet arrayIndexLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet arrayIndexLocal,
+      .br arrayReleaseLoop] []],
+  .ret]
+
+private def opaqueReleaseBody : List Instruction :=
+  [.localGet markerLocal] ++
+  equalsConst .uint32 ResidentContainerLayout.arrayMarker ++
+  [.ifElse arrayReleaseBody [.ret]]
+
 private def descriptorOwnedFields (descriptor : Array AbiKind) :
     List Instruction :=
   descriptor.toList.zipIdx.flatMap fun (kind, index) =>
@@ -144,7 +181,10 @@ private def ownedReleaseBody (descriptors : Array (Array AbiKind)) :
       constructorReleaseBody
       ([.localGet kindLocal] ++
         equalsConst .uint32 ObjectKind.closure.code ++
-        [.ifElse closureBody [.ret]])])
+        [.ifElse closureBody
+          ([.localGet kindLocal] ++
+            equalsConst .uint32 ObjectKind.opaque.code ++
+            [.ifElse opaqueReleaseBody [.ret]])])])
 
 private def decrementAboveOneBody : List Instruction :=
   [.localGet addressLocal,
@@ -193,6 +233,9 @@ private def liveReleaseBody
       .i32Load .uint32 (u32 headerKindOffset),
       .localSet kindLocal,
       .localGet addressLocal,
+      .i32Load .uint32 (u32 headerAux0Offset),
+      .localSet markerLocal,
+      .localGet addressLocal,
       .i32Load .uint32 (u32 headerAux1Offset),
       .localSet countLocal,
       .localGet addressLocal,
@@ -240,7 +283,10 @@ private def decrementOnceFunction
       (countLocal, .uint32),
       (captureCountLocal, .uint32),
       (descriptorLocal, .uint32),
-      (refCountLocal, .uint32)]
+      (refCountLocal, .uint32),
+      (markerLocal, .uint32),
+      (arrayCursorLocal, .uint32),
+      (arrayIndexLocal, .uint32)]
     body :=
       [.localGet objectParam,
         .i32Const .uint32 1,

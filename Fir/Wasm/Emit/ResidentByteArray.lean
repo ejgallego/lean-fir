@@ -34,7 +34,7 @@ inductive LinkError where
 private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 /-- ASCII `BYTE`, stored in `byteArray.aux0`. -/
-def byteArrayMarker : UInt32 := 0x42595445
+def byteArrayMarker : UInt32 := ResidentContainerLayout.byteArrayMarker
 
 def validateName : Name := `fir_byte_array_validate
 def expectedAllocationName : Name := `fir_byte_array_expected_allocation

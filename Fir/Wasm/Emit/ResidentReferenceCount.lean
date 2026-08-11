@@ -34,6 +34,9 @@ def isIncrement : RuntimeOp → Bool
 def incrementName (ordinal : Nat) : Name :=
   Name.mkSimple s!"fir_inc_{ordinal}"
 
+/-- Stable checked one-reference increment used by resident container helpers. -/
+def incrementOnceName : Name := `fir_inc_once
+
 private def equalsConst (kind : AbiKind) (value : UInt32) :
     List Instruction :=
   [.i32Const kind value, .i32Eq]
@@ -119,6 +122,21 @@ def incrementFunction (ordinal amount : Nat) (check : Bool) :
           (checkedImmediateBody check)
           (heapBody amount check)] }
 
+private def incrementOnceFunction : Function := {
+  name := incrementOnceName
+  params := #[(objectParam, .tobject)]
+  results := #[]
+  locals := #[
+    (oldCountLocal, .uint32),
+    (newCountLocal, .uint32)]
+  body :=
+    [.localGet objectParam,
+      .i32Const .uint32 1,
+      .i32And,
+      .ifElse
+        (checkedImmediateBody true)
+        (heapBody 1 true)] }
+
 private partial def rewriteInstruction (operation : RuntimeOp)
     (name : Name) : Instruction → Instruction
   | .call (.runtime candidate) =>
@@ -172,6 +190,13 @@ def internalizeIncrements (module : Module) : Except LinkError Module := do
   | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
+  if module.imports.any (·.declaration? == some incrementOnceName) ||
+      module.functions.any (·.name == incrementOnceName) ||
+      module.exports.contains incrementOnceName then
+    throw (.reservedDeclaration incrementOnceName)
+  let module := {
+    module with
+    functions := module.functions.push incrementOnceFunction }
   let operations := module.runtimeOperations.filter isIncrement
   let result ← operations.toList.zipIdx.foldlM (init := module)
     fun result (operation, ordinal) =>
