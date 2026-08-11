@@ -15,6 +15,37 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-RECURSIVE-NAMED-CALLS`.
+- Integration owner: `wasm-proof`; this closes generated named-call recursion
+  in the current W6.7e admitted language.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `7fb2c8ee`.
+- Published stack: active-slice record `d33a0fa1`, functional head `c7551259`,
+  and ready mailbox `c0ebc550`.
+- Accepted proof: `ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectCalls_generated`
+  handles arbitrary finite nesting of compiler-generated named calls. It
+  enters the exact generated callee row, recursively simulates its admitted
+  body, transports the evolved cache/resource witness across the saved caller
+  frame, performs the checked result-local update, and resumes the generated
+  continuation with exact source and target frame restoration. The caller
+  supplies no target trace, callee execution package, or certificate.
+- Supporting boundary: direct flat-prefix and return lemmas now retain exact
+  frame equalities; call entry records the stored caller locals; bind return
+  exposes the checked update; and
+  `ReuseCapacityEntryRelativeFrame.restoreDirectCaller` reconstructs the
+  caller's full cache/resource invariant after callee execution.
+- Remaining boundary: admit supported pure external results next, followed by
+  lazy/cache, case, effect, and saturated-closure transitions.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam save at source hash `adc1663391effd55`; forced direct
+  recompilation; focused 3,110-job dependency-cone build; `git diff --check`;
+  complete `make check` with 642 covered cases and 1,844/1,844 backend
+  comparisons; Talos setup pinned at `a01d01c`; and all 3,133
+  `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-DIRECT-SPINE`.
 - Integration owner: `wasm-proof`; this is the first complete recursive body
   fragment of W6.7e.
