@@ -11,7 +11,7 @@ worktrees, tests, or the integration owner's board.
 | `wasm-gen.md` | wasm-gen | `wasm/generation` |
 | `wasm-proof.md` | wasm-proof | `wasm/talos-runtime` |
 | `lcnf-proof.md` | lcnf-proof | `proof/simpcase` |
-| `test-fixtures.md` | test-fixtures | `validation/float-corpus` |
+| `test-fixtures.md` | test-fixtures | `validation/closure-ownership-fixtures` |
 
 The integration owner may create the initial records for a milestone. After
 that bootstrap, each owner edits only its own file. Mailbox updates are normal
