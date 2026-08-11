@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: f5b15d8e on main
+state: active
+base: 904ec391 on main
 functional-head: bdb16b24 (exact structured execution reaches the first selected saturated-closure candidate body)
 contract-base: f5b15d8e; proof-only extension over the accepted W6.7e recursion and existing concrete closure matcher/dispatch contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam 0.2.0-beta (source 662b514f) update/sync/save document version 14 hash dcb22c7b502a360f (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean; lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (122 tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 indexed comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for the integration owner from functional commit bdb16b24; branch rebased on local main f5b15d8e and clean at this mailbox update.
+handoff: none; the saturated dispatch-prefix slice landed on main at 904ec391 and the lane is active on selected-body/callee composition.
 next: Compose the selected candidate's existing capture/argument assembly with generated callee entry, recursive callee simulation, result-local write, and exact unwinding of the recorded conditional labels. Defer heap-valued lazy publication until the entry transport is made facts-aware.
 ```
