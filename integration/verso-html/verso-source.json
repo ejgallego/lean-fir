@@ -2,7 +2,7 @@
   "schemaVersion": 1,
   "repository": "https://github.com/ejgallego/verso-slides.git",
   "revision": "eb8d2b8fcf145810996ad388d701e9337cfe1ceb",
-  "remoteRef": "upgrade/fir-html-lean-4.33",
+  "remoteRef": "ejgallego/upgrade/fir-html-lean-4.33",
   "upstreamBaseRevision": "db608f9611b2a6784310ade04f8d542a6f81cb58",
   "files": {
     "VersoSlides/Pretty.lean": "bf4271d690b523d5709d19331568c27f2dcb42b0d9ee253dbc30205a5a336c8e"
