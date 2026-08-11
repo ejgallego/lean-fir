@@ -98,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | S5a is landed; S5b is validated on the fixture branch with repeated-child-alias unique release versus shared-owner stopping; direct LCNF additionally anchors repeated aliases and persistent owners | Integrate S5b, then use the coverage model to choose the smallest undominated retained-capacity or grow/delete pair |
+| M5 Recursive release | active, primary | S5a and S5b are landed; repeated-child-alias unique release versus shared-owner stopping complements the direct LCNF anchors for repeated aliases and persistent owners | Use the coverage model to choose the smallest undominated retained-capacity or grow/delete pair |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -288,8 +288,7 @@ control.
 
 ### S5: recursive release and reuse
 
-State: S5b prepared on `validation/closure-ownership-fixtures` from `main` at
-`5dfa5778`; changes no shared contract.
+State: S5b landed on `main` through `e47139b6`; changes no shared contract.
 
 Cover repeated child aliases, nested unique release, shared-child recursion
 stopping, persistent owners, erased/scalar neighbors, same-size reuse, retained

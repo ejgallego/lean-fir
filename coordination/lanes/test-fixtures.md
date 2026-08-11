@@ -5,7 +5,7 @@ lane: test-fixtures
 owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
-state: ready
+state: released
 base: 69c2fd5a167845cf81b6eab5fe3652f430620148 on main; integration lease record only
 functional-head: 3faa01a8f3e35e3c632e8d47085e1f07096fc71f
 contract-base: 1fc7982e8166b40a583e5c29d2d617eabc74dd32 on main; rebased over the accepted W6 saturated-control proof stack; consumes the landed S5a recursive-release pair and existing direct repeated-alias/native-IR attestation; changes no shared contract
@@ -16,6 +16,6 @@ contracts: none; fixture, trace, coverage-search documentation, native-oracle fl
 checks: PASS lean-beam update/sync/save Fir/Validation/Corpus.lean with zero diagnostics; PASS lake --rehash build fir-native-oracle Fir.Validation; PASS focused native-lcnf probe and pinned replay 2/2; PASS focused native-lcnf-v8 triangle 6/6 with both bundles opened under strace; PASS git diff --check; PASS complete make check before and after rebasing on 1fc7982e, including 122 harness tests, 651/651 source native-lcnf cases, 9/9 direct machines, 651/651 native-lcnf-v8 triangles, 1,302 native-oracle witnesses, 1,962/1,962 indexed comparisons, 6,689 interpreter steps, 122/122 tag floors, and 227/227 semantic domains; findings 0; PASS post-lease-record git diff --check and retained coverage-index verification
 bug-cards: none
 blockers: none; source-level repeated fields and outside aliases need no compiler, proof, W6, or W7 change
-handoff: ready for integration owner; base 69c2fd5a167845cf81b6eab5fe3652f430620148, functional head 3faa01a8f3e35e3c632e8d47085e1f07096fc71f, lane test-fixtures, contract base 1fc7982e8166b40a583e5c29d2d617eabc74dd32, clean before this mailbox update
-next: integrate S5b promptly, then use the documented coverage-guided narrowing model to select the smallest undominated retained-capacity or grow/delete ownership pair
+handoff: accepted on main through e47139b6386b646a3f86360eb8b0c6fe16bb12ea; base 69c2fd5a167845cf81b6eab5fe3652f430620148, functional head 3faa01a8f3e35e3c632e8d47085e1f07096fc71f, lane test-fixtures, contract base 1fc7982e8166b40a583e5c29d2d617eabc74dd32
+next: after the integration checkpoint is pushed, use the documented coverage-guided narrowing model to select the smallest undominated retained-capacity or grow/delete ownership pair
 ```

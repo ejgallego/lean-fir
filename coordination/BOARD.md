@@ -13,25 +13,42 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-REPEATED-CHILD-RELEASE-S5B`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take
   the integration role when needed.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
   `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
-  `main` at `1fc7982e` after the accepted W6 saturated-control proof stack.
-- Candidate stack: planning seed `9ca3b3bc`, fixture commit `c8f764bd`,
-  coverage/docs head `cc52d810`, and resolved ready mailbox `8d964886`.
-- Scope: fixture-only repeated-child recursive release, exact LCNF path
-  evidence, native-oracle and coverage ratchets, validation documentation,
-  and the coverage-guided narrowing policy. No shared semantic, proof, W6,
-  W7, concrete-runtime, or resident-helper contract changes.
-- Acceptance so far: clean post-rebase handoff; Lean Beam update/sync/save;
-  focused native/LCNF and native/LCNF/real-V8 checks; `git diff --check`; and
-  complete pre- and post-rebase `make check` with zero findings. Integration
-  will resolve this lease, fast-forward `main`, and push before the next
-  fixture slice begins.
+  `main` at `1fc7982e` after the accepted W6 saturated-control proof stack and
+  again over the integration-lease record at `69c2fd5a`.
+- Published stack: planning seed `3f5e60aa`, fixture commit `b9941b62`,
+  functional coverage/docs head `3faa01a8`, and resolved clean mailbox
+  `e47139b6`.
+- Accepted fixtures: one retained leaf occupies both object fields and also
+  survives outside. The unique-owner path releases both fields and then
+  reuses the leaf; the shared-owner path stops before either field, preserves
+  both originals, and allocates the later leaf update. Complete 62- and
+  64-step traces pin the distinct projection, increment, decrement,
+  constructor, branch, and `oset` paths.
+- Selection policy: adversarial ownership candidates now use pairwise factor
+  coverage plus mandatory three-way coverage for alias multiplicity, release
+  stop boundary, and surviving alias. Portable observations and complete
+  executed path signatures eliminate dominated candidates; this adds no new
+  generator or orchestration layer.
+- Contracts: none. This is fixture, exact-trace, oracle-floor,
+  coverage-policy, roadmap, and validation documentation work only.
+- Acceptance: Lean Beam update/sync/save with zero diagnostics; focused
+  native/LCNF and native/LCNF/real-V8 matrices; `lake --rehash build`; repeated
+  `git diff --check`; and complete `make check` both before and after the W6
+  rebase. The accepted baseline has 651/651 source native/LCNF/V8 cases, 9/9
+  direct ownership machines, 1,302 native-oracle witnesses, 660 unique cases,
+  1,311 tier cases, 1,962/1,962 equal indexed comparisons, 6,689 interpreter
+  steps, 122 tag floors, 227 semantic domains, and zero findings. No bug card
+  was required.
+- Result: `main` fast-forwards through the resolved mailbox and the fixture
+  lane is released. S5 remains active; coverage-guided selection next targets
+  the smallest undominated retained-capacity or grow/delete ownership pair.
 
 ## Latest completed integration lease
 
