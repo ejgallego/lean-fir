@@ -5,17 +5,17 @@ lane: test-fixtures
 owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
-state: released
-base: 05ebaab160a1f4574c494bcdea47ed53faf7e8fe on main
-functional-head: 2f93f54e; validation: cover tail-call ownership
-contract-base: 05ebaab160a1f4574c494bcdea47ed53faf7e8fe on main; consumes landed S3 capture topology, W7 tail-call generation support, and the accepted W6 structured-external proof checkpoint; changes no shared contract
+state: active
+base: e206463119e98dc48a2a60e11f6ac9173beec686 on main
+functional-head: none yet; S5 planning seed only
+contract-base: e206463119e98dc48a2a60e11f6ac9173beec686 on main; consumes the landed S4 transfer/reuse baseline and existing direct recursive-release/native-IR attestations; changes no shared contract
 clean-at-update: true
-slice: S4/B1 tail-call ownership bridge: compare three tail-recursive updates of a uniquely transferred nested ByteArray owner with the same worker called while an independent alias to the original owner survives
-files: Fir/Validation/Corpus.lean; docs/validation.md; validation-plans/coverage-index.json; validation-plans/native-oracle-attestations.json; validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md
+slice: S5a recursive release/reuse: compare replacing a nested owner whose retained leaf becomes exclusive after recursive child release with the same replacement while an outside child alias stops recursion and forces the later leaf update to allocate
+files: validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md; planned Fir/Validation/Corpus.lean, validation coverage/oracle ratchets, and docs/validation.md
 contracts: none; fixture, trace, native-oracle, and coverage-policy changes only
-checks: PASS — Lean Beam update/sync/save with zero diagnostics; lake --rehash build fir-native-oracle Fir.Validation; focused native/LCNF and native/LCNF/real-V8 checks; git diff --check; complete pre-rebase and post-rebase make check. Final gate: 122 harness tests; 647/647 source and V8 cases; 9/9 direct cases; 656 unique cases; 1,950/1,950 indexed comparisons; 6,431 machine steps; 106/106 tag floors; 215/215 domains; 1,294 native-oracle witnesses; zero findings
+checks: not-run; planning seed only
 bug-cards: none
-blockers: none; the semantic pair reuses linked constructor, String, ByteArray, recursion, and result surfaces; W7's separate large-depth transform claim remains outside this fixture slice
-handoff: accepted by the test-fixtures integration owner from ready mailbox 7daee1fa; the containing completion record lands the exact rebased stack
-next: start the fixture-owned S5 recursive-release/reuse design without overlapping W6/W7 implementation work; keep W7's large-depth tail-transform probe separate
+blockers: none; source constructors, erased fields, nested results, and ownership forms are already linked; the direct native-IR recorder remains unchanged
+handoff: none; active fixture-only slice
+next: compile the paired owner replacement and leaf update, then admit exact obligations only if native Lean, LCNF, and real V8 agree
 ```

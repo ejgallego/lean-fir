@@ -96,8 +96,8 @@ near-synonym drift:
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
-| M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
-| M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
+| M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
+| M5 Recursive release | active, primary | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Compile the first source-generated unique-release versus shared-stop pair and pin its exact paths |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -287,11 +287,32 @@ control.
 
 ### S5: recursive release and reuse
 
+State: active on `validation/closure-ownership-fixtures` from `main` at
+`e2064631`; changes no shared contract.
+
 Cover repeated child aliases, nested unique release, shared-child recursion
 stopping, persistent owners, erased/scalar neighbors, same-size reuse, retained
 capacity, and grow/delete/allocation. Make release order observable through a
 surviving alias, later copy-on-write, or a reuse decision, and pin exact
 `project-dec`, `dec`, `reset`, `reuse`, `del`, `oset`, and `setTag` counts.
+
+The first compact pair mirrors—but does not duplicate—the audited direct-machine
+nested-reset law. Source construction creates an owner with an erased proof
+field, a unique child, and a retained leaf. Replacing the owner must recursively
+release the unique child, decrement the retained leaf to exclusive ownership,
+and let a later leaf update reuse its storage. The paired program retains the
+child outside the owner, so owner release must stop at that shared child;
+returning the child while updating its leaf then forces allocation and preserves
+the original leaf contents. Both return the owner replacement so the compiler
+cannot discard the release-producing call.
+
+Require final-LCNF execution evidence for owner reuse, recursive decrement,
+the shared stop boundary, and the later reuse-versus-allocation decision. The
+returned replacement, surviving child, and updated leaf make over-release or
+incorrect copy-on-write observable. The exact dynamic path catches a leaked
+reference even when allocation identity is not part of portable Lean results.
+The existing opt-in direct native-IR attestations remain the native ownership
+fact anchor; this fixture slice adds no orchestration or recorder surface.
 
 ### S6: nonlocal ownership boundaries
 
