@@ -1323,9 +1323,12 @@ acceptance tests pass.
      release an ownership tree; closure-descriptor agreement and the existing
      recursive ordinary-persistence theorem establish the updated heap
      relation, while a shared same-witness effect theorem reconstructs the
-     complete entry-relative cache/resource frame. Subsequent slices connect
-     delete and mutation effects and add saturated closure calls, heap-valued
-     cache misses, and target-only label/loop unwinding to this induction.
+     complete entry-relative cache/resource frame. Explicit deletion is now
+     connected through the same exact generated unary-host prefix and shared
+     reconstruction. Physical zero is admitted only by the erased-value
+     relation; ordinary object decoding is unchanged. Subsequent slices connect
+     mutation effects and add saturated closure calls, heap-valued cache misses,
+     and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
