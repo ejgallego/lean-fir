@@ -6663,6 +6663,32 @@ structure SaturatedClosureCallResolution
   parametersBound :
     bindParams target.params (captures ++ site.semanticArgs) = .ok calleeEnv
 
+/-- Successful source argument evaluation preserves the saturated call site's
+argument arity.  This is the source-semantic counterpart of
+`argumentKinds_size`, exposed so structured entry proofs do not repeat the
+`Array.mapM` inversion. -/
+theorem SaturatedClosureCallSite.semanticArgs_size
+    {context : Fir.Wasm.Context}
+    {decl : LCNF.LetDecl .impure}
+    {sourceEnv : Env}
+    (site : SaturatedClosureCallSite context decl sourceEnv) :
+    site.semanticArgs.size = site.args.size := by
+  have evaluated := site.argumentsEvaluated
+  unfold evalArgs at evaluated
+  rw [Array.mapM_eq_mapM_toList] at evaluated
+  cases listResult : site.args.toList.mapM (evalArg sourceEnv) with
+  | error fault =>
+      rw [listResult] at evaluated
+      contradiction
+  | ok results =>
+      rw [listResult] at evaluated
+      have valuesEq : results.toArray = site.semanticArgs :=
+        Except.ok.inj evaluated
+      rw [← valuesEq]
+      simpa using
+        listMapM_length_of_ok_for_directCall site.args.toList
+          (evalArg sourceEnv) results listResult
+
 /-- `compileArgs` emits exactly one ABI kind for every source argument. -/
 theorem SaturatedClosureCallSite.argumentKinds_size
     {context : Fir.Wasm.Context}

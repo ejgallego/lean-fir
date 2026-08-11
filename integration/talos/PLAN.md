@@ -5937,8 +5937,20 @@ that compiler theorem with the existing semantic assembly law: in exactly
 `argumentTarget.length` structured steps it leaves the complete physical
 callee row on the operand stack, related to the captured and newly supplied
 source arguments. The caller supplies neither target syntax nor execution.
-The next closure slice recursively enters the generated callee and unwinds
-the recorded call and conditional labels into the caller continuation.
+The entry composition is now exact as well.
+`SaturatedClosureCallSite.semanticArgs_size` exposes the shared source arity
+fact, and `SaturatedClosureCallResolution.sourceStageAndEnterFinitePath`
+reconstructs the source staging/closure-consumption pair in exactly two
+interpreter steps. On the target,
+`targetDispatchArgumentsAndEnterFinitePath` composes the matcher fold,
+capture/argument assembly, and the real generated `enterCall` step, retaining
+the precise call frame and every conditional label. Finally,
+`structuredWasmLeaveReplicatedClosureLabelsFinitePath` proves that normal
+selected-body fallthrough restores the caller operand tail and continuation
+in exactly `before.length + 1` steps. None of these theorems accepts an
+execution certificate. The next closure slice runs the recursive callee,
+writes its result local, applies this exact label unwind, and restores the
+caller resource frame before continuation recursion.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

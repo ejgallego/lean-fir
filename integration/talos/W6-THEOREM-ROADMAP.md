@@ -1358,10 +1358,17 @@ acceptance tests pass.
      takes exactly one structured step per emitted projection/local/constant
      instruction and leaves the full related physical callee row on the
      operand stack beneath arbitrary residual code and frames. No target code
-     or path enters its premises. Subsequent slices compose recursive
-     generated-callee entry, the result-local write, and exact conditional
-     label unwinding; then add heap-valued cache misses and target-only loop
-     unwinding to this induction.
+     or path enters its premises. Generated entry is now composed too:
+     `sourceStageAndEnterFinitePath` derives the exact two-step source prefix,
+     while `targetDispatchArgumentsAndEnterFinitePath` composes matcher
+     selection, argument assembly, and the generated internal `enterCall`
+     step, retaining the saved call frame and all matcher labels.
+     `structuredWasmLeaveReplicatedClosureLabelsFinitePath` separately proves
+     exact normal fallthrough through those labels back to the compiler's
+     residual continuation. Subsequent slices run the recursive callee, write
+     its result local, apply that unwind, and restore the caller resource
+     frame; then add heap-valued cache misses and target-only loop unwinding to
+     this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
