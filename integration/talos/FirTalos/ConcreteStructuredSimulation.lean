@@ -357,6 +357,142 @@ theorem
       (structuredWasmFlatProgram_importCall_localSet
         (resultIndex := resultIndex) imported)
 
+/-- A production argument row followed by a compiler-selected external
+declaration call is flat after adaptation.  Import status is derived from the
+whole-pipeline external-call alignment, not assumed from target syntax. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_compileArgs_externalCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {name : Lean.Name} {declaration : Lean.Compiler.LCNF.Decl .impure}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {argumentKinds : Array AbiKind}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args =
+        .ok (argumentCode, argumentKinds))
+    (declarationFound : program.findDecl? name = some declaration)
+    (declarationExternal : ∃ metadata, declaration.value = .extern metadata)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (argumentCode ++ [.call (.declaration name)]) =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetEq⟩ :=
+    instructions_append_declaration_call_eq valueAdapted
+  obtain ⟨_operation, _resultKind, imp, _operationName, _operationMatches,
+      _resultSignature, imported, _inBounds, _contracted, _parameterCount,
+      _resultCount⟩ :=
+    spec.externalCall declarationFound declarationExternal callFound
+  have argumentsFlat :
+      StructuredWasmFlatProgram target.wasmModule targetArguments :=
+    (ConstructorArgsCompiled.ofCompileArgs argumentsCompiled).structuredFlatProgram
+      argumentsAdapted
+  subst targetValue
+  simpa [List.append_assoc] using
+    StructuredWasmFlatProgram.append argumentsFlat
+      (structuredWasmFlatProgram_importCall_localSet
+        (resultIndex := resultIndex) imported)
+
+/-- Every admitted pure external result has a compiler-derived straight-line
+target prefix: compiled arguments, one resolved import call, and the generated
+destination write. -/
+theorem PureExternalSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {stepCost : Nat}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    (valueCompiled : Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  rcases supported with integer | natural | scalar
+  · rcases integer with
+      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
+        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
+        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
+        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    have expectedCompiled :
+        Fir.Wasm.compileLetValue context decl =
+          .ok (argumentCode ++ [.call (.declaration name)]) := by
+      simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+    rw [expectedCompiled] at valueCompiled
+    have valueCodeEq := Except.ok.inj valueCompiled
+    subst valueCode
+    have declarationFound : program.findDecl? name = some declaration := by
+      rw [← spec.contextProgram]
+      exact targetFound
+    exact spec.structuredFlatProgram_compileArgs_externalCall
+      argumentsCompiled declarationFound targetExternal valueAdapted
+  · rcases natural with
+      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
+        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
+        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
+        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    have expectedCompiled :
+        Fir.Wasm.compileLetValue context decl =
+          .ok (argumentCode ++ [.call (.declaration name)]) := by
+      simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+    rw [expectedCompiled] at valueCompiled
+    have valueCodeEq := Except.ok.inj valueCompiled
+    subst valueCode
+    have declarationFound : program.findDecl? name = some declaration := by
+      rw [← spec.contextProgram]
+      exact targetFound
+    exact spec.structuredFlatProgram_compileArgs_externalCall
+      argumentsCompiled declarationFound targetExternal valueAdapted
+  · rcases scalar with
+      ⟨name, args, argumentCode, argumentKinds, _semanticArgs, declaration,
+        _value, valueEq, _operation, nonempty, targetFound, targetExternal,
+        valueKind, argumentsCompiled, _argumentsEvaluated, _signature,
+        _resultCompiled, _semanticCalled, _nextRuntimeEq, _sourceValueEq,
+        _stepCostEq⟩
+    have expectedCompiled :
+        Fir.Wasm.compileLetValue context decl =
+          .ok (argumentCode ++ [.call (.declaration name)]) := by
+      simp [Fir.Wasm.compileLetValue, valueEq, valueKind, argumentsCompiled,
+        targetFound, nonempty, Bind.bind, Except.bind, pure, Except.pure]
+    rw [expectedCompiled] at valueCompiled
+    have valueCodeEq := Except.ok.inj valueCompiled
+    subst valueCode
+    have declarationFound : program.findDecl? name = some declaration := by
+      rw [← spec.contextProgram]
+      exact targetFound
+    exact spec.structuredFlatProgram_compileArgs_externalCall
+      argumentsCompiled declarationFound targetExternal valueAdapted
+
 /-- Successful adaptation of one symbolic local read determines one atomic
 target local read, regardless of the source local's numeric target index. -/
 theorem structuredWasmFlatProgram_localGet_of_instructions
@@ -1577,6 +1713,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
         nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
         nextStore { nextLocals with values := targetLocals.values } targetRest
         nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = source.joins ∧
       sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
   let resumedLocals : Wasm.Locals :=
@@ -1590,7 +1727,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
     { target with
       store := nextStore
       control := .running resumedLocals targetRest }
-  refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_, ?_, ?_⟩
+  refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_, ?_, ?_, ?_⟩
   · rcases source with
       ⟨program, control, env, joins, frames, runtime⟩
     have programEq := related.sourceProgramEq
@@ -1645,6 +1782,146 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
       frameAligned := by
         simpa [resumedLocals] using
           (nextAligned.withValues targetLocals.values) }
+  · simp [sourceAfter]
+  · simp [sourceAfter]
+  · simp [targetAfter]
+
+/-- Interpreter `ExecSteps` are the source transition system's exact finite
+paths. -/
+theorem ExecSteps.toFinitePath
+    {externals : ExternalImpl} {count : Nat}
+    {first last : MachineState}
+    (steps : ExecSteps externals count first last) :
+    FinitePath
+      (fun before after => executeStep externals before = .next after)
+      count first last := by
+  induction steps with
+  | refl state => exact .refl state
+  | step head _tail ih =>
+      simpa [Nat.succ_eq_add_one] using
+        FinitePath.cons
+          (step :=
+            fun before after =>
+              executeStep externals before = .next after)
+          head ih
+
+/-- One supported external-result `let` advances through the interpreter's
+three-step request protocol and the exact flat imported-call target prefix.
+
+The current recursive fragment has no join constructors, so its local source
+focus carries the empty join environment.  Saved bind/call frames may still be
+arbitrarily deep; the executable external prefix is lifted beneath that exact
+frame suffix. -/
+theorem ConcreteStructuredCodeFocus.advance_flatExternalLet
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {targetCode targetValue targetRest : Wasm.Program}
+    {resultIndex : Nat} {witness nextWitness : RefinementWitness}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (sourceJoins : source.joins = [])
+    (targetCodeEq :
+      targetCode = targetValue ++ .localSet resultIndex :: targetRest)
+    (continuationAdapted :
+      CodeAdapted context sourceModule sourceFunction labels continuation
+        targetRest)
+    (flat : StructuredWasmFlatProgram module
+      (targetValue ++ [.localSet resultIndex]))
+    (step : ExternalLetStepSimulates context sourceFunction module hostEnv
+      externals decl continuation targetValue sourceRuntime nextRuntime
+      sourceEnv sourceValue targetStore nextStore targetLocals nextLocals
+      resultIndex witness nextWitness)
+    (nextAligned :
+      ConcreteLocalFrameAligned sourceFunction nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+        nextWitness) :
+    ∃ sourceAfter targetAfter,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          3 source sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv)
+        (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length
+        target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        nextStore { nextLocals with values := targetLocals.values } targetRest
+        nextWitness sourceAfter targetAfter ∧
+      sourceAfter.joins = [] ∧
+      sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  let resumedLocals : Wasm.Locals :=
+    { nextLocals with values := targetLocals.values }
+  let sourceAfter : MachineState :=
+    { source with
+      control := .code continuation
+      env := bind sourceEnv decl.fvarId sourceValue
+      runtime := nextRuntime }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      store := nextStore
+      control := .running resumedLocals targetRest }
+  refine ⟨sourceAfter, targetAfter, ?_, ?_, ?_, ?_, ?_, ?_⟩
+  · apply ExecSteps.toFinitePath
+    rcases source with
+      ⟨program, control, env, joins, frames, runtime⟩
+    have programEq := related.sourceProgramEq
+    change program = context.program at programEq
+    subst program
+    have controlEq := related.sourceControlEq
+    change control = .code (.let decl continuation) at controlEq
+    subst control
+    have envEq := related.sourceEnvEq
+    change env = sourceEnv at envEq
+    subst env
+    have runtimeEq := related.sourceRuntimeEq
+    change runtime = sourceRuntime at runtimeEq
+    subst runtime
+    change joins = [] at sourceJoins
+    subst joins
+    have lifted :=
+      FirTalos.Correctness.ExecSteps.withFrameSuffix
+        (suffix := frames) step.1
+    simpa [SourceExternalLetResult, withFrameSuffix, sourceAfter] using lifted
+  · rcases target with ⟨store, control, frames⟩
+    have storeEq := related.targetStoreEq
+    change store = targetStore at storeEq
+    subst store
+    have controlEq := related.targetControlEq
+    rw [targetCodeEq] at controlEq
+    change control =
+      .running targetLocals
+        (targetValue ++ .localSet resultIndex :: targetRest) at controlEq
+    subst control
+    simpa [resumedLocals, targetAfter] using
+      step.structuredFinitePath (targetRest := targetRest)
+        (tail := targetLocals.values) (frames := frames) flat
+  · exact {
+      sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+      sourceControlEq := by simp [sourceAfter]
+      sourceEnvEq := by simp [sourceAfter]
+      sourceRuntimeEq := by simp [sourceAfter]
+      targetStoreEq := by simp [targetAfter]
+      targetControlEq := by simp [targetAfter, resumedLocals]
+      adapted := continuationAdapted
+      stateRelated := by
+        simpa [resumedLocals] using
+          (step.2.2.1.withValues targetLocals.values)
+      frameAligned := by
+        simpa [resumedLocals] using
+          (nextAligned.withValues targetLocals.values) }
+  · simp [sourceAfter, sourceJoins]
   · simp [sourceAfter]
   · simp [targetAfter]
 
@@ -1744,6 +2021,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
       ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
         sourceEnv sourceValue targetStore targetLocals witness kind physical
         sourceAfter targetAfter ∧
+      sourceAfter.joins = source.joins ∧
       sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
   obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
@@ -1764,7 +2042,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
     { target with
       control := .returning (physical :: targetLocals.values) }
   refine ⟨kind, physical, sourceAfter, targetAfter, localCompiled, ?_, ?_, ?_,
-    ?_, ?_⟩
+    ?_, ?_, ?_⟩
   · rcases source with
       ⟨program, control, env, joins, frames, runtime⟩
     have controlEq := related.sourceControlEq
@@ -1805,6 +2083,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
       stateRelated := related.stateRelated
       frameAligned := related.frameAligned
       valueRelated }
+  · simp [sourceAfter]
   · simp [sourceAfter]
   · simp [targetAfter]
 
@@ -1945,7 +2224,8 @@ theorem
       source target with
   | ret sourceLookup =>
       obtain ⟨kind, physical, sourceAfter, targetAfter, _localCompiled,
-          sourceStep, targetPath, focus, sourceFramesEq, targetFramesEq⟩ :=
+          sourceStep, targetPath, focus, _sourceJoinsEq, sourceFramesEq,
+          targetFramesEq⟩ :=
         related.advance_return localsAligned sourceLookup
       exact ⟨sourceAfter, targetAfter, targetStore, targetLocals, witness,
         kind, physical, 1, 2, .single sourceStep, targetPath, focus,
@@ -1983,7 +2263,8 @@ theorem
             (targetValue ++ [.localSet resultIndex]) :=
         targetFlat supported valueCompiled valueAdapted
       obtain ⟨sourceMiddle, targetMiddle, firstSourceStep, targetPrefix,
-          nextFocus, firstSourceFramesEq, firstTargetFramesEq⟩ :=
+          nextFocus, _firstSourceJoinsEq, firstSourceFramesEq,
+          firstTargetFramesEq⟩ :=
         related.advance_flatLet targetCodeEq continuationAdapted flat step
           (invariantFrameAligned continuationInvariant)
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -2494,6 +2775,7 @@ structure ConcreteStructuredDirectCallEntryFocus
       sourceRuntime site.calleeEnv site.calleeCode targetStore
       (row.targetFunction.toLocals physicalArgs) row.targetFunction.body witness
       source target
+  sourceJoinsEq : source.joins = []
   sourceFramesEq :
     source.frames =
       .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames
@@ -2731,6 +3013,7 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter
     exact .single entered
   · refine {
       calleeFocus := ?_
+      sourceJoinsEq := by simp [sourceAfter]
       sourceFramesEq := by simp [sourceAfter, related.sourceFramesEq]
       targetFramesEq := by simp [targetAfter]
       continuationAdapted := related.continuationAdapted
@@ -3132,6 +3415,7 @@ theorem ConcreteStructuredBindFrameFocus.advance
       ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
           sourceRuntime (bind callerEnv result sourceValue) continuation
           targetStore resumedLocals targetRest witness sourceAfter targetAfter ∧
+        sourceAfter.joins = callerJoins ∧
         sourceAfter.frames = sourceFrames ∧
         targetAfter.frames = targetFrames := by
   obtain ⟨updated, targetSet, updatedAligned⟩ :=
@@ -3173,7 +3457,7 @@ theorem ConcreteStructuredBindFrameFocus.advance
       control := .running resumedLocals targetRest
       frames := targetFrames }
   refine ⟨sourceAfter, targetAfter, updated, resumedLocals, ?_, ?_, targetSet,
-    rfl, ?_, ?_, ?_⟩
+    rfl, ?_, ?_, ?_, ?_⟩
   · rcases source with
       ⟨program, control, env, joins, frames, runtime⟩
     have controlEq := related.sourceControlEq
@@ -3222,6 +3506,7 @@ theorem ConcreteStructuredBindFrameFocus.advance
       adapted := related.continuationAdapted
       stateRelated := updatedRelated
       frameAligned := resumedAligned }
+  · simp [sourceAfter]
   · simp [sourceAfter]
   · simp [targetAfter]
 
@@ -3345,6 +3630,19 @@ abbrev ReuseCapacityStructuredDirectCallCodeEvaluates
     (fun _context => NoEffectsSupported)
     directLetAllocationCost
 
+/-- Recursive admission after connecting the complete pure external-result
+family to the structured target.  Lazy/cache, case, and effect constructors
+remain disabled at this layer. -/
+abbrev ReuseCapacityStructuredPureExternalCallCodeEvaluates
+    (externals : ExternalImpl) :=
+  ReuseCapacityDirectHereditaryCodeEvaluates externals
+    (fun context => ReuseBudgetedDirectSupported context)
+    (fun context => PureExternalSupported context externals)
+    (fun _context => NoReuseCapacityLazySupported)
+    NoStructuredCasesSupported
+    (fun _context => NoEffectsSupported)
+    directLetAllocationCost
+
 /-- Recover the ordinary ABI classifier from the direct-call classifier. -/
 theorem abiKind?_of_directAbiKind?_eq_some
     {type : Lean.Expr} {kind : AbiKind}
@@ -3412,7 +3710,7 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
         sourceRuntime (bind callerEnv result sourceValue) continuation
         targetStore resumedLocals targetRest witness sourceAfter targetAfter := by
   obtain ⟨computedAfter, targetAfter, _updated, resumedLocals, computedStep,
-      path, _targetSet, _resumedEq, focus, _sourceFramesEq,
+      path, _targetSet, _resumedEq, focus, _sourceJoinsEq, _sourceFramesEq,
       _targetFramesEq⟩ :=
     related.advance (module := module) (hostEnv := hostEnv)
       (externals := externals)
@@ -3422,17 +3720,19 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
   subst computedAfter
   exact ⟨targetAfter, resumedLocals, path, focus⟩
 
-/-- Recursive structured partial correctness for the current direct fragment.
+/-- Recursive structured partial correctness for direct values, supported pure
+external results, and statically named calls.
 
-The induction ranges over the existing source-only hereditary relation.  A
-named call is staged by the production compiler, entered by the structured
-machine, discharged recursively in the exact generated declaration row, and
-then returned through the saved bind/call frames.  Both machine paths, the
-entry-relative concrete resource frame, the result ABI refinement, and exact
-restoration of the enclosing frame stacks are retained.  No target trace,
-callee execution package, or translation certificate is a premise. -/
+External results traverse the interpreter's exact three-step request protocol
+and the compiler-derived imported-call prefix. A named call is staged by the
+production compiler, entered by the structured machine, discharged recursively
+in the exact generated declaration row, and returned through the saved
+bind/call frames. Both machine paths, the entry-relative concrete resource
+frame, the result ABI refinement, and exact restoration of the enclosing frame
+stacks are retained. No target trace, callee execution package, or translation
+certificate is a premise. -/
 theorem
-    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectCalls_generated
+    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCalls_generated
     {program : Fir.LeanIR.ImpureProgram}
     {rootContext : Fir.Wasm.Context}
     {rootCode : Lean.Compiler.LCNF.Code .impure}
@@ -3451,7 +3751,7 @@ theorem
         sourceFunction targetModule hosts)
     (contextCaches :
       context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
-    {labels : List Lean.FVarId} {externals : ExternalImpl}
+    {externals : ExternalImpl}
     {expectedResult : AbiKind}
     {facts resultFacts : ReuseCapacityFacts}
     {sourceRuntime resultRuntime entryRuntime : RuntimeState}
@@ -3463,13 +3763,14 @@ theorem
     {targetCode : Wasm.Program}
     {source : MachineState} {target : StructuredWasmState Host}
     (evaluation :
-      ReuseCapacityStructuredDirectCallCodeEvaluates externals context
+      ReuseCapacityStructuredPureExternalCallCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
+    (sourceJoins : source.joins = [])
     (invariant :
       ReuseCapacityEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
@@ -3492,22 +3793,24 @@ theorem
                 entryRuntime entryStore entryWitness resultFacts slack
                 resultRuntime resultEnv resultStore resultLocals resultWitness ∧
               kind.refines expectedResult = true ∧
+                sourceAfter.joins = [] ∧
                 sourceAfter.frames = source.frames ∧
                 targetAfter.frames = target.frames := by
-  induction evaluation generalizing functionCode sourceFunction labels
+  induction evaluation generalizing functionCode sourceFunction
       targetStore targetLocals targetCode witness source target entryRuntime
       entryStore entryWitness slack with
   | ret sourceLookup resultCompiled resultRefines =>
       obtain ⟨kind, physical, sourceAfter, targetAfter, targetResultCompiled,
-          sourceStep, targetPath, yielded, sourceFramesEq, targetFramesEq⟩ :=
+          sourceStep, targetPath, yielded, sourceAfterJoins, sourceFramesEq,
+          targetFramesEq⟩ :=
         related.advance_return functionSpec.localsAligned sourceLookup
       rw [resultCompiled] at targetResultCompiled
       have resultPairEq := Except.ok.inj targetResultCompiled
       cases resultPairEq
       exact ⟨sourceAfter, targetAfter, targetStore, targetLocals, witness,
         _, physical, 1, 2, .single sourceStep, targetPath,
-        yielded, by simpa using invariant, resultRefines, sourceFramesEq,
-        targetFramesEq⟩
+        yielded, by simpa using invariant, resultRefines,
+        sourceAfterJoins.trans sourceJoins, sourceFramesEq, targetFramesEq⟩
   | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
       nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>
@@ -3516,7 +3819,7 @@ theorem
           targetCodeEq⟩ :=
         CodeAdapted.let_eq related.adapted
       have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction labels continuation
+          CodeAdapted context sourceModule sourceFunction [] continuation
             targetRest :=
         ⟨restCode, restCompiled, restAdapted⟩
       have stepFits :
@@ -3553,14 +3856,16 @@ theorem
         functionSpec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
           supported valueCompiled valueAdapted
       obtain ⟨sourceMiddle, targetMiddle, firstSourceStep, targetPrefix,
-          nextFocus, firstSourceFramesEq, firstTargetFramesEq⟩ :=
+          nextFocus, firstSourceJoinsEq, firstSourceFramesEq,
+          firstTargetFramesEq⟩ :=
         related.advance_flatLet targetCodeEq continuationAdapted flat step
           continuationInvariant.1.1.1.1.2.2.1
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
           targetTail, yielded, resultInvariant, resultRefines,
-          tailSourceFramesEq, tailTargetFramesEq⟩ :=
+          resultJoins, tailSourceFramesEq, tailTargetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
+          (firstSourceJoinsEq.trans sourceJoins)
           (continuationInvariant.withValues targetLocals.values)
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount,
@@ -3571,7 +3876,7 @@ theorem
             executeStep externals before = .next after)
           firstSourceStep).trans sourceTail,
         targetPrefix.trans targetTail, yielded, resultInvariant, resultRefines,
-        tailSourceFramesEq.trans firstSourceFramesEq,
+        resultJoins, tailSourceFramesEq.trans firstSourceFramesEq,
         tailTargetFramesEq.trans firstTargetFramesEq⟩
   | @directCallLet context decl sourceEnv sourceRuntime calleeResultFacts
       nextRuntime calleeResultEnv sourceValue stepCost facts nextFacts
@@ -3616,9 +3921,11 @@ theorem
       obtain ⟨sourceYield, targetYield, afterCall, calleeLocals, resultWitness,
           actualKind, physical, calleeSourceCount, calleeTargetCount,
           calleeSourcePath, calleeTargetPath, calleeYielded, calleeInvariant,
-          calleeResultRefines, calleeSourceFramesEq, calleeTargetFramesEq⟩ :=
+          calleeResultRefines, _calleeResultJoins, calleeSourceFramesEq,
+          calleeTargetFramesEq⟩ :=
         calleeIH (generatedRow.toSupportedFunction rootSpec)
-          generatedRow.contextCaches entry.calleeFocus calleeInvariantWithSlack
+          generatedRow.contextCaches entry.calleeFocus entry.sourceJoinsEq
+          calleeInvariantWithSlack
       have sourceCallFramesEq :
           sourceYield.frames =
             .bind decl.fvarId continuation sourceEnv source.joins ::
@@ -3636,7 +3943,8 @@ theorem
             site.calleeResultRefines)
       obtain ⟨sourceResumed, targetResumed, updated, resumedLocals,
           bindSourceStep, bindTargetPath, targetSet, resumedEq, resumedFocus,
-          resumedSourceFramesEq, resumedTargetFramesEq⟩ :=
+          resumedSourceJoinsEq, resumedSourceFramesEq,
+          resumedTargetFramesEq⟩ :=
         bindFocus.advance
       have storedInvariant :
           ReuseCapacityEntryRelativeFrame
@@ -3680,8 +3988,10 @@ theorem
           finalWitness, kind, resultPhysical, continuationSourceCount,
           continuationTargetCount, continuationSourcePath,
           continuationTargetPath, yielded, resultInvariant, resultRefines,
-          continuationSourceFramesEq, continuationTargetFramesEq⟩ :=
+          resultJoins, continuationSourceFramesEq,
+          continuationTargetFramesEq⟩ :=
         continuedIH functionSpec contextCaches resumedFocus
+          (resumedSourceJoinsEq.trans sourceJoins)
           continuationInvariant
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals, finalWitness,
         kind, resultPhysical,
@@ -3696,11 +4006,70 @@ theorem
               continuationSourcePath,
         (((targetArgumentsPath.trans enterTargetPath).trans calleeTargetPath).trans
           bindTargetPath).trans continuationTargetPath,
-        yielded, resultInvariant, resultRefines,
+        yielded, resultInvariant, resultRefines, resultJoins,
         continuationSourceFramesEq.trans resumedSourceFramesEq,
         continuationTargetFramesEq.trans resumedTargetFramesEq⟩
-  | externalLet supported _sourceStep _transfer _continued _ih =>
-      exact False.elim supported
+  | @externalLet context sourceRuntime sourceEnv decl continuation nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult resultFacts
+      resultRuntime resultEnv resultValue continuationCost supported sourceStep
+      transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+          targetCodeEq⟩ :=
+        CodeAdapted.let_eq related.adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          stepCost ≤ (stepCost + continuationCost) + slack := by
+        omega
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, producedTransfer, nextInvariant⟩ :=
+        (functionSpec.reuseCapacityExternalLetRuntimeRefinesWithCost_pureExternal_entryRelativeCache
+          externals) supported stepFits invariant sourceStep valueCompiled
+            valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              externals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) nextStore nextLocals
+            nextWitness := by
+        have budgetEq :
+            (stepCost + continuationCost) + slack - stepCost =
+              continuationCost + slack := by
+          omega
+        simpa only [budgetEq] using nextInvariant
+      have flat :
+          StructuredWasmFlatProgram targetModule.wasmModule
+            (targetValue ++ [.localSet resultIndex]) :=
+        supported.structuredFlatProgram functionSpec valueCompiled valueAdapted
+      obtain ⟨sourceMiddle, targetMiddle, sourcePrefix, targetPrefix,
+          nextFocus, nextSourceJoins, firstSourceFramesEq,
+          firstTargetFramesEq⟩ :=
+        related.advance_flatExternalLet sourceJoins targetCodeEq
+          continuationAdapted flat step
+          continuationInvariant.1.1.1.1.2.2.1
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          tailSourceFramesEq, tailTargetFramesEq⟩ :=
+        ih functionSpec contextCaches nextFocus nextSourceJoins
+          (continuationInvariant.withValues targetLocals.values)
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 3 + sourceCount,
+        (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length +
+          targetCount,
+        sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
+        resultInvariant, resultRefines, resultJoins,
+        tailSourceFramesEq.trans firstSourceFramesEq,
+        tailTargetFramesEq.trans firstTargetFramesEq⟩
   | lazyLet _path supported _sourceStep _transfer _continued _ih =>
       exact False.elim supported
   | caseOf supported _sourceStep _continued _ih =>

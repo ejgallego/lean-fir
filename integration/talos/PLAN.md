@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5859,9 +5859,15 @@ real generated named call, enters its exact declaration row, applies itself
 recursively to the callee, transports the evolved resource/cache invariant
 back to the saved caller, and resumes the compiled continuation. Both machine
 paths and the enclosing frame stacks are explicit, while the premises remain
-source-only. The next construction slice connects external-result prefixes,
-then lazy/cache, case, effect, and saturated-closure transitions to the same
-induction.
+source-only. The same induction now covers every admitted pure `Nat`, `Int`,
+and scalar external result. Production compiler/adapter inversion derives the
+flat argument/import/result-store prefix, whole-pipeline external alignment
+proves that the selected declaration call is a target import, and the existing
+entry-relative runtime theorem supplies the evolved heap witness and exact
+three-step source request protocol. The current no-case fragment records its
+empty source join environment explicitly while preserving arbitrary saved
+bind/call frames. The next construction slice connects lazy/cache prefixes,
+then case, effect, and saturated-closure transitions to the same induction.
 
 ## Parallel agent packages
 

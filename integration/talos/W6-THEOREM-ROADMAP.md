@@ -1255,17 +1255,26 @@ acceptance tests pass.
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
      structured target return with both path lengths exposed.
-     `reachesYield_reuseBudgetedDirectCalls_generated` now performs the same
-     construction over the existing source-only hereditary relation. A named
+     `reachesYield_reuseBudgetedDirectPureExternalCalls_generated` now performs
+     the same construction over the existing source-only hereditary relation.
+     A named
      call executes its compiler-derived argument prefix and structured call
      entry, recurses in the exact generated declaration row, reconstructs the
      caller cache/resource frame from the callee's entry-relative transports,
      and executes bind/call-frame return before continuing recursively. It
      supports arbitrary finite named-call depth and preserves the exact outer
      source and target frame stacks; no callee execution package or target
-     trace enters the premises. Subsequent slices connect external and
-     lazy/cache prefixes, selected cases, effects, saturated closure calls,
-     and target-only label/loop unwinding to this induction.
+     trace enters the premises. Pure external-result lets are now recursive as
+     well. `PureExternalSupported.structuredFlatProgram` derives compiled
+     arguments, a resolver-proved imported declaration call, and the generated
+     destination write from the production compiler and adapter.
+     `advance_flatExternalLet` combines its exact structured target path with
+     the interpreter's three-step external request path, retains the evolved
+     entry-relative cache/resource frame, and resumes the same induction. The
+     current no-case fragment makes its empty join environment explicit while
+     still allowing arbitrary saved source and target frames. Subsequent
+     slices connect lazy/cache prefixes, selected cases, effects, saturated
+     closure calls, and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
