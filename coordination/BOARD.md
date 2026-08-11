@@ -13,6 +13,32 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3A`.
+- Integration owner: `test-fixtures`; the user authorized this lane to take an
+  integration lease when needed, and no other lease is active on the board.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  `main` at `348977fe` after the W6 unified-control-relation checkpoint.
+- Candidate stack: functional head `b5080fe3` and ready mailbox `ea68bbe2`.
+  It adds a returned-versus-consumed pair in which one `ByteArray` occupies
+  two partial-application capture slots while a third alias survives outside
+  the closure. Exact 22/27-transition LCNF traces prove real `pap`/`fvar`
+  execution, opposite branch paths, and zero/one `ByteArray.set!` dispatches.
+- Contracts: none. The candidate changes only fixture, trace,
+  validation-policy, roadmap, documentation, and this lane's mailbox files;
+  no W6, W7, LCNF-proof, or shared semantic contract is changed.
+- Acceptance: clean ready handoff; Lean Beam zero-diagnostic checkpoint;
+  targeted importer rebuild; focused native/LCNF and native/LCNF/real-V8
+  checks; `git diff --check`; complete post-rebase `make check` with 122
+  harness tests, 650 unique cases, 641/641 source and V8 cases, 9/9 direct
+  cases, 1,932/1,932 equal comparisons, 6,050 machine steps, all 96 tag floors
+  and 201 semantic domains satisfied, and zero findings.
+- Landing sequence: validate the exact coordination candidate, fast-forward
+  and push `main`, close the lease, then begin S3b ignore/read topology from
+  the landed base.
+
 ## Latest completed integration lease
 
 - Milestone: `VALIDATION-CLOSURE-MULTIPLICITY-S2`.
