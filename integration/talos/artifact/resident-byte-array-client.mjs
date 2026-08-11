@@ -2,6 +2,8 @@ const HEADER_BYTES = 32;
 const SLOT_BYTES = 8;
 const KIND_OPAQUE = 8;
 const KIND_BYTE_ARRAY = 7;
+const KIND_FREED = 255;
+const LIVE = 2;
 const LIVE_PERSISTENT = 3;
 const ARRAY_MARKER = 0x41525259;
 const BYTE_ARRAY_MARKER = 0x42595445;
@@ -67,9 +69,15 @@ function decodeByteArray(exports, address) {
   const view = new DataView(exports.memory.buffer);
   equal(view.getUint32(address, true), KIND_BYTE_ARRAY,
     "ByteArray kind");
-  equal(view.getUint32(address + 4, true), LIVE_PERSISTENT,
-    "ByteArray flags");
-  equal(view.getUint32(address + 8, true), 0, "ByteArray reference count");
+  const flags = view.getUint32(address + 4, true);
+  const refCount = view.getUint32(address + 8, true);
+  expect(flags === LIVE || flags === LIVE_PERSISTENT,
+    `ByteArray flags: expected ${LIVE} or ${LIVE_PERSISTENT}, got ${flags}`);
+  if (flags === LIVE_PERSISTENT) {
+    equal(refCount, 0, "persistent ByteArray reference count");
+  } else {
+    expect(refCount > 0, "ordinary ByteArray has zero references");
+  }
   equal(view.getUint32(address + 16, true), BYTE_ARRAY_MARKER,
     "ByteArray marker");
   equal(view.getUint32(address + 28, true), 0, "ByteArray reserved metadata");
@@ -79,6 +87,8 @@ function decodeByteArray(exports, address) {
   equal(view.getUint32(address + 12, true), align8(HEADER_BYTES + capacity),
     "ByteArray allocation size");
   return {
+    flags,
+    refCount,
     size,
     capacity,
     bytes: [...new Uint8Array(exports.memory.buffer, address + HEADER_BYTES, size)],
@@ -111,42 +121,99 @@ export async function checkResidentByteArray(bytes) {
   equal(exports.fir_ext_ByteArray_size(source) >>> 0,
     nat(sourceBytes.length), "ByteArray.size tagged result");
 
+  const makeByteArray = (bytes) =>
+    exports.fir_ext_ByteArray_mk(encodeArray(exports, bytes)) >>> 0;
+
   const empty = exports.fir_ext_ByteArray_emptyWithCapacity(nat(10)) >>> 0;
   const decodedEmpty = decodeByteArray(exports, empty);
   equal(decodedEmpty.size, 0, "emptyWithCapacity size");
   equal(decodedEmpty.capacity, 10, "emptyWithCapacity capacity");
 
+  const uniqueDestination =
+    exports.fir_ext_ByteArray_emptyWithCapacity(nat(10)) >>> 0;
+  const uniqueView = new DataView(exports.memory.buffer);
+  equal(uniqueView.getUint32(uniqueDestination + 4, true), LIVE,
+    "emptyWithCapacity unique flags");
+  equal(uniqueView.getUint32(uniqueDestination + 8, true), 1,
+    "emptyWithCapacity unique reference count");
+  const uniqueFrontier = exports.fir_heap_frontier() >>> 0;
+  const uniqueResult = exports.fir_ext_ByteArray_copySlice(
+    source, nat(0), uniqueDestination, nat(0), nat(2), 1) >>> 0;
+  equal(uniqueResult, uniqueDestination,
+    "copySlice did not preserve an exclusive destination");
+  equal(exports.fir_heap_frontier() >>> 0, uniqueFrontier,
+    "copySlice allocated despite sufficient exclusive capacity");
+  deepEqual(decodeByteArray(exports, uniqueResult).bytes, [0, 1],
+    "copySlice exclusive bytes");
+
   const src = exports.fir_ext_ByteArray_mk(
     encodeArray(exports, [9, 8, 7, 6])) >>> 0;
-  const dest = exports.fir_ext_ByteArray_mk(
-    encodeArray(exports, [1, 2, 3])) >>> 0;
+  const exactDestination = makeByteArray([1, 2, 3]);
   const exact = exports.fir_ext_ByteArray_copySlice(
-    src, nat(1), dest, nat(2), nat(9), 1) >>> 0;
+    src, nat(1), exactDestination, nat(2), nat(9), 1) >>> 0;
   const decodedExact = decodeByteArray(exports, exact);
   deepEqual(decodedExact.bytes, [1, 2, 8, 7, 6], "copySlice exact bytes");
   equal(decodedExact.capacity, 5, "copySlice exact capacity");
+  expect(exact !== exactDestination,
+    "copySlice retained a destination that required growth");
+  equal(new DataView(exports.memory.buffer).getUint32(exactDestination, true),
+    KIND_FREED, "copySlice did not consume grown exclusive destination");
 
+  const geometricDestination = makeByteArray([1, 2, 3]);
   const geometric = exports.fir_ext_ByteArray_copySlice(
-    src, nat(1), dest, nat(2), nat(9), 0) >>> 0;
+    src, nat(1), geometricDestination, nat(2), nat(9), 0) >>> 0;
   const decodedGeometric = decodeByteArray(exports, geometric);
   deepEqual(decodedGeometric.bytes, decodedExact.bytes,
     "copySlice geometric bytes");
   equal(decodedGeometric.capacity, 10, "copySlice geometric capacity");
 
+  const roomySource = makeByteArray([1, 2, 3]);
   const roomy = exports.fir_ext_ByteArray_copySlice(
-    dest, nat(0), empty, nat(0), nat(3), 1) >>> 0;
+    roomySource, nat(0), empty, nat(0), nat(3), 1) >>> 0;
   const decodedRoomy = decodeByteArray(exports, roomy);
   deepEqual(decodedRoomy.bytes, [1, 2, 3], "copySlice retained capacity bytes");
   equal(decodedRoomy.capacity, 10, "copySlice retained capacity");
+  equal(roomy, empty, "copySlice failed to reuse roomy exclusive destination");
 
+  const clampedDestination = makeByteArray([1, 2, 3]);
   const clamped = exports.fir_ext_ByteArray_copySlice(
-    src, nat(0), dest, nat(99), nat(2), 1) >>> 0;
+    src, nat(0), clampedDestination, nat(99), nat(2), 1) >>> 0;
   deepEqual(decodeByteArray(exports, clamped).bytes, [1, 2, 3, 9, 8],
     "copySlice destination offset clamp");
 
+  const unchangedDestination = makeByteArray([1, 2, 3]);
   const unchanged = exports.fir_ext_ByteArray_copySlice(
-    src, nat(99), dest, nat(0), nat(1), 1) >>> 0;
-  equal(unchanged, dest, "copySlice past-source result identity");
+    src, nat(99), unchangedDestination, nat(0), nat(1), 1) >>> 0;
+  equal(unchanged, unchangedDestination,
+    "copySlice past-source result identity");
+
+  const sharedDestination = makeByteArray([1, 2, 3]);
+  const sharedView = new DataView(exports.memory.buffer);
+  sharedView.setUint32(sharedDestination + 8, 2, true);
+  const sharedResult = exports.fir_ext_ByteArray_copySlice(
+    src, nat(0), sharedDestination, nat(0), nat(2), 1) >>> 0;
+  expect(sharedResult !== sharedDestination,
+    "copySlice mutated a shared destination");
+  const decodedSharedOriginal = decodeByteArray(exports, sharedDestination);
+  equal(decodedSharedOriginal.refCount, 1,
+    "copySlice did not consume one shared destination reference");
+  deepEqual(decodedSharedOriginal.bytes, [1, 2, 3],
+    "copySlice mutated the remaining shared alias");
+  deepEqual(decodeByteArray(exports, sharedResult).bytes, [9, 8, 3],
+    "copySlice shared copy bytes");
+
+  const persistentDestination = makeByteArray([1, 2, 3]);
+  const persistentView = new DataView(exports.memory.buffer);
+  persistentView.setUint32(persistentDestination + 4, LIVE_PERSISTENT, true);
+  persistentView.setUint32(persistentDestination + 8, 0, true);
+  const persistentResult = exports.fir_ext_ByteArray_copySlice(
+    src, nat(0), persistentDestination, nat(0), nat(2), 1) >>> 0;
+  expect(persistentResult !== persistentDestination,
+    "copySlice mutated a persistent destination");
+  deepEqual(decodeByteArray(exports, persistentDestination).bytes, [1, 2, 3],
+    "copySlice mutated persistent input");
+  deepEqual(decodeByteArray(exports, persistentResult).bytes, [9, 8, 3],
+    "copySlice persistent copy bytes");
 
   const malformedArray = encodeArray(exports, [0]);
   new DataView(exports.memory.buffer).setUint32(

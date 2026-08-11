@@ -36,6 +36,13 @@ The produced artifact is not a host-backed ByteArray facade. `ByteArray.size`,
 the Wasm module over a packed resident representation. JavaScript copies input
 and output bytes at the boundary; no raw address escapes.
 
+The v2 layout also preserves Lean's ownership behavior. Fresh resident
+ByteArrays are live, nonpersistent values with reference count one.
+`copySlice` mutates such a destination in place exactly when its capacity is
+sufficient; shared or persistent destinations are copied and one consumed
+ordinary reference is decremented. Boundary inputs remain persistent borrowed
+values and therefore cannot be mutated by compiled Lean.
+
 Run the complete deterministic, native-oracle, Node, and optional browser gate:
 
 ```sh

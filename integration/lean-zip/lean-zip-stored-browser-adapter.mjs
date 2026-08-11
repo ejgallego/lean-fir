@@ -3,6 +3,7 @@ const HEADER_BYTES = 32;
 const HEAP_ALIGNMENT = 8;
 const HEAP_BASE = 1024;
 const KIND_BYTE_ARRAY = 7;
+const LIVE = 2;
 const LIVE_PERSISTENT = 3;
 const BYTE_ARRAY_MARKER = 0x42595445;
 const ENTRY = "Zip.Wasm.compressStored";
@@ -10,9 +11,9 @@ const ENTRY = "Zip.Wasm.compressStored";
 export const LEAN_ZIP_STORED_ADAPTER_API_VERSION =
   "fir.lean-zip.stored.browser/v1";
 export const LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION =
-  "fir.wasm.byte-array/v1";
+  "fir.wasm.byte-array/v2";
 export const LEAN_ZIP_STORED_OWNERSHIP_VERSION =
-  "fir.lean-zip.stored.scratch-transfer/v1";
+  "fir.lean-zip.stored.scratch-transfer/v2";
 
 function requireCondition(condition, message) {
   if (!condition) throw new TypeError(message);
@@ -133,9 +134,10 @@ class LeanZipStoredAdapter {
     const capacity = view.getUint32(address + 24, true);
     const reserved = view.getUint32(address + 28, true);
     requireCondition(kind === KIND_BYTE_ARRAY, "result is not a ByteArray");
-    requireCondition(flags === LIVE_PERSISTENT,
-      "result ByteArray is not a live persistent value");
-    requireCondition(rc === 0, "result ByteArray has an unexpected refcount");
+    requireCondition(flags === LIVE || flags === LIVE_PERSISTENT,
+      "result ByteArray is not live");
+    requireCondition(flags === LIVE_PERSISTENT ? rc === 0 : rc > 0,
+      "result ByteArray has an invalid ownership state");
     requireCondition(marker === BYTE_ARRAY_MARKER,
       "result ByteArray has an unexpected layout marker");
     requireCondition(reserved === 0,

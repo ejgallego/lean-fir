@@ -212,6 +212,11 @@ const build = {
       representation: "32-byte resident header followed by packed UInt8 bytes",
       operations: ["ByteArray.size", "ByteArray.mk",
         "ByteArray.emptyWithCapacity", "ByteArray.copySlice"],
+      allocationOwnership: "live nonpersistent, reference count one",
+      uniqueUpdate:
+        "copySlice preserves identity iff capacity suffices and refcount is one",
+      sharedUpdate:
+        "copySlice allocates and consumes one destination reference",
       hostCallbacks: false,
     },
     adapter: {
@@ -225,6 +230,8 @@ const build = {
       version: LEAN_ZIP_STORED_OWNERSHIP_VERSION,
       publicInput: "borrowed JavaScript bytes",
       encodedInput: "fresh packed ByteArray in module-owned memory",
+      encodedInputOwnership: "borrowed persistent; never mutated by Lean",
+      residentResults: "ordinary Lean-owned values with checked reference counts",
       output: "copied JavaScript bytes before rewind",
       rawAddressesExposed: false,
       reclamation: "per-call scratch checkpoint rewind",

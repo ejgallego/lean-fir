@@ -42,6 +42,7 @@ def allocateName : Name := `fir_byte_array_allocate
 def retypeObjectName : Name := `fir_byte_array_retype_object
 def decodeNatural32Name : Name := `fir_byte_array_decode_natural32
 def copyBytesName : Name := `fir_byte_array_copy_bytes
+def releaseConsumedName : Name := `fir_byte_array_release_consumed
 
 def internalHelperNames : Array Name := #[
   validateName,
@@ -49,7 +50,8 @@ def internalHelperNames : Array Name := #[
   allocateName,
   retypeObjectName,
   decodeNatural32Name,
-  copyBytesName]
+  copyBytesName,
+  releaseConsumedName]
 
 def externalDeclarations : Array Name := #[
   `ByteArray.copySlice,
@@ -80,7 +82,7 @@ private def selectedInternalHelperNames (declarations : Array Name) : Array Name
       declarations.contains `ByteArray.copySlice then
     names.push decodeNatural32Name else names
   if declarations.contains `ByteArray.copySlice then
-    names.push copyBytesName else names
+    (names.push copyBytesName).push releaseConsumedName else names
 
 private def sourceParam : FVarId := ⟨`source⟩
 private def sourceOffsetParam : FVarId := ⟨`sourceOffset⟩
@@ -116,6 +118,9 @@ private def newCapacityLocal : FVarId := ⟨`newCapacity⟩
 private def sourceCursorLocal : FVarId := ⟨`sourceCursor⟩
 private def destinationCursorLocal : FVarId := ⟨`destinationCursor⟩
 private def elementLocal : FVarId := ⟨`element⟩
+private def flagsLocal : FVarId := ⟨`flags⟩
+private def refCountLocal : FVarId := ⟨`refCount⟩
+private def reuseLocal : FVarId := ⟨`reuseDestination⟩
 
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def packLoopLabel : FVarId := ⟨`packLoop⟩
@@ -198,13 +203,22 @@ def validateFunction : Function := {
   name := validateName
   params := #[(sourceParam, .object)]
   results := #[]
-  locals := #[(sizeLocal, .uint32), (capacityLocal, .uint32)]
+  locals := #[(sizeLocal, .uint32), (capacityLocal, .uint32),
+    (flagsLocal, .uint32), (refCountLocal, .uint32)]
   body := requireHeapAddress sourceParam ++
     trapUnlessTrue (load32 sourceParam headerKindOffset ++
       equalsConst .uint32 ObjectKind.byteArray.code) ++
-    trapUnlessTrue (load32 sourceParam headerFlagsOffset ++
-      equalsConst .uint32 (persistentFlag + liveFlag)) ++
-    trapWhenTrue (load32 sourceParam headerRefCountOffset) ++
+    load32 sourceParam headerFlagsOffset ++ [.localSet flagsLocal] ++
+    ([.localGet flagsLocal] ++ equalsConst .uint32 liveFlag ++
+      [.ifElse []
+        (trapUnlessTrue ([.localGet flagsLocal] ++
+          equalsConst .uint32 (persistentFlag + liveFlag)))]) ++
+    load32 sourceParam headerRefCountOffset ++ [.localSet refCountLocal] ++
+    ([.localGet flagsLocal] ++ equalsConst .uint32 liveFlag ++
+      [.ifElse
+        (trapWhenTrue ([.localGet refCountLocal] ++
+          equalsConst .uint32 0))
+        (trapWhenTrue [.localGet refCountLocal])]) ++
     trapUnlessTrue (load32 sourceParam headerAux0Offset ++
       equalsConst .uint32 byteArrayMarker) ++
     trapWhenTrue (load32 sourceParam headerAux3Offset) ++ [
@@ -243,10 +257,10 @@ def allocateFunction : Function := {
     .i32Const .uint32 ObjectKind.byteArray.code,
     .i32Store .uint32 (u32 headerKindOffset),
     .localGet addressLocal,
-    .i32Const .uint32 (persistentFlag + liveFlag),
+    .i32Const .uint32 liveFlag,
     .i32Store .uint32 (u32 headerFlagsOffset),
     .localGet addressLocal,
-    .i32Const .uint32 0,
+    .i32Const .uint32 1,
     .i32Store .uint32 (u32 headerRefCountOffset),
     .localGet addressLocal,
     .localGet allocationLocal,
@@ -320,6 +334,64 @@ def copyBytesFunction : Function := {
       .i32Sub,
       .localSet countParam,
       .br copyLoopLabel]] }
+
+/-- Consume one ByteArray reference after copying it to a fresh destination. -/
+def releaseConsumedFunction : Function := {
+  name := releaseConsumedName
+  params := #[(destinationParam, .object)]
+  results := #[]
+  locals := #[(addressLocal, .uint32), (flagsLocal, .uint32),
+    (refCountLocal, .uint32)]
+  body := [
+    .localGet destinationParam,
+    .call (.declaration validateName),
+    .localGet destinationParam,
+    .i32Const .uint32 0,
+    .i32Add,
+    .localSet addressLocal,
+    .localGet addressLocal,
+    .i32Load .uint32 (u32 headerFlagsOffset),
+    .localSet flagsLocal,
+    .localGet flagsLocal,
+    .i32Const .uint32 persistentFlag,
+    .i32And] ++ equalsConst .uint32 persistentFlag ++ [
+    .ifElse [.ret] [],
+    .localGet addressLocal,
+    .i32Load .uint32 (u32 headerRefCountOffset),
+    .localSet refCountLocal] ++
+    trapWhenTrue ([.localGet refCountLocal] ++ equalsConst .uint32 0) ++ [
+    .i32Const .uint32 1,
+    .localGet refCountLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet addressLocal,
+      .localGet refCountLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .i32Store .uint32 (u32 headerRefCountOffset),
+      .ret] [],
+    .localGet addressLocal,
+    .i32Const .uint32 ObjectKind.freed.code,
+    .i32Store .uint32 (u32 headerKindOffset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerFlagsOffset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerRefCountOffset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerAux0Offset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerAux1Offset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerAux2Offset),
+    .localGet addressLocal,
+    .i32Const .uint32 0,
+    .i32Store .uint32 (u32 headerAux3Offset),
+    .ret] }
 
 def sizeFunction : Function := {
   name := externalName `ByteArray.size
@@ -428,6 +500,22 @@ def mkFunction : Function := {
     .call (.declaration retypeObjectName),
     .ret] }
 
+private def selectReusableDestination : List Instruction := [
+  .localGet capacityLocal,
+  .localGet newSizeLocal,
+  .i32LtU,
+  .ifElse [] (
+    [.localGet destinationParam,
+      .i32Load .uint32 (u32 headerFlagsOffset)] ++
+    equalsConst .uint32 liveFlag ++ [
+      .ifElse (
+        [.localGet destinationParam,
+          .i32Load .uint32 (u32 headerRefCountOffset)] ++
+        equalsConst .uint32 1 ++ [
+          .ifElse [
+            .i32Const .uint32 1,
+            .localSet reuseLocal] []]) []])]
+
 def copySliceFunction : Function := {
   name := externalName `ByteArray.copySlice
   params := #[(sourceParam, .object), (sourceOffsetParam, .tobject),
@@ -440,6 +528,7 @@ def copySliceFunction : Function := {
     (requestedLengthLocal, .uint32), (copyLengthLocal, .uint32),
     (availableLocal, .uint32), (endLocal, .uint32),
     (newSizeLocal, .uint32), (newCapacityLocal, .uint32),
+    (reuseLocal, .uint32),
     (rawLocal, .uint32), (savedScratchLocal, .uint32),
     (objectResultLocal, .object)]
   body := [
@@ -517,33 +606,59 @@ def copySliceFunction : Function := {
       .localGet newCapacityLocal,
       .localGet newSizeLocal,
       .i32LtU] ++ [
-    .localGet newSizeLocal,
-    .localGet newCapacityLocal,
-    .call (.declaration allocateName),
-    .localSet addressLocal,
-    .localGet addressLocal,
-    .i32Const .uint32 (u32 headerBytes),
-    .i32Add,
-    .localGet destinationParam,
-    .i32Const .uint32 (u32 headerBytes),
-    .i32Add,
-    .localGet destinationSizeLocal,
-    .call (.declaration copyBytesName),
-    .localGet addressLocal,
-    .i32Const .uint32 (u32 headerBytes),
-    .i32Add,
-    .localGet destinationOffsetLocal,
-    .i32Add,
-    .localGet sourceParam,
-    .i32Const .uint32 (u32 headerBytes),
-    .i32Add,
-    .localGet sourceOffsetLocal,
-    .i32Add,
-    .localGet copyLengthLocal,
-    .call (.declaration copyBytesName),
-    .localGet addressLocal,
-    .call (.declaration retypeObjectName),
-    .ret] }
+    .i32Const .uint32 0,
+    .localSet reuseLocal] ++
+    selectReusableDestination ++ [
+    .localGet reuseLocal,
+    .ifElse [
+      .localGet destinationParam,
+      .i32Const .uint32 0,
+      .i32Add,
+      .localGet newSizeLocal,
+      .i32Store .uint32 (u32 headerAux1Offset),
+      .localGet destinationParam,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet destinationOffsetLocal,
+      .i32Add,
+      .localGet sourceParam,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet sourceOffsetLocal,
+      .i32Add,
+      .localGet copyLengthLocal,
+      .call (.declaration copyBytesName),
+      .localGet destinationParam,
+      .ret] [
+      .localGet newSizeLocal,
+      .localGet newCapacityLocal,
+      .call (.declaration allocateName),
+      .localSet addressLocal,
+      .localGet addressLocal,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet destinationParam,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet destinationSizeLocal,
+      .call (.declaration copyBytesName),
+      .localGet addressLocal,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet destinationOffsetLocal,
+      .i32Add,
+      .localGet sourceParam,
+      .i32Const .uint32 (u32 headerBytes),
+      .i32Add,
+      .localGet sourceOffsetLocal,
+      .i32Add,
+      .localGet copyLengthLocal,
+      .call (.declaration copyBytesName),
+      .localGet destinationParam,
+      .call (.declaration releaseConsumedName),
+      .localGet addressLocal,
+      .call (.declaration retypeObjectName),
+      .ret]] }
 
 def functions : Array Function := #[
   validateFunction,
@@ -552,6 +667,7 @@ def functions : Array Function := #[
   retypeObjectFunction,
   decodeNatural32Function,
   copyBytesFunction,
+  releaseConsumedFunction,
   copySliceFunction,
   sizeFunction,
   mkFunction,
@@ -700,8 +816,8 @@ def manifest : Json :=
       Json.mkObj [
         ("sourceEntry", declaration.toString),
         ("entry", externalName declaration |>.toString)]),
-    ("layout", "fir.wasm.byte-array/v1"),
-    ("ownership", "module-owned persistent arena; copied output"),
+    ("layout", "fir.wasm.byte-array/v2"),
+    ("ownership", "module-owned Lean reference counts; copied host output"),
     ("imports", Json.arr #[]),
     ("status", "generation-ready; W6 ByteArray contract proofs pending")]
 

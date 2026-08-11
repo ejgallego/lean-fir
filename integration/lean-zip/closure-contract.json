@@ -2,8 +2,8 @@
   "capturedDeclarations": 21,
   "reviewedExternalsBeforeLink": 14,
   "retainedSourceFunctions": 7,
-  "residentHelpers": 65,
-  "completeFunctions": 72,
+  "residentHelpers": 66,
+  "completeFunctions": 73,
   "baseWasmBytes": 1884,
-  "completeWasmBytes": 11315
+  "completeWasmBytes": 11667
 }

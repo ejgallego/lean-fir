@@ -32,6 +32,10 @@ assert.equal(build.capabilities.adapter.apiVersion,
   LEAN_ZIP_STORED_ADAPTER_API_VERSION);
 assert.equal(build.capabilities.ownership.version,
   LEAN_ZIP_STORED_OWNERSHIP_VERSION);
+assert.match(build.capabilities.byteArray.uniqueUpdate,
+  /capacity suffices and refcount is one/);
+assert.match(build.capabilities.ownership.encodedInputOwnership,
+  /borrowed persistent/);
 
 function storedReference(input) {
   const blockCount = Math.max(1, Math.ceil(input.length / 65535));
