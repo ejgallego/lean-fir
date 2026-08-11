@@ -1421,6 +1421,20 @@ acceptance tests pass.
      erasure; `advance_defaultOnlyCase_ranked` exposes the last of those as an
      exact one-source/zero-target local rule. Assembling these local rules into
      the relation-wide per-step `advance` law is now the next proof boundary.
+     The hereditary stack component is now explicit.
+     `ConcreteStructuredFrameRel` recursively relates saved source binds to
+     exact direct call frames or saturated call/matcher-label protocols, with
+     the innermost expected ABI kind as an index and every saved caller related
+     to the current runtime, store, and witness. It transports across evolved
+     heaps and turns a related finite-prefix yield into the terminal, direct
+     bind, or saturated bind control shape without assuming the callee ever
+     returns. `ConcreteStructuredStackRel` joins this stack evidence to all ten
+     local control constructors. Stack-lifted laws now cover named and
+     saturated staging, entry, and resumption; saturated entry transports older
+     callers through the actual matcher/closure-consumption update. The next
+     slice is the parallel resource stack and source-only pointwise admission
+     invariant, whose preservation proof must replace rather than wrap the
+     terminating hereditary evaluator.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

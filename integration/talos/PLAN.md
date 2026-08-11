@@ -6007,6 +6007,23 @@ for empty-argument staging, persistent ownership erasure, and nested
 default-only case erasure. `advance_defaultOnlyCase_ranked` packages that last
 zero-target transition locally. The relation-wide per-source-step `advance`
 law is now the next proof boundary.
+`ConcreteStructuredFrameRel` supplies its previously missing recursive stack
+component. It relates each suspended source bind to the exact generated direct
+call frame or saturated call-plus-matcher-label protocol, indexes the head by
+the caller's expected ABI result, and relates every saved caller to the current
+runtime/store/witness. `transport` moves the whole stack across an accumulated
+runtime segment, while `control_of_yield` classifies any related finite-prefix
+yield as terminal or as the appropriate direct/saturated bind resumption; no
+callee evaluation or termination evidence is involved.
+`ConcreteStructuredStackRel` combines the ten local control shapes with the
+appropriate complete stack or staged suffix. Named-call and saturated-call
+staging, entry, and both return protocols now have stack-lifted transition
+theorems. The saturated entry lift also transports older callers across the
+real matcher and closure-consumption heap update using the existing cache/ABI
+resource frame. The next boundary is the parallel resource stack and
+source-only pointwise admission invariant: it must construct the applicable
+local rule and preserve facts, budget, and admission at the successor instead
+of reintroducing the terminating hereditary evaluator.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
