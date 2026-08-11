@@ -105,8 +105,9 @@ if (fir.dirty && process.env.FIR_ALLOW_DIRTY_PACKAGE !== "1") {
 }
 
 mkdirSync(buildDirectory, { recursive: true });
-run("lake", ["--keep-toolchain", `-KversoRoot=${versoRoot}`, "build",
-  "VersoFirFlat.Compile"], { capture: false });
+run("lake", ["--keep-toolchain", "--reconfigure",
+  `-KversoRoot=${versoRoot}`, "build", "VersoFirFlat.Compile"],
+{ capture: false });
 run("lake", ["--keep-toolchain", `-KversoRoot=${versoRoot}`, "env", "lean",
   "Emit.lean"], { capture: false });
 run("node", ["build-adapter.mjs", adapterPath], { capture: false });
@@ -214,6 +215,9 @@ const build = {
     baseSha256: sha256(baseWasm),
   },
   closure: {
+    capture: "compileEntryFinalCapturedInternalized",
+    arenaPreparation: "prepareArenaArtifact",
+    residentPolicy: "closedApplicationPolicy",
     capturedDeclarations: inventory.capturedDeclarations,
     retainedSourceFunctions: inventory.sourceFunctions.length,
     retainedSourceFunctionSha256: sha256(JSON.stringify(inventory.sourceFunctions)),
