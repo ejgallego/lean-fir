@@ -8,7 +8,7 @@ phase: impure
 pass: none
 discovered-by: invariant-check
 first-seen: 2026-08-11
-reproduction: integration/verso-flat/check.sh
+reproduction: integration/verso-html/Emit.lean
 regression: none
 ---
 
@@ -21,18 +21,19 @@ names instead of recompiling their source declarations, leaving ordinary Lean
 ## Minimal reproduction
 
 Compile the published, compiler-neutral
-`VersoSlides.Pretty.formatRenderedForRuntime` from commit `fd46619`. Its use of
-ordinary `StateM` and `String.join` exposes generated names such as
-`StateT.instMonad._redArg._lam_1`; closure discovery treats that generated name
-as its own environment declaration rather than selecting the compilable
-`StateT.instMonad` source ancestor.
+`VersoSlides.Pretty.formatHtmlForRuntime` from commit
+`3dbc9ef4fa5aa88e2b758b1d90b25eadec51c130`. Its use of ordinary `StateM`,
+`String.join`, and `String.replace` exposes generated names such as
+`StateT.instMonad._redArg._lam_1`; the required final LCNF was not retained in
+Lean's precompiled core modules.
 
 ## Exact commands
 
 ```sh
-cd integration/verso-flat
-VERSO_ROOT=/tmp/verso-flat-published lake --keep-toolchain --reconfigure \
-  -KversoRoot=/tmp/verso-flat-published build VersoFirFlat.Examples
+cd integration/verso-html
+ln -s /tmp/verso-flat-published .verso
+lake --keep-toolchain --reconfigure \
+  -KversoRoot=/tmp/verso-flat-published build VersoFirHtml.Compile
 VERSO_ROOT=/tmp/verso-flat-published lake --keep-toolchain \
   -KversoRoot=/tmp/verso-flat-published env lean Emit.lean
 ```
@@ -45,10 +46,15 @@ Wasm frontier.
 
 ## Actual behavior
 
-The base module retains generated `Id.instMonad` and `StateT` lambdas plus
-`Array.toList`, `String.append`, and related source declarations as externals.
-Resident String selection then sees a partial primitive frontier and fails at
-the absent `String.Internal.append` declaration.
+Module-wise capture rebuilds the exact postponed Verso source in seconds, then
+produces a 32,407-byte base module with 498 FIR runtime operations and 52 Lean
+externals. The external-name inventory has SHA-256
+`1d1546f915150586a44c631b8e32baa966fc5abf8a1fb905dc20bc7f8a06d1bb`.
+It retains generated `Id.instMonad` and `StateT` lambdas plus `Array.toList`,
+the `String.Slice.replace` search machinery, `String.append`, and related core
+declarations as externals. Resident String selection then sees a partial
+primitive frontier and fails at the absent `String.Internal.append`
+declaration.
 
 ## Proof or differential evidence
 
@@ -75,8 +81,11 @@ ancestor under different generated names is not a sound substitute.
 
 ## Workaround
 
-The unpublished Verso probe rewrites the source to explicit specialized monad
-and join helpers. That workaround must not be used for accepted publication.
+Verso's published Flat entry now uses an explicit specialized monad and local
+join helper and no longer reproduces this issue. HTML needs the analogous
+source-local state monad and join plus a specialized escaping loop that does
+not enter the precompiled generic `String.replace` closure. FIR must not copy
+or replace the source semantics merely to publish the package.
 
 ## Upstream tracking
 
