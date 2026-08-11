@@ -15,6 +15,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-CALLER-TRANSPORT`.
+- Integration owner: `wasm-proof`; this is the hereditary call-scope bridge
+  of W6.7e.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `77efa825`.
+- Published stack: active-slice record `6a66e5d0`, functional head `30f3152a`,
+  and ready mailbox `99babfe3`.
+- Accepted proof: `ReuseCapacityCodeEntryTransports.savedStateRelated`
+  reconstructs a suspended caller relation at the evolved callee
+  runtime/store/witness by combining the current callee runtime relation with
+  the accumulated witness transport. It does not require entry and exit
+  stores to be equal. Direct call entry constructs the canonical
+  entry-relative cache frame, and `bindFrame_of_yield_cacheFrame` consumes its
+  evolved form at a related callee yield to establish the accepted structured
+  bind-frame focus.
+- Remaining boundary: the semantic transport bridge is closed. The next
+  W6.7e slice is the structural callee-body simulation that threads the
+  entry-relative cache frame and exact saved-frame suffix through each
+  admitted source constructor, recursively nesting the same relation for
+  internal calls.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam update/sync/save with zero diagnostics; forced direct
+  source recompilation; focused 3,111-job dependency-cone build; `git diff
+  --check`; complete `make check` with 642 validation cases and 1,844/1,844
+  backend comparisons; Talos pinned at `a01d01c`; and all 3,133
+  `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-DIRECT-CALL-ENTRY`.
 - Integration owner: `wasm-proof`; this is the generated call-entry slice of
   W6.7e.
