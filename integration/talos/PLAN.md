@@ -6047,18 +6047,30 @@ evaluation. This locality is essential: storing successor admission or an
 allocation reserve would encode state-dependent future execution and become a
 termination/safety certificate for recursive programs.
 `ConcreteStructuredCodeCoreRel` combines the real compiler focus, hereditary
-resource stack, and result-ABI compatibility independently of any current
-operation family. `ConcreteStructuredCodePointwiseRel` adds current-step
-admission and its local budget check. Their observation and compiler-stack
-projections, canonical root constructor, direct-value core-preservation
-theorem, and return classifier are checked. Direct values construct the exact
-target path and successor core from the production runtime law; returns obtain
-their dynamic lookup from the supplied successful source step and become
-terminal, direct-bind, or saturated-bind control according to the existing
-frame stack. The relation-wide classifier will attach fresh local admission
-only after a dynamic successor state is known. The next boundary proves call
-staging, entry, and return against the core without an admission stack, then
-wires fresh local classification into the one-step `advance` theorem.
+resource stack, and hereditary result-ABI compatibility independently of any
+current operation family. Result ABI metadata is part of the same direct or
+saturated resource-stack constructor as the saved caller scope; there is no
+parallel stack that could disagree about the call protocol.
+`ConcreteStructuredCodePointwiseRel` adds current-step admission and its local
+budget check. Its admission is now indexed by the current runtime/environment
+and includes generated named calls at exact cost zero. The observation and
+compiler-stack projections, canonical root constructor, direct-value
+core-preservation theorem, and return classifier are checked. Direct values
+construct the exact target path and successor core from the production runtime
+law; returns obtain their dynamic lookup from the supplied successful source
+step and become terminal, direct-bind, or saturated-bind control according to
+the existing frame stack.
+The first complete nonterminating call boundary is now connected to the core.
+`ConcreteStructuredCodeCoreRel.advance_directCall_stage` derives the semantic
+and physical arguments plus the exact generated prefix and moves to
+`ConcreteStructuredDirectCallReadyCoreRel`. Its `advance_enter` rule takes the
+single source/target entry steps, pushes caller resources and result ABI
+metadata atomically, and reconstructs the callee code core. Direct bind pop now
+exposes the resumed compiler focus, and `advance_popCore` restores the caller
+core without evaluating the callee as a whole. The relation-wide classifier
+will attach fresh local admission only after each dynamic code successor is
+known. The next boundary repeats this core composition for saturated closure
+calls, then wires the control variants into the one-step `advance` theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

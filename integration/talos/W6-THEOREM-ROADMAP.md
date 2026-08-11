@@ -1455,19 +1455,25 @@ acceptance tests pass.
      evaluation derivation. In particular, no admission stack or future
      allocation reserve is planned: either would encode state-dependent future
      execution and amount to the certificate excluded from the theorem.
-     `ConcreteStructuredCodeCoreRel` combines the actual compiler focus,
-     hereditary resource stack, and result-ABI compatibility independently of
-     the current operation family. `ConcreteStructuredCodePointwiseRel` adds
-     local step admission and its current budget check. The canonical root,
-     observation/stack projections, direct-value core preservation, and return
-     classification are proved: a direct `let` reconstructs the successor
-     core, while a return uses the supplied successful source step and static
-     ABI compatibility to select terminal, direct-bind, or saturated-bind
-     control. The relation-wide classifier attaches fresh admission only after
-     the dynamic successor state is known. The next slice proves call staging,
-     entry, and return against the core and then widens the one-step `advance`
-     case split to the already established external, lazy, case, and effect
-     laws.
+     `ConcreteStructuredCodeCoreRel` combines the actual compiler focus and
+     hereditary resource stack independently of the current operation family.
+     The resource stack now retains the active and suspended function-result
+     ABIs in the same direct/saturated constructors as their scopes, preventing
+     protocol/ABI disagreement without recording any dynamic future.
+     `ConcreteStructuredCodePointwiseRel` adds local step admission and its
+     current budget check; admission is indexed by the current runtime and
+     environment and now includes exact-zero-cost generated named calls. The
+     canonical root, observation/stack projections, direct-value core
+     preservation, and return classification are proved.
+     Direct named calls now cross the core boundary in all three local phases.
+     Staging derives the semantic/physical arguments and exact generated target
+     prefix, entry takes one source and one target step while atomically pushing
+     the caller scope plus result ABI, and direct bind pop restores the caller
+     core. None of these theorems evaluates the callee as a whole. Fresh local
+     admission is attached only after the dynamic successor code state is
+     known. The next slice repeats this composition for saturated closure calls
+     and then widens the one-step `advance` case split to the established
+     external, lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
