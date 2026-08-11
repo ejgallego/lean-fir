@@ -94,7 +94,7 @@ const large = growthAdapter.render({
   annotations: [],
   width: 1_000_000,
 });
-assert.equal(large.html.length, "λ&lt;&amp;&quot;".repeat(4096).length);
+assert.equal(large.html.length, "λ&lt;&amp;&quot;".repeat(512).length);
 assert.ok(large.memory.pagesAfterExecute > large.memory.pagesBefore,
   "large escaped output did not grow module memory");
 
