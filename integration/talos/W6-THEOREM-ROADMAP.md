@@ -1448,19 +1448,26 @@ acceptance tests pass.
      invariant; both return protocols restore its caller head and expose the
      older tail as the successor resource stack. The source-only pointwise
      admission invariant has now begun without wrapping the terminating
-     hereditary evaluator. `ConcreteStructuredCodeAdmission` records only
-     structural source coverage, deterministic fact/budget transfer, and
-     covered source continuations; it contains no semantic step, final result,
-     target path, or evaluation derivation.
-     `ConcreteStructuredCodePointwiseRel` combines it with the actual compiler
-     focus and hereditary resource stack. The canonical root, direct-value
-     successor preservation, and return classification are proved: a direct
-     `let` reconstructs the complete successor relation, while a return uses
-     the supplied successful source step and static ABI compatibility to
-     select terminal, direct-bind, or saturated-bind control. The next slice
-     carries continuation admission through the call stack and then widens the
-     relation-wide `advance` case split to the already established external,
-     lazy, case, and effect laws.
+     hereditary evaluator. `ConcreteStructuredCodeStepAdmission` records only
+     structural coverage of the current node and its exact current-step
+     allocation cost; it contains no continuation admission, future
+     fact/budget transfer, semantic step, final result, target path, or
+     evaluation derivation. In particular, no admission stack or future
+     allocation reserve is planned: either would encode state-dependent future
+     execution and amount to the certificate excluded from the theorem.
+     `ConcreteStructuredCodeCoreRel` combines the actual compiler focus,
+     hereditary resource stack, and result-ABI compatibility independently of
+     the current operation family. `ConcreteStructuredCodePointwiseRel` adds
+     local step admission and its current budget check. The canonical root,
+     observation/stack projections, direct-value core preservation, and return
+     classification are proved: a direct `let` reconstructs the successor
+     core, while a return uses the supplied successful source step and static
+     ABI compatibility to select terminal, direct-bind, or saturated-bind
+     control. The relation-wide classifier attaches fresh admission only after
+     the dynamic successor state is known. The next slice proves call staging,
+     entry, and return against the core and then widens the one-step `advance`
+     case split to the already established external, lazy, case, and effect
+     laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

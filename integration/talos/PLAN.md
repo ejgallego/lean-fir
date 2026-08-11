@@ -6039,21 +6039,26 @@ the active heap and reconstructs `ConcreteStructuredFrameRel`; generated
 direct and saturated entries push the same invariant, while both bind-return
 rules restore the caller scope and expose the older chain as the successor.
 The first source-only pointwise admission boundary is now implemented.
-`ConcreteStructuredCodeAdmission` retains only structural source coverage:
-the supported operation family, deterministic fact transfer, remaining
-budget, and recursively covered source continuation. It contains no runtime
-step, final value/state, target path, or terminating evaluation.
-`ConcreteStructuredCodePointwiseRel` combines that admission with the real
-compiler focus and hereditary resource stack under one fixed generated
-function specification. Its canonical root constructor, direct-value
-successor theorem, and return classifier are checked. Direct values construct
-the exact target path and successor relation from the production runtime law;
-returns obtain their dynamic lookup from the supplied successful source step
-and become terminal, direct-bind, or saturated-bind control according to the
-existing frame stack. The next boundary stores this same source-only
-continuation admission across call entry/return, then adds the already proved
-external, lazy, case, and effect one-step families to the relation-wide
-`advance` theorem.
+`ConcreteStructuredCodeStepAdmission` classifies only the current source node,
+the supported operation family, and its exact current-step allocation cost.
+It deliberately contains no continuation admission, future fact/budget
+transfer, runtime step, final value/state, target path, or terminating
+evaluation. This locality is essential: storing successor admission or an
+allocation reserve would encode state-dependent future execution and become a
+termination/safety certificate for recursive programs.
+`ConcreteStructuredCodeCoreRel` combines the real compiler focus, hereditary
+resource stack, and result-ABI compatibility independently of any current
+operation family. `ConcreteStructuredCodePointwiseRel` adds current-step
+admission and its local budget check. Their observation and compiler-stack
+projections, canonical root constructor, direct-value core-preservation
+theorem, and return classifier are checked. Direct values construct the exact
+target path and successor core from the production runtime law; returns obtain
+their dynamic lookup from the supplied successful source step and become
+terminal, direct-bind, or saturated-bind control according to the existing
+frame stack. The relation-wide classifier will attach fresh local admission
+only after a dynamic successor state is known. The next boundary proves call
+staging, entry, and return against the core without an admission stack, then
+wires fresh local classification into the one-step `advance` theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
