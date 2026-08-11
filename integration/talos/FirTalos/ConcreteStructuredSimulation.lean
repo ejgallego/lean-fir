@@ -88,6 +88,208 @@ theorem ConcreteStructuredCodeFocus.observes
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.stateRelated.1.trace
 
+/-- Local compiler relation after a source return has yielded its semantic
+value and the generated target has entered explicit return mode.  The
+pre-return locals remain available for the later call-frame relation; the
+physical result at the head of the returning stack is related at the exact
+ABI kind selected by the compiler. -/
+structure ConcreteStructuredYieldFocus
+    (context : Fir.Wasm.Context)
+    (sourceFunction : Fir.Wasm.Function)
+    (sourceRuntime : RuntimeState)
+    (sourceEnv : Env)
+    (sourceValue : Value)
+    (targetStore : Wasm.Store Host)
+    (targetLocals : Wasm.Locals)
+    (witness : RefinementWitness)
+    (kind : AbiKind)
+    (physical : Wasm.Value)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  sourceProgramEq : source.program = context.program
+  sourceControlEq : source.control = .yielded sourceValue
+  sourceEnvEq : source.env = sourceEnv
+  sourceRuntimeEq : source.runtime = sourceRuntime
+  targetStoreEq : target.store = targetStore
+  targetControlEq :
+    target.control = .returning (physical :: targetLocals.values)
+  stateRelated :
+    StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
+      witness
+  valueRelated : PhysicalValueRel witness kind physical sourceValue
+
+theorem ConcreteStructuredYieldFocus.observes
+    {context : Fir.Wasm.Context}
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceValue : Value}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredYieldFocus context sourceFunction
+      sourceRuntime sourceEnv sourceValue targetStore targetLocals witness kind
+      physical source target) :
+    ConcretePrefixObservationRel
+      (sourcePrefixObservation source)
+      (concretePrefixObservation target.store) := by
+  refine ⟨witness, ?_, ?_⟩
+  · change target.store.host.runtime.world = source.runtime.world
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.world
+  · change ConcreteTraceRel witness target.store.host.runtime.trace
+      source.runtime.trace
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.trace
+
+/-- A source return is matched by the generated positive target path:
+`local.get resultIndex` followed by the structured machine's explicit `ret`
+transition.  Successful two-stage adaptation determines the index and ABI
+kind, while `StateRelated.resolve` supplies the physical result and its
+refinement proof. -/
+theorem ConcreteStructuredCodeFocus.advance_return
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {sourceValue : Value}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (sourceLookup : lookup sourceEnv result = some sourceValue)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.return result) targetStore targetLocals
+      targetCode witness source target) :
+    ∃ kind physical sourceAfter targetAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+        sourceEnv sourceValue targetStore targetLocals witness kind physical
+        sourceAfter targetAfter := by
+  obtain ⟨kind, resultIndex, _localCompiled, resultFound, kindAt,
+      targetCodeEq⟩ :=
+    CodeAdapted.return_eq localsAligned related.adapted
+  obtain ⟨physical, targetLookup, valueRelated⟩ :=
+    related.stateRelated.resolve sourceLookup resultFound kindAt
+  subst targetCode
+  let sourceAfter : MachineState :=
+    { source with control := .yielded sourceValue }
+  let targetAfterGet : StructuredWasmState Host :=
+    { target with
+      control := .running
+        { targetLocals with
+          values := physical :: targetLocals.values }
+        [.ret] }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      control := .returning (physical :: targetLocals.values) }
+  refine ⟨kind, physical, sourceAfter, targetAfter, ?_, ?_, ?_⟩
+  · rcases source with
+      ⟨program, control, env, joins, frames, runtime⟩
+    have controlEq := related.sourceControlEq
+    change control = .code (.return result) at controlEq
+    subst control
+    have envEq := related.sourceEnvEq
+    change env = sourceEnv at envEq
+    subst env
+    simp [sourceAfter, executeStep, coreStep, lookupValue, sourceLookup]
+  · have getStep :
+        StructuredWasmStep module hostEnv target targetAfterGet := by
+      rcases target with ⟨store, control, frames⟩
+      have storeEq := related.targetStoreEq
+      change store = targetStore at storeEq
+      subst store
+      have controlEq := related.targetControlEq
+      change control =
+        .running targetLocals [.localGet resultIndex, .ret] at controlEq
+      subst control
+      apply StructuredWasmStep.atomic (fuel := 1)
+      · trivial
+      · simp only [Wasm.execOne.eq_def, targetLookup]
+    have returnStep :
+        StructuredWasmStep module hostEnv targetAfterGet targetAfter := by
+      rcases target with ⟨store, control, frames⟩
+      have storeEq := related.targetStoreEq
+      change store = targetStore at storeEq
+      subst store
+      exact StructuredWasmStep.beginReturn
+    exact .cons getStep (.cons returnStep (.refl targetAfter))
+  · exact {
+      sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+      sourceControlEq := by simp [sourceAfter]
+      sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+      sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
+      targetStoreEq := by simp [targetAfter, related.targetStoreEq]
+      targetControlEq := by simp [targetAfter]
+      stateRelated := related.stateRelated
+      valueRelated }
+
+/-- Simulation-facing return rule.  The generic advance theorem supplies a
+successful source step, so this wrapper recovers the returned binding from
+that step and invokes `advance_return`; clients do not provide an extra
+source-execution certificate or lookup premise. -/
+theorem ConcreteStructuredCodeFocus.advance_return_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {result : Lean.FVarId}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.return result) targetStore targetLocals
+      targetCode witness source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ sourceValue kind physical targetAfter,
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+        sourceEnv sourceValue targetStore targetLocals witness kind physical
+        sourceAfter targetAfter := by
+  cases sourceLookup : lookup sourceEnv result with
+  | none =>
+      rcases source with
+        ⟨program, control, env, joins, frames, runtime⟩
+      have controlEq := related.sourceControlEq
+      change control = .code (.return result) at controlEq
+      subst control
+      have envEq := related.sourceEnvEq
+      change env = sourceEnv at envEq
+      subst env
+      simp [executeStep, coreStep, lookupValue, sourceLookup, fail] at sourceStep
+  | some sourceValue =>
+      obtain ⟨kind, physical, computedAfter, targetAfter, computedStep, path,
+          focus⟩ :=
+        related.advance_return localsAligned sourceLookup
+      have afterEq : sourceAfter = computedAfter := by
+        rw [sourceStep] at computedStep
+        injection computedStep
+      subst computedAfter
+      exact ⟨sourceValue, kind, physical, targetAfter, path, focus⟩
+
 /-- Structural rank used when lowering erases a source control step.  Later
 frame slices add their own continuation component; the local erased-step laws
 need only this strictly decreasing code-control component. -/

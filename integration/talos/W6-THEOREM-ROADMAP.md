@@ -1204,8 +1204,14 @@ acceptance tests pass.
      runtime/local refinement, and derives observation agreement directly.
      Persistent `inc` and `dec` steps are proved to preserve that focus with a
      reflexive target path while `compilerCodeSilenceRank` strictly decreases.
-     The next slices lift this local component through source/target frame
-     correspondence and add positive target paths for non-erased operations.
+     The first positive path is also explicit: source `return` is matched by
+     exactly two structured target steps, the adapted `local.get` and `ret`.
+     `StateRelated.resolve` proves that the returned physical word refines the
+     yielded source value at the compiler-selected ABI kind; the
+     simulation-facing wrapper recovers the lookup from the successful source
+     step rather than asking the eventual public theorem's caller for it. The
+     next slices lift these local components through source/target frame
+     correspondence and add positive target paths for non-terminal operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
