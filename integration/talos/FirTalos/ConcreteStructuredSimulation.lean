@@ -19542,14 +19542,9 @@ theorem ConcreteStructuredCodePointwiseRel.advance_directLet
   have fits : directLetAllocationCost decl ≤ remainingBytes := by
     rw [← requiredEq]
     exact related.budget
-  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-      targetCodeEq⟩ :=
-    CodeAdapted.let_eq related.focus.adapted
-  have continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
-        targetRest :=
-    ⟨restCode, restCompiled, restAdapted⟩
+  obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+      valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.let_eq related.focus.adapted
   obtain ⟨nextStore, nextLocals, nextWitness, nextFacts, step,
       _externalsPreserved, _hostDescriptorsPreserved,
       _witnessDescriptorsPreserved, transports, _producedTransfer,
