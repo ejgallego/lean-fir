@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `LEAN-4.33-UPGRADE`.
+- Integration owner: `integration`; this was the special one-off release lane
+  for moving the repository, Talos bridge, and published browser contracts to
+  Lean 4.33.
+- Integration branch/worktree: `upgrade/lean-4.33` in
+  `.worktrees/lean-4.33`, based on `41cd4b29` and fast-forwarded to `main` at
+  `476f001b`.
+- Toolchain and compiler surface: all live FIR toolchains, trusted-source
+  hashes, pass proofs, concrete-runtime proofs, generated-artifact validators,
+  and package contracts now target Lean 4.33.0. The migration preserves the
+  semantic Wasm ABI, concrete layouts, and resident-helper signatures while
+  updating the versioned compact-Format contract to
+  `lean-4.33-Std.Format.compact/v1`.
+- Talos: FIR pins official-repository commit `0e05edbc` from
+  `codex/update-lean-4-33`; the complete FIR/Talos cone passes all 3,143 jobs.
+  Talos upstream PR #172 remains the follow-up for replacing that branch pin
+  with a merged upstream revision.
+- Verso: the compiler-neutral HTML producer is published at fork commit
+  `eb8d2b8f` on `ejgallego/upgrade/fir-html-lean-4.33`. The checked package is
+  a 187,855-byte zero-import module with 93 source functions and 631 resident
+  helpers; its Wasm digest remains
+  `ce63b4fd71abddda8aa5795a57ab7849666f8029b501a015ee3e3c714a3eec1c`.
+  Upstreaming that producer surface is the follow-up that removes the fork
+  branch pin.
+- Acceptance: Lean Beam update/sync/save with zero errors on each migrated
+  proof cone; `git diff --check`; complete `make check` with 122 unit tests,
+  662 unique validation cases, and 1,968/1,968 equal comparisons; all 3,143
+  Talos jobs; the deterministic artifact gate; and the published Verso HTML
+  gate with 8/8 native/Wasm cases, bounded growth, 32 repeated calls, and
+  malformed-input rejection. No bug card was required.
+- Result: `main` and `origin/main` are `476f001b`. Every surviving feature lane
+  must rebase on that shared 4.33 contract before continuing. Historical bug
+  cards, completed leases, plans, and performance records retain their original
+  4.32 provenance and are not live toolchain declarations.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-SATURATED-CALL-CORE`.
 - Integration owner: `wasm-proof`; this lease connects exactly saturated
   closure calls to the nonterminating pointwise core without evaluating a
@@ -2777,9 +2814,13 @@ identities.
 Lane rows name their own landed commits; the board intentionally has no
 moving global snapshot hash.
 
+The shared lane baseline is now Lean 4.33 at `476f001b`. Lane heads recorded
+below that do not name this base must rebase before new proof, generation, or
+validation work continues; their historical handoff text remains unchanged.
+
 | Lane | Owner handle | Branch | Status | Current slice | Contract impact |
 |---|---|---|---|---|---|
-| Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
+| Integration | integration owner | `upgrade/lean-4.33` | released | `LEAN-4.33-UPGRADE` landed at `476f001b`; the temporary lane may be retired after publication. | Moves the shared toolchain, compiler-source contracts, and versioned compact-Format package surface to Lean 4.33 without changing the semantic Wasm ABI, concrete layout, or resident-helper signatures. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | active | Global call entry landed through ready mailbox `1ecd63f3`, functional head `1bc6eb40`, on base `59ea914f`; the module-stable outcome hides current function indices, and named/saturated ready states re-enter it from one ordinary source step without dynamic side premises. Next retain suspended caller support/cache identity and close return pops globally. | No shared contract changed. Lean Beam, the 3,110-job focused cone, full root gate, all 1,968 repository comparisons, and all 3,133 Talos jobs pass. |
 | W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `22540610`, package source head `8c7dfdd7`, on base `260ce30a`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
@@ -2801,6 +2842,7 @@ moving global snapshot hash.
 
 | ID | Producer | Consumers | Status | Standalone commit | Effect |
 |---|---|---|---|---|---|
+| `LEAN-4.33-UPGRADE` | integration | pass proof, W6, W7, validation, artifact clients | released | landed stack through `476f001b`; Verso source `eb8d2b8f`; Talos pin `0e05edbc` | Moves every live FIR toolchain and versioned package contract to Lean 4.33.0 while preserving the semantic Wasm ABI, concrete layout, and resident-helper signatures. All surviving lanes rebase before continuing; historical 4.32 records remain provenance. |
 | `LANE-W6-W7-SPLIT` | integration | W6, W7, harness | released | `9cb483f` | Gives W6 and W7 independent branches and worktrees |
 | `RESET-ERASED-RELEASE` | integration | pass proof, W6, validation | released | `373b0a9` | Reset treats erased ownership slots as no-ops; proof adaptation `8c2fff6`, W6 adaptation `afd7ab0`, and validation observation `3b82b0b` are landed |
 | `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | released | `21f382c` | Zero-import allocator and styled package are generation-ready; allocator installation preserves the current 177-import `prettyM` frontier, and W6 owns the later bridge proof |
