@@ -36,7 +36,7 @@ adapter.disposeHitScene(created.scene);
 
 `encodedScene` is Illuminate's canonical encoded HitScene JSON string. The
 adapter parses and encodes it once into one module-owned Wasm instance per
-scene. Input layout `lean-4.32-Illuminate.HitScene/v2` retains each path's
+scene. Input layout `lean-4.33-Illuminate.HitScene/v2` retains each path's
 prepared `left`, `right`, `bottom`, and `top` Float bounds alongside its
 geometry; the adapter transfers those values and never recomputes them.
 Coordinates cross the boundary as exact binary64 bits. No raw Wasm address

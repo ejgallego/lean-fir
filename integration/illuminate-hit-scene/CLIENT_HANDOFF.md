@@ -34,7 +34,7 @@ The final module is self-contained, owns its memory, has zero imports, and
 exports only the structured entry, its bit-exact-coordinate facade, four heap
 operations, and memory.
 
-The admitted input capability is `lean-4.32-Illuminate.HitScene/v2`. Its path
+The admitted input capability is `lean-4.33-Illuminate.HitScene/v2`. Its path
 constructor includes the four prepared Float bounds emitted by Illuminate;
 v1 packages and scenes are incompatible and must not be staged.
 

@@ -22,7 +22,7 @@ const fromBits = (bits) => {
 assert.equal(fixture.schemaVersion, "illuminate.hit-scene-benchmark/v1");
 assert.equal(fixture.queries.length, 301);
 assert.equal(build.capabilities.inputLayout.version,
-  "lean-4.32-Illuminate.HitScene/v2");
+  "lean-4.33-Illuminate.HitScene/v2");
 assert.equal(build.wasm.sha256, sha256(wasm));
 assert.equal(build.fixture.sha256,
   sha256(readFileSync(join(directory, "hit-scene-benchmark.json"))));
