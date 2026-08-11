@@ -4034,6 +4034,243 @@ theorem ConstructorArgsReady.finitePath
       simpa [List.reverse_cons, List.append_assoc] using
         FinitePath.cons head (ih (tail := .i32 0 :: tail))
 
+/-- One compiler-resolved closure matcher has an exact two-step structured
+execution.  The concrete host contract determines the matcher bit and next
+store; no execution witness is supplied by the caller. -/
+theorem ClosureCandidateCase.matcherFinitePath
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (candidate : ClosureCandidateCase sourceModule sourceFunction labels
+      module spec initial closureId closureIndex address)
+    (closureLocal :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (hostSatisfies : hostEnv.Satisfies module spec) :
+    FinitePath (StructuredWasmStep module hostEnv) 2
+      ⟨initial,
+        .running { locals with values := tail }
+          ([.localGet closureIndex, .call candidate.matcherIndex] ++ rest),
+        frames⟩
+      ⟨candidate.nextStore,
+        .running { locals with values := .i32 candidate.matched :: tail }
+          rest,
+        frames⟩ := by
+  let afterLocal : StructuredWasmState Host :=
+    ⟨initial,
+      .running
+        { locals with
+          values := .i32 (UInt32.ofNat address.value) :: tail }
+        (.call candidate.matcherIndex :: rest),
+      frames⟩
+  have loadLocal :
+      StructuredWasmStep module hostEnv
+        ⟨initial,
+          .running { locals with values := tail }
+            ([.localGet closureIndex, .call candidate.matcherIndex] ++ rest),
+          frames⟩
+        afterLocal := by
+    have closureLocalWithStack :
+        ({ locals with values := tail } : Wasm.Locals).get closureIndex =
+          some (.i32 (UInt32.ofNat address.value)) := by
+      simpa [Wasm.Locals.get] using closureLocal
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, closureLocalWithStack]
+  obtain ⟨hostFunction, hostFound, hostContract⟩ :=
+    hostSatisfies.lookup_contract candidate.importInBounds
+      candidate.contractFound
+  have invoked :
+      hostFunction.invoke initial
+          [.i32 (UInt32.ofNat address.value)] =
+        .Return [.i32 candidate.matched] candidate.nextStore := by
+    have contract :=
+      hostContract initial [.i32 (UInt32.ofNat address.value)]
+    change hostFunction.invoke initial
+        [.i32 (UInt32.ofNat address.value)] =
+      closureMatchesStep candidate.function candidate.arity candidate.fixed
+        initial [.i32 (UInt32.ofNat address.value)] at contract
+    rw [candidate.operation] at contract
+    exact contract
+  have callHost :
+      StructuredWasmStep module hostEnv afterLocal
+        ⟨candidate.nextStore,
+          .running
+            { locals with values := .i32 candidate.matched :: tail } rest,
+          frames⟩ := by
+    apply StructuredWasmStep.importedCall (fuel := 1)
+      candidate.importFound
+    simp only [Wasm.execOne.eq_def, Wasm.run, candidate.importFound,
+      hostFound, candidate.parameterCount, candidate.resultCount, invoked,
+      List.take, List.drop, List.reverse_cons, List.reverse_nil,
+      List.nil_append, List.singleton_append]
+  exact .cons loadLocal (.cons callHost (.refl _))
+
+/-- Execute exactly the matcher prefix of the compiler-generated closure
+candidate fold.  Every earlier candidate evaluates to zero and contributes
+one nested conditional label; the selected candidate contributes the first
+nonzero matcher and leaves the machine at its body.  Candidates after the
+selected one are unreachable. -/
+theorem structuredWasmResolvedClosureCandidateChainSelectedPrefixFinitePath
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {closureId : Lean.FVarId}
+    {closureIndex : Nat}
+    {address : Word32}
+    {tail : List Wasm.Value}
+    {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (before : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address))
+    (selected :
+      ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address)
+    (suffix : List
+      (ClosureCandidateCase sourceModule sourceFunction labels module spec
+        initial closureId closureIndex address))
+    (closureLocal :
+      locals.get closureIndex =
+        some (.i32 (UInt32.ofNat address.value)))
+    (hostSatisfies : hostEnv.Satisfies module spec)
+    (failureClear : clearFailure initial = initial)
+    (beforeNonmatching :
+      ∀ candidate, candidate ∈ before →
+        candidate.matched = (0 : UInt32))
+    (selectedMatches : (selected.matched != 0) = true) :
+    FinitePath (StructuredWasmStep module hostEnv)
+      (3 * (before.length + 1))
+      ⟨initial,
+        .running { locals with values := tail }
+          (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+            rest),
+        frames⟩
+      ⟨selected.nextStore,
+        .running { locals with values := tail } selected.targetBody,
+        List.replicate before.length (.label 0 tail []) ++
+          .label 0 tail rest :: frames⟩ := by
+  induction before generalizing rest frames with
+  | nil =>
+      have matcher :=
+        selected.matcherFinitePath (rest :=
+          .iff 0 0 selected.targetBody
+              (resolvedClosureCandidateChain suffix) :: rest)
+          (tail := tail) (frames := frames) closureLocal hostSatisfies
+      have selectedNonzero : selected.matched ≠ 0 := by
+        intro matchedZero
+        rw [matchedZero] at selectedMatches
+        simp at selectedMatches
+      have enter :
+          StructuredWasmStep module hostEnv
+            ⟨selected.nextStore,
+              .running
+                { locals with values := .i32 selected.matched :: tail }
+                (.iff 0 0 selected.targetBody
+                    (resolvedClosureCandidateChain suffix) :: rest),
+              frames⟩
+            ⟨selected.nextStore,
+              .running { locals with values := tail } selected.targetBody,
+              .label 0 tail rest :: frames⟩ :=
+        StructuredWasmStep.enterIffThen selectedNonzero
+      simpa [resolvedClosureCandidateChain] using
+        matcher.trans (.single enter)
+  | cons candidate before ih =>
+      have candidateNonmatching : candidate.matched = 0 :=
+        beforeNonmatching candidate (by simp)
+      have remainingNonmatching :
+          ∀ next, next ∈ before → next.matched = (0 : UInt32) := by
+        intro next found
+        exact beforeNonmatching next (by simp [found])
+      have candidateOperationZero :
+          closureMatchesStep candidate.function candidate.arity
+              candidate.fixed initial
+              [.i32 (UInt32.ofNat address.value)] =
+            .Return [.i32 0] candidate.nextStore := by
+        simpa [candidateNonmatching] using candidate.operation
+      have candidateStore : candidate.nextStore = initial :=
+        (closureMatchesStep_zero_store candidateOperationZero).trans
+          failureClear
+      have matcher :=
+        candidate.matcherFinitePath (rest :=
+          .iff 0 0 candidate.targetBody
+              (resolvedClosureCandidateChain (before ++ selected :: suffix)) ::
+            rest)
+          (tail := tail) (frames := frames) closureLocal hostSatisfies
+      have enter :
+          StructuredWasmStep module hostEnv
+            ⟨candidate.nextStore,
+              .running
+                { locals with values := .i32 candidate.matched :: tail }
+                (.iff 0 0 candidate.targetBody
+                    (resolvedClosureCandidateChain
+                      (before ++ selected :: suffix)) :: rest),
+              frames⟩
+            ⟨candidate.nextStore,
+              .running { locals with values := tail }
+                (resolvedClosureCandidateChain
+                  (before ++ selected :: suffix)),
+              .label 0 tail rest :: frames⟩ := by
+        rw [candidateNonmatching]
+        exact StructuredWasmStep.enterIffElse
+      have recursive :=
+        ih (rest := []) (frames := .label 0 tail rest :: frames)
+          remainingNonmatching
+      have recursive' :
+          FinitePath (StructuredWasmStep module hostEnv)
+            (3 * (before.length + 1))
+            ⟨initial,
+              .running { locals with values := tail }
+                (resolvedClosureCandidateChain
+                  (before ++ selected :: suffix)),
+              .label 0 tail rest :: frames⟩
+            ⟨selected.nextStore,
+              .running { locals with values := tail } selected.targetBody,
+              List.replicate before.length (.label 0 tail []) ++
+                .label 0 tail [] :: .label 0 tail rest :: frames⟩ := by
+        simpa using recursive
+      have framesEq :
+          List.replicate before.length (.label 0 tail []) ++
+              .label 0 tail [] :: .label 0 tail rest :: frames =
+            List.replicate (candidate :: before).length
+                (.label 0 tail []) ++
+              .label 0 tail rest :: frames := by
+        have rotate : ∀ n : Nat,
+            List.replicate n (StructuredWasmFrame.label 0 tail []) ++
+                StructuredWasmFrame.label 0 tail [] ::
+                  StructuredWasmFrame.label 0 tail rest :: frames =
+              List.replicate (n + 1)
+                  (StructuredWasmFrame.label 0 tail []) ++
+                StructuredWasmFrame.label 0 tail rest :: frames := by
+          intro n
+          induction n with
+          | zero => rfl
+          | succ n ih =>
+              simp [List.replicate_succ, ih, Nat.add_assoc]
+        simpa using rotate before.length
+      rw [framesEq] at recursive'
+      rw [candidateStore] at matcher enter
+      simpa [resolvedClosureCandidateChain, List.replicate_succ,
+        List.append_assoc, Nat.mul_add, Nat.add_assoc, Nat.add_comm,
+        Nat.add_left_comm] using
+        (matcher.trans (.single enter)).trans recursive'
+
 /-- Intermediate relation after the source has staged an internal named call
 and the generated target has evaluated its argument prefix.  Both machines
 are poised to enter the callee.  The relation retains the caller continuation

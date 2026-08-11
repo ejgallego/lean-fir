@@ -5917,9 +5917,21 @@ checked absolute-slot writer while preserving the witness and heap frontier.
 Packed-integer scalar mutation is connected through one common three-step
 continuation rule: production state refinement selects i32 for `UInt8`/16/32
 and i64 for `UInt64`, while the four checked writers establish their exact
-layout-preserving heap updates. Remaining construction slices connect
-saturated-closure transitions and heap-valued cache misses to the same
-induction.
+layout-preserving heap updates. The saturated-closure construction has now
+crossed its first structured-control boundary too.
+`ClosureCandidateCase.matcherFinitePath` derives each concrete matcher call
+directly from the resident host contract, and
+`structuredWasmResolvedClosureCandidateChainSelectedPrefixFinitePath`
+executes the real compiler fold to the first matching candidate. A prefix of
+`n` failed candidates followed by the selected one takes exactly
+`3 * (n + 1)` target steps and leaves the selected body under the exact `n +
+1` nested conditional frames; failed matchers are proved store-neutral, while
+the selected matcher's ownership-consuming store is retained. No candidate
+execution or branch-selection certificate is supplied. The next closure
+slice executes the selected capture/argument prefix, recursively enters the
+generated callee, and unwinds these recorded labels into the caller
+continuation. Heap-valued cache misses remain the facts-aware transport
+redesign after saturated calls.
 
 ## Parallel agent packages
 

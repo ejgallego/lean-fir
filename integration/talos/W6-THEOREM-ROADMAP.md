@@ -1342,8 +1342,18 @@ acceptance tests pass.
      connected through one common exact three-step continuation rule;
      production state refinement selects i32 for `UInt8`/16/32 and i64 for
      `UInt64`, and the four checked writers preserve the layout, witness, and
-     heap frontier. Subsequent slices add saturated closure calls, heap-valued
-     cache misses, and target-only label/loop unwinding to this induction.
+     heap frontier. Saturated closure dispatch now has its exact
+     compiler-fold prefix as well. Each concrete matcher is reified from the
+     host contract in two steps, followed by one structured conditional-entry
+     step. Induction over the actual failed-candidate prefix reaches the first
+     selected body in exactly `3 * (before.length + 1)` steps and records the
+     precise nested label stack. Failed matchers are proved store-neutral;
+     the selected matcher retains its ownership-consuming store. This theorem
+     takes neither a target execution certificate nor a caller-chosen selected
+     branch. Subsequent slices compose the selected capture/argument assembly,
+     recursive generated-callee path, result-local write, and label unwinding;
+     then add heap-valued cache misses and target-only loop unwinding to this
+     induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
