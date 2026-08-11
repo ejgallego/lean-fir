@@ -5274,6 +5274,268 @@ theorem
   simpa only [storedCallerLocals, Nat.add_assoc] using
     (dispatch.trans argumentPath).trans (.single enter)
 
+/-- Relation immediately after both machines enter a compiler-resolved
+saturated closure callee.  The callee code focus is accompanied by the exact
+saved source bind frame, target call frame, failed-matcher labels, and selected
+matcher label that must survive recursive effects until return. -/
+structure ConcreteStructuredSaturatedCallEntryFocus
+    (callerContext calleeContext : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (callerFunction calleeFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    (site : SaturatedClosureCallSite callerContext decl callerEnv)
+    (resolution : SaturatedClosureCallResolution callerContext sourceRuntime
+      site)
+    (row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction targetModule)
+    (labels : List Lean.FVarId)
+    (sourceRuntime : RuntimeState)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (physicalArgs : List Wasm.Value)
+    (resultIndex matcherCount : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  calleeFocus :
+    ConcreteStructuredCodeFocus calleeContext sourceModule calleeFunction []
+      sourceRuntime resolution.calleeEnv resolution.calleeCode targetStore
+      (row.targetFunction.toLocals physicalArgs) row.targetFunction.body witness
+      source target
+  sourceJoinsEq : source.joins = []
+  sourceFramesEq :
+    source.frames =
+      .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames
+  targetFramesEq :
+    target.frames =
+      .call 1 callerRemainder
+          { callerLocals with
+            values := physicalArgs.reverse ++ callerRemainder }
+          [.localSet resultIndex] ::
+        (List.replicate matcherCount (.label 0 callerRemainder []) ++
+          .label 0 callerRemainder
+              ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+            targetFrames)
+  continuationAdapted :
+    CodeAdapted callerContext sourceModule callerFunction labels continuation
+      targetRest
+  callerStateRelated :
+    StateRelated callerFunction sourceRuntime callerEnv targetStore callerLocals
+      witness
+  callerFrameAligned :
+    ConcreteLocalFrameAligned callerFunction sourceRuntime callerEnv targetStore
+      callerLocals witness
+  resultFound :
+    findFVar? (functionBindings callerFunction) decl.fvarId = some resultIndex
+  resultKindAt :
+    (functionBindings callerFunction)[resultIndex]?.map Prod.snd =
+      some site.resultKind
+  argumentsRelated :
+    ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+      physicalArgs (resolution.captures ++ site.semanticArgs).toList
+
+theorem ConcreteStructuredSaturatedCallEntryFocus.observes
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite callerContext decl callerEnv}
+    {resolution : SaturatedClosureCallResolution callerContext sourceRuntime
+      site}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (entry : ConcreteStructuredSaturatedCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site resolution row labels sourceRuntime continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs resultIndex matcherCount source target) :
+    ConcretePrefixObservationRel
+      (sourcePrefixObservation source)
+      (concretePrefixObservation target.store) :=
+  entry.calleeFocus.observes
+
+/-- Strengthen saturated entry with the canonical hereditary cache frame.  The
+post-matcher caller frame already carries closure-consumption effects; entry
+only re-indexes its locals to the generated callee row. -/
+theorem
+    ConcreteStructuredSaturatedCallEntryFocus.calleeEntryRelativeCacheFrame
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {originalRuntime sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite callerContext decl callerEnv}
+    {resolution : SaturatedClosureCallResolution callerContext originalRuntime
+      site}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    (entry : ConcreteStructuredSaturatedCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site resolution row labels sourceRuntime continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs resultIndex matcherCount source target)
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes sourceRuntime callerEnv targetStore callerLocals
+        witness) :
+    ReuseCapacityEntryRelativeFrame
+      (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
+      sourceRuntime targetStore witness [] remainingBytes sourceRuntime
+      resolution.calleeEnv targetStore
+      (row.targetFunction.toLocals physicalArgs) witness := by
+  exact
+    ⟨callerFrame.generatedSaturatedClosureCalleeEntryAtCost site resolution
+      row entry.argumentsRelated (Nat.le_refl remainingBytes),
+      ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore witness⟩
+
+/-- Close a saturated recursive callee at a related yield.  Entry-relative
+transports reinterpret the saved caller locals in the evolved store/witness;
+the explicit frame equalities retain the call and matcher-label stack required
+by `ConcreteStructuredSaturatedBindFrameFocus.advance`. -/
+theorem
+    ConcreteStructuredSaturatedCallEntryFocus.bindFrame_of_yield_cacheFrame
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {originalRuntime entryRuntime currentRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite callerContext decl callerEnv}
+    {resolution : SaturatedClosureCallResolution callerContext originalRuntime
+      site}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      resolution.target calleeContext resolution.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryStore currentStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {entryWitness currentWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {entrySource : MachineState}
+    {entryTarget : StructuredWasmState Host}
+    {currentEnv : Env}
+    {sourceValue : Value}
+    {actualKind : AbiKind}
+    {physical : Wasm.Value}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {resultFacts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    (entry : ConcreteStructuredSaturatedCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site resolution row labels entryRuntime continuation callerJoins
+      sourceFrames entryStore callerLocals callerRemainder targetRest
+      targetFrames entryWitness physicalArgs resultIndex matcherCount
+      entrySource entryTarget)
+    (yielded : ConcreteStructuredYieldFocus calleeContext calleeFunction
+      currentRuntime currentEnv sourceValue currentStore calleeLocals
+      currentWitness actualKind physical source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
+        entryRuntime entryStore entryWitness resultFacts remainingBytes
+        currentRuntime currentEnv currentStore calleeLocals currentWitness)
+    (sourceFramesEq :
+      source.frames =
+        .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames)
+    (targetFramesEq :
+      target.frames =
+        .call 1 callerRemainder
+            { callerLocals with
+              values := physicalArgs.reverse ++ callerRemainder }
+            [.localSet resultIndex] ::
+          (List.replicate matcherCount (.label 0 callerRemainder []) ++
+            .label 0 callerRemainder
+                ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+              targetFrames))
+    (resultRefines : actualKind.refines site.resultKind = true) :
+    ConcreteStructuredSaturatedBindFrameFocus callerContext sourceModule
+      callerFunction labels currentRuntime callerEnv sourceValue decl.fvarId
+      continuation callerJoins sourceFrames currentStore callerLocals
+      calleeLocals physicalArgs callerRemainder targetRest targetFrames
+      currentWitness site.resultKind physical resultIndex matcherCount source
+      target := by
+  have callerStateRelated :
+      StateRelated callerFunction currentRuntime callerEnv currentStore
+        callerLocals currentWitness :=
+    ⟨yielded.stateRelated.1, yielded.stateRelated.2.1,
+      EnvLocalsRelated.witnessTransport invariant.2.witness
+        entry.callerStateRelated.2.2⟩
+  have callerFrameAligned :
+      ConcreteLocalFrameAligned callerFunction currentRuntime callerEnv
+        currentStore callerLocals currentWitness := by
+    simpa [ConcreteLocalFrameAligned] using entry.callerFrameAligned
+  exact {
+    sourceProgramEq := yielded.sourceProgramEq.trans row.contextProgram
+    sourceControlEq := yielded.sourceControlEq
+    sourceRuntimeEq := yielded.sourceRuntimeEq
+    sourceFramesEq
+    targetStoreEq := yielded.targetStoreEq
+    targetControlEq := yielded.targetControlEq
+    targetFramesEq
+    continuationAdapted := entry.continuationAdapted
+    stateRelated := callerStateRelated
+    frameAligned := callerFrameAligned
+    resultFound := entry.resultFound
+    kindAt := entry.resultKindAt
+    valueRelated := yielded.valueRelated.ofRefines resultRefines }
+
 /-- Intermediate relation after the source has staged an internal named call
 and the generated target has evaluated its argument prefix.  Both machines
 are poised to enter the callee.  The relation retains the caller continuation
@@ -6574,6 +6836,42 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
         expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
         resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
+  | saturatedClosureCallLet
+      (callRuntime : RuntimeState)
+      (calleeFunction : Fir.Wasm.Function)
+      (calleeResultFacts : ReuseCapacityFacts)
+      (calleeResultEnv : Env)
+      (site : SaturatedClosureCallSite context decl sourceEnv)
+      (resolution :
+        SaturatedClosureCallResolution context sourceRuntime site)
+      (row :
+        LoweredInternalDeclaration context.program context.cachedDeclarations
+          resolution.target resolution.calleeCode calleeFunction)
+      (sharedCapacity : ∀ parentRuntime,
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList)
+      (application :
+        Fir.LeanIR.Impure.takeClosureApplication sourceRuntime
+            resolution.location =
+          .ok (callRuntime, resolution.function, resolution.arity,
+            resolution.captures))
+      (callee :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals
+          row.context resolution.targetResultKind [] callRuntime
+          resolution.calleeEnv resolution.calleeCode calleeResultFacts
+          nextRuntime calleeResultEnv sourceValue stepCost)
+      (transfer : reuseCapacityLetFacts? facts decl = some nextFacts)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult nextFacts nextRuntime
+          (bind sourceEnv decl.fvarId sourceValue) continuation resultFacts
+          resultRuntime resultEnv resultValue continuationCost) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
+        resultFacts resultRuntime resultEnv resultValue
+        (stepCost + continuationCost)
   | lazyHit
       (call :
         LazyCacheCallSupported context decl declaration sourceDeclaration
@@ -6857,6 +7155,16 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
         row.contextsCoherent rfl rfl
       obtain ⟨count, steps⟩ :=
         site.sourceCallLetResult contexts calleeIH
+      apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
+      simpa [sourceCodeState] using steps
+  | @saturatedClosureCallLet callContext decl sourceEnv sourceRuntime
+      nextRuntime sourceValue stepCost facts nextFacts expectedResult
+      continuation resultFacts resultRuntime resultEnv resultValue
+      continuationCost callRuntime calleeFunction calleeResultFacts
+      calleeResultEnv site resolution row sharedCapacity application callee
+      transfer continued calleeIH continuedIH =>
+      obtain ⟨count, steps⟩ :=
+        site.sourceCallLetResult resolution row application calleeIH
       apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
       simpa [sourceCodeState] using steps
   | lazyHit _ sourceStep _ _ ih =>
@@ -8993,13 +9301,15 @@ both FVar and erased object-field mutation, `USize` field mutation, and every
 supported packed-integer scalar field mutation.
 
 External results traverse the interpreter's exact three-step request protocol
-and the compiler-derived imported-call prefix. A named call is staged by the
-production compiler, entered by the structured machine, discharged recursively
-in the exact generated declaration row, and returned through the saved
-bind/call frames. Both machine paths, the entry-relative concrete resource
-frame, the result ABI refinement, and exact restoration of the enclosing frame
-stacks are retained. No target trace, callee execution package, or translation
-certificate is a premise. -/
+and the compiler-derived imported-call prefix. Named and exactly saturated
+closure calls are staged by the production compiler, entered by the structured
+machine, discharged recursively in the exact generated declaration row, and
+returned through their saved bind/call and matcher-label frames. The explicit
+entry ABI premise is static allocation metadata transported from the entry
+witness; it is not a target execution certificate. Both machine paths, the
+entry-relative concrete resource frame, result ABI refinement, and exact
+restoration of the enclosing frame stacks are retained. No target trace,
+callee execution package, or translation certificate is a premise. -/
 theorem
     ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheCases_generated
     {program : Fir.LeanIR.ImpureProgram}
@@ -9046,7 +9356,9 @@ theorem
       ReuseCapacityEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
         entryRuntime entryStore entryWitness facts (requiredBytes + slack)
-        sourceRuntime sourceEnv targetStore targetLocals witness) :
+        sourceRuntime sourceEnv targetStore targetLocals witness)
+    (entryAbi :
+      ClosureAllocationsAbiAligned context.program entryWitness) :
     ∃ sourceAfter targetAfter resultStore resultLocals resultWitness kind
         physical sourceCount targetCount,
       FinitePath
@@ -9125,7 +9437,7 @@ theorem
           targetPath, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches selectedFocus
-          (by simpa [sourceSelected] using sourceJoins) invariant
+          (by simpa [sourceSelected] using sourceJoins) invariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, targetCount,
         (FinitePath.single
@@ -9273,7 +9585,7 @@ theorem
           sourceFramesEq, selectedTargetFramesEq⟩ :=
         ih functionSpec contextCaches selectedFocus
           (by simpa [sourceSelected] using sourceJoins)
-          (invariant.withValues targetLocals.values)
+          (invariant.withValues targetLocals.values) entryAbi
       let targetFinal : StructuredWasmState Host := {
         store := resultStore
         control := .returning (physical :: resultLocals.values)
@@ -9499,7 +9811,7 @@ theorem
             sourceFramesEq, selectedTargetFramesEq⟩ :=
           ih functionSpec contextCaches selectedFocus
             (by simpa [sourceSelected] using sourceJoins)
-            (invariant.withValues targetLocals.values)
+            (invariant.withValues targetLocals.values) entryAbi
         let targetFinal : StructuredWasmState Host := {
           store := resultStore
           control := .returning (physical :: resultLocals.values)
@@ -9800,7 +10112,7 @@ theorem
           sourceFramesEq, selectedTargetFramesEq⟩ :=
         ih functionSpec contextCaches selectedFocus
           (by simpa [sourceSelected] using sourceJoins)
-          (invariant.withValues targetLocals.values)
+          (invariant.withValues targetLocals.values) entryAbi
       let targetFinal : StructuredWasmState Host := {
         store := resultStore
         control := .returning (physical :: resultLocals.values)
@@ -9937,7 +10249,7 @@ theorem
           sourceFramesEq, selectedTargetFramesEq⟩ :=
         ih functionSpec contextCaches selectedFocus
           (by simpa [sourceSelected] using sourceJoins)
-          (invariant.withValues targetLocals.values)
+          (invariant.withValues targetLocals.values) entryAbi
       let targetFinal : StructuredWasmState Host := {
         store := resultStore
         control := .returning (physical :: resultLocals.values)
@@ -10029,7 +10341,7 @@ theorem
               resultRefines, resultJoins, sourceFramesEq, targetFramesEq⟩ :=
             ih functionSpec contextCaches nextFocus
               (by simpa [sourceMiddle] using sourceJoins)
-              invariant
+              invariant entryAbi
           exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
             resultWitness, kind, physical, 1 + sourceCount, targetCount,
             (FinitePath.single
@@ -10071,7 +10383,7 @@ theorem
               resultRefines, resultJoins, sourceFramesEq, targetFramesEq⟩ :=
             ih functionSpec contextCaches nextFocus
               (by simpa [sourceMiddle] using sourceJoins)
-              invariant
+              invariant entryAbi
           exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
             resultWitness, kind, physical, 1 + sourceCount, targetCount,
             (FinitePath.single
@@ -10093,7 +10405,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10113,7 +10425,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10133,7 +10445,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10153,7 +10465,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10173,7 +10485,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10193,7 +10505,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10212,7 +10524,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10231,7 +10543,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           sourceFramesEq, targetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
-          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
@@ -10293,7 +10605,7 @@ theorem
           resultJoins, tailSourceFramesEq, tailTargetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus
           (firstSourceJoinsEq.trans sourceJoins)
-          (continuationInvariant.withValues targetLocals.values)
+          (continuationInvariant.withValues targetLocals.values) entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount,
         (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length +
@@ -10345,6 +10657,11 @@ theorem
             site.calleeEnv targetStore
             (generatedRow.targetFunction.toLocals physicalArgs) witness := by
         simpa only [Nat.add_assoc] using calleeEntryInvariant
+      have calleeEntryAbi :
+          ClosureAllocationsAbiAligned loweredRow.context.program witness := by
+        rw [generatedRow.contextProgram]
+        exact entryAbi.ofPersistent
+          invariant.2.closureAllocationsPersistent
       obtain ⟨sourceYield, targetYield, afterCall, calleeLocals, resultWitness,
           actualKind, physical, calleeSourceCount, calleeTargetCount,
           calleeSourcePath, calleeTargetPath, calleeYielded, calleeInvariant,
@@ -10352,7 +10669,7 @@ theorem
           calleeTargetFramesEq⟩ :=
         calleeIH (generatedRow.toSupportedFunction rootSpec)
           generatedRow.contextCaches entry.calleeFocus entry.sourceJoinsEq
-          calleeInvariantWithSlack
+          calleeInvariantWithSlack calleeEntryAbi
       have sourceCallFramesEq :
           sourceYield.frames =
             .bind decl.fvarId continuation sourceEnv source.joins ::
@@ -10419,7 +10736,7 @@ theorem
           continuationTargetFramesEq⟩ :=
         continuedIH functionSpec contextCaches resumedFocus
           (resumedSourceJoinsEq.trans sourceJoins)
-          continuationInvariant
+          continuationInvariant entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals, finalWitness,
         kind, resultPhysical,
         1 + 1 + calleeSourceCount + 1 + continuationSourceCount,
@@ -10433,6 +10750,351 @@ theorem
               continuationSourcePath,
         (((targetArgumentsPath.trans enterTargetPath).trans calleeTargetPath).trans
           bindTargetPath).trans continuationTargetPath,
+        yielded, resultInvariant, resultRefines, resultJoins,
+        continuationSourceFramesEq.trans resumedSourceFramesEq,
+        continuationTargetFramesEq.trans resumedTargetFramesEq⟩
+  | @saturatedClosureCallLet context decl sourceEnv sourceRuntime nextRuntime
+      sourceValue stepCost facts nextFacts expectedResult continuation
+      resultFacts resultRuntime resultEnv resultValue continuationCost
+      callRuntime calleeFunction calleeResultFacts calleeResultEnv site
+      resolution loweredRow sharedCapacity application callee transfer continued
+      calleeIH continuedIH =>
+      have programEq : context.program = program := functionSpec.contextProgram
+      subst program
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+          targetCodeEq⟩ :=
+        CodeAdapted.let_eq related.adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction [] continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (compileClosureDispatch context decl.fvarId site.closureId
+              site.resultKind site.argumentCode site.argumentKinds) := by
+        simp [Fir.Wasm.compileLetValue, Fir.Wasm.letValueKind, site.valueEq,
+          site.kindEq, site.closureCompiled, site.argumentsCompiled,
+          site.nonempty, Bind.bind, Except.bind, pure, Except.pure]
+      have valueCodeEq :
+          valueCode =
+            compileClosureDispatch context decl.fvarId site.closureId
+              site.resultKind site.argumentCode site.argumentKinds := by
+        rw [expectedCompiled] at valueCompiled
+        exact (Except.ok.inj valueCompiled).symm
+      subst valueCode
+      obtain ⟨closureIndex, closureFound, closureKindAt⟩ :=
+        functionSpec.localsAligned site.closureCompiled
+      obtain ⟨alignedResultIndex, alignedResultFound, resultKindAt⟩ :=
+        functionSpec.localsAligned site.resultCompiled
+      rw [resultFound] at alignedResultFound
+      injection alignedResultFound with resultIndexEq
+      subst alignedResultIndex
+      have currentAbi :
+          ClosureAllocationsAbiAligned context.program witness :=
+        entryAbi.ofPersistent invariant.2.closureAllocationsPersistent
+      have abiInvariant :
+          ConcreteReuseCapacityCacheAbiFrame context sourceModule
+            sourceFunction externals facts
+            ((stepCost + continuationCost) + slack) sourceRuntime sourceEnv
+            targetStore targetLocals witness :=
+        ⟨invariant.1, currentAbi⟩
+      obtain ⟨address, closureLocal, mapped⟩ :=
+        abiInvariant.cacheFrame.resolveClosureAddress site resolution
+          closureFound closureKindAt
+      obtain ⟨staticCandidates, staticCandidatesEq⟩ :=
+        functionSpec.saturatedClosureCandidateAdapterResolver site
+          valueAdapted
+      obtain ⟨candidates, executedSources⟩ :=
+        ClosureCandidateAdapterCase.executeAll_of_refines staticCandidates
+          abiInvariant.cacheFrame.stateRelated.stateRelated.1
+          abiInvariant.cacheFrame.2.2.dispatch
+          abiInvariant.cacheFrame.2.2.descriptors.symm mapped
+          resolution.cellFound resolution.cellLive resolution.cellObjectEq
+          sharedCapacity application
+      have candidatesEq := staticCandidatesEq.trans executedSources
+      obtain ⟨before, selected, suffix, candidatesSplit, _selectedSource,
+          beforeNonmatching, selectedMatches, selectedIdentity⟩ :=
+        abiInvariant.cacheFrame.closureCandidates_exists_first_match_of_resolution
+          site resolution closureLocal mapped candidates candidatesEq
+      have selectedMem : selected ∈ candidates := by
+        rw [candidatesSplit]
+        simp
+      obtain ⟨_matcherIdentity, _applicationSnapshot, captureKinds,
+          applicationFound, applicationRelated, matcherFrame, matcherCapacity,
+          postMatcher⟩ :=
+        abiInvariant.cacheFrame.selectedClosureMatcher selected mapped
+          resolution.cellFound resolution.cellLive resolution.cellObjectEq
+          selectedMatches sharedCapacity application
+      obtain ⟨functionIndex, argumentTarget, callFound, argumentAdapted,
+          selectedBodyEq⟩ :=
+        resolution.candidateBody_of_identity site functionSpec candidatesEq
+          selectedMem selectedIdentity resultFound
+      obtain ⟨generatedRow⟩ :=
+        ConcreteGeneratedInternalDeclaration.exists_ofSupportedPipelineAtLoweredSingleResult
+          rfl contextCaches rootSpec.programNamesUnique rootSpec.lowered
+          rootSpec.adapted resolution.targetFound loweredRow
+          (loweredRow.singleResult_of_effectiveResult resolution.targetResult)
+      have exactCallIndex :
+          callIndex? sourceModule (.declaration resolution.function) =
+            some generatedRow.targetFunctionIndex := by
+        simpa [resolution.targetName] using generatedRow.callIndexEq
+      rw [exactCallIndex] at callFound
+      have functionIndexEq :
+          generatedRow.targetFunctionIndex = functionIndex :=
+        Option.some.inj callFound
+      subst functionIndex
+      have dispatchAdapted :
+          instructions sourceModule sourceFunction []
+              (compileClosureDispatch context decl.fvarId site.closureId
+                site.resultKind site.argumentCode site.argumentKinds) =
+            .ok
+              (resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+                [.localGet resultIndex]) := by
+        have generatedEq := candidatesEq
+        rw [candidatesSplit] at generatedEq
+        exact instructions_compileClosureDispatch
+          (before ++ selected :: suffix) generatedEq closureFound resultFound
+      have targetValueEq :
+          targetValue =
+            resolvedClosureCandidateChain (before ++ selected :: suffix) ++
+              [.localGet resultIndex] := by
+        rw [dispatchAdapted] at valueAdapted
+        exact (Except.ok.inj valueAdapted).symm
+      obtain ⟨physicalArgs, storedCallerLocals, argumentsRelated,
+          storedCallerEq, targetCanonicalPath⟩ :=
+        resolution.targetDispatchArgumentsAndEnterFinitePath functionSpec
+          generatedRow currentAbi closureFound closureLocal argumentAdapted
+          applicationFound applicationRelated postMatcher.stateRelated.1
+          related.stateRelated.clearFailure
+          postMatcher.stateRelated.1.clearFailure beforeNonmatching
+          selectedMatches selectedBodyEq
+          (tail := targetLocals.values)
+          (rest :=
+            [.localGet resultIndex, .localSet resultIndex] ++ targetRest)
+          (frames := target.frames)
+      let sourceEntry : MachineState := {
+        program := context.program
+        control := .code resolution.calleeCode
+        env := resolution.calleeEnv
+        joins := []
+        frames :=
+          .bind decl.fvarId continuation sourceEnv source.joins :: source.frames
+        runtime := callRuntime }
+      let targetEntry : StructuredWasmState Host := {
+        store := selected.nextStore
+        control := .running (generatedRow.targetFunction.toLocals physicalArgs)
+          generatedRow.targetFunction.body
+        frames :=
+          .call 1 targetLocals.values storedCallerLocals
+              [.localSet resultIndex] ::
+            (List.replicate before.length
+                (.label 0 targetLocals.values []) ++
+              .label 0 targetLocals.values
+                  ([.localGet resultIndex, .localSet resultIndex] ++
+                    targetRest) ::
+                target.frames) }
+      have sourcePrefix :
+          FinitePath
+            (fun before after => executeStep externals before = .next after)
+            2 source sourceEntry := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+            sourceFrames, actualRuntime⟩
+        have sourceProgramEq := related.sourceProgramEq
+        change sourceProgram = context.program at sourceProgramEq
+        subst sourceProgram
+        have sourceControlEq := related.sourceControlEq
+        change sourceControl = .code (.let decl continuation) at sourceControlEq
+        subst sourceControl
+        have sourceEnvEq := related.sourceEnvEq
+        change actualEnv = sourceEnv at sourceEnvEq
+        subst actualEnv
+        have sourceRuntimeEq := related.sourceRuntimeEq
+        change actualRuntime = sourceRuntime at sourceRuntimeEq
+        subst actualRuntime
+        simpa [sourceEntry] using
+          (resolution.sourceStageAndEnterFinitePath
+            (externals := externals) (continuation := continuation)
+            (callerJoins := sourceJoinEnv) (sourceFrames := sourceFrames)
+            application)
+      have targetPrefix :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            (3 * (before.length + 1) + argumentTarget.length + 1)
+            target targetEntry := by
+        rcases target with ⟨actualStore, actualControl, targetFrames⟩
+        have targetStoreEq := related.targetStoreEq
+        change actualStore = targetStore at targetStoreEq
+        subst actualStore
+        have targetControlEq := related.targetControlEq
+        rw [targetCodeEq, targetValueEq] at targetControlEq
+        have targetControlNormalized :
+            actualControl = .running targetLocals
+              (resolvedClosureCandidateChain
+                  (before ++ selected :: suffix) ++
+                .localGet resultIndex :: .localSet resultIndex ::
+                  targetRest) := by
+          simpa only [List.append_assoc, List.singleton_append] using
+            targetControlEq
+        clear targetControlEq
+        subst actualControl
+        simpa [targetEntry, List.append_assoc] using targetCanonicalPath
+      have calleeFrame :
+          ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals
+            [] ((stepCost + continuationCost) + slack) callRuntime
+            resolution.calleeEnv selected.nextStore
+            (generatedRow.targetFunction.toLocals physicalArgs) witness :=
+        postMatcher.generatedSaturatedClosureCalleeEntryAtCost site resolution
+          generatedRow argumentsRelated
+          (Nat.le_refl ((stepCost + continuationCost) + slack))
+      have entry :
+          ConcreteStructuredSaturatedCallEntryFocus context
+            loweredRow.context sourceModule sourceFunction calleeFunction
+            targetModule site resolution generatedRow [] callRuntime
+            continuation source.joins source.frames selected.nextStore
+            targetLocals targetLocals.values targetRest target.frames witness
+            physicalArgs resultIndex before.length sourceEntry targetEntry := {
+        calleeFocus := {
+          sourceProgramEq := by
+            exact generatedRow.contextProgram.symm
+          sourceControlEq := by simp [sourceEntry]
+          sourceEnvEq := by simp [sourceEntry]
+          sourceRuntimeEq := by simp [sourceEntry]
+          targetStoreEq := by simp [targetEntry]
+          targetControlEq := by simp [targetEntry]
+          adapted := generatedRow.bodyAdapted
+          stateRelated := calleeFrame.1.1.1.1.1
+          frameAligned := calleeFrame.1.1.1.2.2.1 }
+        sourceJoinsEq := by simp [sourceEntry]
+        sourceFramesEq := by simp [sourceEntry]
+        targetFramesEq := by simp [targetEntry, storedCallerEq]
+        continuationAdapted
+        callerStateRelated := postMatcher.1.1.1.1.1
+        callerFrameAligned := postMatcher.1.1.1.2.2.1
+        resultFound
+        resultKindAt
+        argumentsRelated }
+      have calleeEntryInvariant :=
+        entry.calleeEntryRelativeCacheFrame postMatcher
+      have calleeInvariantWithSlack :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction
+              externals)
+            callRuntime selected.nextStore witness []
+            (stepCost + (continuationCost + slack)) callRuntime
+            resolution.calleeEnv selected.nextStore
+            (generatedRow.targetFunction.toLocals physicalArgs) witness := by
+        simpa only [Nat.add_assoc] using calleeEntryInvariant
+      have calleeEntryAbi :
+          ClosureAllocationsAbiAligned loweredRow.context.program witness := by
+        rw [generatedRow.contextProgram]
+        exact currentAbi
+      obtain ⟨sourceYield, targetYield, afterCall, calleeLocals,
+          resultWitness, actualKind, physical, calleeSourceCount,
+          calleeTargetCount, calleeSourcePath, calleeTargetPath, calleeYielded,
+          calleeInvariant, calleeResultRefines, _calleeResultJoins,
+          calleeSourceFramesEq, calleeTargetFramesEq⟩ :=
+        calleeIH (generatedRow.toSupportedFunction rootSpec)
+          generatedRow.contextCaches entry.calleeFocus entry.sourceJoinsEq
+          calleeInvariantWithSlack calleeEntryAbi
+      have sourceCallFramesEq :
+          sourceYield.frames =
+            .bind decl.fvarId continuation sourceEnv source.joins ::
+              source.frames :=
+        calleeSourceFramesEq.trans entry.sourceFramesEq
+      have targetCallFramesEq :
+          targetYield.frames =
+            .call 1 targetLocals.values
+                { targetLocals with
+                  values := physicalArgs.reverse ++ targetLocals.values }
+                [.localSet resultIndex] ::
+              (List.replicate before.length
+                    (.label 0 targetLocals.values []) ++
+                .label 0 targetLocals.values
+                    ([.localGet resultIndex, .localSet resultIndex] ++
+                      targetRest) ::
+                  target.frames) :=
+        calleeTargetFramesEq.trans entry.targetFramesEq
+      have bindFocus :=
+        entry.bindFrame_of_yield_cacheFrame calleeYielded calleeInvariant
+          sourceCallFramesEq targetCallFramesEq
+          (AbiKind.refines_trans calleeResultRefines
+            resolution.targetResultRefines)
+      obtain ⟨sourceResumed, targetResumed, updated, resumedLocals,
+          bindSourceStep, bindTargetPath, targetSet, resumedEq, resumedFocus,
+          resumedSourceJoinsEq, resumedSourceFramesEq,
+          resumedTargetFramesEq⟩ :=
+        bindFocus.advance
+      have matcherTables :
+          ClosureTablesTransport targetStore selected.nextStore witness
+            witness := {
+        hostDispatchPreserved := matcherFrame.dispatch
+        witnessDispatchPreserved := rfl
+        hostDescriptorsPreserved := matcherFrame.descriptors
+        witnessDescriptorsPreserved := rfl }
+      have matcherEntry :
+          ReuseCapacityCodeEntryTransports entryRuntime callRuntime entryStore
+            selected.nextStore entryWitness witness :=
+        invariant.2.step (WitnessTransport.refl witness)
+          (ClosureAllocationsPersistent.refl witness) matcherCapacity
+          (takeClosureApplication_ordinaryPersistenceTransport application)
+          matcherFrame.externals matcherTables
+      have storedInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              externals)
+            entryRuntime entryStore entryWitness facts
+            ((stepCost + continuationCost) + slack) callRuntime sourceEnv
+            selected.nextStore targetLocals witness :=
+        ⟨postMatcher, matcherEntry⟩
+      have resumedUpdate :
+          FirTalos.Correctness.LocalUpdate targetLocals resumedLocals
+            resultIndex physical := by
+        rw [resumedEq]
+        have base := FirTalos.Correctness.localUpdate_of_set? targetSet
+        refine ⟨?_, ?_⟩
+        · simpa [Wasm.Locals.get] using base.1
+        · intro other different
+          simpa [Wasm.Locals.get] using base.2 different
+      have expectedTransfer :
+          reuseCapacityLetFacts? facts decl =
+            some (eraseReuseCapacityFact facts decl.fvarId) := by
+        simp [reuseCapacityLetFacts?, site.valueEq]
+      rw [expectedTransfer] at transfer
+      have nextFactsEq : nextFacts = eraseReuseCapacityFact facts decl.fvarId :=
+        Option.some.inj transfer.symm
+      have callerAfterCall :=
+        storedInvariant.restoreDirectCaller calleeInvariant
+          resumedFocus.stateRelated resumedFocus.frameAligned entry.resultFound
+          resumedUpdate
+      have continuationInvariant :
+          ReuseCapacityEntryRelativeFrame
+            (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+              externals)
+            entryRuntime entryStore entryWitness nextFacts
+            (continuationCost + slack) nextRuntime
+            (bind sourceEnv decl.fvarId sourceValue) afterCall resumedLocals
+            resultWitness := by
+        simpa only [nextFactsEq] using callerAfterCall
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          finalWitness, kind, resultPhysical, continuationSourceCount,
+          continuationTargetCount, continuationSourcePath,
+          continuationTargetPath, yielded, resultInvariant, resultRefines,
+          resultJoins, continuationSourceFramesEq,
+          continuationTargetFramesEq⟩ :=
+        continuedIH functionSpec contextCaches resumedFocus
+          (resumedSourceJoinsEq.trans sourceJoins) continuationInvariant
+          entryAbi
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals, finalWitness,
+        kind, resultPhysical,
+        2 + calleeSourceCount + 1 + continuationSourceCount,
+        (3 * (before.length + 1) + argumentTarget.length + 1) +
+          calleeTargetCount + (before.length + 5) + continuationTargetCount,
+        ((sourcePrefix.trans calleeSourcePath).trans
+          (.single bindSourceStep)).trans continuationSourcePath,
+        ((targetPrefix.trans calleeTargetPath).trans bindTargetPath).trans
+          continuationTargetPath,
         yielded, resultInvariant, resultRefines, resultJoins,
         continuationSourceFramesEq.trans resumedSourceFramesEq,
         continuationTargetFramesEq.trans resumedTargetFramesEq⟩
@@ -10488,7 +11150,7 @@ theorem
           targetTail, yielded, resultInvariant, resultRefines, resultJoins,
           tailSourceFramesEq, tailTargetFramesEq⟩ :=
         ih functionSpec contextCaches nextFocus nextSourceJoins
-          (continuationInvariant.withValues targetLocals.values)
+          (continuationInvariant.withValues targetLocals.values) entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 3 + sourceCount,
         (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length +
@@ -10576,7 +11238,7 @@ theorem
             sourceTail, targetTail, yielded, resultInvariant, resultRefines,
             resultJoins, tailSourceFramesEq, tailTargetFramesEq⟩ :=
           ih functionSpec contextCaches nextFocus nextSourceJoins
-            (continuationInvariant.withValues targetLocals.values)
+            (continuationInvariant.withValues targetLocals.values) entryAbi
         exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           resultWitness, kind, resultPhysical, 3 + sourceCount,
           5 + targetCount, sourcePrefix.trans sourceTail,
@@ -10821,6 +11483,11 @@ theorem
         ⟨calleeFrame,
           ReuseCapacityCodeEntryTransports.refl sourceRuntime targetStore
             witness⟩
+      have calleeEntryAbi :
+          ClosureAllocationsAbiAligned loweredRow.context.program witness := by
+        rw [generatedRow.contextProgram]
+        exact entryAbi.ofPersistent
+          invariant.2.closureAllocationsPersistent
       obtain ⟨sourceYield, targetYield, afterCall, calleeLocals, callWitness,
           actualKind, physical, calleeSourceCount, calleeTargetCount,
           calleeSourcePath, calleeTargetPath, calleeYielded, calleeInvariant,
@@ -10828,6 +11495,7 @@ theorem
           calleeTargetFramesEq⟩ :=
         calleeIH (generatedRow.toSupportedFunction rootSpec)
           generatedRow.contextCaches calleeFocus rfl calleeEntryInvariant
+          calleeEntryAbi
       have sourceCallFramesEq :
           sourceYield.frames =
             .cache declaration ::
@@ -11163,7 +11831,7 @@ theorem
           resultJoins, continuationSourceFramesEq,
           continuationTargetFramesEq⟩ :=
         continuedIH functionSpec contextCaches nextFocus rfl
-          (continuationInvariant.withValues targetLocals.values)
+          (continuationInvariant.withValues targetLocals.values) entryAbi
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, resultPhysical,
         2 + calleeSourceCount + 2 + continuationSourceCount,

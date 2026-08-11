@@ -1264,8 +1264,16 @@ acceptance tests pass.
      and executes bind/call-frame return before continuing recursively. It
      supports arbitrary finite named-call depth and preserves the exact outer
      source and target frame stacks; no callee execution package or target
-     trace enters the premises. Pure external-result lets are now recursive as
-     well. `PureExternalSupported.structuredFlatProgram` derives compiled
+     trace enters the premises. Exactly saturated closure calls now use the
+     same hereditary induction. The production matcher fold, capture/argument
+     prefix, and call entry reach the exact generated callee row; its recursive
+     result returns through the call frame and every matcher label before the
+     enclosing `let` resumes. Entry-relative transports restore the evolved
+     caller resource frame. Closure ABI alignment is required only at the
+     fixed theorem entry and transported by descriptor persistence, so it
+     remains static allocation metadata rather than a target certificate.
+     Pure external-result lets are now recursive as well.
+     `PureExternalSupported.structuredFlatProgram` derives compiled
      arguments, a resolver-proved imported declaration call, and the generated
      destination write from the production compiler and adapter.
      `advance_flatExternalLet` combines its exact structured target path with

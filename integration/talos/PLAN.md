@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named and exactly saturated closure calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5955,9 +5955,17 @@ unwind, and the enclosing generic `let` reload/write pair in exactly
 lifts that control path to the simulation relation: one source bind-frame step
 re-enters the recursively compiled continuation with the caller operand tail,
 local relation, and frame alignment restored. None of these theorems accepts
-an execution certificate. The next closure slice connects recursive callee
-entry/yield and entry-relative resource restoration to this bind focus inside
-the hereditary structured induction.
+an execution certificate. `ConcreteStructuredSaturatedCallEntryFocus` now
+connects the exact matcher/argument/call prefix to the generated callee row,
+and its entry-relative cache laws recover the saved caller from the recursively
+evolved callee store and witness. The hereditary structured induction therefore
+admits saturated closure calls recursively, returns through every saved matcher
+label, restores the original caller resources, and continues in compiled code.
+Program-indexed closure ABI alignment is supplied once at the fixed theorem
+entry and transported through cumulative descriptor persistence; it is static
+allocation metadata, not target behavior. The next exact-path slice can expose
+this recursive fragment at the export/finite-trace boundary while admission
+continues to widen.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
