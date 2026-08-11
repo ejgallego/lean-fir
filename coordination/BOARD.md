@@ -13,15 +13,17 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-CLOSURE-MULTIPLICITY-S2`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take the
-  short lease needed to land its green fixture stack promptly.
+  short lease needed to land its green fixture stack promptly, and the owner
+  accepted the exact candidate after the complete integration gate passed.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
   `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
   `main` at `2d96f7a1`.
-- Candidate stack: functional head `0fec2b0f` and ready mailbox `2be3d484`.
+- Published stack: functional head `0fec2b0f`, ready mailbox `2be3d484`, and
+  exact validated lease candidate `9b16ee55`.
   It completes the zero/one/two/three-use mixed-closure matrix, pins exact
   14/36/62/87-step LCNF traces, distinguishes shared-intermediate and
   unique-final applications, and raises the native-oracle and coverage floors.
@@ -36,8 +38,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   `make check` with 122 harness tests, 648 unique cases, 639/639 source and V8
   cases, 9/9 direct cases, 1,926/1,926 equal comparisons, 6,001 machine steps,
   all 88 tag floors and 193 semantic domains satisfied, and zero findings.
-- Landing sequence: validate the exact coordination candidate, fast-forward
-  and push `main`, close the lease, then begin S3 from the landed base.
+- Result: `main` fast-forwards atomically through this completion record and is
+  pushed before S3 begins. Other lanes rebase before their next handoff; the
+  fixture lane proceeds to S3 capture alias topology from the landed base.
 
 ## Latest completed integration lease
 
