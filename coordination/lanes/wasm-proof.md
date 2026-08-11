@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: fc5c07f5 on main
+state: active
+base: 2d96f7a1 on main
 functional-head: ba132524 (canonical compiler-produced structured export entry)
 contract-base: fc5c07f5; proof-only packaging over the accepted recursive exact-path, structured-control, concrete runtime, and semantic-fidelity contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof and public entry packaging only; no source semantics, tar
 checks: clean rebase onto fc5c07f5; Lean Beam update/sync/save ConcreteStructuredSimulation version 18 hash 90b31e5488355146 with zero errors and zero warnings; forced lake env lean FirTalos/ConcreteStructuredSimulation.lean; lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (122 tests, 637 native/LCNF cases, 9 direct-machine cases, 637 native/LCNF/V8 cases, 646 unique cases and 1920/1920 indexed comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for integration at functional-head ba132524; worktree clean at the containing mailbox commit.
+handoff: none; the canonical-entry slice landed on main at 2d96f7a1 and the lane is active on the unified ranked relation.
 next: Define the unified compiler-derived ranked relation over canonical and suspended structured states, then discharge its per-step advance law for the already-admitted fragment. Heap-valued lazy publication remains a separate facts-aware transport widening.
 ```
