@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 230d805a on main
-functional-head: ab58cd2e
-contract-base: 230d805a; consumes accepted W6.7d terminal adequacy, the accepted W6.7e compiler-focus/silence spine, generated structured machine, concrete runtime refinements, and current W7 resident-runtime stack
+state: active
+base: 3e362ba0 on main
+functional-head: ab58cd2e (previous accepted slice; no frame-relation functional commit yet)
+contract-base: 3e362ba0; consumes accepted W6.7d terminal adequacy and the accepted W6.7e compiler-focus, silent-ownership, and positive return-path slices over the generated structured machine and concrete runtime refinements
 clean-at-update: true
-slice: W6.7e first positive structured target path. ConcreteStructuredYieldFocus relates yielded source control to explicit target return control, preserves the concrete state relation and observation agreement, and records the exact ABI-indexed PhysicalValueRel for the returned word. advance_return inverts the real two-stage compiler, resolves the generated result local, and proves one source return step is matched by exactly two structured target steps (local.get, ret). advance_return_of_step recovers the source lookup and result from the generic simulation's successful source-step premise, so no execution certificate or lookup is added to the public compiler relation.
-files: integration/talos/FirTalos/ConcreteStructuredSimulation.lean; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
+slice: Continue W6.7e with source/target continuation correspondence. Inventory source bind/apply/cache frames and structured target call/label/loop frames, define the smallest compositional frame relation needed around the accepted code/yield focuses, and prove its first restoration/unwinding law without weakening the compiler or runtime relations.
+files: coordination/lanes/wasm-proof.md; intended proof-owned modules under integration/talos/FirTalos/
 contracts: none; this slice constructs the simulation over accepted source, structured-target, and concrete-runtime contracts
-checks: Lean Beam update/sync/save (version 7, 0 errors, 0 warnings); lake build FirTalos.ConcreteStructuredSimulation FirTalos.ConcreteResumableWasm (3,107 jobs); git diff --check; no sorry/admit; make check (642 unique cases, 1,844/1,844 comparisons, 124 bug cards, trusted assumptions green); make talos-setup (Talos a01d01c); make talos-check (3,133 jobs)
+checks: not-run
 bug-cards: none
 blockers: none
-handoff: ready for fast-forward integration by the wasm-proof integration owner
-next: Define source/target continuation-frame correspondence and lift yielded/returning control through bind/apply/cache and call/label/loop unwinding, so local return simulation restores the global compiler relation.
+handoff: none; active proof slice
+next: Inventory existing frame-level compiler facts, then select the first frame constructor whose source resume and structured target unwind can be related by current proven runtime laws.
 ```
