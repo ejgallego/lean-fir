@@ -1255,7 +1255,7 @@ acceptance tests pass.
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
      structured target return with both path lengths exposed.
-     `reachesYield_reuseBudgetedDirectPureExternalCalls_generated` now performs
+     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyHits_generated` now performs
      the same construction over the existing source-only hereditary relation.
      A named
      call executes its compiler-derived argument prefix and structured call
@@ -1271,10 +1271,16 @@ acceptance tests pass.
      `advance_flatExternalLet` combines its exact structured target path with
      the interpreter's three-step external request path, retains the evolved
      entry-relative cache/resource frame, and resumes the same induction. The
-     current no-case fragment makes its empty join environment explicit while
-     still allowing arbitrary saved source and target frames. Subsequent
-     slices connect lazy/cache prefixes, selected cases, effects, saturated
-     closure calls, and target-only label/loop unwinding to this induction.
+     Generated lazy-cache hits are now recursive too.
+     `advance_lazyHit_of_compiler` derives the exact five-step flag/conditional/
+     value/destination path from compiler inversion and the populated generated
+     cache relation; the unselected miss body is never executed. It restores
+     the evolved cache/resource frame and recursively compiled continuation
+     beneath arbitrary saved source and target frames. The current no-case
+     fragment makes its empty join environment explicit. Subsequent slices
+     connect the miss initializer and publication path, selected cases,
+     effects, saturated closure calls, and target-only label/loop unwinding to
+     this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
