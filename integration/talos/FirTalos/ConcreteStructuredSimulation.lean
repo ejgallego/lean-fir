@@ -4206,8 +4206,9 @@ proof receives an induction hypothesis for the generated initializer rather
 than an opaque runtime certificate.  The cache constructors cover hits and
 non-heap misses; a miss recursively evaluates the initializer and then
 publishes its result through the concrete host cache and generated Wasm
-globals.  Heap-valued miss publication, cases, and effects remain separate
-later widenings. -/
+globals.  Default-only cases are included as compiler-erased control steps.
+Heap-valued miss publication, generated discriminator cases, and effects
+remain separate later widenings. -/
 inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
     (externals : ExternalImpl) :
     Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState →
@@ -4322,6 +4323,18 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
         expectedResult facts sourceRuntime sourceEnv (.let decl continuation)
         resultFacts resultRuntime resultEnv resultValue
         (stepCost + continuationCost)
+  | defaultCase
+      (supported :
+        DefaultOnlyCaseSupported sourceRuntime sourceEnv cases selected)
+      (sourceStep :
+        SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts sourceRuntime sourceEnv selected resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -4380,6 +4393,13 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       obtain ⟨count, steps⟩ := sourceStep.execSteps
       apply SourceCodeResult.ofSteps (prefixCount := count) ?_ continuedIH
       simpa [sourceCodeState] using steps
+  | defaultCase _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+          simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
+          (.refl _))
+        ih
 
 /-- Recover the ordinary ABI classifier from the direct-call classifier. -/
 theorem abiKind?_of_directAbiKind?_eq_some
@@ -4459,7 +4479,8 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
   exact ⟨targetAfter, resumedLocals, path, focus⟩
 
 /-- Recursive structured partial correctness for direct values, supported pure
-external results, and statically named calls.
+external results, statically named calls, generated lazy caches, and erased
+default-case wrappers.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -4470,7 +4491,7 @@ frame, the result ABI refinement, and exact restoration of the enclosing frame
 stacks are retained. No target trace, callee execution package, or translation
 certificate is a premise. -/
 theorem
-    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCache_generated
+    ConcreteStructuredCodeFocus.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheDefaultCases_generated
     {program : Fir.LeanIR.ImpureProgram}
     {rootContext : Fir.Wasm.Context}
     {rootCode : Lean.Compiler.LCNF.Code .impure}
@@ -4551,6 +4572,58 @@ theorem
         _, physical, 1, 2, .single sourceStep, targetPath,
         yielded, by simpa using invariant, resultRefines,
         sourceAfterJoins.trans sourceJoins, sourceFramesEq, targetFramesEq⟩
+  | @defaultCase sourceRuntime sourceEnv cases selected context expectedResult
+      facts resultFacts resultRuntime resultEnv resultValue
+      requiredBytes supported sourceStep continued ih =>
+      let sourceSelected : MachineState := {
+        source with control := .code selected }
+      have selectSourceStep :
+          executeStep externals source = .next sourceSelected := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+            sourceFrames, actualRuntime⟩
+        have programEq := related.sourceProgramEq
+        change sourceProgram = context.program at programEq
+        subst sourceProgram
+        have controlEq := related.sourceControlEq
+        change sourceControl = .code (.cases cases) at controlEq
+        subst sourceControl
+        have envEq := related.sourceEnvEq
+        change actualEnv = sourceEnv at envEq
+        subst actualEnv
+        have runtimeEq := related.sourceRuntimeEq
+        change actualRuntime = sourceRuntime at runtimeEq
+        subst actualRuntime
+        rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+        simp [sourceSelected, executeStep, coreStep, found, tagged, chosen]
+      have selectedFocus :
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+            sourceRuntime sourceEnv selected targetStore targetLocals targetCode
+            witness sourceSelected target := {
+        sourceProgramEq := by simp [sourceSelected, related.sourceProgramEq]
+        sourceControlEq := by simp [sourceSelected]
+        sourceEnvEq := by simp [sourceSelected, related.sourceEnvEq]
+        sourceRuntimeEq := by simp [sourceSelected, related.sourceRuntimeEq]
+        targetStoreEq := related.targetStoreEq
+        targetControlEq := related.targetControlEq
+        adapted :=
+          CodeAdapted.defaultOnlyCases_selected supported related.adapted
+        stateRelated := related.stateRelated
+        frameAligned := related.frameAligned }
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetPath, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, targetFramesEq⟩ :=
+        ih functionSpec contextCaches selectedFocus
+          (by simpa [sourceSelected] using sourceJoins) invariant
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, targetCount,
+        (FinitePath.single
+          (step := fun before after =>
+            executeStep externals before = .next after)
+          selectSourceStep).trans sourceTail,
+        targetPath, yielded, resultInvariant, resultRefines, resultJoins,
+        by simpa [sourceSelected] using sourceFramesEq, targetFramesEq⟩
   | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
       nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>

@@ -1255,7 +1255,7 @@ acceptance tests pass.
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
      structured target return with both path lengths exposed.
-     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyCache_generated` now performs
+     `reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheDefaultCases_generated` now performs
      the same construction over the existing source-only hereditary relation.
      A named
      call executes its compiler-derived argument prefix and structured call
@@ -1287,10 +1287,15 @@ acceptance tests pass.
      admits non-heap results, for which cache publication is provably disjoint
      from every retained ordinary reuse token. Heap-valued miss publication
      needs the existing reachability-sensitive fact invalidation boundary.
-     The current no-case fragment makes its empty join environment explicit.
-     Subsequent slices connect selected cases, effects, saturated closure
-     calls, heap-valued cache misses, and target-only label/loop unwinding to
-     this induction.
+     Default-only case selection is now recursive too: the interpreter takes
+     one exact source step, while compiler inversion proves that production
+     lowering erased the wrapper to the identical selected target branch. The
+     target path is therefore reflexive, the resource frame is unchanged, and
+     this supplies the first genuine zero-target transition for the later
+     ranked relation. The current fragment makes its empty join environment
+     explicit. Subsequent slices connect generated object/scalar case
+     dispatch, effects, saturated closure calls, heap-valued cache misses, and
+     target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
