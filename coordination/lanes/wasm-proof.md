@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 3f1af4e6 on main
+state: active
+base: d7cd14e4 on main
 functional-head: 71e8fae5 (recursive structured simulation now includes arbitrary normalized scalar UInt8 dispatch)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 106 hash f14f53e237d5d195 (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for integration; base 3f1af4e6, functional head 71e8fae5, proof-only arbitrary scalar-case slice.
+handoff: none; the arbitrary scalar-case slice landed on main at d7cd14e4 and the lane is active on recursive effects.
 next: Add the first effect constructor to the recursive structured relation, prioritizing ownership/reference-count operations whose exact compiler prefixes and entry-relative preservation theorems already exist. Keep heap-valued lazy publication and saturated closure calls as separate slices.
 ```
