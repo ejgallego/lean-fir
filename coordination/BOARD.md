@@ -13,15 +13,17 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3A`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take an
-  integration lease when needed, and no other lease is active on the board.
+  integration lease when needed, and the owner accepted the clean exact
+  candidate after its post-rebase integration gate passed.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
   `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
   `main` at `348977fe` after the W6 unified-control-relation checkpoint.
-- Candidate stack: functional head `b5080fe3` and ready mailbox `ea68bbe2`.
+- Published stack: functional head `b5080fe3`, ready mailbox `ea68bbe2`, and
+  exact validated lease candidate `822cc248`.
   It adds a returned-versus-consumed pair in which one `ByteArray` occupies
   two partial-application capture slots while a third alias survives outside
   the closure. Exact 22/27-transition LCNF traces prove real `pap`/`fvar`
@@ -35,9 +37,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   harness tests, 650 unique cases, 641/641 source and V8 cases, 9/9 direct
   cases, 1,932/1,932 equal comparisons, 6,050 machine steps, all 96 tag floors
   and 201 semantic domains satisfied, and zero findings.
-- Landing sequence: validate the exact coordination candidate, fast-forward
-  and push `main`, close the lease, then begin S3b ignore/read topology from
-  the landed base.
+- Result: `main` fast-forwards atomically through this completion record and is
+  pushed before S3b begins. Other lanes rebase before their next handoff; the
+  fixture lane proceeds to ignore/read topology from the landed base.
 
 ## Latest completed integration lease
 
