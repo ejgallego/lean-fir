@@ -19,7 +19,7 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Start S5 recursive release/reuse from the landed S4 transfer baseline |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land S5c grow/delete release, then select the next undominated lifetime interaction |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 651-case source checkpoint, case counts are concentrated in
+At the current 653-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-305 `external`, and 146 `arithmetic`. In contrast, only 25 are tagged
+305 `external`, and 146 `arithmetic`. In contrast, only 27 are tagged
 `constructor`, 12 `control-flow`, three `effect`, five `recursion`, three
 `tail-control`, two `tail-ownership`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 651 eligible cases, not a scalar
+historical: the plan currently selects all 653 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -98,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | S5a and S5b are landed; repeated-child-alias unique release versus shared-owner stopping complements the direct LCNF anchors for repeated aliases and persistent owners | Admit S5c only if grow/delete exposes the released-child reuse versus shared-owner stop interaction with a new complete path signature |
+| M5 Recursive release | active, primary | S5a and S5b are landed; S5c is prepared with one `del` on both growth paths and released-leaf reuse only on the unique-owner path | Land S5c, then select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -383,13 +383,22 @@ separate capacity state beyond the current constructor fields. Capacity history
 therefore is not an observable semantic axis in this validation model.
 
 S5c instead combines grow/delete with recursive release. Grow a unique
-one-field owner containing a leaf into a two-scalar-field replacement, retain
-an independent leaf alias, and then update that leaf. The unique grow/delete
-path must release the old leaf so the later update reuses it. Its pair retains
+two-field owner containing a retained seed and a leaf into a three-scalar-field
+replacement, retain an independent leaf alias, and then update that leaf. The
+unique grow/delete path must release the old leaf so the later update reuses
+it. Its pair retains
 the original owner: release must stop at that shared owner, preserve the
 original leaf, and force the outside update to allocate. Admit this pair only
 if its complete signatures differ from both the existing one-step grow/delete
 cases and the same-size S5a/S5b release cases.
+
+The admitted candidate has that distinct signature. Both paths execute one
+`del`; only the unique-owner path executes the later leaf `oset`, while the
+shared-owner path executes zero `oset`. Exact 66- and 74-step traces pin the
+complete distinction. Native Lean, final LCNF, and real V8 agree with no
+finding. The resulting checkpoint is 653 source cases, 662 aggregate unique
+cases, 1,315 tier cases, 1,968 comparisons, 6,829 interpreter steps, 124 tag
+floors, and 233 semantic domains.
 
 ### S6: nonlocal ownership boundaries
 

@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 651,
-        "minimumComparisons": 651,
+        "minimumCases": 653,
+        "minimumComparisons": 653,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 651,
-        "minimumComparisons": 1302,
+        "minimumCases": 653,
+        "minimumComparisons": 1306,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 660,
-      "minimumTierCases": 1311,
-      "minimumComparisons": 1962
+      "minimumUniqueCases": 662,
+      "minimumTierCases": 1315,
+      "minimumComparisons": 1968
     },
     "machine": {
-      "minimumCases": 660,
-      "minimumInterpreterSteps": 6689,
+      "minimumCases": 662,
+      "minimumInterpreterSteps": 6829,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -561,6 +561,11 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "grow-delete-release",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "heap",
         "minimumCases": 98
       },
@@ -838,6 +843,11 @@
         "tier": "wasm-v8",
         "tag": "generic-application",
         "minimumCases": 30
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "grow-delete-release",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -1420,6 +1430,24 @@
         "name": "fixed-usize-external",
         "allTags": ["fixed-width-unsigned-external", "usize"],
         "minimumCases": 22
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "grow-delete-release",
+        "allTags": ["grow-delete-release", "release-fidelity"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "grow-delete-release-shared-stop",
+        "allTags": ["grow-delete-release", "shared-owner-stop", "stop-recursion"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "grow-delete-release-unique-reuse",
+        "allTags": ["grow-delete-release", "reuse", "unique-owner-release"],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -2196,6 +2224,24 @@
         "name": "fixed-usize-external",
         "allTags": ["fixed-width-unsigned-external", "usize"],
         "minimumCases": 22
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "grow-delete-release",
+        "allTags": ["grow-delete-release", "release-fidelity"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "grow-delete-release-shared-stop",
+        "allTags": ["grow-delete-release", "shared-owner-stop", "stop-recursion"],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "grow-delete-release-unique-reuse",
+        "allTags": ["grow-delete-release", "reuse", "unique-owner-release"],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",

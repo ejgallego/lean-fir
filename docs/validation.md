@@ -460,7 +460,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over all 637 currently accepted real-engine cases. Required oracle edges
+edges over all 653 currently accepted real-engine cases. Required oracle edges
 must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
@@ -550,7 +550,7 @@ the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 651 source cases are shared by the source-LCNF and V8
+current baseline, the 653 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1894,6 +1894,19 @@ Its exact 64-step trace contains eight `inc`, three `dec`, six `ctor`, three
 agree on both observations, and dedicated source/V8 domains pin the combined
 repeated-child, release-boundary, and surviving-alias claim.
 
+The grow/delete release pair crosses that release boundary with a constructor
+capacity failure. The old variant contains a retained seed and a heap leaf;
+the replacement has three scalar fields and is too large to reuse the old
+object. Both paths therefore execute exactly one `del`. The unique-owner path
+also releases the outside-aliased leaf far enough for its later update to
+execute exactly one `oset`; its complete trace has 66 steps, five `inc`, three
+`dec`, four `ctor`, and four `oproj` forms. The paired path retains the old
+owner, so release stops before the leaf and the update allocates; its 74-step
+trace has ten `inc`, five `dec`, six `ctor`, four `oproj`, and exactly zero
+`oset` forms. Native Lean, final LCNF, and real V8 agree on both results.
+Dedicated source/V8 domains require the combined grow/delete, release-stop,
+surviving-alias, and reuse claims rather than counting the cases alone.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in
@@ -1917,7 +1930,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 651 corpus cases, including a natural
+The default native-to-V8 matrix covers all 653 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
 and saturating `Nat.sub`, paired `Nat.div`/`Nat.mod` including zero, all three
