@@ -1036,7 +1036,15 @@ export class ConcreteHost {
         size: header.aux1,
       });
     }
+    const descriptor = this.descriptors.get(address);
+    assert.equal(descriptor?.kind, "constructor",
+      "missing concrete constructor descriptor");
+    assert.equal(descriptor.fieldKinds.length, header.aux1,
+      "concrete constructor descriptor arity mismatch");
     this.writeU32(address + HEADER_BYTES + SLOT_BYTES * operation.index, field);
+    const fieldKinds = [...descriptor.fieldKinds];
+    fieldKinds[operation.index] = operation.field;
+    this.descriptors.set(address, { ...descriptor, fieldKinds });
   }
 
   usizeFieldIndex(header, slot) {

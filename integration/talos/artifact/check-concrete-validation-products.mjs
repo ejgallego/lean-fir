@@ -75,12 +75,18 @@ export async function checkConcreteValidationProducts(validationDirectory) {
       blocked.push({ caseId, blockers });
       continue;
     }
-    const observation = await executeConcreteValidationCase({
-      caseId,
-      descriptor,
-      compilerManifest,
-      bytes: moduleBytes,
-    });
+    let observation;
+    try {
+      observation = await executeConcreteValidationCase({
+        caseId,
+        descriptor,
+        compilerManifest,
+        bytes: moduleBytes,
+      });
+    } catch (error) {
+      error.message = `${caseId}: ${error.message}`;
+      throw error;
+    }
     const expected = JSON.parse(await readFile(
       join(validationDirectory, caseId, "v8", "result.json"), "utf8"));
     assert.equal(expected.caseId, caseId, `${caseId} canonical result case mismatch`);

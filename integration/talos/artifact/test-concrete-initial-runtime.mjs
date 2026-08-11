@@ -59,6 +59,35 @@ assert.equal(header.bytes, 80);
 assert.equal(header.rc, 3);
 assert.deepStrictEqual(host.objectJson(address, header), runtime.heap[0].object);
 
+// A constructor slot has no runtime tag of its own. Track the physical kind
+// supplied by the latest mutation so an object-only slot can subsequently hold
+// a tagged value and still be decoded faithfully.
+const mutationHost = new ConcreteHost([]);
+const largeNatural = mutationHost.allocateNatural(1n << 64n);
+const mutable = mutationHost.allocCtor({
+  fields: ["object"],
+  size: 1,
+  usize: 0,
+  ssize: 0,
+  tag: "0",
+}, [largeNatural]);
+mutationHost.objectSet({ index: 0, field: "tobject" }, [
+  mutable,
+  mutationHost.encode("tobject", { kind: "tagged", payload: 29n }),
+]);
+assert.deepStrictEqual(
+  mutationHost.objectJson(mutable, mutationHost.readHeader(mutable)),
+  {
+    kind: "ctor",
+    tag: "0",
+    objectFields: [
+      { kind: "object", reference: { kind: "tagged", payload: "29" } },
+    ],
+    usizeFields: [],
+    scalarFields: [],
+  },
+);
+
 for (const field of scalarFields) {
   const physical = host.scalarProj({
     kind: "scalarProj",
