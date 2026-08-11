@@ -15,6 +15,38 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-ILLUMINATE-HITSCENE-V2`.
+- Integration owner: `wasm-gen`; the user approved the published sequence and
+  this short lease lands the completed W7 package before the independently
+  unblocked Verso HTML slice begins.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, rebased directly on `main` at `be7eb514` after
+  the capture-topology fixture release.
+- Published stack: HitScene v2 source/package head `74e4be48`, concrete-host
+  refinement consumer `f8adc6e6`, exact topology blocker refresh `53c8b917`,
+  and ready mailbox `8db5b5a6`.
+- Artifact: immutable package
+  `integration/illuminate-hit-scene/_build/illuminate-hit-scene-7daab5f2bb96f121`
+  records exact Illuminate source `88dcfee8`, layout
+  `lean-4.32-Illuminate.HitScene/v2`, a 46,089-byte complete Wasm module with
+  SHA-256 `06708aac339cd7f6f7fcbe7c973dc29125e263925635d0311a0571d4428e97b7`,
+  zero imports, six function exports, and module-owned memory.
+- Contracts: no shared Lean semantic, symbolic Wasm, concrete-runtime, or
+  resident-helper contract changes. W7 consumes the accepted directional
+  closure-projection refinement; the package advances only its client input
+  layout to v2 while retaining browser API and ownership v1.
+- Acceptance: deterministic fresh frontier and complete-link publication;
+  checksums; 301 fixture and 10,000 flat-frontier queries; production and
+  diagnostic paths; `git diff --check`; complete `make check` with 650 unique
+  cases and 1,932/1,932 equal comparisons; all 3,133 Talos jobs; and the full
+  W7 artifact gate with 600/641 concrete executions plus the exact 41-case
+  ByteArray blocker inventory.
+- Result: `main` fast-forwards through this completion record. Illuminate may
+  consume the immutable path while W7 starts the separately sourced Verso HTML
+  zero-import package; the integration lease is released immediately.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3A`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take an
   integration lease when needed, and the owner accepted the clean exact
