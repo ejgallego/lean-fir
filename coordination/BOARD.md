@@ -13,28 +13,35 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-RECURSIVE-RELEASE-S5A`.
 - Integration owner: `test-fixtures`; the user previously authorized this
-  lane to take the integration role when needed, and the preceding mapped-owner
-  proof lease is released.
+  lane to take the integration role when needed, and the owner waited for the
+  preceding mapped-owner proof lease to be accepted and released.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
-  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
-  current `main` at `d1bb3b55`.
-- Candidate: source-compiled recursive release compares a unique nested child
-  making its retained leaf reusable with an outside child alias that stops
-  recursion and forces the later leaf update to allocate.
-- Published handoff: functional head `101ecd8d` and refreshed ready mailbox
-  `6057a494`.
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly over
+  the accepted proof head and this lease record at `b3be5d1a`.
+- Published stack: planning seed `a42a9fec`, functional head `f25d2678`, and
+  resolved clean handoff `476b0634`.
+- Accepted fixtures: source-compiled recursive release compares a unique
+  owner/child chain whose surviving leaf becomes reusable with an outside
+  child alias that stops recursion and forces the later leaf update to allocate
+  while preserving the original leaf. Complete 63- and 69-step form traces,
+  exact ownership counts, and exact `Nat.add` traces retain the distinction.
 - Contracts: none. This is fixture, exact-trace, oracle-floor, coverage-policy,
   roadmap, and validation documentation work only.
-- Acceptance gate: the clean post-proof candidate already passes Lean Beam,
-  dependency builds, `git diff --check`, complete `make check`, all 649 source
-  native/LCNF/V8 cases, the nine direct ownership machines, 1,298 native-oracle
-  witnesses, and the exact aggregate coverage floors with zero findings. Rebase
-  over this lease record, confirm the stack identity/cleanliness, fast-forward
-  `main`, record acceptance here, push, and release the lease.
+- Acceptance: Lean Beam update/sync/save with zero diagnostics; focused
+  native/LCNF and native/LCNF/real-V8 matrices; dependency builds;
+  `git diff --check`; and complete post-proof `make check` with 122 harness
+  tests, 649/649 source native/LCNF/V8 cases, 9/9 direct ownership machines,
+  1,298 native-oracle witnesses, 658 unique cases, 1,307 tier cases,
+  1,956/1,956 equal indexed comparisons, 6,563 interpreter steps, all 116 tag
+  floors and 221 semantic domains satisfied, and zero findings, obligation
+  failures, or telemetry failures. No bug card was required.
+- Result: `main` fast-forwards through the resolved handoff and is pushed before
+  further fixture work. S5 remains active; the next compact slice targets
+  repeated child aliases and observable release order rather than scalar breadth.
 
 ## Latest completed integration lease
 
