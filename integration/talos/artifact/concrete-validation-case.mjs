@@ -65,6 +65,8 @@ export const CONCRETE_VALIDATION_BLOCKED_CASES = Object.freeze([
   "multi-object-update-first-preserves-last",
   "multi-object-update-last-preserves-middle",
   "multi-object-update-middle-preserves-first",
+  "repeated-captured-byte-array-consumed",
+  "repeated-captured-byte-array-returned",
 ]);
 
 function decodedValueJson(value) {
