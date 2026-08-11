@@ -75,7 +75,7 @@ an integration worktree.
 ## Track boundaries
 
 The Lean proof track starts with the local `simpCase` transformation kernel,
-preservation theorems, and conformance of captured Lean 4.32 checkpoints.
+preservation theorems, and conformance of captured Lean 4.33 checkpoints.
 
 W6 owns Talos/concrete runtime definitions, representation relations, compiler
 simulation, structured-fault proofs, and the theorem relating a stable

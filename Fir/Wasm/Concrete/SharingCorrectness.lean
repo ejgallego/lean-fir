@@ -107,7 +107,7 @@ theorem LiveHeapRel.readIsShared_tagged
 /-- Complete `tobject -> UInt8` sharing refinement for a semantically valid
 object. The success premise is essential because witness mappings persist for
 released cells, whose stale references must report `deadObject`. The result is
-a direct scalar lane, matching Lean 4.32's final impure ABI. -/
+a direct scalar lane, matching Lean 4.33's final impure ABI. -/
 theorem LiveHeapRel.readIsShared_refines
     {state : MemoryState} {witness : RefinementWitness} {runtime : RuntimeState}
     {word : Word32} {value : Value}

@@ -10,7 +10,7 @@ open Lean.Compiler
 /-!
 # Wasm-resident small scalar boxing
 
-Lean 4.32 represents boxed small integers through the generic tagged path.
+Lean 4.33 represents boxed small integers through the generic tagged path.
 FIR's `wasm32-lean64` contract preserves that source representation: payloads
 that fit wasm32 are immediate words and larger semantic tags are persistent
 promoted-tag objects. This helper family implements the exact operations

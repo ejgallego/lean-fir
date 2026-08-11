@@ -71,7 +71,7 @@ Evidence originates from syntax whose representation is fixed by final LCNF:
 
 - constructors with fields produce heap evidence;
 - nullary constructors produce tagged evidence;
-- boxing uses Lean 4.32's representation rule for the scalar type;
+- boxing uses Lean 4.33's representation rule for the scalar type;
 - literals retain their established literal invariant;
 - a named call uses the callee's proved result evidence;
 - an `isShared(value) == false` path may refine that exact value to heap;

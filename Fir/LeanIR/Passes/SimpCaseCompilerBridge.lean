@@ -10,7 +10,7 @@ open Fir.LeanIR.Passes.NonLockstep.Structural
 open Fir.LeanIR.Passes.SimpCaseRelation
 
 /-!
-Lean 4.32 exposes `LCNF.simpCase` only as an effectful pass.  Its case
+Lean 4.33 exposes `LCNF.simpCase` only as an effectful pass.  Its case
 simplifiers and recursive `Code.simpCase` traversal are module-private, and
 the latter is also an opaque `partial def`.  Consequently a downstream
 kernel theorem cannot mention the actual recursive result.
@@ -30,8 +30,8 @@ the current structural `CodeRel` does not relate alpha-renamed branch binders,
 so that obligation must be discharged by a future composed relation.
 -/
 
-/-- SHA-256 of `Lean/Compiler/LCNF/SimpCase.lean` in Lean 4.32.0. -/
-def lean432SimpCaseSourceSha256 : String :=
+/-- SHA-256 of `Lean/Compiler/LCNF/SimpCase.lean` in Lean 4.33.0. -/
+def lean433SimpCaseSourceSha256 : String :=
   "270df8851deb0a5f4c6a656377e83e2cf237e76f70a36301239781839122620b"
 
 /-- Transparent copy of the private occurrence count at one alternative. -/
@@ -891,6 +891,6 @@ def checkActualAgreement (fuel : Nat) (before : ImpureProgram) : CoreM Unit := d
   let actual ← LCNF.CompilerM.run
     (LCNF.simpCase.run before.decls) (phase := .impure)
   unless actual == expected.decls do
-    throwError "Lean 4.32 simpCase disagrees with FIR's transparent shadow"
+    throwError "Lean 4.33 simpCase disagrees with FIR's transparent shadow"
 
 end Fir.LeanIR.Passes.SimpCaseCompilerBridge

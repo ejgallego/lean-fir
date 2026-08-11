@@ -10,13 +10,13 @@ open Lean.Compiler
 
 The concrete target uses standard wasm32 linear-memory addresses while
 preserving the final-impure LCNF produced by this repository's 64-bit Lean
-4.32 toolchain. Consequently object-like lanes and addresses are `i32`, but
+4.33 toolchain. Consequently object-like lanes and addresses are `i32`, but
 `USize` remains `i64` and every pre-scalar constructor slot occupies eight
 bytes. This makes an LCNF scalar address
 
 `headerBytes + semanticSlotBytes * slotIndex + byteOffset`
 
-agree with Lean 4.32's `sizeof(void*) * slotIndex + byteOffset` convention for
+agree with Lean 4.33's `sizeof(void*) * slotIndex + byteOffset` convention for
 the captured 64-bit program, without pretending that source `USize` is a
 wasm32 pointer.
 
@@ -112,8 +112,9 @@ word preserves the exact concrete address/tag bits. -/
     Word32.ofUInt32 (UInt32.ofNat word.value) = word := by
   cases word with
   | mk value isLt =>
-      simp [Word32.ofUInt32, wordModulus] at isLt ⊢
-      omega
+      have isLtWord : value < 4294967296 := by
+        simpa [wordModulus] using isLt
+      simp [Word32.ofUInt32, Nat.mod_eq_of_lt isLtWord]
 
 inductive ObjectWordClass where
   | sentinel

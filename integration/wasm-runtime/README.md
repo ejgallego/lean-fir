@@ -6,7 +6,7 @@ opaque declarations, resident helpers consume the subset they implement, and
 `link-runtime.mjs` merges the remaining checked `lean.extern` imports with the
 separately compiled runtime while preserving exactly the frontier exports.
 
-`math-runtime.c` implements the Lean 4.32 Float/libm boundary and reads FIR's
+`math-runtime.c` implements the Lean 4.33 Float/libm boundary and reads FIR's
 module-owned Lean object representation directly. `Float.ofNat` and
 `Float.ofScientific` currently accept canonical Naturals with at most one
 64-bit limb; `Float.ofScientific` accepts decimal exponents through 20. Inputs

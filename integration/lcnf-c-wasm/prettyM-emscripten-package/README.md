@@ -19,7 +19,7 @@ same browser-level contract:
 
 ```text
 fir.prettyM.browser/v1
-lean-4.32-Std.Format.compact/v1
+lean-4.33-Std.Format.compact/v1
 
 render({ format, width, indent?, column? })
   -> { trace: { text, events }, timings, memory }
@@ -123,7 +123,7 @@ if (!globalThis.crossOriginIsolated) {
 ## Request and result contract
 
 `PrettyFormat` constructs the versioned
-`lean-4.32-Std.Format.compact/v1` input:
+`lean-4.33-Std.Format.compact/v1` input:
 
 ```ts
 type NatInput = bigint | number /* safe, nonnegative integer */
@@ -182,7 +182,7 @@ The adapter validates the compact format tree, encodes one
 copies one response back. The C bridge owns its buffers. The wire is private
 to this package: clients should use `render`, not the five raw bridge exports.
 
-The Lean entry point reconstructs the ordinary Lean 4.32 `Std.Format`, calls
+The Lean entry point reconstructs the ordinary Lean 4.33 `Std.Format`, calls
 the real monomorphic `Std.Format.prettyM`, and records the full output,
 newline, start-tag, and end-tags protocol. Natural and integer inputs use
 canonical arbitrary-precision 32-bit limbs.

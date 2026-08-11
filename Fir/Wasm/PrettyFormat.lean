@@ -4,7 +4,7 @@ import Init.Data.Format.Basic
 Define a low-level `Std.Format.prettyM` facade in the caller's module.
 
 The facade must be expanded in the same module that asks Lean for final LCNF:
-Lean 4.32 does not serialize generated monomorphic specializations for a later
+Lean 4.33 does not serialize generated monomorphic specializations for a later
 module's `LCNF.main` invocation. Expanding this small source adapter locally
 keeps the compiler-generated `prettyM` worker in the captured dependency
 closure without introducing a second format AST. A facade named `f` receives

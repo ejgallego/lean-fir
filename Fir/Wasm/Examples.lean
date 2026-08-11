@@ -449,7 +449,7 @@ def supportedPreciseUInt8BoxProgram : Fir.LeanIR.ImpureProgram :=
       .let (letDecl boxed taggedType (.box u8Type s)) <|
       .return boxed)] }
 
-/-- Lean 4.32's Float boxes have the exact heap-object result kind. -/
+/-- Lean 4.33's Float boxes have the exact heap-object result kind. -/
 def supportedPreciseFloatBoxProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `supportedPreciseFloatBox
       #[param s LCNF.ImpureType.float] objType (.code <|
@@ -616,7 +616,7 @@ def guardedResetJoinContinuation : LCNF.Code .impure :=
     .ctorAlt falseInfo (.jmp j #[.fvar x, .fvar c]),
     .ctorAlt trueInfo (.jmp j #[.erased, .fvar c])])
 
-/-- Minimal form of Lean 4.32's guarded optional-object reset join. -/
+/-- Minimal form of Lean 4.33's guarded optional-object reset join. -/
 def guardedResetJoinProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[param x objType] objType (.code <|
       .let (letDecl c u8Type (.isShared x)) <|

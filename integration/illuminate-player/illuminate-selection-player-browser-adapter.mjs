@@ -3,7 +3,7 @@
 export const ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION =
   "fir.illuminate-player.browser/v4";
 export const ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.Animation.SelectionAnimation/v4";
+  "lean-4.33-Illuminate.Animation.SelectionAnimation/v4";
 export const ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.persistent-checkpoint/v2";
 export const ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION =

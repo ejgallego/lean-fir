@@ -421,7 +421,7 @@ def erasedOnlyParameter (program : Fir.LeanIR.ImpureProgram)
     | .extern _ => false
 
 /-
-Check the source-level control invariant emitted by Lean 4.32's
+Check the source-level control invariant emitted by Lean 4.33's
 `ExpandResetReuse`: an optional object parameter may be consumed only below
 the constructor-zero arm of its companion `UInt8` sharing discriminator.
 The explicit `del` operation is the sole exception because the shared runtime
@@ -494,7 +494,7 @@ def checkedJoinParamKind (decl : LCNF.FunDecl .impure)
 
 /--
 Refine compiler-declared `tobject` boxes when their source type fixes the
-representation. Every `UInt8` payload is tagged; Lean 4.32 always
+representation. Every `UInt8` payload is tagged; Lean 4.33 always
 heap-allocates Float32 and Float boxes. Precise kinds let closure capture and
 ownership retain those facts without changing the physical i32 lane.
 -/

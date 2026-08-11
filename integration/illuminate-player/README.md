@@ -6,7 +6,7 @@ v4 retains only timing and selection state in Wasm while JavaScript owns SVG,
 parameter bindings, and per-frame parameter strings. Both package fingerprints
 are tied to the source revision in `illuminate-source.json`.
 
-This integration compiles the real Lean 4.32 entries from
+This integration compiles the real Lean 4.33 entries from
 `Illuminate.Animation.FirLive`:
 
 ```text

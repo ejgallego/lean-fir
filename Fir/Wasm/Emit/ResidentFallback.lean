@@ -21,7 +21,7 @@ inductive LinkError where
   deriving Inhabited, Repr
 
 /--
-The two final declarations in the Lean 4.32 `prettyM` closure are failure
+The two final declarations in the Lean 4.33 `prettyM` closure are failure
 fallbacks. The accepted pretty-printer corpus never reaches either declaration;
 keeping their resident definitions as unconditional traps preserves the
 fail-closed behavior of the temporary JavaScript handlers while closing the

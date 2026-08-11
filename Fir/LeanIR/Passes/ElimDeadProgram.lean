@@ -402,7 +402,7 @@ theorem ShadowLetResidual.localGraph_of_wasDeleted
   cases deleted
   exact ⟨_, by assumption, by assumption, by assumption⟩
 
-/-- Static boundary exposed by the actual Lean 4.32 deletion decision: every
+/-- Static boundary exposed by the actual Lean 4.33 deletion decision: every
 deleted let is locally value-producing, except possibly the known nullary
 full-application case. -/
 theorem ShadowLetResidual.local_or_nullaryFap_of_wasDeleted

@@ -3,7 +3,7 @@
 export const ILLUMINATE_HIT_SCENE_ADAPTER_API_VERSION =
   "fir.illuminate-hit-scene.browser/v1";
 export const ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.HitScene/v2";
+  "lean-4.33-Illuminate.HitScene/v2";
 export const ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION =
   "fir.illuminate-hit-scene.persistent-checkpoint/v1";
 

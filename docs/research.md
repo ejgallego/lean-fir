@@ -5,14 +5,14 @@ ordered work queue live only in `docs/pass-correctness-plan.md`.
 
 ## Compiler target
 
-FIR targets `Lean.Compiler.LCNF` in Lean 4.32.0. The normal compiler starts
+FIR targets `Lean.Compiler.LCNF` in Lean 4.33.0. The normal compiler starts
 with base LCNF, lowers it to monomorphic LCNF, lowers that to impure LCNF, and
 emits C directly from the final saved impure declarations.
 
 The older `Lean.IR` remains in Lean. Final impure LCNF is also translated
 through `Lean.IR.toIR` for interpreter metadata and LLVM-related consumers,
 but that is a parallel branch rather than an intermediate representation on
-the direct C-emission path. `docs/lcnf-to-c.md` records the exact 4.32 pass
+the direct C-emission path. `docs/lcnf-to-c.md` records the exact 4.33 pass
 sequence.
 
 Lean exposes three phase-level LCNF representations:
@@ -60,7 +60,7 @@ not observable.
 The original evaluator remains under `Fir.LeanIR.Legacy` as a small,
 non-exported differential baseline. `lake lean Inspect` compiles four real
 Lean declarations through `LCNF.main`, reads their saved impure LCNF, and
-reports both the legacy result and the new machine result. In Lean 4.32 the
+reports both the legacy result and the new machine result. In Lean 4.33 the
 new machine executes all four:
 
 | Declaration | Relevant emitted form | New machine |
@@ -72,7 +72,7 @@ new machine executes all four:
 
 ## Pass-proof harness
 
-`Fir.LeanIR.Pipeline` copies the exact built-in 4.32 pass keys, including
+`Fir.LeanIR.Pipeline` copies the exact built-in 4.33 pass keys, including
 occurrence numbers and phase transitions, and checks them against
 `LCNF.builtinPassManager` at elaboration time. A Lean upgrade that changes the
 pipeline therefore fails locally instead of silently invalidating the proof
@@ -85,7 +85,7 @@ separately from behavior-changing passes. The theorem interfaces are present;
 proofs for the individual upstream transformations are the continuing
 campaign.
 
-`Fir.LeanIR.Checkpoint` also provides an opt-in wrapper around Lean 4.32's
+`Fir.LeanIR.Checkpoint` also provides an opt-in wrapper around Lean 4.33's
 actual `simpCase` pass. `Inspect` installs it dynamically, records declaration
 groups immediately before and after the pass, and reports per-sample size
 deltas. The wrapper calls the upstream pass body and is not registered
@@ -101,7 +101,7 @@ Runtime imports are generated and deduplicated from actual use.
 
 The optional package in `integration/talos` resolves symbolic locals, branch
 labels, calls, imports, functions, and exports into Talos's `Wasm.Module`.
-It pins a Talos revision whose interpreter uses Lean 4.32. Its smoke test runs
+It pins a Talos revision whose interpreter uses Lean 4.33. Its smoke test runs
 a scalar identity module in Talos. Runtime implementations for heap-bearing
 `fir.*` imports and the cross-language simulation theorem remain future proof
 targets.

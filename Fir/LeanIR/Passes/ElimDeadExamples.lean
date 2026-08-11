@@ -334,7 +334,7 @@ structure ElimDeadPolicyFixture where
 
 /-- Boundary matrix spanning retained unsafe values, ordinary deleted values,
 allocations, writes, reset/reuse, and the unique nullary-application
-rejection. Every row is also compared with Lean 4.32's actual pass. -/
+rejection. Every row is also compared with Lean 4.33's actual pass. -/
 def elimDeadPolicyFixtures : Array ElimDeadPolicyFixture := #[
   ⟨`policyNeutral, neutralBefore, neutralAfter, .accepted⟩,
   ⟨`policyUsed, usedBefore, usedBefore, .accepted⟩,
@@ -17189,7 +17189,7 @@ theorem retainedPrefixReuseCheckedProgramRun :
     retainedPrefixReuseAfterProgram, fixtureDecl, decl,
     retainedPrefixReuseCheckedRun]
 
-/-- The actual Lean 4.32 pass is checked against the transparent retained
+/-- The actual Lean 4.33 pass is checked against the transparent retained
 prefix fixture during elaboration, independently of the proof endpoint. -/
 elab "#check_retained_prefix_reuse_actual" : command =>
   liftCoreM <|

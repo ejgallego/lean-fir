@@ -1335,7 +1335,7 @@ theorem shadowProgram_samePhaseCorrectOn_of_programWellFormed
   shadowProgram_samePhaseCorrectOn_of_upstreamBridge bridge selection
     wellFormed.certificates run
 
-/-- Lean 4.32 `simpCase` specialization using the established reachable-tag
+/-- Lean 4.33 `simpCase` specialization using the established reachable-tag
 selection laws. -/
 theorem shadowProgram_samePhaseCorrectOn_reachableCaseTag_of_programWellFormed
     (bridge : UpstreamBridge)

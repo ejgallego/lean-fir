@@ -451,7 +451,7 @@ def internalizeReadProjections (module : Module) : Except LinkError Module := do
   let result ← internalizeOperationsUnchecked bindings module
   validateOutput result
 
-/-- The exact projection family exercised by compiler-produced Lean 4.32 `prettyM`. -/
+/-- The exact projection family exercised by compiler-produced Lean 4.33 `prettyM`. -/
 def prettyFormatReadProjections : Array RuntimeOp := #[
   .objectProj 0 .object,
   .objectProj 0 .tobject,

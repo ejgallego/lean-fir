@@ -2864,7 +2864,7 @@ theorem terminalCodeRelated_of_local_return
 
 /--
 Reduce executable terminal alpha-soundness to the missing checker-to-relation
-bridge. Lean 4.32 exposes `LCNF.AlphaEqv.eqv` as an opaque `partial def`, so
+bridge. Lean 4.33 exposes `LCNF.AlphaEqv.eqv` as an opaque `partial def`, so
 that bridge cannot currently be proved by unfolding the checker.
 -/
 theorem alphaEqvSoundAt_of_terminal_bridge

@@ -9,7 +9,7 @@ open Lean
 /-!
 # Wasm-resident Float frontier
 
-This generation helper internalizes the exact Lean 4.32 floating operations
+This generation helper internalizes the exact Lean 4.33 floating operations
 supported by the resident runtime. It deliberately assigns Lean extern
 semantics here, after the shared symbolic Wasm instruction layer has landed
 independently. Other standard Float declarations remain at the checked

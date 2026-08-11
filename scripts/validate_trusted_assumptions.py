@@ -11,15 +11,17 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
-EXPECTED_TOOLCHAIN = "leanprover/lean4:v4.32.0"
+EXPECTED_TOOLCHAIN = "leanprover/lean4:v4.33.0"
 EXPECTED_SOURCE_SHA256 = {
     Path("Lean/Compiler/LCNF/AlphaEqv.lean"):
         "f62bf73971d21483f1e285ecc74980bdc12baa0bf5c494fed4dc5d021aeded43",
     Path("Lean/Compiler/LCNF/SimpCase.lean"):
         "270df8851deb0a5f4c6a656377e83e2cf237e76f70a36301239781839122620b",
+    Path("Lean/Compiler/LCNF/ElimDead.lean"):
+        "c5a22e15eab79ebd6ef1e8f302095c69aeaccb12275f7468b505b03cde97a582",
 }
 EXPECTED_AXIOMS = {
-    (Path("Fir/LeanIR/Passes/AlphaEqvTrusted.lean"), "lean432UpstreamBridge"),
+    (Path("Fir/LeanIR/Passes/AlphaEqvTrusted.lean"), "lean433UpstreamBridge"),
 }
 AXIOM_RE = re.compile(r"^\s*axiom\s+([A-Za-z_][A-Za-z0-9_'.]*)", re.MULTILINE)
 PARTIAL_DEF_RE = re.compile(r"^\s*partial\s+def\s+", re.MULTILINE)
@@ -122,7 +124,7 @@ def main() -> int:
         return 1
 
     print(
-        "Validated Lean 4.32 AlphaEqv/SimpCase source hashes and exactly one "
+        "Validated Lean 4.33 AlphaEqv/SimpCase/ElimDead source hashes and exactly one "
         "registered trusted axiom."
     )
     return 0

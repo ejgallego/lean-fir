@@ -12,7 +12,7 @@ source "$lane_dir/toolchain-pins.sh"
 emsdk_dir="$deps_root/emsdk"
 lean_src="$deps_root/lean4"
 lean_build="$deps_root/lean4-emscripten-build"
-lean_patch="$lane_dir/patches/lean-4.32.0-emscripten-uv-stubs.patch"
+lean_patch="$lane_dir/patches/lean-4.33.0-emscripten-uv-stubs.patch"
 jobs="${FIR_WASM_JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || printf '4')}"
 
 for tool in git cmake make; do

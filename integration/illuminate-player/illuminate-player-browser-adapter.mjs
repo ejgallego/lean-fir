@@ -3,7 +3,7 @@
 export const ILLUMINATE_PLAYER_ADAPTER_API_VERSION =
   "fir.illuminate-player.browser/v3";
 export const ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Illuminate.Animation.PlayerAnimation-live/v3";
+  "lean-4.33-Illuminate.Animation.PlayerAnimation-live/v3";
 export const ILLUMINATE_PLAYER_OWNERSHIP_VERSION =
   "fir.illuminate-player.persistent-checkpoint/v2";
 

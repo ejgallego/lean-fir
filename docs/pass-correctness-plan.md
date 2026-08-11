@@ -4,7 +4,7 @@ This is the repository's source of truth for implementation status and next
 work. `docs/research.md` supplies rationale, while `docs/lcnf-to-c.md` supplies
 the compiler-pipeline reference.
 
-This is the executable work plan for the Lean 4.32.0 pipeline pinned by FIR.
+This is the executable work plan for the Lean 4.33.0 pipeline pinned by FIR.
 It has two parallel directions sharing one semantic boundary:
 
 ```text
@@ -43,7 +43,7 @@ invariants appear in types, not that FIR owns three AST implementations.
 
 The following work is implemented and checked by the default build:
 
-- Lean and all pipeline expectations are pinned to 4.32.0.
+- Lean and all pipeline expectations are pinned to 4.33.0.
 - `Fir.LeanIR` and `Fir.Wasm` are the consolidated public imports; executable
   examples and the legacy differential evaluator remain test-only modules.
 - `Hygiene.lean` checks lexical variable/join-point scope and declaration-wide
@@ -81,7 +81,7 @@ The following work is implemented and checked by the default build:
   versus existing variables. `Passes/AlphaEqvCode.lean` now carries that
   relation through terminal code, value bindings, saved bind frames, machine
   controls, states, core-step results, and impure case selection.
-  `Passes/AlphaEqvLocal.lean` provides a total transparent copy of Lean 4.32's
+  `Passes/AlphaEqvLocal.lean` provides a total transparent copy of Lean 4.33's
   recursive checker, including a proof-facing structural alternative traversal;
   `Passes/AlphaEqvLocalSound.lean` proves local acceptance constructs the
   declarative relation for terminal code, value bindings, sequential impure
@@ -91,10 +91,10 @@ The following work is implemented and checked by the default build:
   `Passes/AlphaEqvTrusted.lean` isolates correspondence with the opaque
   upstream checker behind one audited axiom.
   `SimpCaseExamples.lean` checks the singleton, filtering, and genuinely
-  alpha-renamed folding results against Lean 4.32's actual `simpCase.run`.
+  alpha-renamed folding results against Lean 4.33's actual `simpCase.run`.
 - `Fir.Wasm` defines the typed runtime ABI and exhaustively lowers impure LCNF
   to symbolic core-Wasm instructions and imports.
-- `integration/talos` pins a Lean-4.32-compatible Talos revision, converts the
+- `integration/talos` pins a Lean-4.33-compatible Talos revision, converts the
   symbolic module to Talos syntax, and executes a scalar module in Talos.
 - `bugs/` supplies versioned discrepancy cards and a validator used by
   `make check`.
@@ -310,7 +310,7 @@ remaining type-level obligation instead of folding it into the recursive code
 proof.
 
 Binder extension is no longer an assumed classification boundary.
-`AlphaEqvBind` proves the comparison laws needed to reason about Lean 4.32's
+`AlphaEqvBind` proves the comparison laws needed to reason about Lean 4.33's
 `Name.quickCmp`-backed `FVarIdMap`, then proves the concrete lookup law for
 insertion and identifies `withFVar` with that right-to-left update.
 `RenamingScoped` records that every mapped right-hand variable points into the
@@ -353,7 +353,7 @@ semantic condition it needs: each constructor tag and the default selector
 determine at most one body. Successful and failed constructor/default lookups
 are first characterized by table membership, then transported through
 `List.Perm`; `chooseAlt_eq_of_perm` combines the two lookup results.
-`QSortPerm` proves directly against Lean 4.32's private partition and sort
+`QSortPerm` proves directly against Lean 4.33's private partition and sort
 workers that `Array.qsort` returns a permutation. `sortAlts_perm` specializes
 that generic theorem to Lean's alternative comparator. Consequently,
 `CaseTableNormalizationInvariant` now contains only the genuine compiler-side
@@ -367,12 +367,12 @@ top-level semantic boundary. The proof also isolates the exact remaining
 executable bridge in `alphaEqvSoundAt_of_terminal_bridge`.
 
 Trying to prove that bridge exposed an upstream proof-interface blocker. Lean
-4.32 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
+4.33 declares recursive `LCNF.AlphaEqv.eqv` as an opaque `partial def` and
 exports no safe equation theorem, so a successful `Code.alphaEqv` check cannot
 be unfolded even for two `return` instructions.
 
 FIR now ships `AlphaEqv.Local.eqv`, a total transparent fuel-indexed copy of
-the full Lean 4.32 checker. `AlphaEqvLocalSound` defines
+the full Lean 4.33 checker. `AlphaEqvLocalSound` defines
 `CodeSideConditions`, containing lexical scope, binder freshness, and exact
 runtime-observed type metadata not established by alpha-equivalence. Its
 theorem `codeRelated_of_local_accepts` does not depend on FIR's trusted bridge
@@ -399,7 +399,7 @@ two-level normalized case relation, and rejection of mismatched nested
 constructor/default bodies; executable guards compare each nested fixture with
 the upstream checker.
 
-The Lean 4.32 phase audit found no public invariant from which selector
+The Lean 4.33 phase audit found no public invariant from which selector
 determinism can be derived. The pure checker rejects duplicate constructor
 names but assigns its `hasDefault` flag without consulting it, while impure
 `Cases` contains an unrestricted alternative array and no preservation
@@ -421,7 +421,7 @@ replacing that axiom with an upstream theorem remains the desired final
 resolution. Details are recorded in
 `FIR-BUG-impure-alphaEqv-opaque-eqv`.
 
-The control-flow audit is now underway. Lean 4.32's pure checker establishes
+The control-flow audit is now underway. Lean 4.33's pure checker establishes
 that a jump target is an in-scope join point and that its argument count equals
 the target arity, but `Decl.check` remains a no-op at the impure phase. FIR's
 `ImpureHygienic` boundary preserves join/variable scope and global binder
@@ -551,7 +551,7 @@ typed/admissible entry boundary required by control-flow simplifications.
 
 The initially missing recursive compiler graph is now represented locally.
 `SimpCaseCompilerBridge.shadowCode?` is a transparent, fuel-indexed copy of
-the output-producing portion of Lean 4.32's private traversal. It recursively
+the output-producing portion of Lean 4.33's private traversal. It recursively
 covers every impure code constructor and deliberately omits only compiler
 bookkeeping calls that do not affect returned syntax. `shadowProgram?` lifts
 that traversal through declarations and programs. `checkActualAgreement`
@@ -578,14 +578,14 @@ admissible entry arguments. This is the first assembled whole-program
 
 Two boundaries remain explicit:
 
-1. Lean 4.32 keeps the actual recursive traversal and its case simplifiers
+1. Lean 4.33 keeps the actual recursive traversal and its case simplifiers
    private/opaque. Actual-pass agreement is therefore executable,
    source-hash-guarded evidence rather than a universal kernel equation.
    `FIR-BUG-impure-simpCase-private-proof-interface` records the missing public
    equation/graph interface.
 2. The compiler-facing alpha-equivalence specialization instantiates
    `UpstreamBridge` with the single audited
-   `AlphaEqvTrusted.lean432UpstreamBridge` axiom. The transparent local-checker
+   `AlphaEqvTrusted.lean433UpstreamBridge` axiom. The transparent local-checker
    soundness theorems themselves remain axiom-free.
 
 ## Current `elimDeadVars` proof
@@ -596,7 +596,7 @@ raw heap while preserving every observable root.
 
 ### Transparent compiler graph and static certificates
 
-`ElimDead.shadowCode?` is an audited, fuel-indexed copy of Lean 4.32's impure
+`ElimDead.shadowCode?` is an audited, fuel-indexed copy of Lean 4.33's impure
 backwards liveness/elimination traversal. It records the final used-local set,
 retained/deleted let decisions, retained/deleted join decisions, and
 retained/deleted write decisions. The traversal lifts through declaration
@@ -1037,7 +1037,7 @@ finite source/target entry graphs instantiate
 preserves that owner through reset, and reuses the unchanged ledger at the
 concrete-token overwrite. The fixture includes compiler well-formedness, the
 fail-closed checked traversal, an elaboration-time comparison with Lean
-4.32's actual pass, and
+4.33's actual pass, and
 `retainedPrefixReuseProgramLoweringCorrect_ledgerExact`.
 
 Allocation-capable foreign responses now have an explicit ledger contract.
@@ -1521,10 +1521,10 @@ runtime/ownership certificate, and foreign compatibility. The neutral
 positive fixture reaches that endpoint end to end, while
 `deadNullaryFapNotCompilerAdmissible` proves that the known effectful
 counterexample cannot inhabit it. No suitable purity field was found in the
-audited Lean 4.32 input to `elimDeadVars`; `Decl.safe` records termination
+audited Lean 4.33 input to `elimDeadVars`; `Decl.safe` records termination
 safety, not observational purity. A future semantics may replace this
 conservative rejection with a stuttering certificate for selected constants.
-An executable 11-row conformance matrix now checks Lean 4.32's pinned pass,
+An executable 11-row conformance matrix now checks Lean 4.33's pinned pass,
 the transparent traversal, the fail-closed policy decision, and the exact
 accepted target together. It covers neutral deletion, retained used and unsafe
 bindings, deleted allocation/write/reset/reuse/PAP/box bindings, and both sides
@@ -1542,7 +1542,7 @@ owned child, partial-application closure allocation, and heap-backed scalar
 boxing. Each fixture includes the finite source execution graph, concrete heap
 shape or ownership facts, compiler well-formedness, a successful transparent
 program run, and a public `LoweringCorrect` theorem. The PAP/box fixture also
-pins the actual Lean 4.32 pass to the transparent target while proving that
+pins the actual Lean 4.33 pass to the transparent target while proving that
 both unreachable allocations may be omitted.
 
 The remaining general problem is therefore not an operational matcher, a
@@ -1678,7 +1678,7 @@ contract.
   remains a separate cleanup target.
 
 Actual-pass fixtures compare the transparent `elimDeadVars` shadow with Lean
-4.32 and preserve every discovered mismatch as a textual bug card and
+4.33 and preserve every discovered mismatch as a textual bug card and
 regression. The systematic policy matrix found no additional mismatch beyond
 the existing nullary-`.fap` semantic discrepancy.
 
@@ -1813,7 +1813,7 @@ validation protocol.
 ## Trust and checked status
 
 The Lean proof sources are fully elaborated without proof holes. The sole
-registered project axiom is the pinned Lean 4.32 upstream-to-local
+registered project axiom is the pinned Lean 4.33 upstream-to-local
 alpha-equivalence correspondence in `AlphaEqvTrusted`; `elimDeadVars` adds no
 trusted axiom. `make check` validates the Lean build, executable examples,
 differential matrices, bug-card format, source hashes, and the exact

@@ -5,7 +5,7 @@ namespace Fir.Wasm.Emit.ExternalRuntime
 open Lean
 
 /--
-Standard Lean 4.32 numeric externals supplied by the separately compiled
+Standard Lean 4.33 numeric externals supplied by the separately compiled
 Wasm math runtime.  Source capture retains these declarations at the same
 opaque boundary used by Lean's native compiler; package linking validates
 their exact imported signatures before producing a zero-import module.

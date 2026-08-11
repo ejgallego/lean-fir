@@ -91,7 +91,7 @@ def abiConstructorGraphReleaseProgram : Fir.LeanIR.ImpureProgram :=
       .return r)] }
 
 /-- Positive packed-layout artifact using the absolute `USize` and scalar slot
-indices emitted by Lean 4.32 after one object and one `USize` slot. -/
+indices emitted by Lean 4.33 after one object and one `USize` slot. -/
 def abiCompilerShapedMutationProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] u64Type (.code <|
       .let (letDecl x tobjectType (.lit (.nat 1))) <|

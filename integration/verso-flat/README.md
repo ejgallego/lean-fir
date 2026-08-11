@@ -5,7 +5,7 @@ This integration compiles the real
 complete runtime into a zero-import Wasm module. It is a separate Flat-output
 experiment; it does not replace the established FIR `PrettyTrace` control.
 
-The browser adapter accepts the same compact Lean 4.32 `Std.Format` input as
+The browser adapter accepts the same compact Lean 4.33 `Std.Format` input as
 the control package. Wasm returns `{ text, events }`, where event offsets are
 UTF-8 byte offsets and event kinds are start tag `0`, end-tags `1`, and
 unstyled newline `2`.

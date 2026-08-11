@@ -5,7 +5,7 @@ import Lean.Elab.Term
 namespace Fir.LeanIR.Passes.QSortPerm
 
 /-!
-Lean 4.32's executable quicksort keeps its two recursive workers private.  The
+Lean 4.33's executable quicksort keeps its two recursive workers private.  The
 kernel declarations are still present in the imported environment, but their
 private names contain a numeric component that cannot be written as an ordinary
 Lean identifier.  Give those declarations stable, proof-local aliases so this
@@ -41,7 +41,7 @@ theorem qpartitionLoop_perm {α : Type u} {n : Nat} (lt : α → α → Bool)
   · exact Vector.swap_perm (by omega) hhi
 termination_by hi - k
 
-/-- Lean 4.32's partition implementation returns a permutation of its input. -/
+/-- Lean 4.33's partition implementation returns a permutation of its input. -/
 theorem qpartition_perm {α : Type u} {n : Nat} (as : Vector α n)
     (lt : α → α → Bool) (lo hi : Nat) (w : lo ≤ hi)
     (hlo : lo < n) (hhi : hi < n) :
@@ -97,7 +97,7 @@ theorem qsortLoop_perm {α : Type u} (lt : α → α → Bool) {n : Nat}
   · exact .rfl
 termination_by (hi, hi - lo)
 
-/-- Lean 4.32's public quicksort returns a permutation of its input array. -/
+/-- Lean 4.33's public quicksort returns a permutation of its input array. -/
 theorem qsort_perm {α : Type u} (as : Array α) (lt : α → α → Bool)
     (lo := 0) (hi := as.size - 1) :
     Array.Perm (Array.qsort as lt lo hi) as := by

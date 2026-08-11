@@ -451,7 +451,7 @@ private theorem Word32.ofNat_uint32_value (word : Word32) :
   cases word with
   | mk value isLt =>
       simp [Word32.ofNat?, wordModulus] at isLt ⊢
-      omega
+      simp [Nat.mod_eq_of_lt isLt, isLt]
 
 /-- Word lanes inherit the exact 32-bit checked write/read round trip. -/
 theorem readWord32_of_writeWord32_eq_ok (memory result : LinearMemory)

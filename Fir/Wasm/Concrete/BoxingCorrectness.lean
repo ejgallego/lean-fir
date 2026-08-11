@@ -364,6 +364,9 @@ theorem semanticBox_split (runtime : RuntimeState) (scalar : BoxedScalar) :
       boxUsesTaggedRepresentation, notF32, notF64, alloc,
       semanticBoxResult, semanticBoxCell, Bind.bind, Except.bind,
       Pure.pure, Except.pure]
+  all_goals
+    rename_i value
+    by_cases small : value.toNat ≤ maxTaggedPayload <;> simp [small]
 
 theorem semanticBox_heap_eq (runtime : RuntimeState) (scalar : BoxedScalar)
     (heap : maxTaggedPayload < scalar.payload.toNat) :
@@ -533,33 +536,28 @@ theorem scalarFromType_boxedScalarKind (kind : BoxedScalarKind) (payload : UInt6
   cases kind with
   | uint8 =>
       unfold scalarFromType
-      simp only [BoxedScalarKind.semanticType, BoxedScalar.ofPayload,
-        BoxedScalar.semanticValue]
       rw [if_pos (by native_decide)]
+      rfl
   | uint16 =>
       unfold scalarFromType
-      simp only [BoxedScalarKind.semanticType, BoxedScalar.ofPayload,
-        BoxedScalar.semanticValue]
       rw [if_neg (by native_decide), if_pos (by native_decide)]
+      rfl
   | uint32 =>
       unfold scalarFromType
-      simp only [BoxedScalarKind.semanticType, BoxedScalar.ofPayload,
-        BoxedScalar.semanticValue]
       rw [if_neg (by native_decide), if_neg (by native_decide),
         if_pos (by native_decide)]
+      rfl
   | uint64 =>
       unfold scalarFromType
-      simp only [BoxedScalarKind.semanticType, BoxedScalar.ofPayload,
-        BoxedScalar.semanticValue]
       rw [if_neg (by native_decide), if_neg (by native_decide),
         if_neg (by native_decide), if_pos (by native_decide)]
+      rfl
   | usize =>
       unfold scalarFromType
-      simp only [BoxedScalarKind.semanticType, BoxedScalar.ofPayload,
-        BoxedScalar.semanticValue]
       rw [if_neg (by native_decide), if_neg (by native_decide),
         if_neg (by native_decide), if_neg (by native_decide),
         if_pos (by native_decide)]
+      rfl
 
 /-- Checked heap-box decoding refines the actual semantic `unbox` operation
 for a mapped live boxed cell. The descriptor fixes the ABI result kind; the

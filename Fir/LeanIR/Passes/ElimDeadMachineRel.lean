@@ -20766,7 +20766,7 @@ theorem DeletedLetReadyAt.not_fap
 
 /-- The source runtime/ownership interface constructively rejects every
 strong compiler edge that deletes a full application.  The nullary instance
-is exactly Lean 4.32's known `safeToElim` discrepancy, while the statement is
+is exactly Lean 4.33's known `safeToElim` discrepancy, while the statement is
 slightly stronger because no full application produces a local value action. -/
 theorem SourceRuntimeOwnershipReadyAt.not_fap_of_deleted
     (ready : SourceRuntimeOwnershipReadyAt fuel state sourceFrameRoots

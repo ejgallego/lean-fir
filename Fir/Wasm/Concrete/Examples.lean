@@ -809,7 +809,7 @@ def releasedErasedFieldConstructor : Except ConcreteError (MemoryState × Word32
 #guard match concreteMixedConstructor with
   | .error _ => false
   | .ok (state, object) =>
-      -- Lean 4.32 emits the total fixed-slot count as the scalar operand.
+      -- Lean 4.33 emits the total fixed-slot count as the scalar operand.
       match writeScalarUInt64Field state object 2 0 66 with
       | .error _ => false
       | .ok result =>

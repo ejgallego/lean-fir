@@ -702,7 +702,7 @@ def validationSchemaAcceptsAbiKind : Fir.Validation.ValidationSchema → Fir.Was
   | _, _ => false
 
 /-- Normalize a backend-neutral validation value to the checked parameter ABI.
-The validation protocol represents `Bool` as a tagged object, while Lean 4.32
+The validation protocol represents `Bool` as a tagged object, while Lean 4.33
 uses scalar `UInt8` for compiler-produced Boolean parameters. -/
 def validationArgumentForAbi (schema : Fir.Validation.ValidationSchema)
     (kind : Fir.Wasm.AbiKind) (value : Value) : Except String Value := do

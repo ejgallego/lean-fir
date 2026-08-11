@@ -19,14 +19,14 @@ needed to state same-phase and lowering theorems, and two executable
 LCNF-to-WebAssembly paths: FIR's symbolic backend and Lean's direct C emitter
 followed by an optimized LLVM WebAssembly backend.
 
-The repository is pinned to Lean 4.32.0. The proof campaign works backwards
+The repository is pinned to Lean 4.33.0. The proof campaign works backwards
 from final impure LCNF while the Wasm backend develops against the same
 interpreter and semantic ABI. See `docs/pass-correctness-plan.md` for the
 implemented foundation and the remaining proof order.
 
 ## Requirements
 
-- Lean toolchain: `leanprover/lean4:v4.32.0`
+- Lean toolchain: `leanprover/lean4:v4.33.0`
 - Lake from the pinned Lean toolchain
 - `rg` for the placeholder scan
 - Python 3 for the validation orchestrator
@@ -75,7 +75,7 @@ re-exported.
   operations, external requests, traces, and observations.
 - `Fir/LeanIR/Interpreter.lean`: canonical small-step semantics and executable
   runner for final impure LCNF.
-- `Fir/LeanIR/Pipeline.lean`: exact Lean 4.32 pass-order guards and the reverse
+- `Fir/LeanIR/Pipeline.lean`: exact Lean 4.33 pass-order guards and the reverse
   proof campaign.
 - `Fir/LeanIR/Checkpoint.lean`: opt-in capture of actual declaration groups
   immediately before and after the upstream `simpCase` pass.

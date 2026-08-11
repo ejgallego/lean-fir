@@ -36,7 +36,7 @@ def eqvAltListsUsing
 
 /--
 Run the alternative checker using a supplied recursive code checker. This is
-the transparent counterpart of the loop inside Lean 4.32's opaque
+the transparent counterpart of the loop inside Lean 4.33's opaque
 `LCNF.AlphaEqv.eqvAlts`.
 -/
 def eqvAltsUsing
@@ -51,7 +51,7 @@ def eqvAltsUsing
 
 /--
 Compare parameter lists while exposing the reader-map extension at every
-binder. This is the transparent counterpart of Lean 4.32's indexed loop in
+binder. This is the transparent counterpart of Lean 4.33's indexed loop in
 `LCNF.AlphaEqv.withParams`.
 -/
 def withParamListsUsing (recurse : EqvM Bool) :
@@ -69,7 +69,7 @@ def withParamsUsing (left right : Array (LCNF.Param pu))
   withParamListsUsing recurse left.toList right.toList
 
 /--
-A total, transparent copy of Lean 4.32's recursive LCNF alpha-equivalence
+A total, transparent copy of Lean 4.33's recursive LCNF alpha-equivalence
 checker. Fuel is consumed only when descending through code or an alternative
 table; exhaustion rejects instead of introducing another opaque `partial def`.
 -/

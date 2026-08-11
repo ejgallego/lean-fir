@@ -221,10 +221,7 @@ theorem allocatePromotedTag_objectRel
     simp only
     rw [headerRead]
     simp only [Bind.bind, Except.bind, liftMemory]
-    dsimp [header, Header.forAllocation]
-    rw [if_neg (by decide)]
-    rw [if_pos (by decide)]
-    rw [payloadRead]
+    simp [header, Header.forAllocation, payloadRead] <;> rfl
   have resultExtent :
       address.value + header.allocationBytes.toNat ≤ result.heapCursor := by
     rw [cursorEq, middleExtent]

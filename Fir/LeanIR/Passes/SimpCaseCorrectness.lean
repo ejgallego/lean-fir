@@ -79,7 +79,7 @@ theorem fold_to_default_correct_of_local_alpha
     covers frames bodies
 
 /-- Compiler-facing default folding. Both Boolean orientations are explicit;
-their conversion reuses the sole audited Lean-4.32 correspondence axiom. -/
+their conversion reuses the sole audited Lean-4.33 correspondence axiom. -/
 theorem fold_to_default_correct_of_upstream_alpha
     {state : MachineState} {before after : LCNF.Cases .impure}
     {discr : Value} {tag : Nat}

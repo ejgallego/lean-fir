@@ -35,7 +35,7 @@ private theorem fvarId_beq_iff_eq {left right : FVarId} :
         change name == name
         exact Name.beq_iff_eq.mpr rfl
 
-/-- Lean 4.32 derives `BEq` and `Hashable` for `FVarId` but does not ship the
+/-- Lean 4.33 derives `BEq` and `Hashable` for `FVarId` but does not ship the
 lawfulness instance required by the extensional `HashSet` lemmas. -/
 instance fvarIdLawfulBEq : LawfulBEq FVarId where
   eq_of_beq := fvarId_beq_iff_eq.mp

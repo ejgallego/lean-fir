@@ -76,7 +76,7 @@ independent at the artifact boundary:
 | Lifetime | Monotone module-owned arena | C-owned request/result buffers plus Lean runtime allocations |
 
 At the JavaScript level both adapters accept
-`lean-4.32-Std.Format.compact/v1` and return
+`lean-4.33-Std.Format.compact/v1` and return
 `{ trace: { text, events }, timings, memory }`. This is the common client
 surface; it does not imply a common raw Wasm ABI or interchangeable manifests.
 

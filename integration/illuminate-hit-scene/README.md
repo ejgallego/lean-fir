@@ -1,6 +1,6 @@
 # FIR-native Illuminate HitScene package
 
-This integration compiles the real Lean 4.32 entry
+This integration compiles the real Lean 4.33 entry
 
 ```lean
 Illuminate.HitScene.query : HitScene → Float → Float → HitSceneResult

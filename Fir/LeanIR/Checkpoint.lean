@@ -32,7 +32,7 @@ private def recordImpurePassCheckpoint (checkpoint : ImpurePassCheckpoint) :
     impurePassCheckpointExt.modifyState environment (·.push checkpoint)
 
 /--
-Lean 4.32's real `simpCase` pass, wrapped only with before/after recording.
+Lean 4.33's real `simpCase` pass, wrapped only with before/after recording.
 The pass body is not reimplemented here.
 -/
 def capturedSimpCasePass : LCNF.Pass where

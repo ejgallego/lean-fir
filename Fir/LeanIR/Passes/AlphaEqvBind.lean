@@ -8,7 +8,7 @@ open Lean.Compiler
 open Fir.LeanIR.Impure
 
 /-!
-Lean 4.32 does not register comparison laws for `Name.quickCmp`. The local
+Lean 4.33 does not register comparison laws for `Name.quickCmp`. The local
 instances below establish exactly the laws needed to reason about the
 `FVarIdMap` used by the compiler's alpha-equivalence pass.
 -/
@@ -106,12 +106,16 @@ private theorem nameQuickCmp_eq_iff {left right : Name} :
 theorem fvarIdMap_get?_insert (rho : FVarIdMap α) (key query : FVarId) (value : α) :
     (rho.insert key value).get? query =
       if key.name = query.name then some value else rho.get? query := by
-  change (Std.TreeMap.insert rho key value)[query]? = _
+  let rhoT : Std.TreeMap FVarId α
+      (fun left right => Name.quickCmp left.name right.name) := by
+    with_unfolding_all exact rho
+  with_unfolding_all
+    change (rhoT.insert key value)[query]? =
+      if key.name = query.name then some value else rhoT[query]?
   rw [Std.TreeMap.getElem?_insert]
   by_cases same : key.name = query.name
   · rw [if_pos (nameQuickCmp_eq_iff.mpr same), if_pos same]
   · rw [if_neg (fun compared => same (nameQuickCmp_eq_iff.mp compared)), if_neg same]
-    rfl
 
 private theorem fvar_beq_self (fvarId : FVarId) : (fvarId == fvarId) = true := by
   cases fvarId with

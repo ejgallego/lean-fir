@@ -1,8 +1,8 @@
-# From LCNF to C in Lean 4.32.0
+# From LCNF to C in Lean 4.33.0
 
 This document describes the Lean compiler pipeline relevant to FIR, from an
 elaborated declaration through LCNF and into generated C. It is based on the
-Lean 4.32.0 toolchain pinned by this repository.
+Lean 4.33.0 toolchain pinned by this repository.
 
 There is an important naming and architectural distinction:
 

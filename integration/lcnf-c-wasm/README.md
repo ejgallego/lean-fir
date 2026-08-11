@@ -143,14 +143,14 @@ changes are not acceptable performance optimizations.
 
 ## Toolchain pins
 
-- Lean `4.32.0`, commit
-  `8c9756b28d64dab099da31a4c09229a9e6a2ef35`;
+- Lean `4.33.0`, commit
+  `d8b18978322de05a8f3dba51ef03cf5461676c17`;
 - Emscripten `5.0.3`, emsdk commit
   `a620cf1d71c62dfdfbb0c01fe0a371e2af2dda6c`;
 - wasi-sdk `33.0`, with per-platform release SHA-256 digests in
   `toolchain-pins.sh`.
 
-Lean 4.32.0 contains two mismatched declarations in Emscripten-only unsupported
+Lean 4.33.0 contains two mismatched declarations in Emscripten-only unsupported
 libuv stubs. `setup-emscripten.sh` applies the lane-local, signature-preserving
 patch under `patches/`; it does not modify the FIR or Lean semantic surface.
 
@@ -233,7 +233,7 @@ This does not merge the two Wasm packages. The C package keeps its verified
 Emscripten ES module, threaded full Lean runtime, manifest, and loader. The
 FIR-native package keeps its zero-import module-owned-memory ABI and resident
 runtime. Their JavaScript adapters intentionally accept the same compact
-`lean-4.32-Std.Format.compact/v1` objects and expose the same logical call:
+`lean-4.33-Std.Format.compact/v1` objects and expose the same logical call:
 
 ```js
 import {

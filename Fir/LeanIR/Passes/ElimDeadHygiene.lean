@@ -177,7 +177,7 @@ mutual
 end
 
 /- Total transparent binder enumeration for a code tree.  The order matches
-Lean 4.32's opaque `ImpureHygiene.codeBinders`: declaration binder, join
+Lean 4.33's opaque `ImpureHygiene.codeBinders`: declaration binder, join
 parameters, join body, then continuation. -/
 mutual
 

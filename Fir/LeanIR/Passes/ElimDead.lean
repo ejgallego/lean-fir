@@ -8,7 +8,7 @@ open Fir.LeanIR.Impure
 open Fir.LeanIR.Passes.SimpCase
 
 /-!
-Proof kernels for Lean 4.32's impure `elimDeadVars` pass.
+Proof kernels for Lean 4.33's impure `elimDeadVars` pass.
 
 The upstream pass combines two independent obligations when it removes a
 binding: evaluating the unused value must have no observable effect, and the
@@ -17,7 +17,7 @@ separate is useful both for the backwards liveness proof and for transformations
 whose only runtime difference is unreachable heap garbage.
 -/
 
-/-- Audited local copy of Lean 4.32's impure `LetValue.safeToElim` predicate.
+/-- Audited local copy of Lean 4.33's impure `LetValue.safeToElim` predicate.
 This is deliberately syntax-only; semantic safety is stated separately below. -/
 def safeToElim : LCNF.LetValue .impure → Bool
   | .ctor .. | .reset .. | .reuse .. | .oproj .. | .uproj .. | .sproj ..
@@ -34,7 +34,7 @@ def locallyValueProducingSafeToElim : LCNF.LetValue .impure → Bool
   | .lit .. | .pap .. | .box .. | .unbox .. | .erased .. | .isShared .. => true
   | .fap .. | .fvar .. => false
 
-/-- Audit of Lean 4.32's eliminable impure let-value shapes.  The only
+/-- Audit of Lean 4.33's eliminable impure let-value shapes.  The only
 `safeToElim` case outside the locally value-producing family is a full
 application whose argument array is empty. -/
 theorem safeToElim_local_or_nullaryFap
@@ -49,13 +49,14 @@ theorem safeToElim_local_or_nullaryFap
 
 /-! ## Transparent backwards liveness traversal -/
 
-/-- SHA-256 of `Lean/Compiler/LCNF/ElimDead.lean` in Lean 4.32.0. -/
-def lean432ElimDeadSourceSha256 : String :=
-  "af1868ea62e059ce746a05bd96e78727c58d2b0f5a021b42c8149a949b900170"
+/-- SHA-256 of `Lean/Compiler/LCNF/ElimDead.lean` in Lean 4.33.0. -/
+def lean433ElimDeadSourceSha256 : String :=
+  "c5a22e15eab79ebd6ef1e8f302095c69aeaccb12275f7468b505b03cde97a582"
 
-/-- Proof-facing spelling of Lean's `FVarIdHashSet`.  The upstream name is an
-exposed opaque wrapper around this exact representation, which prevents its
-standard membership instance from surviving proof elaboration consistently. -/
+/-- Proof-facing finite set used by the transparent traversal. Lean 4.33's
+upstream `UsedLocalDecls` is an `FVarIdSet` tree set; the traversal observes it
+only through `contains` and `insert`, so this hash-set spelling retains the
+same extensional behavior while keeping the proof interface transparent. -/
 abbrev UsedLocals := Std.HashSet FVarId
 
 def collectArg (used : UsedLocals) (argument : LCNF.Arg pu) : UsedLocals :=
@@ -110,7 +111,7 @@ def shadowAltList?
       let (rest, used) ← shadowAltList? transformCode used rest
       return (alternative :: rest, used)
 
-/-- Fuel-indexed transparent copy of the output-producing part of Lean 4.32's
+/-- Fuel-indexed transparent copy of the output-producing part of Lean 4.33's
 private `Code.elimDead`.  The compiler's `eraseLetDecl`/`eraseFunDecl` calls
 update only its local context and are intentionally absent.  Every recursive
 code call consumes fuel; terminal nodes remain available at zero fuel. -/

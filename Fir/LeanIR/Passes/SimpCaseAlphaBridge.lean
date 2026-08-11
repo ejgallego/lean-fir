@@ -154,7 +154,7 @@ theorem structuralAlphaStructuralTraceSamePhaseCorrectOn
         (ih entry member args admissible.2 observation)
 
 /-- Evidence for the transparent compiler shadow followed by an alpha step.
-`caseSound` remains explicit because Lean 4.32's actual recursive simpCase
+`caseSound` remains explicit because Lean 4.33's actual recursive simpCase
 implementation is private and opaque to downstream kernel proofs. -/
 structure ShadowThenAlphaPrograms
     (validCase : LCNF.Cases .impure → Nat → Prop) (fuel : Nat)
