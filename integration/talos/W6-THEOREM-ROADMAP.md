@@ -1496,10 +1496,20 @@ acceptance tests pass.
      Both named and exactly saturated ready states now enter their generated
      callees in the same global outcome from only the ordinary source step;
      the saturated rule reconstructs exact closure consumption internally.
-     The next slice adds the suspended caller's supported-function identity to
-     the hereditary return boundary, closes direct/saturated pop under the
-     global outcome, and then widens admission to the established external,
-     lazy, case, and effect laws.
+     The recursive supported-function half is now explicit as well.
+     `ConcreteStructuredSupportedFrameStack` stores each suspended caller spec,
+     canonical cache identity, and exact direct/saturated continuation layout;
+     its `Agrees` relation aligns each constructor with the existing hereditary
+     resource stack. `ConcreteStructuredSupportedGlobalOutcome` combines that
+     aligned chain with the active function's cache identity. Direct and
+     saturated call entry push both stacks atomically, while
+     `advance_pop_supportedGlobal_of_step` inverts their common head and
+     restores the caller after the exact generated target suffix. The root
+     return case is impossible for an ordinary `.next` source step. No rule
+     contains a callee evaluation, termination premise, future admission, or
+     target execution certificate. The next slice closes the pointwise
+     outcome law over this strong relation, then widens admission to the
+     established external, lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a

@@ -6090,10 +6090,23 @@ the active generated function, entry anchor, and budget, so
 `advance_global` has a module-stable conclusion. Named and exactly saturated
 ready states take the ordinary source step into that same global outcome;
 saturated closure consumption is reconstructed from the step rather than
-supplied as a second dynamic premise. The remaining return-pop boundary must
-retain the suspended caller's supported-function identity alongside its
-resource scope, then the same law widens over the already established
-external, lazy, case, and effect operations.
+supplied as a second dynamic premise.
+`ConcreteStructuredSupportedFrameStack` now retains each suspended caller's
+supported-function identity and canonical cache table alongside the exact
+generated direct or saturated frame protocol. Its `Agrees` relation ties that
+static stack constructor by constructor to
+`ConcreteStructuredSuspendedResourceStack`, avoiding the ambiguity of frame
+lists that happen to be extensionally equal. The stronger
+`ConcreteStructuredSupportedGlobalOutcome` keeps the active cache identity and
+this aligned caller chain. Named and saturated entry push both descriptions
+together, and `advance_pop_supportedGlobal_of_step` inverts the aligned head,
+rules out an impossible root return, executes the exact two-step direct or
+`matcherCount + 5` saturated target suffix, and restores the caller in the same
+strong relation. These laws use only the ordinary current source step; they
+contain no whole-callee evaluation, termination premise, or execution
+certificate. The next pointwise closure theorem carries this support package
+through ordinary code/ready/returned outcomes, then widens admission over the
+already established external, lazy, case, and effect operations.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
