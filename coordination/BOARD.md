@@ -13,6 +13,26 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `VALIDATION-REPEATED-CHILD-RELEASE-S5B`.
+- Integration owner: `test-fixtures`; the user authorized this lane to take
+  the integration role when needed.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  `main` at `1fc7982e` after the accepted W6 saturated-control proof stack.
+- Candidate stack: planning seed `9ca3b3bc`, fixture commit `c8f764bd`,
+  coverage/docs head `cc52d810`, and resolved ready mailbox `8d964886`.
+- Scope: fixture-only repeated-child recursive release, exact LCNF path
+  evidence, native-oracle and coverage ratchets, validation documentation,
+  and the coverage-guided narrowing policy. No shared semantic, proof, W6,
+  W7, concrete-runtime, or resident-helper contract changes.
+- Acceptance so far: clean post-rebase handoff; Lean Beam update/sync/save;
+  focused native/LCNF and native/LCNF/real-V8 checks; `git diff --check`; and
+  complete pre- and post-rebase `make check` with zero findings. Integration
+  will resolve this lease, fast-forward `main`, and push before the next
+  fixture slice begins.
+
 ## Latest completed integration lease
 
 - Milestone: `W6-SATURATED-PER-STEP-RANK`.
