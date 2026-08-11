@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
-base: 260ce30a on main
-functional-head: 1f57b48d (accepted hereditary pointwise resource stack with direct/saturated push and pop)
-contract-base: 260ce30a; accepted pointwise control/resource stack and existing compiler/runtime contracts
+state: ready
+base: 2d24f623 on main
+functional-head: 56a3e15d (source-only pointwise admission, direct-let preservation, and return classification)
+contract-base: 2d24f623; accepted pointwise control/resource stack and current compiler/runtime contracts
 clean-at-update: true
-slice: Define the source-only pointwise admission classifier over the combined control/resource relation. Admission must be a local property of the current compiler-produced control/code, static generated-function rows, and resource facts—not an evaluation derivation. Connect the first code/control successor families and show each successful admitted source step constructs a finite target path, successor control/resource relation, and rank decrease when the target path is empty.
+slice: Added `ConcreteStructuredCodeAdmission`, a source-only structural coverage judgment containing supported direct operations, deterministic fact/budget transfer, continuation coverage, and return ABI compatibility, but no runtime step, endpoint, target path, or evaluation derivation. Added `ConcreteStructuredCodePointwiseRel` combining the actual compiler focus, hereditary resource stack, and that admission under the generated-function spec. Proved canonical root construction, complete direct-value successor preservation through the production runtime law, and return classification into terminal/direct-bind/saturated-bind control from a supplied successful source step.
 files: integration/talos/FirTalos/ConcreteStructuredSimulation.lean; integration/talos/PLAN.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
 contracts: none; proof relation and roadmap only
-checks: pending
+checks: post-rebase `lean-beam update/sync/save FirTalos/ConcreteStructuredSimulation.lean` (0 errors, 1 existing warning); `lake -d integration/talos build FirTalos.ConcreteStructuredSimulation` (3110 jobs); `git diff --check`; `make check` (122 unit tests plus native/LCNF validation and Wasm validation checks); `make talos-setup` (Talos a01d01c778b794dd00956748a067b6793c2c9f9b); `make talos-check` (3133 jobs); all passed
 bug-cards: none
 blockers: none
-handoff: not ready; active proof slice
-next: Inventory the existing source-only admitted code predicates and operation-family progression theorems, define the minimal local admission judgment for ordinary code, and prove its root construction and first successor-preservation cases.
+handoff: ready for integration; branch rebased on 2d24f623 and clean before this mailbox update
+next: Carry source-only continuation admission through direct/saturated call push and bind pop, then widen the pointwise `advance` dispatcher to the already proved external, lazy, case, persistent/ordinary effect, and ranked zero-target-step families.
 ```
