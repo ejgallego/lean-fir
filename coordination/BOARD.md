@@ -13,6 +13,33 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
+## Active integration lease
+
+- Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3B`.
+- Integration owner: `test-fixtures`; the user authorized this lane to act as
+  integration owner when needed, and the clean S3b handoff is ready for prompt
+  fixture-only integration.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  `main` at `473d5ec3` after W7 HitScene v2 acceptance.
+- Published stack: functional head `f997949f` and ready mailbox `6e65f2aa`.
+  Four fixtures compare ignored versus read paths for one ByteArray and one
+  allocated constructor/String object repeated across two closure captures
+  while a third alias remains outside.
+- Contracts: none. The stack changes only fixture, exact trace,
+  validation-policy, roadmap, documentation, and this lane's mailbox files;
+  it changes no W6, W7, LCNF-proof, or shared semantic contract.
+- Acceptance: Lean Beam zero-diagnostic checkpoint; focused native/LCNF and
+  native/LCNF/real-V8 checks; `git diff --check`; and complete post-rebase
+  `make check` with 645/645 source and V8 cases, 9/9 direct cases, 654 unique
+  cases, 1,944/1,944 equal comparisons, 6,184 machine steps, 98 tag floors,
+  209 conjunctive domains, 1,290 native-oracle witnesses, and zero findings.
+- Coordination: the W7 package consumed by this stack is already on `main`.
+  The ready LCNF-proof and W6 mailboxes remain untouched on older bases and
+  must rebase before their next integration handoff.
+- Planned result: fast-forward `main` through the exact candidate, push it,
+  mark S3b landed/released, and hand the fixture lane to S4/B1 tail ownership.
+
 ## Latest completed integration lease
 
 - Milestone: `W7-ILLUMINATE-HITSCENE-V2`.
