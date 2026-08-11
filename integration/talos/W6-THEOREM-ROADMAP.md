@@ -1254,12 +1254,18 @@ acceptance tests pass.
      existing resource-indexed runtime laws into explicit finite paths in both
      machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
      `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
-     structured target return with both path lengths exposed. The next slice
-     threads the entry-relative frame and exact saved-frame suffix recursively
-     through internal calls.
-     Subsequent slices handle structured lazy/case prefixes, target-only
-     label/loop unwinding, apply/cache source frames, and the remaining
-     non-terminal operations.
+     structured target return with both path lengths exposed.
+     `reachesYield_reuseBudgetedDirectCalls_generated` now performs the same
+     construction over the existing source-only hereditary relation. A named
+     call executes its compiler-derived argument prefix and structured call
+     entry, recurses in the exact generated declaration row, reconstructs the
+     caller cache/resource frame from the callee's entry-relative transports,
+     and executes bind/call-frame return before continuing recursively. It
+     supports arbitrary finite named-call depth and preserves the exact outer
+     source and target frame stacks; no callee execution package or target
+     trace enters the premises. Subsequent slices connect external and
+     lazy/cache prefixes, selected cases, effects, saturated closure calls,
+     and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
