@@ -1209,9 +1209,17 @@ acceptance tests pass.
      `StateRelated.resolve` proves that the returned physical word refines the
      yielded source value at the compiler-selected ABI kind; the
      simulation-facing wrapper recovers the lookup from the successful source
-     step rather than asking the eventual public theorem's caller for it. The
-     next slices lift these local components through source/target frame
-     correspondence and add positive target paths for non-terminal operations.
+     step rather than asking the eventual public theorem's caller for it.
+     The local focus also retains `ConcreteLocalFrameAligned`, which is needed
+     to prove that a not-yet-bound result slot can be written. The first
+     continuation constructor is now explicit: a source bind frame corresponds
+     to a one-result target call frame whose residual code stores the result
+     and enters the adapted continuation. One source yielded/bind resumption is
+     matched by exactly `returnCall` plus `local.set`, reconstructing the code
+     focus with the semantic result bound and the caller operand tail restored.
+     The next slices construct this bind/call frame relation at call entry,
+     handle target-only label/loop unwinding, and cover apply/cache source
+     frames plus positive target paths for non-terminal operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

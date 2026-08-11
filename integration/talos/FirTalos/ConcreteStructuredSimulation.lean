@@ -55,6 +55,9 @@ structure ConcreteStructuredCodeFocus
   stateRelated :
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
       witness
+  frameAligned :
+    ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness
 
 /-- The local compiler relation already implies exact world/trace observation
 agreement.  Frame correspondence is irrelevant to observations and can be
@@ -116,6 +119,9 @@ structure ConcreteStructuredYieldFocus
   stateRelated :
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
       witness
+  frameAligned :
+    ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv targetStore
+      targetLocals witness
   valueRelated : PhysicalValueRel witness kind physical sourceValue
 
 theorem ConcreteStructuredYieldFocus.observes
@@ -236,6 +242,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
       targetStoreEq := by simp [targetAfter, related.targetStoreEq]
       targetControlEq := by simp [targetAfter]
       stateRelated := related.stateRelated
+      frameAligned := related.frameAligned
       valueRelated }
 
 /-- Simulation-facing return rule.  The generic advance theorem supplies a
@@ -289,6 +296,305 @@ theorem ConcreteStructuredCodeFocus.advance_return_of_step
         injection computedStep
       subst computedAfter
       exact ⟨sourceValue, kind, physical, targetAfter, path, focus⟩
+
+/-- Changing only the operand stack commutes with a successful checked local
+write.  The structured call-frame proof uses this to expose the returned value
+as a stack head, execute `local.set`, and restore the caller's saved operand
+tail. -/
+theorem locals_set?_with_values
+    {locals updated : Wasm.Locals}
+    {index : Nat}
+    {value : Wasm.Value}
+    (values : List Wasm.Value)
+    (set : locals.set? index value = some updated) :
+    ({ locals with values }.set? index value) =
+      some { updated with values } := by
+  unfold Wasm.Locals.set? at set
+  split at set
+  · rename_i inParams
+    cases set
+    simp [Wasm.Locals.set?, inParams]
+  · rename_i notInParams
+    split at set
+    · rename_i inLocals
+      cases set
+      simp [Wasm.Locals.set?, notInParams, inLocals]
+    · contradiction
+
+/-- One saved source bind frame corresponds to the generated call frame whose
+caller residual program stores the single returned value and continues with
+the adapted source continuation.  Target-only label/loop frames may surround
+this constructor later; they are not falsely identified with source frames. -/
+structure ConcreteStructuredBindFrameFocus
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (sourceRuntime : RuntimeState)
+    (callerEnv : Env)
+    (sourceValue : Value)
+    (result : Lean.FVarId)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals : Wasm.Locals)
+    (callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (returnedTail : List Wasm.Value)
+    (witness : RefinementWitness)
+    (kind : AbiKind)
+    (physical : Wasm.Value)
+    (resultIndex : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  sourceProgramEq : source.program = context.program
+  sourceControlEq : source.control = .yielded sourceValue
+  sourceRuntimeEq : source.runtime = sourceRuntime
+  sourceFramesEq :
+    source.frames = .bind result continuation callerEnv callerJoins ::
+      sourceFrames
+  targetStoreEq : target.store = targetStore
+  targetControlEq :
+    target.control = .returning (physical :: returnedTail)
+  targetFramesEq :
+    target.frames =
+      .call 1 callerRemainder callerLocals
+          (.localSet resultIndex :: targetRest) :: targetFrames
+  continuationAdapted :
+    CodeAdapted context sourceModule sourceFunction labels continuation
+      targetRest
+  stateRelated :
+    StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
+      witness
+  frameAligned :
+    ConcreteLocalFrameAligned sourceFunction sourceRuntime callerEnv targetStore
+      callerLocals witness
+  resultFound :
+    findFVar? (functionBindings sourceFunction) result = some resultIndex
+  kindAt :
+    (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind
+  valueRelated : PhysicalValueRel witness kind physical sourceValue
+
+theorem ConcreteStructuredBindFrameFocus.observes
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames returnedTail witness kind physical
+      resultIndex source target) :
+    ConcretePrefixObservationRel
+      (sourcePrefixObservation source)
+      (concretePrefixObservation target.store) := by
+  refine ⟨witness, ?_, ?_⟩
+  · change target.store.host.runtime.world = source.runtime.world
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.world
+  · change ConcreteTraceRel witness target.store.host.runtime.trace
+      source.runtime.trace
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.trace
+
+/-- Resuming a related bind/call frame takes one source administrative step
+and exactly two structured target steps: unwind the call frame, then store the
+returned physical value.  The resulting source code and target residual code
+re-enter `ConcreteStructuredCodeFocus` with the semantic result bound in the
+caller environment. -/
+theorem ConcreteStructuredBindFrameFocus.advance
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames returnedTail witness kind physical
+      resultIndex source target) :
+    ∃ sourceAfter targetAfter resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime (bind callerEnv result sourceValue) continuation
+        targetStore resumedLocals targetRest witness sourceAfter targetAfter := by
+  obtain ⟨updated, targetSet, updatedAligned⟩ :=
+    related.frameAligned.set?
+      (nextRuntime := sourceRuntime)
+      (nextEnv := bind callerEnv result sourceValue)
+      (nextStore := targetStore)
+      (nextWitness := witness)
+      related.resultFound
+  let resumedLocals : Wasm.Locals :=
+    { updated with values := callerRemainder }
+  have updatedRelated :
+      StateRelated sourceFunction sourceRuntime
+        (bind callerEnv result sourceValue) targetStore resumedLocals witness := by
+    have bound := related.stateRelated.bindPhysical related.resultFound
+      related.kindAt related.valueRelated targetSet
+    rw [related.stateRelated.clearFailure] at bound
+    simpa [resumedLocals, StateRelated, EnvLocalsRelated, Wasm.Locals.get]
+      using bound
+  have resumedAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime
+        (bind callerEnv result sourceValue) targetStore resumedLocals witness := by
+    simpa [resumedLocals, ConcreteLocalFrameAligned] using updatedAligned
+  let sourceAfter : MachineState :=
+    { source with
+      control := .code continuation
+      env := bind callerEnv result sourceValue
+      joins := callerJoins
+      frames := sourceFrames }
+  let targetAfterCall : StructuredWasmState Host :=
+    { target with
+      control := .running
+        { callerLocals with
+          values := physical :: callerRemainder }
+        (.localSet resultIndex :: targetRest)
+      frames := targetFrames }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      control := .running resumedLocals targetRest
+      frames := targetFrames }
+  refine ⟨sourceAfter, targetAfter, resumedLocals, ?_, ?_, ?_⟩
+  · rcases source with
+      ⟨program, control, env, joins, frames, runtime⟩
+    have controlEq := related.sourceControlEq
+    change control = .yielded sourceValue at controlEq
+    subst control
+    have framesEq := related.sourceFramesEq
+    change frames = _ at framesEq
+    subst frames
+    simp [sourceAfter, executeStep, coreStep]
+  · have unwindStep :
+        StructuredWasmStep module hostEnv target targetAfterCall := by
+      rcases target with ⟨store, control, frames⟩
+      have storeEq := related.targetStoreEq
+      change store = targetStore at storeEq
+      subst store
+      have controlEq := related.targetControlEq
+      change control = .returning (physical :: returnedTail) at controlEq
+      subst control
+      have framesEq := related.targetFramesEq
+      change frames = _ at framesEq
+      subst frames
+      exact StructuredWasmStep.returnCall
+    have stackSet :
+        ({ callerLocals with
+            values := physical :: callerRemainder }.set? resultIndex physical) =
+          some { updated with values := physical :: callerRemainder } :=
+      locals_set?_with_values (physical :: callerRemainder) targetSet
+    have storeStep :
+        StructuredWasmStep module hostEnv targetAfterCall targetAfter := by
+      rcases target with ⟨store, control, frames⟩
+      have storeEq := related.targetStoreEq
+      change store = targetStore at storeEq
+      subst store
+      apply StructuredWasmStep.atomic (fuel := 1)
+      · trivial
+      · simp only [Wasm.execOne.eq_def, stackSet]
+        rfl
+    exact .cons unwindStep (.cons storeStep (.refl targetAfter))
+  · exact {
+      sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+      sourceControlEq := by simp [sourceAfter]
+      sourceEnvEq := by simp [sourceAfter]
+      sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
+      targetStoreEq := by simp [targetAfter, related.targetStoreEq]
+      targetControlEq := by simp [targetAfter]
+      adapted := related.continuationAdapted
+      stateRelated := updatedRelated
+      frameAligned := resumedAligned }
+
+/-- Simulation-facing bind-frame rule.  Determinism identifies the successor
+constructed by `advance` with the successor supplied by the generic source
+transition premise. -/
+theorem ConcreteStructuredBindFrameFocus.advance_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder returnedTail : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames returnedTail witness kind physical
+      resultIndex source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter resumedLocals,
+      FinitePath (StructuredWasmStep module hostEnv) 2 target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime (bind callerEnv result sourceValue) continuation
+        targetStore resumedLocals targetRest witness sourceAfter targetAfter := by
+  obtain ⟨computedAfter, targetAfter, resumedLocals, computedStep, path,
+      focus⟩ := related.advance (module := module) (hostEnv := hostEnv)
+        (externals := externals)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    injection computedStep
+  subst computedAfter
+  exact ⟨targetAfter, resumedLocals, path, focus⟩
 
 /-- Structural rank used when lowering erases a source control step.  Later
 frame slices add their own continuation component; the local erased-step laws
@@ -355,7 +661,8 @@ theorem ConcreteStructuredCodeFocus.advance_incPersistent
       targetStoreEq := related.targetStoreEq
       targetControlEq := related.targetControlEq
       adapted := CodeAdapted.incPersistent_eq related.adapted
-      stateRelated := related.stateRelated }
+      stateRelated := related.stateRelated
+      frameAligned := related.frameAligned }
   · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
       related.sourceControlEq]
 
@@ -410,7 +717,8 @@ theorem ConcreteStructuredCodeFocus.advance_decPersistent
       targetStoreEq := related.targetStoreEq
       targetControlEq := related.targetControlEq
       adapted := CodeAdapted.decPersistent_eq related.adapted
-      stateRelated := related.stateRelated }
+      stateRelated := related.stateRelated
+      frameAligned := related.frameAligned }
   · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
       related.sourceControlEq]
 
