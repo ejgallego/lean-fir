@@ -4988,8 +4988,9 @@ globals.  Default-only cases are included as compiler-erased control steps,
 and arbitrary normalized object-constructor cases execute the
 compiler-generated `getTag` chain recursively.  Arbitrary normalized scalar
 `UInt8` cases execute the generated direct-comparison chain recursively as
-well.  Heap-valued miss publication and effects remain separate later
-widenings. -/
+well.  Persistent ownership effects are source-visible recursive steps whose
+compiler erasure is matched by a zero-step target path.  Heap-valued miss
+publication and ordinary ownership effects remain separate later widenings. -/
 inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
     (externals : ExternalImpl) :
     Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState →
@@ -5168,6 +5169,20 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | persistentOwnershipEffect
+      (supported :
+        PersistentOwnershipEffectSupported sourceRuntime sourceEnv code
+          continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -5261,6 +5276,9 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
           simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
           (.refl _))
         ih
+  | persistentOwnershipEffect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (sourceStep externals) (.refl _)) ih
 
 /-- Recover the ordinary ABI classifier from the direct-call classifier. -/
 theorem abiKind?_of_directAbiKind?_eq_some
@@ -6344,6 +6362,94 @@ theorem
         finalYielded, resultInvariant, resultRefines, resultJoins,
         by simpa [sourceSelected] using sourceFramesEq,
         by simp [targetFinal]⟩
+  | @persistentOwnershipEffect sourceRuntime sourceEnv code continuation
+      nextRuntime context expectedResult facts resultFacts resultRuntime
+      resultEnv resultValue requiredBytes supported _sourceStep continued ih =>
+      cases supported with
+      | inc =>
+          let sourceMiddle : MachineState := {
+            source with control := .code continuation }
+          have firstSourceStep :
+              executeStep externals source = .next sourceMiddle := by
+            rcases source with
+              ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+                sourceFrames, actualRuntime⟩
+            have controlEq := related.sourceControlEq
+            change sourceControl = _ at controlEq
+            subst sourceControl
+            rfl
+          have nextFocus :
+              ConcreteStructuredCodeFocus context sourceModule sourceFunction
+                [] sourceRuntime sourceEnv continuation targetStore targetLocals
+                targetCode witness sourceMiddle target := {
+            sourceProgramEq := by
+              simp [sourceMiddle, related.sourceProgramEq]
+            sourceControlEq := by simp [sourceMiddle]
+            sourceEnvEq := by simp [sourceMiddle, related.sourceEnvEq]
+            sourceRuntimeEq := by
+              simp [sourceMiddle, related.sourceRuntimeEq]
+            targetStoreEq := related.targetStoreEq
+            targetControlEq := related.targetControlEq
+            adapted := CodeAdapted.incPersistent_eq related.adapted
+            stateRelated := related.stateRelated
+            frameAligned := related.frameAligned }
+          obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+              resultWitness, kind, physical, sourceCount, targetCount,
+              sourceTail, targetPath, yielded, resultInvariant,
+              resultRefines, resultJoins, sourceFramesEq, targetFramesEq⟩ :=
+            ih functionSpec contextCaches nextFocus
+              (by simpa [sourceMiddle] using sourceJoins)
+              invariant
+          exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+            resultWitness, kind, physical, 1 + sourceCount, targetCount,
+            (FinitePath.single
+              (step := fun before after =>
+                executeStep externals before = .next after)
+              firstSourceStep).trans sourceTail,
+            targetPath, yielded, resultInvariant, resultRefines, resultJoins,
+            by simpa [sourceMiddle] using sourceFramesEq, targetFramesEq⟩
+      | dec =>
+          let sourceMiddle : MachineState := {
+            source with control := .code continuation }
+          have firstSourceStep :
+              executeStep externals source = .next sourceMiddle := by
+            rcases source with
+              ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+                sourceFrames, actualRuntime⟩
+            have controlEq := related.sourceControlEq
+            change sourceControl = _ at controlEq
+            subst sourceControl
+            rfl
+          have nextFocus :
+              ConcreteStructuredCodeFocus context sourceModule sourceFunction
+                [] sourceRuntime sourceEnv continuation targetStore targetLocals
+                targetCode witness sourceMiddle target := {
+            sourceProgramEq := by
+              simp [sourceMiddle, related.sourceProgramEq]
+            sourceControlEq := by simp [sourceMiddle]
+            sourceEnvEq := by simp [sourceMiddle, related.sourceEnvEq]
+            sourceRuntimeEq := by
+              simp [sourceMiddle, related.sourceRuntimeEq]
+            targetStoreEq := related.targetStoreEq
+            targetControlEq := related.targetControlEq
+            adapted := CodeAdapted.decPersistent_eq related.adapted
+            stateRelated := related.stateRelated
+            frameAligned := related.frameAligned }
+          obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+              resultWitness, kind, physical, sourceCount, targetCount,
+              sourceTail, targetPath, yielded, resultInvariant,
+              resultRefines, resultJoins, sourceFramesEq, targetFramesEq⟩ :=
+            ih functionSpec contextCaches nextFocus
+              (by simpa [sourceMiddle] using sourceJoins)
+              invariant
+          exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+            resultWitness, kind, physical, 1 + sourceCount, targetCount,
+            (FinitePath.single
+              (step := fun before after =>
+                executeStep externals before = .next after)
+              firstSourceStep).trans sourceTail,
+            targetPath, yielded, resultInvariant, resultRefines, resultJoins,
+            by simpa [sourceMiddle] using sourceFramesEq, targetFramesEq⟩
   | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
       nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>

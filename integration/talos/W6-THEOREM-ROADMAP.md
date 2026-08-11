@@ -1309,9 +1309,14 @@ acceptance tests pass.
      Arbitrary normalized scalar `UInt8` tables are connected by the analogous
      structural induction. Their direct local/constant/equality/conditional
      tests cost four target steps each, retain the same one label per executed
-     test, and need no concrete host call. Subsequent slices connect effects
-     and add saturated closure calls, heap-valued cache misses, and target-only
-     label/loop unwinding to this induction.
+     test, and need no concrete host call. Persistent ownership effects are
+     connected recursively too: a persistent `inc` or `dec` takes one source
+     step while production compilation erases it, so the target path is
+     reflexive and the complete entry-relative cache/resource frame passes
+     unchanged to the continuation induction. Subsequent slices connect
+     ordinary ownership and mutation effects and add saturated closure calls,
+     heap-valued cache misses, and target-only label/loop unwinding to this
+     induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
