@@ -16522,16 +16522,23 @@ theorem retainedPrefixReuseResetPairReady_ledger
       ⟨remaining, final, bounded, exact, subset, static⟩
     cases covered with
     | ret liveMember =>
-      have mapping : rho.forward 0 = some 0 := by
-        apply env.heap_mapping liveMember
-        · simp [retainedPrefixReuseSourceResetState,
-            nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
-            Impure.bind, lookup, live, resetObjectVar]
-        · exact targetShape.liveRead
+      have sourceRead :
+          lookup
+              (retainedPrefixReuseSourceResetState sourceArguments).env
+              live = some (.object (.heap 0)) := by
+        simp [retainedPrefixReuseSourceResetState,
+          nonemptyLedgerResetEnv, nonemptyLedgerRetainedEnv,
+          Impure.bind, lookup, live, resetObjectVar]
+      let ownerBindings :=
+        targetShape.liveHeapBindingPrefix liveMember sourceRead
       have sourceOnly :
           SourceOnlyUnderTargetLedger ledger 1 :=
-        targetShape.sourceOnly_of_mapping_ne
-          mapping (by decide) ledger
+        ownerBindings.sourceOnly_of_owners_ne env
+          (by
+            intro _location _bounded
+            change (0 : Location) ≠ 1
+            decide)
+          ledger
       have closure :
           SourceOnlyHeapClosureBinding ledger
             (retainedPrefixReuseSourceResetState sourceArguments).env
@@ -16636,16 +16643,23 @@ theorem retainedPrefixReusePairReady_ledger
       ⟨remaining, final, bounded, exact, subset, static⟩
     cases covered with
     | ret liveMember =>
-      have mapping : rho.forward 0 = some 0 := by
-        apply env.heap_mapping liveMember
-        · simp [retainedPrefixReuseSourceReuseState,
-            nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
-            nonemptyLedgerRetainedEnv, Impure.bind, lookup,
-            live, resetObjectVar, reuseTokenVar, reuseArgVar]
-        · exact targetShape.liveRead
+      have sourceRead :
+          lookup
+              (retainedPrefixReuseSourceReuseState sourceArguments).env
+              live = some (.object (.heap 0)) := by
+        simp [retainedPrefixReuseSourceReuseState,
+          nonemptyLedgerReuseEnv, nonemptyLedgerResetEnv,
+          nonemptyLedgerRetainedEnv, Impure.bind, lookup,
+          live, resetObjectVar, reuseTokenVar, reuseArgVar]
+      let ownerBindings :=
+        targetShape.liveHeapBindingPrefix liveMember sourceRead
       have sourceOnly : SourceOnlyUnderTargetLedger ledger 1 :=
-        targetShape.sourceOnly_of_mapping_ne
-          mapping (by decide) ledger
+        ownerBindings.sourceOnly_of_owners_ne env
+          (by
+            intro _location _bounded
+            change (0 : Location) ≠ 1
+            decide)
+          ledger
       have reuseReady :
           DeletedReuseReadyAt
             (retainedPrefixReuseSourceReuseState sourceArguments)

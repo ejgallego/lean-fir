@@ -7528,6 +7528,52 @@ theorem TargetMappedOwnerPrefix.sourceOnly_of_owners_ne
       (ownerMap.forwardMapped rightLocation bounded) bounded
   exact different rightLocation bounded (ownerEq.symm.trans sameOwner)
 
+/-- A compiler residual covers an allocated target prefix by live heap
+bindings when every target address below the frontier is named by a retained
+local on both sides.  This is deliberately independent of any particular
+control shape or allocation count: exact code coverage supplies
+`binderUsed`, while the related environments supply the address mappings. -/
+structure TargetLiveHeapBindingPrefix
+    (used : UsedLocals) (sourceEnv targetEnv : Env)
+    (rightFrontier : Location) where
+  sourceOwner : Location → Location
+  binder : Location → FVarId
+  binderUsed : ∀ rightLocation, rightLocation < rightFrontier →
+    used.contains (binder rightLocation) = true
+  sourceRead : ∀ rightLocation, rightLocation < rightFrontier →
+    lookup sourceEnv (binder rightLocation) =
+      some (.object (.heap (sourceOwner rightLocation)))
+  targetRead : ∀ rightLocation, rightLocation < rightFrontier →
+    lookup targetEnv (binder rightLocation) =
+      some (.object (.heap rightLocation))
+
+/-- Exact environment relatedness turns live source/target heap bindings for
+an arbitrary allocated target prefix into proof-visible owner mappings. -/
+def TargetLiveHeapBindingPrefix.mappedOwnerPrefix
+    (bindings : TargetLiveHeapBindingPrefix used sourceEnv targetEnv
+      rightFrontier)
+    (env : EnvRelOn rho used sourceEnv targetEnv) :
+    TargetMappedOwnerPrefix rho rightFrontier where
+  sourceOwner := bindings.sourceOwner
+  forwardMapped := by
+    intro rightLocation bounded
+    exact env.heap_mapping
+      (bindings.binderUsed rightLocation bounded)
+      (bindings.sourceRead rightLocation bounded)
+      (bindings.targetRead rightLocation bounded)
+
+/-- A source address distinct from every compiler-live prefix owner is
+outside the exact target allocation ledger. -/
+theorem TargetLiveHeapBindingPrefix.sourceOnly_of_owners_ne
+    (bindings : TargetLiveHeapBindingPrefix used sourceEnv targetEnv
+      rightFrontier)
+    (env : EnvRelOn rho used sourceEnv targetEnv)
+    (different : ∀ rightLocation, rightLocation < rightFrontier →
+      bindings.sourceOwner rightLocation ≠ sourceOnly)
+    (ledger : TargetAllocationLedger rho rightFrontier) :
+    SourceOnlyUnderTargetLedger ledger sourceOnly :=
+  (bindings.mappedOwnerPrefix env).sourceOnly_of_owners_ne different ledger
+
 /-- Program-independent target interface for a live returned heap binding
 when the allocated target prefix contains exactly one location.  The binder,
 location, and numeric frontier are explicit parameters so reset/reuse clients
@@ -7542,6 +7588,34 @@ structure TargetSingletonLiveReturnAt
   rightBounded : rightLocation < rightFrontier
   singleton : ∀ location, location < rightFrontier →
     location = rightLocation
+
+/-- The unique returned live binding covers a singleton allocated prefix.
+This packages the focused shape as an instance of the arbitrary compiler-live
+binding interface; address mapping is derived later from `EnvRelOn`. -/
+def TargetSingletonLiveReturnAt.liveHeapBindingPrefix
+    (shape : TargetSingletonLiveReturnAt target binder
+      rightLocation rightFrontier)
+    (binderUsed : used.contains binder = true)
+    (sourceRead :
+      lookup sourceEnv binder = some (.object (.heap sourceOwner))) :
+    TargetLiveHeapBindingPrefix used sourceEnv target.env
+      target.runtime.nextLocation where
+  sourceOwner := fun _ => sourceOwner
+  binder := fun _ => binder
+  binderUsed := by
+    intro _location _bounded
+    exact binderUsed
+  sourceRead := by
+    intro _location _bounded
+    exact sourceRead
+  targetRead := by
+    intro location bounded
+    have prefixBounded : location < rightFrontier := by
+      simpa [shape.frontier] using bounded
+    have locationEq : location = rightLocation :=
+      shape.singleton location prefixBounded
+    subst location
+    exact shape.liveRead
 
 /-- A mapped owner of the unique live target address supplies owner witnesses
 for the whole singleton prefix. This is the adapter from the focused fixture
