@@ -13,16 +13,17 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-SEMANTIC-FIDELITY-BASELINE`.
-- Integration owner: `test-fixtures`; the user assigned this lane the lease to
-  land the prepared native-oracle fixture and executable-roadmap stack before
-  S2 closure-multiplicity work begins.
+- Integration owner: `test-fixtures`; the user assigned this lane the lease and
+  it landed the prepared native-oracle fixture and executable-roadmap stack
+  before S2 closure-multiplicity work begins.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
   `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
   `main` at `cf0b6e89`.
-- Candidate stack: functional head `b20eb671` and ready mailbox `b3ff066f`.
+- Published stack: functional head `b20eb671`, ready mailbox `b3ff066f`, and
+  exact validated lease candidate `1d1a6883`.
   It admits the 32 scalar closures, mixed one-use/two-use ownership pair, and
   outside-alias ByteArray read/mutate pair; retains exact LCNF evidence; and
   publishes the executable semantic-fidelity roadmap and coverage ratchets.
@@ -30,12 +31,13 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
   discrepancy-record, and documentation files; it does not change W6, W7,
   LCNF-proof, or shared semantic surfaces. Other lanes rebase after landing,
   but no proof or compiler contract is invalidated.
-- Acceptance: clean tree; `git diff --check`; complete `make check` with 122
+- Validation: clean tree; `git diff --check`; complete `make check` with 122
   harness tests, 646 unique cases, 637/637 native/LCNF/V8 cases, 9/9 direct
   machine cases, 1,920/1,920 equal comparisons, 5,900 machine steps, all 73
   tag floors and 183 conjunctive domains satisfied, and zero findings.
-- Landing sequence: revalidate the exact candidate, fast-forward `main`, mark
-  this lease completed, then start S2 from the landed base on the fixture lane.
+- Result: `main` fast-forwards atomically through this completion record. Other
+  lanes rebase before their next handoff; the fixture lane starts S2 from the
+  landed base.
 
 ## Latest completed integration lease
 
