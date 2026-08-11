@@ -6031,11 +6031,17 @@ and both return protocols use it to compose all callee transports, erase
 exactly the bound result fact, restore the caller resource invariant, and pop
 the structural frame. These rules concern one finite call/return boundary and
 have no callee evaluation or termination premise.
-The next boundary is to index a parallel recursive resource stack by
-`ConcreteStructuredFrameRel`, then define the source-only pointwise admission
-invariant. It must construct the applicable local rule and preserve facts,
-budget, and admission at the successor instead of reintroducing the
-terminating hereditary evaluator.
+`ConcreteStructuredSuspendedResourceStack` and
+`ConcreteStructuredResourceStack` now assemble those local scopes into the
+parallel recursive invariant. Adjacent scopes share their exact entry boundary
+by construction. Its `frameRel` projection transports every saved caller to
+the active heap and reconstructs `ConcreteStructuredFrameRel`; generated
+direct and saturated entries push the same invariant, while both bind-return
+rules restore the caller scope and expose the older chain as the successor.
+The next boundary is the source-only pointwise admission invariant. It must
+construct the applicable local rule and preserve facts, budget, and admission
+at the successor instead of reintroducing the terminating hereditary
+evaluator.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

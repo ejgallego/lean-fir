@@ -1440,10 +1440,15 @@ acceptance tests pass.
      suspended caller and start a fresh callee scope. The shared
      `restoreCaller` theorem and both return rules fold all callee transports
      back into the caller, erase exactly the result fact, and pop the structural
-     frame without any callee evaluation or termination premise. The next
-     slice indexes these scopes as a parallel recursive resource stack and
-     begins the source-only pointwise admission invariant, whose preservation
-     proof must replace rather than wrap the terminating hereditary evaluator.
+     frame without any callee evaluation or termination premise.
+     `ConcreteStructuredSuspendedResourceStack` now chains those exact scopes,
+     and `ConcreteStructuredResourceStack` pairs the chain with the active
+     scope. Its projection reconstructs `ConcreteStructuredFrameRel` at the
+     current heap. Direct and saturated generated entries push the unified
+     invariant; both return protocols restore its caller head and expose the
+     older tail as the successor resource stack. The next slice begins the
+     source-only pointwise admission invariant, whose preservation proof must
+     replace rather than wrap the terminating hereditary evaluator.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
