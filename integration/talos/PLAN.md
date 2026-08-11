@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, call entry/return, caller transport, and first flat direct-let transition complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, call entry/return, caller transport, and the complete resource-indexed direct-value spine are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5849,11 +5849,15 @@ The current W6.7e body boundary derives exact Talos execution from existing
 runtime WP laws and reifies straight-line generated prefixes as structured
 finite paths beneath arbitrary code and frame suffixes. The direct source
 `let` constructor restores the recursively compiled focus without accepting a
-target execution or translation certificate. Immediate literals and local
-aliases already discharge the required target-shape premise from the real
-compiler and adapter; the next direct slice closes the remaining
-runtime-import families before the resource-indexed recursive induction is
-assembled.
+target execution or translation certificate. The real compiler and adapter
+now discharge the target-shape premise for every operation in
+`ReuseBudgetedDirectSupported`, including mixed local/erased constructor
+arguments and reuse-token prefixes. The resource-indexed recursive induction
+composes those direct `let` paths with the final return and retains exact
+source/target path lengths. The next construction slice lifts this completed
+direct body spine through the entry-relative saved-frame relation for nested
+internal calls, then continues with external, lazy/cache, case, and effect
+transitions.
 
 ## Parallel agent packages
 

@@ -235,6 +235,679 @@ theorem structuredWasmFlatProgram_localGet_localSet
   exact .cons (.atomic (by trivial))
     (.cons (.atomic (by trivial)) .nil)
 
+/-- A compiler-generated call that resolves to a target import, followed by
+the generated destination write, is a two-step flat target fragment. -/
+theorem structuredWasmFlatProgram_importCall_localSet
+    {module : Wasm.Module} {functionIndex resultIndex : Nat}
+    {imp : Wasm.ImportDecl}
+    (imported : module.imports[functionIndex]? = some imp) :
+    StructuredWasmFlatProgram module
+      ([.call functionIndex] ++ [.localSet resultIndex]) := by
+  exact .cons (.importedCall imported)
+    (.cons (.atomic (by trivial)) .nil)
+
+/-- Flat target fragments are closed under program concatenation. -/
+theorem StructuredWasmFlatProgram.append
+    {module : Wasm.Module} {left right : Wasm.Program}
+    (leftFlat : StructuredWasmFlatProgram module left)
+    (rightFlat : StructuredWasmFlatProgram module right) :
+    StructuredWasmFlatProgram module (left ++ right) := by
+  induction leftFlat with
+  | nil => simpa using rightFlat
+  | cons head tail ih => exact .cons head ih
+
+/-- The production argument compiler emits only local reads and erased-zero
+constants.  Successful adaptation therefore maps its entire output to a flat
+target fragment, independently of runtime state or argument values. -/
+theorem ConstructorArgsCompiled.structuredFlatProgram
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {args : List (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : List AbiKind} {targetArguments : Wasm.Program}
+    (compiled : ConstructorArgsCompiled context args argumentCode fieldKinds)
+    (adapted :
+      instructions sourceModule sourceFunction labels argumentCode =
+        .ok targetArguments) :
+    StructuredWasmFlatProgram module targetArguments := by
+  induction compiled generalizing targetArguments with
+  | nil =>
+      have targetEq : targetArguments = [] := by
+        have adaptedEq :
+            (Except.ok [] : Except AdapterError Wasm.Program) =
+              .ok targetArguments := by
+          simpa [instructions, pure, Except.pure] using adapted
+        exact (Except.ok.inj adaptedEq).symm
+      subst targetArguments
+      exact .nil
+  | erased rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      have targetHeadEq : targetHead = .const 0 := by
+        have adaptedEq :
+            (Except.ok (.const 0) : Except AdapterError Wasm.Instruction) =
+              .ok targetHead := by
+          simpa [instruction, pure, Except.pure] using headAdapted
+        exact (Except.ok.inj adaptedEq).symm
+      subst targetHead
+      subst targetArguments
+      exact .cons (.atomic (by trivial)) (ih restAdapted)
+  | @fvar fvarId kind args argumentCode fieldKinds kindFound rest ih =>
+      obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+        instructions_cons_eq_ok adapted
+      cases sourceFound :
+          findFVar?
+            (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+            fvarId with
+      | none =>
+          simp [instruction, sourceFound] at headAdapted
+      | some sourceIndex =>
+          have targetHeadEq : targetHead = .localGet sourceIndex := by
+            have adaptedEq :
+                (Except.ok (.localGet sourceIndex) :
+                    Except AdapterError Wasm.Instruction) =
+                  .ok targetHead := by
+              simpa [instruction, sourceFound, pure, Except.pure] using
+                headAdapted
+            exact (Except.ok.inj adaptedEq).symm
+          subst targetHead
+          subst targetArguments
+          exact .cons (.atomic (by trivial)) (ih restAdapted)
+
+/-- A successfully compiled argument row followed by any runtime call is flat
+after production adaptation whenever the selected call is covered by the
+module-wide runtime-call alignment theorem. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_compileArgs_runtimeCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : Array AbiKind} {operation : RuntimeOp}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args = .ok (argumentCode, fieldKinds))
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (argumentCode ++ [.call (.runtime operation)]) =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetEq⟩ :=
+    instructions_append_call_eq valueAdapted
+  obtain ⟨imp, imported, _⟩ := spec.runtimeCallsAligned callFound
+  have argumentsFlat :
+      StructuredWasmFlatProgram target.wasmModule targetArguments :=
+    (ConstructorArgsCompiled.ofCompileArgs argumentsCompiled).structuredFlatProgram
+      argumentsAdapted
+  subst targetValue
+  simpa [List.append_assoc] using
+    StructuredWasmFlatProgram.append argumentsFlat
+      (structuredWasmFlatProgram_importCall_localSet
+        (resultIndex := resultIndex) imported)
+
+/-- Successful adaptation of one symbolic local read determines one atomic
+target local read, regardless of the source local's numeric target index. -/
+theorem structuredWasmFlatProgram_localGet_of_instructions
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {fvarId : Lean.FVarId} {targetArguments : Wasm.Program}
+    (adapted :
+      instructions sourceModule sourceFunction labels [.localGet fvarId] =
+        .ok targetArguments) :
+    StructuredWasmFlatProgram module targetArguments := by
+  obtain ⟨targetHead, targetRest, headAdapted, restAdapted, targetEq⟩ :=
+    instructions_cons_eq_ok adapted
+  have restEq : targetRest = [] := by
+    have adaptedEq :
+        (Except.ok [] : Except AdapterError Wasm.Program) =
+          .ok targetRest := by
+      simpa [instructions, pure, Except.pure] using restAdapted
+    exact (Except.ok.inj adaptedEq).symm
+  cases sourceFound :
+      findFVar?
+        (sourceFunction.params.toList ++ sourceFunction.locals.toList)
+        fvarId with
+  | none => simp [instruction, sourceFound] at headAdapted
+  | some sourceIndex =>
+      have headEq : targetHead = .localGet sourceIndex := by
+        have adaptedEq :
+            (Except.ok (.localGet sourceIndex) :
+                Except AdapterError Wasm.Instruction) =
+              .ok targetHead := by
+          simpa [instruction, sourceFound, pure, Except.pure] using
+            headAdapted
+        exact (Except.ok.inj adaptedEq).symm
+      subst targetHead
+      subst targetRest
+      subst targetArguments
+      exact .cons (.atomic (by trivial)) .nil
+
+/-- Every direct operation whose compiler shape is one local read followed by
+one runtime call has a flat adapted prefix. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_localGet_runtimeCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {operation : RuntimeOp} {targetValue : Wasm.Program} {resultIndex : Nat}
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet fvarId, .call (.runtime operation)] =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetEq⟩ :=
+    instructions_append_call_eq
+      (argumentCode := [.localGet fvarId]) valueAdapted
+  obtain ⟨imp, imported, _⟩ := spec.runtimeCallsAligned callFound
+  have argumentsFlat :
+      StructuredWasmFlatProgram target.wasmModule targetArguments :=
+    structuredWasmFlatProgram_localGet_of_instructions argumentsAdapted
+  subst targetValue
+  simpa [List.append_assoc] using
+    StructuredWasmFlatProgram.append argumentsFlat
+      (structuredWasmFlatProgram_importCall_localSet
+        (resultIndex := resultIndex) imported)
+
+/-- Recover the one-local/one-runtime-call target shape from the actual
+`compileLetValue` result before applying the generic adapter theorem. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_localRuntimeCall_of_compiler
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {fvarId : Lean.FVarId} {operation : RuntimeOp}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (expectedCompiled :
+      Fir.Wasm.compileLetValue context decl =
+        .ok [.localGet fvarId, .call (.runtime operation)])
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  rw [expectedCompiled] at valueCompiled
+  injection valueCompiled with valueCodeEq
+  subst valueCode
+  exact spec.structuredFlatProgram_localGet_runtimeCall valueAdapted
+
+/-- Admitted `USize` projections satisfy the production flatness law. -/
+theorem USizeProjectionSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : USizeProjectionSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro index objectId objectKind valueEq resultKind objectCompiled
+      objectRefines resultCompiled =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_usizeProjection valueEq resultKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Admitted object projections satisfy the same production flatness law. -/
+theorem ObjectProjectionSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : ObjectProjectionSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro index objectId objectKind resultKind valueEq valueKind objectCompiled
+      objectRefines resultCompiled fieldKindAligned =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_objectProjection valueEq valueKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Admitted packed-scalar projections satisfy production flatness. -/
+theorem ScalarProjectionSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : ScalarProjectionSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro width offset objectId objectKind resultKind valueEq valueKind
+      objectCompiled objectRefines resultCompiled valueKindAligned =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_scalarProjection valueEq valueKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Admitted scalar boxing satisfies production flatness independently of
+the concrete tagged-or-heap representation selected at runtime. -/
+theorem BoxSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : BoxSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro scalarId kind resultKind valueEq valueKind resultKindEq
+      scalarCompiled annotationKind resultCompiled =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_box valueEq valueKind scalarCompiled annotationKind)
+        valueCompiled valueAdapted
+
+/-- Admitted typed unboxing satisfies production flatness. -/
+theorem UnboxSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : UnboxSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro objectId objectKind kind valueEq resultTypeEq valueKind
+      objectCompiled objectRefines resultCompiled kindCompatible =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_unbox valueEq valueKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Admitted sharing observations satisfy production flatness. -/
+theorem IsSharedSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : IsSharedSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro objectId objectKind valueEq valueKind objectCompiled objectRefines
+      resultCompiled =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_isShared valueEq valueKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Ownership reset has the same one-local/one-runtime-call compiler shape. -/
+theorem ResetSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : ResetSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro count objectId objectKind valueEq valueKind objectCompiled
+      objectRefines resultCompiled =>
+      exact spec.structuredFlatProgram_localRuntimeCall_of_compiler
+        (compileLetValue_reset valueEq valueKind objectCompiled)
+        valueCompiled valueAdapted
+
+/-- Admitted nonempty constructors use the compiler-characterized argument
+prefix followed by one aligned allocation import. -/
+theorem NonemptyConstructorSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : NonemptyConstructorSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro info args argumentCode fieldKinds resultKind valueEq tagFits
+      valueKind argumentsCompiled resultCompiled operationWellFormed nonempty
+      objectFieldsFit usizeFieldsFit scalarBytesFit =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (argumentCode ++
+              [.call (.runtime (.allocCtor info fieldKinds resultKind))]) :=
+        compileLetValue_constructor valueEq tagFits valueKind
+          argumentsCompiled
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      exact spec.structuredFlatProgram_compileArgs_runtimeCall
+        argumentsCompiled valueAdapted
+
+/-- A leading symbolic local read may be prepended to a compiled argument row
+and runtime call without leaving the flat target fragment.  This is the exact
+production shape used by reuse. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_localGet_compileArgs_runtimeCall
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {args : Array (Lean.Compiler.LCNF.Arg .impure)}
+    {argumentCode : List Fir.Wasm.Instruction}
+    {fieldKinds : Array AbiKind} {operation : RuntimeOp}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (argumentsCompiled :
+      Fir.Wasm.compileArgs context args = .ok (argumentCode, fieldKinds))
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels
+          (.localGet fvarId ::
+            argumentCode ++ [.call (.runtime operation)]) =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  have appendedAdapted :
+      instructions sourceModule sourceFunction labels
+          ([.localGet fvarId] ++
+            (argumentCode ++ [.call (.runtime operation)])) =
+        .ok targetValue := by
+    simpa using valueAdapted
+  obtain ⟨targetLocal, targetRest, localAdapted, restAdapted, targetEq⟩ :=
+    instructions_append_eq_ok appendedAdapted
+  have localFlat :
+      StructuredWasmFlatProgram target.wasmModule targetLocal :=
+    structuredWasmFlatProgram_localGet_of_instructions localAdapted
+  have restFlat :
+      StructuredWasmFlatProgram target.wasmModule
+        (targetRest ++ [.localSet resultIndex]) :=
+    spec.structuredFlatProgram_compileArgs_runtimeCall argumentsCompiled
+      restAdapted
+  subst targetValue
+  simpa [List.append_assoc] using
+    StructuredWasmFlatProgram.append localFlat restFlat
+
+/-- Capacity-admitted reuse satisfies production flatness for arbitrary mixed
+local/erased constructor arguments. -/
+theorem ReuseSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {facts : ReuseCapacityFacts} {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction}
+    {targetValue : Wasm.Program} {resultIndex : Nat}
+    (supported : ReuseSupported context facts decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro tokenId info updateHeader args argumentCode fieldKinds resultKind
+      evidence valueEq tagFits valueKind tokenCompiled argumentsCompiled
+      resultCompiled operationWellFormed capacityFitting resultCompatible
+      objectFieldsFit usizeFieldsFit scalarBytesFit =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok (.localGet tokenId :: argumentCode ++
+              [.call
+                (.runtime
+                  (.reuse info updateHeader fieldKinds resultKind))]) :=
+        compileLetValue_reuse valueEq valueKind tokenCompiled
+          argumentsCompiled
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      exact spec.structuredFlatProgram_localGet_compileArgs_runtimeCall
+        argumentsCompiled valueAdapted
+
+/-- Production compilation of an admitted natural literal emits exactly one
+runtime import call followed by the destination write.  Runtime-call
+alignment supplies the target-import fact, so flatness is derived from the
+compiler and adapter rather than stated as a separate certificate. -/
+theorem NaturalLiteralSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
+    {resultIndex : Nat}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    (supported : NaturalLiteralSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro value valueEq valueKind _ =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok [.call (.runtime (.literal (.nat value) .tobject))] :=
+        compileLetValue_naturalLiteral valueEq valueKind
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      cases callFound :
+          callIndex? sourceModule
+            (.runtime (.literal (.nat value) .tobject)) with
+      | none =>
+          simp [instructions, instruction, callFound] at valueAdapted
+          change
+            Except.error AdapterError.unknownCallTarget =
+              Except.ok targetValue at valueAdapted
+          cases valueAdapted
+      | some callIndex =>
+          have expectedAdapted :
+              instructions sourceModule sourceFunction labels
+                  [.call (.runtime (.literal (.nat value) .tobject))] =
+                .ok [.call callIndex] := by
+            simp [instructions, instruction, callFound]
+            rfl
+          rw [expectedAdapted] at valueAdapted
+          injection valueAdapted with targetValueEq
+          subst targetValue
+          obtain ⟨imp, imported, _⟩ := spec.naturalLiteralCall callFound
+          exact structuredWasmFlatProgram_importCall_localSet imported
+
+/-- The corresponding UTF-8 String literal prefix is likewise recovered from
+the production compiler and adapter and ends in a resolved target import. -/
+theorem StringLiteralSupported.structuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {valueCode : List Fir.Wasm.Instruction} {targetValue : Wasm.Program}
+    {resultIndex : Nat}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    (supported : StringLiteralSupported context decl)
+    (valueCompiled :
+      Fir.Wasm.compileLetValue context decl = .ok valueCode)
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels valueCode =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule
+      (targetValue ++ [.localSet resultIndex]) := by
+  cases supported with
+  | intro value valueEq valueKind _ =>
+      have expectedCompiled :
+          Fir.Wasm.compileLetValue context decl =
+            .ok [.call (.runtime (.literal (.str value) .object))] :=
+        compileLetValue_stringLiteral valueEq valueKind
+      rw [expectedCompiled] at valueCompiled
+      injection valueCompiled with valueCodeEq
+      subst valueCode
+      cases callFound :
+          callIndex? sourceModule
+            (.runtime (.literal (.str value) .object)) with
+      | none =>
+          simp [instructions, instruction, callFound] at valueAdapted
+          change
+            Except.error AdapterError.unknownCallTarget =
+              Except.ok targetValue at valueAdapted
+          cases valueAdapted
+      | some callIndex =>
+          have expectedAdapted :
+              instructions sourceModule sourceFunction labels
+                  [.call (.runtime (.literal (.str value) .object))] =
+                .ok [.call callIndex] := by
+            simp [instructions, instruction, callFound]
+            rfl
+          rw [expectedAdapted] at valueAdapted
+          injection valueAdapted with targetValueEq
+          subst targetValue
+          obtain ⟨imp, imported, _⟩ := spec.stringLiteralCall callFound
+          exact structuredWasmFlatProgram_importCall_localSet imported
+
 /-- Local-alias admission plus the executable compiler and adapter uniquely
 recover that two-instruction target prefix. -/
 theorem LocalAliasSupported.structuredFlatProgram
@@ -286,6 +959,319 @@ theorem LocalAliasSupported.structuredFlatProgram
           subst targetValue
           exact structuredWasmFlatProgram_localGet_localSet module sourceIndex
             resultIndex
+
+/-- Uniform compiler-shape law for a facts-indexed family of direct values.
+It quantifies over the real lowering and adapter results and concludes only
+that their generated call/write prefix is structurally flat.  This is a
+compiler theorem interface, not a per-program target certificate. -/
+def ReuseCapacityDirectTargetFlat
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (module : Wasm.Module)
+    (Supported :
+      ReuseCapacityFacts → Lean.Compiler.LCNF.LetDecl .impure → Prop) : Prop :=
+  ∀ {facts : ReuseCapacityFacts}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {valueCode : List Fir.Wasm.Instruction}
+      {targetValue : Wasm.Program}
+      {resultIndex : Nat},
+    Supported facts decl →
+      Fir.Wasm.compileLetValue context decl = .ok valueCode →
+      instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue →
+      StructuredWasmFlatProgram module
+        (targetValue ++ [.localSet resultIndex])
+
+/-- Flat compiler-shape laws compose across source-admission disjunction. -/
+theorem ReuseCapacityDirectTargetFlat.or
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {Left Right :
+      ReuseCapacityFacts → Lean.Compiler.LCNF.LetDecl .impure → Prop}
+    (left : ReuseCapacityDirectTargetFlat context sourceModule sourceFunction
+      labels module Left)
+    (right : ReuseCapacityDirectTargetFlat context sourceModule sourceFunction
+      labels module Right) :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      module (fun facts decl => Left facts decl ∨ Right facts decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  cases supported with
+  | inl supported => exact left supported valueCompiled valueAdapted
+  | inr supported => exact right supported valueCompiled valueAdapted
+
+/-- Immediate literals satisfy the uniform facts-indexed compiler-shape law. -/
+theorem reuseCapacityDirectTargetFlat_immediateLiteral
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      module (fun _ decl => ImmediateLiteralSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram valueCompiled valueAdapted
+
+/-- Local aliases satisfy the same uniform facts-indexed shape law. -/
+theorem reuseCapacityDirectTargetFlat_localAlias
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      module (fun _ decl => LocalAliasSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram valueCompiled valueAdapted
+
+/-- Runtime-call alignment discharges the natural-literal shape law. -/
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_naturalLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => NaturalLiteralSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+/-- Runtime-call alignment also discharges the String-literal shape law. -/
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_stringLiteral
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => StringLiteralSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_reuse
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule (ReuseSupported context) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_usizeProjection
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => USizeProjectionSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_objectProjection
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => ObjectProjectionSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_scalarProjection
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => ScalarProjectionSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_unbox
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule (fun _ decl => UnboxSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_isShared
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule (fun _ decl => IsSharedSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_constructor
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule
+      (fun _ decl => NonemptyConstructorSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+theorem ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_box
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule (fun _ decl => BoxSupported context decl) := by
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  exact supported.structuredFlatProgram spec valueCompiled valueAdapted
+
+/-- The complete facts-indexed direct fragment used by the existing resource
+theorem has one uniform compiler-derived flatness law. -/
+theorem
+    ConcreteSupportedFunction.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} :
+    ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+      target.wasmModule (ReuseBudgetedDirectSupported context) := by
+  unfold ReuseBudgetedDirectSupported ReuseConstructorBoxSupported
+    ReuseReadOnlyConstructorSupported ReuseReadOnlySupported
+    ReuseAliasSupported
+  intro facts decl valueCode targetValue resultIndex supported valueCompiled
+    valueAdapted
+  cases supported with
+  | inl constructorBox =>
+      cases constructorBox with
+      | inl readOnlyConstructor =>
+          cases readOnlyConstructor with
+          | inl readOnly =>
+              cases readOnly with
+              | inl reuseOrReader =>
+                  cases reuseOrReader with
+                  | inl reuseAlias =>
+                      cases reuseAlias with
+                      | inl reuse =>
+                          exact reuse.structuredFlatProgram spec valueCompiled
+                            valueAdapted
+                      | inr localAlias =>
+                          exact localAlias.structuredFlatProgram valueCompiled
+                            valueAdapted
+                  | inr reader =>
+                      cases reader with
+                      | inl immediate =>
+                          exact immediate.structuredFlatProgram valueCompiled
+                            valueAdapted
+                      | inr projection =>
+                          cases projection with
+                          | inl usize =>
+                              exact usize.structuredFlatProgram spec
+                                valueCompiled valueAdapted
+                          | inr objectOrScalar =>
+                              cases objectOrScalar with
+                              | inl object =>
+                                  exact object.structuredFlatProgram spec
+                                    valueCompiled valueAdapted
+                              | inr scalar =>
+                                  exact scalar.structuredFlatProgram spec
+                                    valueCompiled valueAdapted
+              | inr unboxOrShared =>
+                  cases unboxOrShared with
+                  | inl unbox =>
+                      exact unbox.structuredFlatProgram spec valueCompiled
+                        valueAdapted
+                  | inr shared =>
+                      exact shared.structuredFlatProgram spec valueCompiled
+                        valueAdapted
+          | inr constructor =>
+              exact constructor.structuredFlatProgram spec valueCompiled
+                valueAdapted
+      | inr box =>
+          exact box.structuredFlatProgram spec valueCompiled valueAdapted
+  | inr literal =>
+      cases literal with
+      | inl natural =>
+          exact natural.structuredFlatProgram spec valueCompiled valueAdapted
+      | inr string =>
+          exact string.structuredFlatProgram spec valueCompiled valueAdapted
 
 /-- Interprocedural concrete `let` laws expose the same exact executable
 prefix.  Internal-call execution is therefore obtained from the proved
@@ -437,6 +1423,38 @@ theorem StateRelated.withValues
   exact ⟨index, kind, physical, found, kindAt, by simpa using targetLookup,
     valueRelated⟩
 
+/-- Static reuse-capacity facts are interpreted through parameter/local slots
+only, so changing the operand stack preserves their dynamic meaning. -/
+theorem ReuseCapacityFactsRel.withValues
+    {facts : ReuseCapacityFacts}
+    {bindings : List (Lean.FVarId × AbiKind)} {sourceEnv : Env}
+    {targetLocals : Wasm.Locals} {heap : MemoryState}
+    {witness : RefinementWitness}
+    (related :
+      ReuseCapacityFactsRel facts bindings sourceEnv targetLocals heap witness)
+    (values : List Wasm.Value) :
+    ReuseCapacityFactsRel facts bindings sourceEnv
+      { targetLocals with values } heap witness := by
+  intro fvarId evidence found
+  obtain ⟨index, kind, lane, semantic, sourceLookup, localFound, kindAt,
+      targetLookup, valueRelated⟩ := related fvarId evidence found
+  exact ⟨index, kind, lane, semantic, sourceLookup, localFound, kindAt,
+    by simpa using targetLookup, valueRelated⟩
+
+/-- The combined state-plus-capacity relation is operand-stack insensitive. -/
+theorem ReuseCapacityStateRelated.withValues
+    {facts : ReuseCapacityFacts} {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (related :
+      ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+        targetStore targetLocals witness)
+    (values : List Wasm.Value) :
+    ReuseCapacityStateRelated facts sourceFunction sourceRuntime sourceEnv
+      targetStore { targetLocals with values } witness := by
+  exact ⟨related.1.withValues values, related.2.withValues values⟩
+
 /-- Local-frame shape is likewise independent of the operand stack. -/
 theorem ConcreteLocalFrameAligned.withValues
     {sourceFunction : Fir.Wasm.Function}
@@ -449,6 +1467,23 @@ theorem ConcreteLocalFrameAligned.withValues
     ConcreteLocalFrameAligned sourceFunction sourceRuntime sourceEnv targetStore
       { targetLocals with values := values } witness := by
   exact aligned
+
+/-- The authoritative resource frame is also operand-stack insensitive. -/
+theorem ConcreteReuseCapacityFrame.withValues
+    {sourceFunction : Fir.Wasm.Function} {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat} {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    (frame :
+      ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+        sourceRuntime sourceEnv targetStore targetLocals witness)
+    (values : List Wasm.Value) :
+    ConcreteReuseCapacityFrame sourceFunction facts remainingBytes
+      sourceRuntime sourceEnv targetStore { targetLocals with values }
+      witness := by
+  rcases frame with ⟨related, ordinary, aligned, budget⟩
+  exact ⟨related.withValues values, ordinary, aligned.withValues values,
+    budget⟩
 
 /-- One direct source `let` whose generated prefix is straight-line advances
 both machines to the recursively compiled continuation.  The target path is
@@ -769,6 +1804,202 @@ theorem ConcreteStructuredCodeFocus.advance_return_of_step
         injection computedStep
       subst computedAfter
       exact ⟨sourceValue, kind, physical, targetAfter, path, focus⟩
+
+/-- Partial correctness for an arbitrary finite direct-value spine in the
+structured target machine.
+
+The source evaluation supplies only source steps, admission, fact transfer,
+and its allocation-cost index.  At every `let`, the uniform runtime theorem
+constructs the exact concrete successor and the uniform compiler-shape law
+proves that the production target prefix is flat; `advance_flatLet` then
+reifies that exact execution as structured steps.  The return rule closes the
+path at a related yielded source value and explicit target return state.
+
+Both path lengths remain explicit.  This theorem therefore exposes the local
+progress information needed by the later weak-simulation theorem while making
+no termination claim for programs outside the supplied finite source
+evaluation. -/
+theorem
+    ConcreteStructuredCodeFocus.reachesYield_of_reuseCapacityCodeEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {DirectSupported :
+      ReuseCapacityFacts → Lean.Compiler.LCNF.LetDecl .impure → Prop}
+    {letCost : Lean.Compiler.LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      ReuseCapacityFacts → Nat → RuntimeState → Env →
+        Wasm.Store Host → Wasm.Locals → RefinementWitness → Prop}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context DirectSupported letCost facts
+        sourceRuntime sourceEnv sourceCode resultFacts resultRuntime resultEnv
+        resultValue requiredBytes)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
+        witness source target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (invariant :
+      Invariant facts requiredBytes sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (runtimeRefines :
+      ReuseCapacityDirectLetRuntimeRefinesWithCost context sourceModule
+        sourceFunction labels module hostEnv DirectSupported letCost Invariant)
+    (targetFlat :
+      ReuseCapacityDirectTargetFlat context sourceModule sourceFunction labels
+        module DirectSupported)
+    (invariantFrameAligned :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Invariant frameFacts frameBytes frameRuntime frameEnv frameStore
+            frameLocals frameWitness →
+          ConcreteLocalFrameAligned sourceFunction frameRuntime frameEnv
+            frameStore frameLocals frameWitness)
+    (invariantWithValues :
+      ∀ {frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness},
+        Invariant frameFacts frameBytes frameRuntime frameEnv frameStore
+            frameLocals frameWitness →
+          ∀ values,
+            Invariant frameFacts frameBytes frameRuntime frameEnv frameStore
+              { frameLocals with values } frameWitness) :
+    ∃ sourceAfter targetAfter resultStore resultLocals resultWitness kind
+        physical sourceCount targetCount,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          sourceCount source sourceAfter ∧
+        FinitePath (StructuredWasmStep module hostEnv) targetCount target
+          targetAfter ∧
+          ConcreteStructuredYieldFocus context sourceFunction resultRuntime
+            resultEnv resultValue resultStore resultLocals resultWitness kind
+            physical sourceAfter targetAfter := by
+  induction evaluation generalizing targetStore targetLocals targetCode witness
+      source target with
+  | ret sourceLookup =>
+      obtain ⟨kind, physical, sourceAfter, targetAfter, sourceStep, targetPath,
+          focus⟩ :=
+        related.advance_return localsAligned sourceLookup
+      exact ⟨sourceAfter, targetAfter, targetStore, targetLocals, witness,
+        kind, physical, 1, 2, .single sourceStep, targetPath, focus⟩
+  | @letValue facts decl letSourceRuntime letSourceEnv letNextRuntime
+      letSourceValue nextFacts continuation resultFacts resultRuntime resultEnv
+      resultValue continuationCost supported sourceStep transfer continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
+          targetCodeEq⟩ :=
+        CodeAdapted.let_eq related.adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels continuation
+            targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          letCost decl ≤ letCost decl + continuationCost :=
+        Nat.le_add_right _ _
+      obtain ⟨nextStore, nextLocals, nextWitness, producedFacts, step,
+          _externalsPreserved, _hostDescriptorsPreserved,
+          _witnessDescriptorsPreserved, _transports, producedTransfer,
+          nextInvariant⟩ :=
+        runtimeRefines supported stepFits invariant sourceStep
+          valueCompiled valueAdapted resultFound
+      rw [transfer] at producedTransfer
+      have factsEq := Option.some.inj producedTransfer
+      subst producedFacts
+      have continuationInvariant :
+          Invariant nextFacts continuationCost letNextRuntime
+            (bind letSourceEnv decl.fvarId letSourceValue) nextStore nextLocals
+            nextWitness := by
+        simpa using nextInvariant
+      have flat :
+          StructuredWasmFlatProgram module
+            (targetValue ++ [.localSet resultIndex]) :=
+        targetFlat supported valueCompiled valueAdapted
+      obtain ⟨sourceMiddle, targetMiddle, firstSourceStep, targetPrefix,
+          nextFocus⟩ :=
+        related.advance_flatLet targetCodeEq continuationAdapted flat step
+          (invariantFrameAligned continuationInvariant)
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yieldFocus⟩ :=
+        ih nextFocus
+          (invariantWithValues continuationInvariant targetLocals.values)
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount,
+        (targetValue ++ [Wasm.Instruction.localSet resultIndex]).length +
+          targetCount,
+        (FinitePath.single
+          (step := fun before after =>
+            executeStep externals before = .next after)
+          firstSourceStep).trans sourceTail,
+        targetPrefix.trans targetTail, yieldFocus⟩
+
+/-- Concrete endpoint for the complete current facts-indexed direct fragment.
+It combines the production runtime theorem and compiler-derived shape theorem
+with the generic structured spine, leaving only the source evaluation and the
+ordinary initial resource relation as dynamic premises. -/
+theorem ConcreteSupportedFunction.reachesYield_reuseBudgetedDirect
+    {program : Fir.LeanIR.ImpureProgram} {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction targetModule hosts)
+    {labels : List Lean.FVarId} {externals : ExternalImpl}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {resultValue : Value} {requiredBytes : Nat}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program} {witness : RefinementWitness}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (evaluation :
+      ReuseCapacityCodeEvaluates context (ReuseBudgetedDirectSupported context)
+        directLetAllocationCost facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
+        source target)
+    (invariant :
+      ConcreteReuseCapacityFrame sourceFunction facts requiredBytes
+        sourceRuntime sourceEnv targetStore targetLocals witness) :
+    ∃ sourceAfter targetAfter resultStore resultLocals resultWitness kind
+        physical sourceCount targetCount,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          sourceCount source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            targetCount target targetAfter ∧
+          ConcreteStructuredYieldFocus context sourceFunction resultRuntime
+            resultEnv resultValue resultStore resultLocals resultWitness kind
+            physical sourceAfter targetAfter := by
+  exact
+    ConcreteStructuredCodeFocus.reachesYield_of_reuseCapacityCodeEvaluates
+      evaluation related spec.localsAligned invariant
+      spec.reuseCapacityDirectLetRuntimeRefinesWithCost_reuseBudgetedDirect
+      spec.reuseCapacityDirectTargetFlat_reuseBudgetedDirect
+      (by
+        intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness frame
+        exact frame.2.2.1)
+      (by
+        intro frameFacts frameBytes frameRuntime frameEnv frameStore frameLocals
+          frameWitness frame values
+        exact frame.withValues values)
 
 /-- Changing only the operand stack commutes with a successful checked local
 write.  The structured call-frame proof uses this to expose the returned value

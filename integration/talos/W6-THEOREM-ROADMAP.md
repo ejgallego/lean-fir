@@ -1245,11 +1245,18 @@ acceptance tests pass.
      `ConcreteStructuredCodeFocus.advance_flatLet` uses it to match one direct
      source `let`, preserve the operand and frame suffixes, and reconstruct the
      recursively compiled continuation focus. Compiler/adapter inversion now
-     discharges the flatness premise for immediate literals and local aliases.
-     The next slice extends that compiler-shape proof across the remaining
-     direct runtime-import families and folds `advance_flatLet` into the
-     resource-indexed structural induction. It then threads the entry-relative
-     frame and exact saved-frame suffix recursively through internal calls.
+     discharges the flatness premise for the complete facts-indexed direct
+     fragment: immediate and heap literals, aliases, projections, boxing,
+     unboxing, sharing, constructors, and capacity-validated reuse. The
+     argument proof is derived once from production `compileArgs`; runtime-call
+     alignment proves that every selected numeric call is a target import.
+     `reachesYield_of_reuseCapacityCodeEvaluates` folds those shapes and the
+     existing resource-indexed runtime laws into explicit finite paths in both
+     machines, and `reachesYield_reuseBudgetedDirect` specializes the result to
+     `ConcreteReuseCapacityFrame`. It ends at a value-related source yield and
+     structured target return with both path lengths exposed. The next slice
+     threads the entry-relative frame and exact saved-frame suffix recursively
+     through internal calls.
      Subsequent slices handle structured lazy/case prefixes, target-only
      label/loop unwinding, apply/cache source frames, and the remaining
      non-terminal operations.
