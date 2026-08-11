@@ -2,7 +2,7 @@
 id: FIR-BUG-<phase>-<pass>-<short-slug>
 status: candidate
 classification: fir-semantics
-lean-toolchain: leanprover/lean4:v4.32.0
+lean-toolchain: leanprover/lean4:v4.33.0
 lean-revision: <exact-revision>
 phase: <base|mono|impure|wasm>
 pass: <pass-name-and-occurrence-or-none>

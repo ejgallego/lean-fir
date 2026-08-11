@@ -247,13 +247,13 @@ const build = {
         "totalMs"],
     },
     inputLayout: {
-      version: "lean-4.32-Std.Format.compact/v1",
-      leanVersion: "4.32.0",
+      version: "lean-4.33-Std.Format.compact/v1",
+      leanVersion: "4.33.0",
       representation: "compact-discriminated-union-plus-tagged-annotations",
       constructors: ["nil", "line", "align", "text", "nest", "append",
         "group", "tag"],
       annotations: "Array VersoSlides.Pretty.TaggedAnnotation",
-      rawTarget: "Lean 4.32 Std.Format",
+      rawTarget: "Lean 4.33 Std.Format",
     },
     ownership: {
       version: "fir.prettyM.module-owned-transfer/v1",

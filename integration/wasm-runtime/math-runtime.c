@@ -47,7 +47,7 @@ double fir_float_of_nat(uint32_t value) {
 }
 
 /*
- * This is the Lean 4.32 Init.Data.OfScientific algorithm on the checked
+ * This is Lean's Init.Data.OfScientific algorithm on the checked
  * one-limb Natural domain.  Exponents through 20 guarantee that every
  * intermediate fits in u128 for either exponent sign and every u64 mantissa.
  */

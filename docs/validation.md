@@ -1716,7 +1716,7 @@ maximum-value round trips for `UInt8`, `UInt16`, `UInt32`, `UInt64`, and
 `USize`, plus a nonempty `List Nat` containing a heap natural.  That last case
 reconstructs the initial constructor graph and executes the compiler-produced
 `getTag` import before returning `UInt64`.  Sibling nonempty and empty cases
-return Lean 4.32's unboxed Boolean as `uint8`, covering both one and zero; the
+return Lean 4.33's unboxed Boolean as `uint8`, covering both one and zero; the
 LCNF and V8 schema decoders accept only those values for that representation.
 The first W5 additions compile a dependency-bearing polymorphic box/unbox call
 and a packed constructor initialized through `uset`/`sset`, projected through

@@ -5,7 +5,7 @@ This integration compiles the real
 complete Lean runtime frontier into a zero-import Wasm module. The source
 implementation is neither copied nor adapted inside FIR.
 
-The browser/Node adapter accepts the compact Lean 4.32 `Std.Format` object used
+The browser/Node adapter accepts the compact Lean 4.33 `Std.Format` object used
 by FIR's other `prettyM` packages plus an array of
 `{ tag, annotation: { cssClass, binding } }` values. It returns a copied,
 escaped HTML String whose spans implement Verso's `verso-token-html/v1`

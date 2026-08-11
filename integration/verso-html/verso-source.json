@@ -1,8 +1,8 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/ejgallego/verso-slides.git",
-  "revision": "2ee1c804106b87ab254923fc75a0172f382fcd8e",
-  "remoteRef": "ejgallego/feat/vir-panel-component-evaluation",
+  "revision": "098cb3f878232de2af6634afb237eb7998735019",
+  "remoteRef": "upgrade/fir-html-lean-4.33",
   "upstreamBaseRevision": "db608f9611b2a6784310ade04f8d542a6f81cb58",
   "files": {
     "VersoSlides/Pretty.lean": "bf4271d690b523d5709d19331568c27f2dcb42b0d9ee253dbc30205a5a336c8e"

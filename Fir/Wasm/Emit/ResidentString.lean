@@ -133,7 +133,7 @@ def externalDeclarations : Array Name := #[
   `String.Internal.next]
 
 /--
-Additional exposed Lean 4.32 String APIs linked only when a captured source
+Additional exposed String APIs linked only when a captured source
 closure imports them. The historical strict frontier above remains stable.
 -/
 def availableExternalDeclarations : Array Name :=
