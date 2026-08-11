@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: 1e9d4965 on main
+state: active
+base: f5b15d8e on main
 functional-head: 306658b6 (recursive structured simulation now includes all supported packed-integer field mutations)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam 0.2.0-beta (source 662b514f) update/sync/save document version 7 hash 3e366988e9389d6f (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation; git diff --check; make check; Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for integration; functional head 306658b6 is a proof-only extension over main 1e9d4965.
-next: Connect either saturated closure calls or heap-valued lazy publication after auditing which existing production contract has the smaller missing structured control-flow cone.
+handoff: none; packed-integer scalar mutation landed on main at f5b15d8e and the lane is active on saturated closure calls.
+next: Connect saturated closure calls using the existing source-only resolution, concrete matcher, argument-assembly, and recursive callee contracts. Defer heap-valued lazy publication until the entry transport is made facts-aware.
 ```
