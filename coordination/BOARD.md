@@ -13,16 +13,17 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `VALIDATION-CAPTURE-TOPOLOGY-S3B`.
 - Integration owner: `test-fixtures`; the user authorized this lane to act as
-  integration owner when needed, and the clean S3b handoff is ready for prompt
-  fixture-only integration.
+  integration owner when needed, and the owner accepted the clean S3b handoff
+  after its post-rebase cross-lane gate passed.
 - Integration branch/worktree: `validation/closure-ownership-fixtures` in
   `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
   `main` at `473d5ec3` after W7 HitScene v2 acceptance.
-- Published stack: functional head `f997949f` and ready mailbox `6e65f2aa`.
+- Published stack: functional head `f997949f`, ready mailbox `6e65f2aa`, and
+  exact validated lease candidate `fd2b8b6d`.
   Four fixtures compare ignored versus read paths for one ByteArray and one
   allocated constructor/String object repeated across two closure captures
   while a third alias remains outside.
@@ -37,8 +38,9 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 - Coordination: the W7 package consumed by this stack is already on `main`.
   The ready LCNF-proof and W6 mailboxes remain untouched on older bases and
   must rebase before their next integration handoff.
-- Planned result: fast-forward `main` through the exact candidate, push it,
-  mark S3b landed/released, and hand the fixture lane to S4/B1 tail ownership.
+- Result: `main` fast-forwards through this completion record and is pushed
+  before further fixture work. S3b is landed/released, and the fixture lane
+  proceeds to S4/B1 tail ownership from the accepted alias vocabulary.
 
 ## Latest completed integration lease
 

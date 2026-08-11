@@ -5,7 +5,7 @@ lane: test-fixtures
 owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
-state: ready
+state: released
 base: 473d5ec3f7ff590b4ac09a5befcf77920b952e7b on main
 functional-head: f997949f01552a37fafc2a5d7c550e8f48cc0a4e
 contract-base: 473d5ec3f7ff590b4ac09a5befcf77920b952e7b on main; consumes landed S3a repeated-capture topology and HitScene v2 artifact acceptance, and changes no shared contract
@@ -16,6 +16,6 @@ contracts: none; fixture, trace, native-oracle, and coverage-policy changes only
 checks: Lean Beam update/sync/save for Fir/Validation/Corpus.lean (save-ready, zero diagnostics); lake --rehash build fir-native-oracle Fir.Validation (pass); focused four-case native/LCNF exact validation (8/8 results, 4/4 comparisons equal, zero findings); focused four-case native/LCNF/V8 validation (12/12 results, all three 4/4 edges equal, eight products opened with strace, zero findings); pre-rebase make check (pass); rebased onto main at 473d5ec3; post-rebase git diff --check (pass); post-rebase make check (pass: 645/645 source/native-LCNF, 9/9 direct machine, 645/645 native-LCNF-V8 with 1,290 products opened and 1,316 strace paths, 1,290 native-oracle witnesses, 654 unique cases, 1,944/1,944 aggregate comparisons, 6,184 interpreter steps, 98/98 tag floors, 209/209 domains, zero findings)
 bug-cards: none
 blockers: none; all four cases reuse linked constructor, String, ByteArray, and scalar result surfaces and do not overlap W6, W7, or LCNF-proof ownership
-handoff: ready for integration from validation/closure-ownership-fixtures; integrate f997949f plus this containing mailbox commit by fast-forward after resolving the branch head
-next: integration owner takes the S3b lease, fast-forwards main, closes the lease, then the fixture lane starts S4/B1 tail-call ownership from the landed alias vocabulary
+handoff: accepted under milestone VALIDATION-CAPTURE-TOPOLOGY-S3B; main lands functional head f997949f and its containing coordination completion directly from base 473d5ec3; no W6, W7, LCNF-proof, or shared-contract file changes
+next: start S4/B1 tail-call ownership from the landed repeated-capture and outside-alias vocabulary
 ```
