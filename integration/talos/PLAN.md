@@ -6020,10 +6020,22 @@ appropriate complete stack or staged suffix. Named-call and saturated-call
 staging, entry, and both return protocols now have stack-lifted transition
 theorems. The saturated entry lift also transports older callers across the
 real matcher and closure-consumption heap update using the existing cache/ABI
-resource frame. The next boundary is the parallel resource stack and
-source-only pointwise admission invariant: it must construct the applicable
-local rule and preserve facts, budget, and admission at the successor instead
-of reintroducing the terminating hereditary evaluator.
+resource frame.
+`ConcreteStructuredCurrentResource` now packages the current function's
+entry-relative facts, budget, ownership, cache, and closure-ABI invariants.
+`ConcreteStructuredResourceScope` exposes the exact call-entry
+runtime/store/witness triple needed for hereditary composition. Direct and
+saturated entry rules preserve the suspended caller scope and start a fresh
+callee scope; `restoreCaller` is the common certificate-free return theorem,
+and both return protocols use it to compose all callee transports, erase
+exactly the bound result fact, restore the caller resource invariant, and pop
+the structural frame. These rules concern one finite call/return boundary and
+have no callee evaluation or termination premise.
+The next boundary is to index a parallel recursive resource stack by
+`ConcreteStructuredFrameRel`, then define the source-only pointwise admission
+invariant. It must construct the applicable local rule and preserve facts,
+budget, and admission at the successor instead of reintroducing the
+terminating hereditary evaluator.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

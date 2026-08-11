@@ -1431,10 +1431,19 @@ acceptance tests pass.
      returns. `ConcreteStructuredStackRel` joins this stack evidence to all ten
      local control constructors. Stack-lifted laws now cover named and
      saturated staging, entry, and resumption; saturated entry transports older
-     callers through the actual matcher/closure-consumption update. The next
-     slice is the parallel resource stack and source-only pointwise admission
-     invariant, whose preservation proof must replace rather than wrap the
-     terminating hereditary evaluator.
+     callers through the actual matcher/closure-consumption update.
+     The resource half of those call boundaries is now explicit too.
+     `ConcreteStructuredCurrentResource` retains the active entry-relative
+     facts/budget/cache/ownership invariant, while
+     `ConcreteStructuredResourceScope` exposes the exact call-entry boundary
+     required for composition. Direct and saturated pushes preserve the
+     suspended caller and start a fresh callee scope. The shared
+     `restoreCaller` theorem and both return rules fold all callee transports
+     back into the caller, erase exactly the result fact, and pop the structural
+     frame without any callee evaluation or termination premise. The next
+     slice indexes these scopes as a parallel recursive resource stack and
+     begins the source-only pointwise admission invariant, whose preservation
+     proof must replace rather than wrap the terminating hereditary evaluator.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
