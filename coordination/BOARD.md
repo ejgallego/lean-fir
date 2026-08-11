@@ -15,6 +15,36 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-DIRECT-CALL-ENTRY`.
+- Integration owner: `wasm-proof`; this is the generated call-entry slice of
+  W6.7e.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `9594e9ce`.
+- Published stack: active-slice record `16e3025c`, functional head `7e2e8004`,
+  and ready mailbox `9c052c16`.
+- Accepted proof: `ConcreteStructuredCodeFocus.advance_directCall_stage`
+  inverts the production two-stage compiler, executes the exact generated
+  local-read/erased-zero argument prefix, and reaches the real generated call
+  instruction without assuming target execution evidence or a translation
+  certificate. `ConcreteStructuredDirectCallReadyFocus.advance_enter` matches
+  one source dispatcher step with the actual `StructuredWasmStep.enterCall`
+  transition and establishes the generated callee code focus.
+- Frame boundary: call entry records the exact saved source bind and target
+  Wasm call frames. The target frame retains the post-argument caller locals,
+  as prescribed by Wasm. Caller runtime/local invariants remain separate from
+  the callee focus so the next slice can transport them soundly across callee
+  allocation and effects before establishing the accepted bind-frame return
+  relation.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam dependency refresh and save with zero diagnostics;
+  forced direct source recompilation; focused 3,111-job dependency-cone build;
+  `git diff --check`; complete `make check` with 642 validation cases and
+  1,844/1,844 backend comparisons; Talos pinned at `a01d01c`; and all 3,133
+  `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-BIND-FRAME`.
 - Integration owner: `wasm-proof`; this is the first continuation-stack slice
   of W6.7e.
