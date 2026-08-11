@@ -11843,6 +11843,129 @@ theorem
         yielded, resultInvariant, resultRefines, resultJoins,
         continuationSourceFramesEq, continuationTargetFramesEq⟩
 
+/-- Canonical structured-machine entry for one already-selected generated
+function body.  The exported-function lookup and Talos invocation boundary
+select this function; the compiler proof starts from its initialized locals,
+body, and empty structured frame stack. -/
+def concreteStructuredFunctionEntry
+    (function : Wasm.Function) (store : Wasm.Store Host)
+    (parameters : List Wasm.Value) : StructuredWasmState Host :=
+  { store
+    control := .running (function.toLocals parameters.reverse) function.body
+    frames := [] }
+
+/-- Compiler-produced exact execution for the current recursive structured
+fragment, specialized to the canonical source and generated-function entries.
+
+This theorem removes the caller-supplied `ConcreteStructuredCodeFocus`: the
+real lowering/adaptation proof and the ordinary initial cache/ownership frame
+construct it.  The recursive source derivation then produces both finite
+machine paths, a related returned value, the evolved entry-relative resource
+frame, and exact endpoint observations.  It is deliberately a terminating
+fragment theorem; the later ranked relation removes `evaluation` and gives
+every finite source prefix independently of termination. -/
+theorem
+    ConcreteSupportedExport.reachesYield_reuseBudgetedStructured_generated
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    {exportName : String}
+    (spec :
+      ConcreteSupportedExport program context sourceCode sourceModule
+        sourceFunction targetModule hosts exportName)
+    (contextCaches :
+      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+    (generated : LazyCacheGeneratedEnvironment context sourceModule)
+    {externals : ExternalImpl}
+    {expectedResult : AbiKind}
+    {facts resultFacts : ReuseCapacityFacts}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv resultEnv : Env}
+    {resultValue : Value} {requiredBytes : Nat}
+    {initial : Wasm.Store Host}
+    {initialWitness : RefinementWitness}
+    {parameters : List Wasm.Value}
+    (evaluation :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv sourceCode resultFacts
+        resultRuntime resultEnv resultValue requiredBytes)
+    (invariant :
+      ConcreteReuseCapacityCacheAbiFrame context sourceModule sourceFunction
+        externals facts requiredBytes sourceRuntime sourceEnv initial
+        (spec.targetFunction.toLocals parameters.reverse) initialWitness) :
+    ∃ sourceAfter targetAfter resultStore resultLocals resultWitness kind
+        physical sourceCount targetCount,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          sourceCount
+          (sourceCodeState context sourceRuntime sourceEnv sourceCode)
+          sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            targetCount
+            (concreteStructuredFunctionEntry spec.targetFunction initial
+              parameters)
+            targetAfter ∧
+          ConcreteStructuredYieldFocus context sourceFunction resultRuntime
+              resultEnv resultValue resultStore resultLocals resultWitness kind
+              physical sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+                (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                  externals)
+                sourceRuntime initial initialWitness resultFacts 0 resultRuntime
+                resultEnv resultStore resultLocals resultWitness ∧
+              kind.refines expectedResult = true ∧
+                ConcretePrefixObservationRel
+                  (sourcePrefixObservation sourceAfter)
+                  (concretePrefixObservation targetAfter.store) ∧
+                  sourceAfter.joins = [] ∧
+                    sourceAfter.frames = [] ∧ targetAfter.frames = [] := by
+  let sourceInitial :=
+    sourceCodeState context sourceRuntime sourceEnv sourceCode
+  let targetLocals := spec.targetFunction.toLocals parameters.reverse
+  let targetInitial :=
+    concreteStructuredFunctionEntry spec.targetFunction initial parameters
+  have related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv sourceCode initial targetLocals
+        spec.targetFunction.body initialWitness sourceInitial targetInitial := {
+    sourceProgramEq := by simp [sourceInitial, sourceCodeState]
+    sourceControlEq := by simp [sourceInitial, sourceCodeState]
+    sourceEnvEq := by simp [sourceInitial, sourceCodeState]
+    sourceRuntimeEq := by simp [sourceInitial, sourceCodeState]
+    targetStoreEq := by simp [targetInitial, concreteStructuredFunctionEntry]
+    targetControlEq := by
+      simp [targetInitial, targetLocals, concreteStructuredFunctionEntry]
+    adapted := spec.bodyAdapted
+    stateRelated := invariant.cacheFrame.stateRelated.stateRelated
+    frameAligned := invariant.cacheFrame.1.1.1.2.2.1 }
+  have entryInvariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        sourceRuntime initial initialWitness facts (requiredBytes + 0)
+        sourceRuntime sourceEnv initial targetLocals initialWitness :=
+    ⟨by simpa [targetLocals] using invariant.cacheFrame,
+      ReuseCapacityCodeEntryTransports.refl sourceRuntime initial
+        initialWitness⟩
+  obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals, resultWitness,
+      kind, physical, sourceCount, targetCount, sourcePath, targetPath, yielded,
+      resultInvariant, resultRefines, resultJoins, sourceFrames, targetFrames⟩ :=
+    related.reachesYield_reuseBudgetedDirectPureExternalCallsLazyCacheCases_generated
+      spec generated spec.toConcreteSupportedFunction contextCaches evaluation
+      (by simp [sourceInitial, sourceCodeState]) entryInvariant
+      invariant.closureAbi
+  exact ⟨sourceAfter, targetAfter, resultStore, resultLocals, resultWitness,
+    kind, physical, sourceCount, targetCount,
+    by simpa [sourceInitial] using sourcePath,
+    by simpa [targetInitial] using targetPath, yielded,
+    by simpa using resultInvariant, resultRefines, yielded.observes, resultJoins,
+    by simpa [sourceInitial, sourceCodeState] using sourceFrames,
+    by simpa [targetInitial, concreteStructuredFunctionEntry] using
+      targetFrames⟩
+
 /-- Structural rank used when lowering erases a source control step.  Later
 frame slices add their own continuation component; the local erased-step laws
 need only this strictly decreasing code-control component. -/

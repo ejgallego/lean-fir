@@ -1380,10 +1380,18 @@ acceptance tests pass.
      generic `let` reload/write pair. The corresponding
      `ConcreteStructuredSaturatedBindFrameFocus.advance` matches one source
      bind-frame step and reconstructs the compiled continuation focus with its
-     original operand tail and aligned caller locals. The next slice connects
-     recursive callee entry/yield plus entry-relative resource restoration to
-     this relation inside the main induction; then add heap-valued cache misses
-     and target-only loop unwinding.
+     original operand tail and aligned caller locals. Recursive callee
+     entry/yield and entry-relative resource restoration are now connected in
+     the main induction. `concreteStructuredFunctionEntry` names the canonical
+     initialized generated-body state, and
+     `ConcreteSupportedExport.reachesYield_reuseBudgetedStructured_generated`
+     constructs both exact machine paths from the canonical source and target
+     entries using only the supported export, initial ABI/cache frame, and the
+     terminating fragment derivation. It also exposes related endpoint
+     observations. This theorem deliberately retains the source `evaluation`
+     premise: it closes the exact terminating boundary but does not claim the
+     prefix-general W6.7f theorem. Next add heap-valued cache misses and the
+     unified ranked relation, including target-only loop unwinding.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
