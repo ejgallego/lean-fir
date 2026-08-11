@@ -1326,9 +1326,13 @@ acceptance tests pass.
      complete entry-relative cache/resource frame. Explicit deletion is now
      connected through the same exact generated unary-host prefix and shared
      reconstruction. Physical zero is admitted only by the erased-value
-     relation; ordinary object decoding is unchanged. Subsequent slices connect
-     mutation effects and add saturated closure calls, heap-valued cache misses,
-     and target-only label/loop unwinding to this induction.
+     relation; ordinary object decoding is unchanged. Constructor-tag mutation
+     is now connected as the first mutation case: its admitted live-constructor
+     facts drive the concrete header writer, and the compiler-selected tag host
+     still yields an exact two-instruction local-read/imported-call prefix.
+     Subsequent slices connect object/`USize`/packed-scalar field mutations and
+     add saturated closure calls, heap-valued cache misses, and target-only
+     label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

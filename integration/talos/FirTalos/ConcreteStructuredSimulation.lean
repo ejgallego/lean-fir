@@ -5381,6 +5381,20 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | constructorTagEffect
+      (supported :
+        ConstructorTagEffectSupported context sourceRuntime sourceEnv code
+          continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -5484,6 +5498,9 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
   | ordinaryDeleteEffect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (sourceStep externals) (.refl _)) ih
+  | constructorTagEffect _ sourceStep _ ih =>
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
 
@@ -6177,10 +6194,211 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
+/-- One successful constructor-tag mutation advances the source by one effect
+step and the structured target by the exact generated unary-host prefix. The
+source admission supplies the live-constructor decoder facts; concrete header
+refinement and the common replace-heap transport rebuild the recursive frame. -/
+theorem ConcreteStructuredCodeFocus.advance_constructorTag
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (functionSpec :
+      ConcreteSupportedFunction program context functionCode sourceModule
+        sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime nextRuntime entryRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore entryStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    {targetCode : Wasm.Program}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (supported :
+      ConstructorTagEffectSupported context sourceRuntime sourceEnv code
+        continuation nextRuntime)
+    (sourceStep :
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
+        source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness) :
+    ∃ sourceAfter targetAfter nextStore targetRest,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          1 source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            2 target targetAfter ∧
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+              nextRuntime sourceEnv continuation nextStore targetLocals
+              targetRest witness sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness facts remainingBytes
+              nextRuntime sourceEnv nextStore targetLocals witness ∧
+            sourceAfter.joins = source.joins ∧
+              sourceAfter.frames = source.frames ∧
+                targetAfter.frames = target.frames := by
+  cases supported with
+  | setTag sourceRuntime nextRuntime sourceEnv objectId tag continuation
+      location cell semantic objectCompiled objectLookup updated found live
+      objectEq tagFits =>
+      obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
+          callFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdapted.setTag_eq functionSpec.localsAligned objectCompiled
+          related.adapted
+      subst targetCode
+      obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+          resultCount⟩ :=
+        functionSpec.setTagCall callFound
+      have sourceLookup :
+          lookup sourceEnv objectId = some (.object (.heap location)) := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value foundLookup
+          injection objectLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      obtain ⟨physicalObject, targetLookup, physicalRelated⟩ :=
+        related.stateRelated.resolve sourceLookup objectFound kindAt
+      cases physicalRelated with
+      | word32 objectRelated =>
+          rename_i word
+          obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
+            setTagStep_of_refines_with_capacity related.stateRelated.1
+              objectRelated found live objectEq updated tagFits
+          have nextRelated :
+              StateRelated sourceFunction nextRuntime sourceEnv
+                (replaceHeap targetStore heap) targetLocals witness :=
+            ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+              related.stateRelated.2.2⟩
+          have effectStep :
+              EffectStepSimulates context sourceModule sourceFunction []
+                targetModule.wasmModule hosts.env sourceRuntime nextRuntime
+                sourceEnv (.setTag objectId tag continuation) continuation
+                ([.localGet objectIndex, .call callIndex] ++ targetRest)
+                targetRest targetStore (replaceHeap targetStore heap)
+                targetLocals witness witness := by
+            apply effectStepSimulates_unaryHost
+              (spec := hosts.spec) (step := setTagStep tag)
+            · exact sourceStep
+            · exact codeAdapted_setTag objectCompiled objectFound callFound
+                continuationAdapted
+            · exact related.stateRelated
+            · exact nextRelated
+            · exact targetLookup
+            · exact imported
+            · exact functionSpec.hostsSatisfy
+            · exact inBounds
+            · exact contracted
+            · exact parameterCount
+            · exact resultCount
+            · exact operation
+          have ordinaryTransport :
+              OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+            setTag_ordinaryPersistenceTransport updated
+          have sourceGlobals :
+              nextRuntime.globals = sourceRuntime.globals :=
+            (setTag_runtimeAux updated).globals
+          have nextInvariant :
+              ReuseCapacityEntryRelativeFrame
+                (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                  externals)
+                entryRuntime entryStore entryWitness facts remainingBytes
+                nextRuntime sourceEnv (replaceHeap targetStore heap)
+                targetLocals witness :=
+            invariant.ofReplaceHeapEffectStep effectStep capacity
+              ordinaryTransport sourceGlobals cursor
+          let sourceAfter : MachineState := {
+            source with control := .code continuation
+                        runtime := nextRuntime }
+          have sourcePath :
+              executeStep externals source = .next sourceAfter := by
+            rcases source with
+              ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+                sourceFrames, actualRuntime⟩
+            have programEq := related.sourceProgramEq
+            change sourceProgram = context.program at programEq
+            subst sourceProgram
+            have controlEq := related.sourceControlEq
+            change sourceControl = _ at controlEq
+            subst sourceControl
+            have envEq := related.sourceEnvEq
+            change actualEnv = sourceEnv at envEq
+            subst actualEnv
+            have runtimeEq := related.sourceRuntimeEq
+            change actualRuntime = sourceRuntime at runtimeEq
+            subst actualRuntime
+            simp [sourceAfter, executeStep, coreStep, objectLookup, updated]
+          let targetAfter : StructuredWasmState Host := {
+            store := replaceHeap targetStore heap
+            control := .running
+              { targetLocals with values := targetLocals.values } targetRest
+            frames := target.frames }
+          have targetPath :
+              FinitePath
+                (StructuredWasmStep targetModule.wasmModule hosts.env) 2
+                target targetAfter := by
+            rcases target with ⟨actualStore, actualControl, actualFrames⟩
+            have storeEq := related.targetStoreEq
+            change actualStore = targetStore at storeEq
+            subst actualStore
+            have controlEq := related.targetControlEq
+            change actualControl =
+              .running targetLocals
+                ([.localGet objectIndex, .call callIndex] ++ targetRest)
+              at controlEq
+            subst actualControl
+            simpa [targetAfter] using
+              structuredWasmUnaryHostEffectPrefixFinitePath
+                (module := targetModule.wasmModule) (env := hosts.env)
+                (spec := hosts.spec) (step := setTagStep tag)
+                (initial := targetStore) (final := replaceHeap targetStore heap)
+                (locals := targetLocals) (objectIndex := objectIndex)
+                (physicalObject := .i32 (UInt32.ofNat word.value))
+                (targetRest := targetRest) (tail := targetLocals.values)
+                (frames := actualFrames) targetLookup imported
+                functionSpec.hostsSatisfy inBounds contracted parameterCount
+                resultCount operation
+          have nextFocus :
+              ConcreteStructuredCodeFocus context sourceModule sourceFunction
+                [] nextRuntime sourceEnv continuation
+                (replaceHeap targetStore heap) targetLocals targetRest witness
+                sourceAfter targetAfter := {
+            sourceProgramEq := by
+              simp [sourceAfter, related.sourceProgramEq]
+            sourceControlEq := by simp [sourceAfter]
+            sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+            sourceRuntimeEq := by simp [sourceAfter]
+            targetStoreEq := by simp [targetAfter]
+            targetControlEq := by simp [targetAfter]
+            adapted := continuationAdapted
+            stateRelated := nextRelated
+            frameAligned := nextInvariant.1.1.1.1.2.2.1 }
+          exact ⟨sourceAfter, targetAfter, replaceHeap targetStore heap,
+            targetRest, .single sourcePath, targetPath, nextFocus,
+            nextInvariant, by simp [sourceAfter], by simp [sourceAfter],
+            by simp [targetAfter]⟩
+      | word64 valueRelated => cases valueRelated
+      | float32Bits valueRelated => cases valueRelated
+      | float64Bits valueRelated => cases valueRelated
+
 /-- Recursive structured partial correctness for direct values, supported pure
 external results, statically named calls, generated lazy caches, erased
 default-case wrappers, arbitrary normalized object and scalar `UInt8`
-dispatchers, and persistent or ordinary ownership effects through deletion.
+dispatchers, ownership effects through deletion, and constructor-tag mutation.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -7317,6 +7535,26 @@ theorem
           targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
           sourceMiddleFrames, targetMiddleFrames⟩ :=
         related.advance_ordinaryDelete functionSpec supported sourceStep
+          invariant
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, targetFramesEq⟩ :=
+        ih functionSpec contextCaches nextFocus
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
+        sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
+        resultInvariant, resultRefines, resultJoins,
+        sourceFramesEq.trans sourceMiddleFrames,
+        targetFramesEq.trans targetMiddleFrames⟩
+  | @constructorTagEffect sourceRuntime sourceEnv code continuation
+      nextRuntime context expectedResult facts resultFacts resultRuntime
+      resultEnv resultValue requiredBytes supported sourceStep continued ih =>
+      obtain ⟨sourceMiddle, targetMiddle, nextStore, targetRest, sourcePrefix,
+          targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
+          sourceMiddleFrames, targetMiddleFrames⟩ :=
+        related.advance_constructorTag functionSpec supported sourceStep
           invariant
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
           resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
