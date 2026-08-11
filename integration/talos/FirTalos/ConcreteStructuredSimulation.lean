@@ -2955,6 +2955,209 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
       (.cons pushExpected
         (.cons compare (.cons enterRemainder (.refl _)))))
 
+/-- A related scalar `UInt8` discriminator occupies its direct i32 lane with
+exactly the semantic tag selected by FIR. -/
+theorem scalarUInt8Local_eq_of_related
+    {sourceFunction : Fir.Wasm.Function}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {discr : Lean.FVarId}
+    {discrIndex : Nat} {sourceValue : Value} {actualTag : Nat}
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (sourceLookup : lookup sourceEnv discr = some sourceValue)
+    (discrFound :
+      findFVar? (functionBindings sourceFunction) discr = some discrIndex)
+    (discrKind :
+      (functionBindings sourceFunction)[discrIndex]?.map Prod.snd =
+        some .uint8)
+    (tagged : getTag sourceRuntime sourceValue = .ok actualTag) :
+    targetLocals.get discrIndex =
+        some (.i32 (UInt32.ofNat actualTag)) ∧
+      actualTag < UInt8.size := by
+  obtain ⟨index, kind, physical, found, kindAt, localValue,
+      physicalRelated⟩ := stateRelated.2.2 sourceLookup
+  rw [discrFound] at found
+  have indexEq := Option.some.inj found
+  subst index
+  rw [discrKind] at kindAt
+  have kindEq := Option.some.inj kindAt
+  subst kind
+  cases physicalRelated with
+  | word32 valueRelated =>
+      cases valueRelated with
+      | @uint8 word value encoded =>
+          have fits64 : value.toNat < UInt64.size := by
+            have sizeLe : UInt8.size ≤ UInt64.size := by native_decide
+            exact lt_of_lt_of_le (UInt8.toNat_lt_size value) sizeLe
+          have valueToNat :
+              (UInt64.ofNat value.toNat).toNat = value.toNat :=
+            UInt64.toNat_ofNat_of_lt' fits64
+          have tagEq : actualTag = value.toNat := by
+            simpa [getTag, ScalarValue.toUInt64, ScalarValue.rawBits,
+              valueToNat] using tagged.symm
+          subst actualTag
+          exact ⟨by simpa [Wasm.Locals.get, encoded] using localValue,
+            UInt8.toNat_lt_size value⟩
+  | word64 valueRelated => cases valueRelated
+  | float32Bits valueRelated => cases valueRelated
+  | float64Bits valueRelated => cases valueRelated
+
+/-- A successful scalar `UInt8` constructor test takes four structured steps:
+local read, expected-tag constant, equality, and conditional entry. -/
+theorem structuredWasmScalarUInt8CaseHitPrefixFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {frames : List StructuredWasmFrame}
+    {thenTarget elseTarget : Wasm.Program} {discrIndex : Nat}
+    {actualTag expectedTag : Nat}
+    (tagEq : actualTag = expectedTag)
+    (localFound :
+      locals.get discrIndex = some (.i32 (UInt32.ofNat actualTag))) :
+    FinitePath (StructuredWasmStep module hostEnv) 4
+      ⟨store, .running locals [
+          .localGet discrIndex,
+          .const (UInt32.ofNat expectedTag),
+          .eq,
+          .iff 0 0 thenTarget elseTarget], frames⟩
+      ⟨store, .running { locals with values := locals.values } thenTarget,
+        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+  let afterLocal : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+          .const (UInt32.ofNat expectedTag),
+          .eq,
+          .iff 0 0 thenTarget elseTarget],
+      frames⟩
+  let afterConst : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values :=
+        (.i32 (UInt32.ofNat expectedTag) ::
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .eq,
+          .iff 0 0 thenTarget elseTarget],
+      frames⟩
+  let afterEq : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values := .i32 1 :: locals.values }
+        [.iff 0 0 thenTarget elseTarget],
+      frames⟩
+  have loadLocal :
+      StructuredWasmStep module hostEnv
+        ⟨store, .running locals [
+            .localGet discrIndex,
+            .const (UInt32.ofNat expectedTag),
+            .eq,
+            .iff 0 0 thenTarget elseTarget], frames⟩
+        afterLocal := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, localFound]
+  have pushExpected :
+      StructuredWasmStep module hostEnv afterLocal afterConst := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def]
+  have compare : StructuredWasmStep module hostEnv afterConst afterEq := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp [Wasm.execOne.eq_def, tagEq]
+  have enterSelected :
+      StructuredWasmStep module hostEnv afterEq
+        ⟨store,
+          .running { locals with values := locals.values } thenTarget,
+          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+    simpa only [afterEq] using
+      (StructuredWasmStep.enterIffThen (module := module) (env := hostEnv)
+        (store := store) (locals := locals) (thenBody := thenTarget)
+        (elseBody := elseTarget) (rest := []) (frames := frames)
+        (condition := 1) (by decide))
+  exact .cons loadLocal
+    (.cons pushExpected
+      (.cons compare (.cons enterSelected (.refl _))))
+
+/-- A failed scalar `UInt8` constructor test takes four steps and enters the
+recursively compiled remainder of the case chain. -/
+theorem structuredWasmScalarUInt8CaseMissPrefixFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {frames : List StructuredWasmFrame}
+    {thenTarget elseTarget : Wasm.Program} {discrIndex : Nat}
+    {actualTag expectedTag : Nat}
+    (tagNe : actualTag ≠ expectedTag)
+    (actualFits : actualTag < UInt8.size)
+    (expectedFits : expectedTag < UInt8.size)
+    (localFound :
+      locals.get discrIndex = some (.i32 (UInt32.ofNat actualTag))) :
+    FinitePath (StructuredWasmStep module hostEnv) 4
+      ⟨store, .running locals [
+          .localGet discrIndex,
+          .const (UInt32.ofNat expectedTag),
+          .eq,
+          .iff 0 0 thenTarget elseTarget], frames⟩
+      ⟨store, .running { locals with values := locals.values } elseTarget,
+        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+  let afterLocal : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+          .const (UInt32.ofNat expectedTag),
+          .eq,
+          .iff 0 0 thenTarget elseTarget],
+      frames⟩
+  let afterConst : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values :=
+        (.i32 (UInt32.ofNat expectedTag) ::
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .eq,
+          .iff 0 0 thenTarget elseTarget],
+      frames⟩
+  let afterEq : StructuredWasmState Host :=
+    ⟨store,
+      .running { locals with values := .i32 0 :: locals.values }
+        [.iff 0 0 thenTarget elseTarget],
+      frames⟩
+  have loadLocal :
+      StructuredWasmStep module hostEnv
+        ⟨store, .running locals [
+            .localGet discrIndex,
+            .const (UInt32.ofNat expectedTag),
+            .eq,
+            .iff 0 0 thenTarget elseTarget], frames⟩
+        afterLocal := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, localFound]
+  have pushExpected :
+      StructuredWasmStep module hostEnv afterLocal afterConst := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def]
+  have physicalDifferent :
+      UInt32.ofNat actualTag ≠ UInt32.ofNat expectedTag := by
+    intro physicalEqual
+    exact tagNe <|
+      (constructorTag_uint8_eq_iff actualFits expectedFits).mp physicalEqual
+  have compare : StructuredWasmStep module hostEnv afterConst afterEq := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp [Wasm.execOne.eq_def, physicalDifferent]
+  have enterRemainder :
+      StructuredWasmStep module hostEnv afterEq
+        ⟨store,
+          .running { locals with values := locals.values } elseTarget,
+          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+    simpa only [afterEq] using
+      (StructuredWasmStep.enterIffElse (module := module) (env := hostEnv)
+        (store := store) (locals := locals) (thenBody := thenTarget)
+        (elseBody := elseTarget) (rest := []) (frames := frames))
+  exact .cons loadLocal
+    (.cons pushExpected
+      (.cons compare (.cons enterRemainder (.refl _))))
+
 /-- Returning through `count` nested generated case conditionals pops exactly
 `count` empty-result label frames and preserves the enclosing frame stack. -/
 theorem structuredWasmReturnReplicatedCaseLabelsFinitePath
@@ -3158,6 +3361,139 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               (expectedTag := info.cidx) hit actualFits expectedFits
               targetLookup imported spec.hostsSatisfy inBounds
               getTagContracted parameterCount resultCount tagOperation
+        refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
+        simpa [caseLabel, Nat.mul_add, Nat.add_comm,
+          List.replicate_succ_append] using headPath.trans tailPath
+
+/-- Exact structured path through an arbitrary normalized scalar `UInt8` case
+chain. Each compiler-generated direct comparison costs four steps and retains
+one empty-result label; no concrete host operation is involved. -/
+theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {discr : Lean.FVarId} {alts : List (Lean.Compiler.LCNF.Alt .impure)}
+    {fallback : List Fir.Wasm.Instruction} {chainTarget : Wasm.Program}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness} {sourceValue : Value} {actualTag : Nat}
+    {frames : List StructuredWasmFrame}
+    (supported : ScalarUInt8CaseAltsSupported alts)
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context discr = .scalarUInt8)
+    (discrCompiled :
+      Fir.Wasm.getLocal context discr = .ok (.localGet discr, .uint8))
+    (selection : chooseAlt actualTag alts = some selected)
+    (sourceLookup : lookup sourceEnv discr = some sourceValue)
+    (tagged : getTag sourceRuntime sourceValue = .ok actualTag)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (fallbackCompiled :
+      Fir.Wasm.compileCaseFallback context alts = .ok fallback)
+    (chainAdapted :
+      CaseChainAdapted context sourceModule sourceFunction labels discr alts
+        fallback chainTarget) :
+    ∃ selectedTarget testCount,
+      CodeAdapted context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+        FinitePath (StructuredWasmStep target.wasmModule hosts.env)
+          (4 * testCount)
+          ⟨targetStore, .running targetLocals chainTarget, frames⟩
+          ⟨targetStore,
+            .running { targetLocals with values := targetLocals.values }
+              selectedTarget,
+            List.replicate testCount
+                (.label 0 (targetLocals.values.drop 0) []) ++ frames⟩ := by
+  induction supported generalizing chainTarget selected frames with
+  | nil =>
+      simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
+  | default code =>
+      have selectedEq : selected = code := by
+        simpa [chooseAlt, findCtorAlt, findDefaultAlt] using selection.symm
+      subst selected
+      have branchCompiled :
+          Fir.Wasm.compileCode context code = .ok fallback := by
+        simpa [Fir.Wasm.compileCaseFallback,
+          Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt]
+          using fallbackCompiled
+      have branchAdapted :
+          CodeAdapted context sourceModule sourceFunction labels code
+            chainTarget :=
+        ⟨fallback, branchCompiled,
+          CaseChainAdapted.nil_eq
+            (CaseChainAdapted.default_eq chainAdapted)⟩
+      exact ⟨chainTarget, 0, branchAdapted, .refl _⟩
+  | @ctor info alts code fits rest ih =>
+      have fallbackCompiledRest :
+          Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
+        simpa [Fir.Wasm.compileCaseFallback,
+          Fir.Wasm.compileCaseFallbackWithM, Fir.Wasm.isDefaultAlt]
+          using fallbackCompiled
+      obtain ⟨thenTarget, elseTarget, discrIndex, thenAdapted, elseAdapted,
+          discrFound, targetEq⟩ :=
+        CaseChainAdapted.scalarUInt8Constructor_eq modeEq fits chainAdapted
+      obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
+        spec.localsAligned discrCompiled
+      rw [discrFound] at alignedFound
+      have alignedEq : alignedIndex = discrIndex :=
+        Option.some.inj alignedFound.symm
+      subst alignedIndex
+      obtain ⟨localFound, actualFits⟩ :=
+        scalarUInt8Local_eq_of_related stateRelated sourceLookup discrFound
+          discrKind tagged
+      have expectedFits : info.cidx < UInt8.size := by
+        simpa [Fir.Wasm.constructorTagFitsUInt8] using fits
+      by_cases hit : actualTag = info.cidx
+      · have selectedEq : selected = code := by
+          have branchEq : code = selected := by
+            simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit]
+              using selection
+          exact branchEq.symm
+        subst selected
+        refine ⟨thenTarget, 1, thenAdapted, ?_⟩
+        rw [targetEq]
+        simpa using
+          structuredWasmScalarUInt8CaseHitPrefixFinitePath
+            (module := target.wasmModule) (hostEnv := hosts.env)
+            (store := targetStore) (locals := targetLocals) (frames := frames)
+            (thenTarget := thenTarget) (elseTarget := elseTarget)
+            (discrIndex := discrIndex) (actualTag := actualTag)
+            (expectedTag := info.cidx) hit localFound
+      · have reverseMiss : info.cidx ≠ actualTag :=
+          fun equal => hit equal.symm
+        have selectionRest : chooseAlt actualTag alts = some selected := by
+          simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
+            using selection
+        let caseLabel : StructuredWasmFrame :=
+          .label 0 (targetLocals.values.drop 0) []
+        obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath⟩ :=
+          ih selectionRest fallbackCompiledRest elseAdapted
+            (frames := caseLabel :: frames)
+        have headPath :
+            FinitePath (StructuredWasmStep target.wasmModule hosts.env) 4
+              ⟨targetStore, .running targetLocals chainTarget, frames⟩
+              ⟨targetStore,
+                .running { targetLocals with values := targetLocals.values }
+                  elseTarget,
+                caseLabel :: frames⟩ := by
+          rw [targetEq]
+          simpa [caseLabel] using
+            structuredWasmScalarUInt8CaseMissPrefixFinitePath
+              (module := target.wasmModule) (hostEnv := hosts.env)
+              (store := targetStore) (locals := targetLocals)
+              (frames := frames) (thenTarget := thenTarget)
+              (elseTarget := elseTarget) (discrIndex := discrIndex)
+              (actualTag := actualTag) (expectedTag := info.cidx) hit
+              actualFits expectedFits localFound
         refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
           List.replicate_succ_append] using headPath.trans tailPath
@@ -4650,8 +4986,10 @@ non-heap misses; a miss recursively evaluates the initializer and then
 publishes its result through the concrete host cache and generated Wasm
 globals.  Default-only cases are included as compiler-erased control steps,
 and arbitrary normalized object-constructor cases execute the
-compiler-generated `getTag` chain recursively.  Heap-valued miss publication,
-scalar cases, and effects remain separate later widenings. -/
+compiler-generated `getTag` chain recursively.  Arbitrary normalized scalar
+`UInt8` cases execute the generated direct-comparison chain recursively as
+well.  Heap-valued miss publication and effects remain separate later
+widenings. -/
 inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
     (externals : ExternalImpl) :
     Fir.Wasm.Context → AbiKind → ReuseCapacityFacts → RuntimeState →
@@ -4817,6 +5155,19 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | scalarUInt8Cases
+      (supported :
+        ScalarUInt8CasesSupported context sourceRuntime sourceEnv cases
+          selected)
+      (sourceStep :
+        SourceCaseResult sourceRuntime sourceEnv cases selected)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts sourceRuntime sourceEnv selected resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv (.cases cases) resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -4903,6 +5254,13 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
           simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
           (.refl _))
         ih
+  | scalarUInt8Cases _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (by
+          rcases sourceStep with ⟨discrValue, tag, found, tagged, chosen⟩
+          simp [executeStep, coreStep, sourceCodeState, found, tagged, chosen])
+          (.refl _))
+        ih
 
 /-- Recover the ordinary ABI classifier from the direct-call classifier. -/
 theorem abiKind?_of_directAbiKind?_eq_some
@@ -4983,7 +5341,8 @@ theorem ConcreteStructuredBindFrameFocus.advance_of_step
 
 /-- Recursive structured partial correctness for direct values, supported pure
 external results, statically named calls, generated lazy caches, erased
-default-case wrappers, and arbitrary normalized object-constructor dispatchers.
+default-case wrappers, and arbitrary normalized object and scalar `UInt8`
+dispatchers.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -5840,6 +6199,143 @@ theorem
       exact ⟨sourceAfter, targetFinal, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount,
         5 * testCount + targetCount + testCount,
+        (FinitePath.single
+          (step := fun before after =>
+            executeStep externals before = .next after)
+          selectSourceStep).trans sourceTail,
+        (targetPrefix.trans targetTail).trans unwindTarget,
+        finalYielded, resultInvariant, resultRefines, resultJoins,
+        by simpa [sourceSelected] using sourceFramesEq,
+        by simp [targetFinal]⟩
+  | @scalarUInt8Cases context sourceRuntime sourceEnv cases selected
+      expectedResult facts resultFacts resultRuntime resultEnv resultValue
+      requiredBytes supported sourceStep continued ih =>
+      rcases supported with ⟨altsSupported, modeEq, discrCompiled⟩
+      rcases sourceStep with
+        ⟨sourceValue, actualTag, lookupFound, tagged, chosen⟩
+      have sourceLookup :
+          lookup sourceEnv cases.discr = some sourceValue := by
+        cases lookupEq : lookup sourceEnv cases.discr with
+        | none => simp [lookupValue, lookupEq] at lookupFound
+        | some value =>
+            have valueEq : value = sourceValue := by
+              simpa [lookupValue, lookupEq] using lookupFound
+            subst value
+            rfl
+      rcases CodeAdapted.cases_eq related.adapted with
+        ⟨fallback, fallbackCompiled, chainAdapted⟩
+      obtain ⟨selectedTarget, testCount, selectedAdapted,
+          rawTargetPrefix⟩ :=
+        functionSpec.scalarUInt8CaseChainFinitePath altsSupported modeEq
+          discrCompiled chosen sourceLookup tagged related.stateRelated
+          fallbackCompiled chainAdapted (frames := target.frames)
+      let sourceSelected : MachineState := {
+        source with control := .code selected }
+      have selectSourceStep :
+          executeStep externals source = .next sourceSelected := by
+        rcases source with
+          ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+            sourceFrames, actualRuntime⟩
+        have programEq := related.sourceProgramEq
+        change sourceProgram = context.program at programEq
+        subst sourceProgram
+        have controlEq := related.sourceControlEq
+        change sourceControl = .code (.cases cases) at controlEq
+        subst sourceControl
+        have envEq := related.sourceEnvEq
+        change actualEnv = sourceEnv at envEq
+        subst actualEnv
+        have runtimeEq := related.sourceRuntimeEq
+        change actualRuntime = sourceRuntime at runtimeEq
+        subst actualRuntime
+        simp [sourceSelected, executeStep, coreStep, lookupFound, tagged,
+          chosen]
+      let targetSelected : StructuredWasmState Host := {
+        store := targetStore
+        control := .running
+          { targetLocals with values := targetLocals.values } selectedTarget
+        frames :=
+          List.replicate testCount
+              (.label 0 (targetLocals.values.drop 0) []) ++ target.frames }
+      have targetPrefix :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            (4 * testCount) target targetSelected := by
+        rcases target with ⟨actualStore, actualControl, actualFrames⟩
+        have storeEq := related.targetStoreEq
+        change actualStore = targetStore at storeEq
+        subst actualStore
+        have controlEq := related.targetControlEq
+        change actualControl = .running targetLocals targetCode at controlEq
+        subst actualControl
+        simpa [targetSelected] using rawTargetPrefix
+      have selectedFocus :
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+            sourceRuntime sourceEnv selected targetStore
+            { targetLocals with values := targetLocals.values } selectedTarget
+            witness sourceSelected targetSelected := {
+        sourceProgramEq := by simp [sourceSelected, related.sourceProgramEq]
+        sourceControlEq := by simp [sourceSelected]
+        sourceEnvEq := by simp [sourceSelected, related.sourceEnvEq]
+        sourceRuntimeEq := by simp [sourceSelected, related.sourceRuntimeEq]
+        targetStoreEq := by simp [targetSelected]
+        targetControlEq := by simp [targetSelected]
+        adapted := selectedAdapted
+        stateRelated := related.stateRelated.withValues targetLocals.values
+        frameAligned := related.frameAligned.withValues targetLocals.values }
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, selectedTargetFramesEq⟩ :=
+        ih functionSpec contextCaches selectedFocus
+          (by simpa [sourceSelected] using sourceJoins)
+          (invariant.withValues targetLocals.values)
+      let targetFinal : StructuredWasmState Host := {
+        store := resultStore
+        control := .returning (physical :: resultLocals.values)
+        frames := target.frames }
+      have unwindTarget :
+          FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            testCount targetAfter targetFinal := by
+        rcases targetAfter with ⟨afterStore, afterControl, afterFrames⟩
+        have storeEq := yielded.targetStoreEq
+        change afterStore = resultStore at storeEq
+        subst afterStore
+        have controlEq := yielded.targetControlEq
+        change afterControl =
+          .returning (physical :: resultLocals.values) at controlEq
+        subst afterControl
+        change afterFrames = _ at selectedTargetFramesEq
+        rw [show targetSelected.frames =
+            List.replicate testCount
+                (.label 0 (targetLocals.values.drop 0) []) ++ target.frames by
+              simp [targetSelected]]
+          at selectedTargetFramesEq
+        subst afterFrames
+        simpa [targetFinal] using
+          structuredWasmReturnReplicatedCaseLabelsFinitePath
+            (module := targetModule.wasmModule) (hostEnv := hosts.env)
+            (store := resultStore)
+            (values := physical :: resultLocals.values)
+            (belowStack := targetLocals.values.drop 0)
+            (frames := target.frames) testCount
+      have finalYielded :
+          ConcreteStructuredYieldFocus context sourceFunction resultRuntime
+            resultEnv resultValue resultStore resultLocals resultWitness kind
+            physical sourceAfter targetFinal := {
+        sourceProgramEq := yielded.sourceProgramEq
+        sourceControlEq := yielded.sourceControlEq
+        sourceEnvEq := yielded.sourceEnvEq
+        sourceRuntimeEq := yielded.sourceRuntimeEq
+        targetStoreEq := by simp [targetFinal]
+        targetControlEq := by simp [targetFinal]
+        stateRelated := yielded.stateRelated
+        frameAligned := yielded.frameAligned
+        valueRelated := yielded.valueRelated }
+      exact ⟨sourceAfter, targetFinal, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount,
+        4 * testCount + targetCount + testCount,
         (FinitePath.single
           (step := fun before after =>
             executeStep externals before = .next after)

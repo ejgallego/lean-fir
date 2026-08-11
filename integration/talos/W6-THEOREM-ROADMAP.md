@@ -1306,9 +1306,12 @@ acceptance tests pass.
      arbitrary normalized constructor tables produce exactly five target steps
      and one saved label per executed test, including a zero-test default
      suffix. The current fragment makes its empty join environment explicit.
-     Subsequent slices connect scalar chains and effects and add saturated
-     closure calls, heap-valued cache misses, and target-only label/loop
-     unwinding to this induction.
+     Arbitrary normalized scalar `UInt8` tables are connected by the analogous
+     structural induction. Their direct local/constant/equality/conditional
+     tests cost four target steps each, retain the same one label per executed
+     test, and need no concrete host call. Subsequent slices connect effects
+     and add saturated closure calls, heap-valued cache misses, and target-only
+     label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

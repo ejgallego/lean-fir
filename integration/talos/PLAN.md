@@ -5832,7 +5832,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7b instruction-boundary Talos adequacy | complete | finite residual-instruction paths agree with Talos `exec` above one common fuel bound and recover exact `Wasm.run` exits |
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
-| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor dispatch, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
+| W6.7e compiler relation and rank | in progress; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, and arbitrary finite nesting of generated named calls are complete | each admitted LCNF `executeStep` produces a finite structured path restoring compiled code, locals/environment, heap, continuation, trace, closure, ownership, cache, allocation, and ABI invariants; zero-step matches decrease a compiler-derived structural rank |
 | W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
@@ -5888,9 +5888,11 @@ selection after two misses, with exact paths and one nested label per executed
 test. The same argument is now structural over arbitrary normalized object
 tables: compiler inversion peels each generated test, a hit enters its arm, a
 miss recurses on the compiled suffix, and the final exact path has five steps
-and one label per tested constructor. The next construction slices connect
-scalar case chains, effects, saturated-closure transitions, and heap-valued
-cache misses to the same induction.
+and one label per tested constructor. Arbitrary scalar `UInt8` tables are now
+structural too: they use the analogous direct four-step test chain, with no
+host import and the same exact label discipline. Remaining construction slices
+connect effects, saturated-closure transitions, and heap-valued cache misses
+to the same induction.
 
 ## Parallel agent packages
 
