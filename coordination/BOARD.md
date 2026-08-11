@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-VERSO-FLAT-PUBLICATION-AND-HTML-PROBE`.
+- Integration owner: `wasm-gen`; the lease published the accepted Flat
+  package source pin and preserved the complete-HTML boundary as a reproducible
+  fail-closed diagnostic.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, rebased directly on `main` at `71890121`.
+- Published stack: Flat pin `c852e06a`, HTML functional head `95ccd21c`, and
+  ready mailbox `1002e638`.
+- Flat artifact: the immutable package
+  `a4dce92bc6e1-3dbc9ef4fa5a-7d16ade417a24f50058e` contains a 154,635-byte
+  zero-import module with SHA-256 `60a70d63a38d230f37c04e1a88bad264a69cd9b23215b1ba859bd6dd125f0b0e`.
+  Deterministic publication, checksums, Node, Chrome, and the Verso validator
+  pass. Its exact FIR source commit is remotely reachable from
+  `origin/publish-verso-flat-a4dce92b`.
+- HTML finding: module-wise postponed capture compiles the exact published
+  `formatHtmlForRuntime` source quickly and emits a stable 32,407-byte base
+  module. Resident linking correctly rejects its 52-name precompiled-core
+  frontier. The source needs an explicit specialized HTML state monad/join and
+  escaping loop before zero-import publication; the boundary is recorded by
+  `FIR-BUG-impure-none-generated-external-source-ancestor`.
+- ABI finding: the actual HTML physical signature is
+  `[tobject, object, tobject, tobject, tobject] -> object`; the annotation Array
+  parameter is physically `object`.
+- Contracts: no shared semantic, concrete-runtime, resident-helper, existing
+  artifact, or browser API contract changed.
+- Validation: Lean Beam and focused source-view builds; `git diff --check`;
+  complete `make check` with 642 covered cases and 1,844/1,844 comparisons;
+  all 3,133 Talos jobs; the complete Talos artifact gate; and the accepted Flat
+  deterministic/Node/Chrome/Verso gates.
+- Remaining boundary: Verso owns the semantic-neutral HTML source refactor.
+  W7 resumes HTML packaging when that published source commit is available;
+  W6 may continue independently.
+
+## Latest completed integration lease
+
 - Milestone: `W7-GENERIC-FLAT-PREREQUISITE`.
 - Integration owner: `wasm-gen`; the lease closed the package-specific Flat
   runtime policy and made the shared closed-application path safe for generic
