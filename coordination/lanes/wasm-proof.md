@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: c025081e on main
+state: active
+base: 1bdcddee on main
 functional-head: f8eac2ca (recursive structured simulation now includes successful ordinary recursive decrement)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 126 hash 877fb967ab370873 (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready from base c025081e at functional head f8eac2ca; worktree was clean before this mailbox update.
-next: Land this slice, then add successful explicit deletion through its compiler-generated unary-host prefix. Keep mutation effects, heap-valued lazy publication, and saturated closure calls as separate slices.
+handoff: none; the ordinary decrement slice landed on main at 1bdcddee and the lane is active on explicit deletion.
+next: Add successful explicit deletion through its compiler-generated unary-host prefix, covering ordinary heap objects and the erased zero token under the shared delete contract. Keep mutation effects, heap-valued lazy publication, and saturated closure calls as separate slices.
 ```
