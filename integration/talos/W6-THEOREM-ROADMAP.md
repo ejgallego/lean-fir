@@ -1228,11 +1228,20 @@ acceptance tests pass.
      relation to the generated callee row, and records the exact saved source
      bind and target call frames. The target frame deliberately stores the
      post-argument caller locals required by Wasm rather than identifying them
-     with the pre-push record. The next slice transports this saved caller
-     invariant across callee allocation/effects and turns a related callee
-     yield into the accepted bind-frame focus. Subsequent slices handle
-     target-only label/loop unwinding, apply/cache source frames, and positive
-     target paths for the remaining non-terminal operations.
+     with the pre-push record. The saved-caller transport boundary is now
+     explicit too. `ReuseCapacityCodeEntryTransports.savedStateRelated`
+     combines the callee's evolved runtime relation with the hereditary
+     witness transport to reconstruct the suspended caller's local relation;
+     it does not equate the entry and exit stores. Call entry constructs the
+     canonical entry-relative cache frame with reflexive transports, and
+     `bindFrame_of_yield_cacheFrame` consumes the evolved hereditary frame at
+     a related callee yield to establish the accepted bind-frame focus. The
+     next slice is the structural callee-body simulation that threads this
+     entry-relative frame and exact saved-frame suffix through each admitted
+     code constructor, recursively nesting the same relation for internal
+     calls. Subsequent slices handle target-only label/loop unwinding,
+     apply/cache source frames, and positive target paths for the remaining
+     non-terminal operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

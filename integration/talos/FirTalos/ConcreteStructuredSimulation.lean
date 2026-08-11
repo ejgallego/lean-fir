@@ -986,6 +986,86 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter
       stateRelated := calleeStateRelated
       frameAligned := calleeFrameAligned }
 
+/-- Entry-to-current runtime transports preserve a suspended caller's local
+relation.  The current callee relation supplies the evolved runtime and clear
+failure channel; the accumulated witness transport reinterprets every saved
+caller local at the current witness without changing either the source
+environment or the physical local frame. -/
+theorem ReuseCapacityCodeEntryTransports.savedStateRelated
+    {entryRuntime currentRuntime : RuntimeState}
+    {entryStore currentStore : Wasm.Store Host}
+    {entryWitness currentWitness : RefinementWitness}
+    {entryFunction currentFunction : Fir.Wasm.Function}
+    {entryEnv currentEnv : Env}
+    {entryLocals currentLocals : Wasm.Locals}
+    (transports :
+      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
+        currentStore entryWitness currentWitness)
+    (entryRelated :
+      StateRelated entryFunction entryRuntime entryEnv entryStore entryLocals
+        entryWitness)
+    (currentRelated :
+      StateRelated currentFunction currentRuntime currentEnv currentStore
+        currentLocals currentWitness) :
+    StateRelated entryFunction currentRuntime entryEnv currentStore entryLocals
+      currentWitness := by
+  exact ⟨currentRelated.1, currentRelated.2.1,
+    EnvLocalsRelated.witnessTransport transports.witness entryRelated.2.2⟩
+
+/-- Strengthen a structured direct-call entry with the canonical hereditary
+cache frame used by the existing W6 operation-family induction.  The callee
+starts with empty reuse facts and reflexive entry transports; its runtime,
+budget, handler, cache, ownership, and immutable-table invariants come from
+the caller frame through the generated declaration row. -/
+theorem
+    ConcreteStructuredDirectCallEntryFocus.calleeEntryRelativeCacheFrame
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {entryWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {entrySource : MachineState}
+    {entryTarget : StructuredWasmState Host}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    (entry : ConcreteStructuredDirectCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site row labels entryRuntime continuation callerJoins sourceFrames
+      entryStore callerLocals callerRemainder targetRest targetFrames
+      entryWitness physicalArgs resultIndex entrySource entryTarget)
+    (callerFrame :
+      ConcreteReuseCapacityCacheFrame sourceModule callerFunction externals
+        facts remainingBytes entryRuntime callerEnv entryStore callerLocals
+        entryWitness) :
+    ReuseCapacityEntryRelativeFrame
+      (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
+      entryRuntime entryStore entryWitness [] remainingBytes entryRuntime
+      site.calleeEnv entryStore (row.targetFunction.toLocals physicalArgs)
+      entryWitness := by
+  exact
+    ⟨callerFrame.generatedDirectCalleeEntry site row entry.argumentsRelated,
+      ReuseCapacityCodeEntryTransports.refl entryRuntime entryStore
+        entryWitness⟩
+
 /-- One saved source bind frame corresponds to the generated call frame whose
 caller residual program stores the single returned value and continues with
 the adapted source continuation.  Target-only label/loop frames may surround
@@ -1081,6 +1161,164 @@ theorem ConcreteStructuredBindFrameFocus.observes
       source.runtime.trace
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.stateRelated.1.trace
+
+/-- Close the hereditary direct-call scope at a related callee yield.
+
+The callee's current state relation and the accumulated entry transports
+reconstruct the saved caller relation at the evolved store and witness.  The
+explicit frame equalities state that nested administrative work has unwound
+back to this call boundary.  The result is exactly the previously accepted
+bind-frame focus, ready for `ConcreteStructuredBindFrameFocus.advance`; no
+pre-call store equality or target-execution certificate is assumed. -/
+theorem ConcreteStructuredDirectCallEntryFocus.bindFrame_of_yield
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {entryRuntime currentRuntime : RuntimeState}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryStore currentStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {entryWitness currentWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {entrySource : MachineState}
+    {entryTarget : StructuredWasmState Host}
+    {currentEnv : Env}
+    {sourceValue : Value}
+    {actualKind : AbiKind}
+    {physical : Wasm.Value}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (entry : ConcreteStructuredDirectCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site row labels entryRuntime continuation callerJoins sourceFrames
+      entryStore callerLocals callerRemainder targetRest targetFrames
+      entryWitness physicalArgs resultIndex entrySource entryTarget)
+    (yielded : ConcreteStructuredYieldFocus calleeContext calleeFunction
+      currentRuntime currentEnv sourceValue currentStore calleeLocals
+      currentWitness actualKind physical source target)
+    (transports :
+      ReuseCapacityCodeEntryTransports entryRuntime currentRuntime entryStore
+        currentStore entryWitness currentWitness)
+    (sourceFramesEq :
+      source.frames =
+        .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames)
+    (targetFramesEq :
+      target.frames =
+        .call 1 callerRemainder callerLocals
+            (.localSet resultIndex :: targetRest) :: targetFrames)
+    (resultRefines : actualKind.refines site.resultKind = true) :
+    ConcreteStructuredBindFrameFocus callerContext sourceModule callerFunction
+      labels currentRuntime callerEnv sourceValue decl.fvarId continuation
+      callerJoins sourceFrames currentStore callerLocals callerRemainder
+      targetRest targetFrames calleeLocals.values currentWitness site.resultKind
+      physical resultIndex source target := by
+  have callerStateRelated :
+      StateRelated callerFunction currentRuntime callerEnv currentStore
+        callerLocals currentWitness :=
+    transports.savedStateRelated entry.callerStateRelated yielded.stateRelated
+  have callerFrameAligned :
+      ConcreteLocalFrameAligned callerFunction currentRuntime callerEnv
+        currentStore callerLocals currentWitness := by
+    simpa [ConcreteLocalFrameAligned] using entry.callerFrameAligned
+  exact {
+    sourceProgramEq := yielded.sourceProgramEq.trans row.contextProgram
+    sourceControlEq := yielded.sourceControlEq
+    sourceRuntimeEq := yielded.sourceRuntimeEq
+    sourceFramesEq
+    targetStoreEq := yielded.targetStoreEq
+    targetControlEq := yielded.targetControlEq
+    targetFramesEq
+    continuationAdapted := entry.continuationAdapted
+    stateRelated := callerStateRelated
+    frameAligned := callerFrameAligned
+    resultFound := entry.resultFound
+    kindAt := entry.resultKindAt
+    valueRelated := yielded.valueRelated.ofRefines resultRefines }
+
+/-- Entry-relative cache-frame specialization of `bindFrame_of_yield`.
+
+This is the direct composition point with the established hereditary runtime
+proof: its final frame already contains the accumulated entry transports, so
+clients need not unpack or restate witness/capacity/ownership transport when
+closing a structured call. -/
+theorem
+    ConcreteStructuredDirectCallEntryFocus.bindFrame_of_yield_cacheFrame
+    {callerContext calleeContext : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {callerFunction calleeFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {externals : ExternalImpl}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {callerEnv : Env}
+    {site : DirectInternalCallSite callerContext decl callerEnv}
+    {row : ConcreteGeneratedInternalDeclaration callerContext.program
+      site.sourceDeclaration calleeContext site.calleeCode sourceModule
+      calleeFunction targetModule}
+    {labels : List Lean.FVarId}
+    {entryRuntime currentRuntime : RuntimeState}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {entryStore currentStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {entryWitness currentWitness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {resultIndex : Nat}
+    {entrySource : MachineState}
+    {entryTarget : StructuredWasmState Host}
+    {currentEnv : Env}
+    {sourceValue : Value}
+    {actualKind : AbiKind}
+    {physical : Wasm.Value}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    {resultFacts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    (entry : ConcreteStructuredDirectCallEntryFocus callerContext
+      calleeContext sourceModule callerFunction calleeFunction targetModule
+      site row labels entryRuntime continuation callerJoins sourceFrames
+      entryStore callerLocals callerRemainder targetRest targetFrames
+      entryWitness physicalArgs resultIndex entrySource entryTarget)
+    (yielded : ConcreteStructuredYieldFocus calleeContext calleeFunction
+      currentRuntime currentEnv sourceValue currentStore calleeLocals
+      currentWitness actualKind physical source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule calleeFunction externals)
+        entryRuntime entryStore entryWitness resultFacts remainingBytes
+        currentRuntime currentEnv currentStore calleeLocals currentWitness)
+    (sourceFramesEq :
+      source.frames =
+        .bind decl.fvarId continuation callerEnv callerJoins :: sourceFrames)
+    (targetFramesEq :
+      target.frames =
+        .call 1 callerRemainder callerLocals
+            (.localSet resultIndex :: targetRest) :: targetFrames)
+    (resultRefines : actualKind.refines site.resultKind = true) :
+    ConcreteStructuredBindFrameFocus callerContext sourceModule callerFunction
+      labels currentRuntime callerEnv sourceValue decl.fvarId continuation
+      callerJoins sourceFrames currentStore callerLocals callerRemainder
+      targetRest targetFrames calleeLocals.values currentWitness site.resultKind
+      physical resultIndex source target :=
+  entry.bindFrame_of_yield yielded invariant.2 sourceFramesEq targetFramesEq
+    resultRefines
 
 /-- Resuming a related bind/call frame takes one source administrative step
 and exactly two structured target steps: unwind the call frame, then store the
