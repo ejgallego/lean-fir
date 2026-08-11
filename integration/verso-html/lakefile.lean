@@ -17,7 +17,6 @@ def versoRoot : String :=
 lean_lib «VersoHtmlSource» where
   srcDir := System.FilePath.mk versoRoot
   roots := #[`VersoSlides.Pretty]
-  leanOptions := #[⟨`compiler.postponeCompile, true⟩]
 
 @[default_target]
 lean_lib «VersoFirHtml»
