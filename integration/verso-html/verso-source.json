@@ -1,10 +1,10 @@
 {
   "schemaVersion": 1,
   "repository": "https://github.com/ejgallego/verso-slides.git",
-  "revision": "3dbc9ef4fa5aa88e2b758b1d90b25eadec51c130",
-  "remoteRef": "ejgallego/feat/vir-panel-component-evaluation",
-  "upstreamBaseRevision": "4cf042fcbda184df133fc495bea10fd0e61b26a3",
+  "revision": "2ee1c804106b87ab254923fc75a0172f382fcd8e",
+  "remoteRef": "origin/feat/vir-pretty-prototype",
+  "upstreamBaseRevision": "db608f9611b2a6784310ade04f8d542a6f81cb58",
   "files": {
-    "VersoSlides/Pretty.lean": "90e7118e2ecce00761f3035f282476bfad5f16be847edf23cc4b0c8b943fb25b"
+    "VersoSlides/Pretty.lean": "bf4271d690b523d5709d19331568c27f2dcb42b0d9ee253dbc30205a5a336c8e"
   }
 }

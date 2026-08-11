@@ -1,32 +1,63 @@
-# Verso complete-HTML source probe
+# Verso complete-HTML `prettyM` package
 
-This project captures the real
-`VersoSlides.Pretty.formatHtmlForRuntime` entry through FIR's module-wise
-postponed final-LCNF path. It does not copy the Verso implementation or consume
-Verso build products.
+This integration compiles the real
+`VersoSlides.Pretty.formatHtmlForRuntime` final-LCNF closure and links the
+complete Lean runtime frontier into a zero-import Wasm module. The source
+implementation is neither copied nor adapted inside FIR.
 
-The source boundary is healthy: the exact published `VersoSlides.Pretty`
-module rebuilds with `compiler.postponeCompile=true`, and the FIR compile
-surface elaborates without diagnostics. Resident linking is currently blocked
-by `FIR-BUG-impure-none-generated-external-source-ancestor`: the HTML entry
-still reaches generated declarations in precompiled Lean core modules through
-`StateT`, `String.join`, and `String.replace`.
+The browser/Node adapter accepts the compact Lean 4.32 `Std.Format` object used
+by FIR's other `prettyM` packages plus an array of
+`{ tag, annotation: { cssClass, binding } }` values. It returns a copied,
+escaped HTML String whose spans implement Verso's `verso-token-html/v1`
+contract. No raw Wasm address escapes the adapter.
 
-Reproduce the accepted diagnostic with a clean checkout of the source commit
-recorded in `verso-source.json`:
+## Source and capture
+
+The exact clean Verso revision and source digest are pinned in
+`verso-source.json`. Point `.verso` at that checkout, or set `VERSO_ROOT`:
 
 ```sh
-ln -s /absolute/path/to/clean/verso-checkout .verso
-lake --keep-toolchain --reconfigure build VersoFirHtml.Compile
-lake --keep-toolchain env lean Emit.lean
+ln -s /absolute/path/to/clean/verso .verso
 ```
 
-The second command intentionally fails closed rather than producing a package
-with host fallbacks. At the recorded source revision it emits a 32,407-byte
-base module with 498 FIR runtime operations and 52 Lean externals, then reports
-the first incomplete resident family at `String.Internal.append`.
+FIR asks Lean for one captured final-LCNF unit rooted at the public entry. This
+is deliberately slower than replaying module-wise fragments, but it preserves
+the specializations produced by the source compilation and reduces the
+external frontier to generic runtime operations. `closure-contract.json`
+ratchets the complete declaration, helper, size, and inventory digests.
 
-Publication resumes after the source entry adopts an explicit specialized HTML
-state monad, a local chunk join, and source-local escaping. The intended public
-surface remains `fir-prettyM-package-metadata-v2` with browser API
-`fir.prettyM.html.browser/v1`, module-owned memory, and zero imports.
+## Complete gate and publication
+
+```sh
+VERSO_ROOT=/absolute/path/to/clean/verso bash check.sh
+```
+
+The gate publishes twice to prove deterministic identity, verifies every
+checksum, compares eight Wasm results with the native Lean entry, checks
+escaping and nested annotations, exercises memory growth and repeated calls,
+and runs the source repository's package validator. Set
+`FIR_BROWSER=google-chrome` to add the real browser fetch/compile/render check.
+
+Immutable packages live under `_build/verso-html-packages/`.
+`_build/verso-html-current` is atomically updated to the accepted package.
+Each package contains:
+
+- `prettyM.wasm` and `prettyM.wasm.json`;
+- `prettyM-browser-adapter.mjs`;
+- `BUILD.json` and `SHA256SUMS`;
+- `smoke.mjs`.
+
+The module owns its memory, has zero imports, and exports only the structured
+entry, four arena functions, and memory. Inputs are fresh transferred Lean
+graphs. Output HTML is copied before it is returned. The arena is monotonic for
+the instance lifetime, so consumers should use fresh instances for bounded
+batches when measuring memory.
+
+## Known performance follow-up
+
+The current Verso source escapes HTML through character-at-a-time immutable
+`String.push`. The resident implementation follows Lean's generic semantics,
+which makes long escaped output quadratic in allocation volume in the monotonic
+Wasm arena. The package gate therefore uses a bounded memory-growth case. The
+separate source-owner throughput acceptance should replace the escape loop with
+a builder/chunk strategy before reinstating the >=1 MiB headline case.
