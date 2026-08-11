@@ -13,24 +13,35 @@ specific behavior to prevent.
 
 Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
-## Active integration lease
+## Latest completed integration lease
 
 - Milestone: `ELIMDEAD-GENERIC-MAPPED-OWNER-READINESS`.
 - Integration owner: `lcnf-proof`; the user assigned this lane the temporary
-  integration role to land its clean mapped-owner readiness handoff.
+  integration role, and the owner accepted the clean mapped-owner readiness
+  handoff after its exact post-W6 rebase gate passed.
 - Integration branch/worktree: `proof/simpcase` in
-  `.worktrees/proof-simpcase`; its published handoff was based on `e2064631`
-  and will be rebased directly onto current `main` at `af7f9a89` before
-  acceptance.
-- Candidate: derive `TargetMappedOwnerPrefix` uniformly from compiler-live
-  heap bindings and migrate the retained-prefix reset/reuse clients away from
-  manually reconstructed singleton address mappings.
-- Contracts: none. This is proof-only compiler-readiness strengthening; the
-  intervening W6 external-evidence integration changes no LCNF proof or shared
-  semantic contract.
-- Acceptance gate: clean rebased branch, Lean dependency cone,
-  `git diff --check`, and complete `make check`; then fast-forward `main`,
-  record acceptance here, and release the lease.
+  `.worktrees/proof-simpcase`, rebased directly on `main` at `d6599de8` after
+  the W6 external-evidence acceptance and this lease's planning record.
+- Published stack: active-slice record `7fc0cd10`, functional head `e54f39d4`,
+  and exact validated handoff `38ad84f4`.
+- Accepted proof: an arbitrary allocated target prefix covered by
+  compiler-live heap binders now derives `TargetMappedOwnerPrefix` uniformly
+  from `EnvRelOn`. The retained-prefix reset and reuse clients consume this
+  interface instead of manually reconstructing a singleton address mapping.
+- Contracts: none. This is proof-only compiler-readiness strengthening; it
+  changes no interpreter, runtime, Wasm, or shared semantic contract.
+- Acceptance: Lean Beam saves with zero errors; the 34-job dependency cone;
+  `git diff --check`; and complete post-rebase `make check` with 122 harness
+  tests, 647/647 source and V8 cases, 9/9 direct cases, 656 unique cases,
+  1,950/1,950 equal comparisons, 6,431 machine steps, all 106 tag floors and
+  215 semantic domains satisfied, zero findings, 129 valid bug cards, and
+  exactly one registered trusted axiom. The changed proof files contain no
+  `sorry` or `admit`.
+- Result: `main` fast-forwards through the validated handoff and is pushed
+  before further lane work. The lease is released; the LCNF lane next rebases
+  on the acceptance record and replaces the remaining fixture-specific
+  reset/reuse classification with generic local operation-shape and ownership
+  premises.
 
 ## Latest completed integration lease
 
