@@ -1701,6 +1701,33 @@ def repeatedCapturedBoxOutsideAliasRead
     (inspectRepeatedCapturedBox source source) readSecond
   (source, captured)
 
+structure TailByteOwner where
+  bytes : ByteArray
+  marker : String
+
+@[noinline]
+def mkTailByteOwner (bytes : ByteArray) : TailByteOwner :=
+  { bytes, marker := "tail-owner" }
+
+@[noinline]
+def TailByteOwner.setByte (owner : TailByteOwner) (index : Nat) : TailByteOwner :=
+  { owner with bytes := owner.bytes.set! index 255 }
+
+@[noinline]
+def tailUpdateByteOwner : Nat → TailByteOwner → TailByteOwner
+  | 0, owner => owner
+  | remaining + 1, owner =>
+      tailUpdateByteOwner remaining (owner.setByte remaining)
+
+def tailByteOwnerUnique (steps : Nat) (bytes : ByteArray) : TailByteOwner :=
+  tailUpdateByteOwner steps (mkTailByteOwner bytes)
+
+def tailByteOwnerShared
+    (steps : Nat) (bytes : ByteArray) : TailByteOwner × TailByteOwner :=
+  let owner := mkTailByteOwner bytes
+  let updated := tailUpdateByteOwner steps owner
+  (owner, updated)
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -2162,6 +2189,13 @@ private def repeatedCaptureBoxTripleDatum
   .ctor "Prod.mk" 0 #[repeatedCaptureBoxDatum value.1,
     repeatedCaptureBoxNatPairDatum value.2]
 
+private def tailByteOwnerDatum (value : Source.TailByteOwner) : ValidationDatum :=
+  .ctor "TailByteOwner.mk" 0 #[byteArrayDatum value.bytes, .string value.marker]
+
+private def tailByteOwnerPairDatum
+    (value : Source.TailByteOwner × Source.TailByteOwner) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[tailByteOwnerDatum value.1, tailByteOwnerDatum value.2]
+
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
@@ -2379,6 +2413,12 @@ private def repeatedCaptureBoxTripleSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema,
     .ctor "Prod.mk" 0 #[repeatedCaptureBoxSchema, .nat]]
 
+private def tailByteOwnerSchema : ValidationSchema :=
+  .ctor "TailByteOwner.mk" 0 #[.bytes, .string]
+
+private def tailByteOwnerPairSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[tailByteOwnerSchema, tailByteOwnerSchema]
+
 private def byteArrayPairPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
 
@@ -2528,6 +2568,35 @@ private def repeatedCapturedBoxReadFormTrace : Array String :=
     "fap", "box", "fvar", "unbox", "fap", "cases", "oproj", "join",
     "isShared", "cases", "inc", "dec", "jump", "join", "cases", "ctor",
     "jump", "return", "return", "return", "ctor", "return"]
+
+private def tailByteOwnerUniqueFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "oset", "jump", "return",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "oset", "jump", "return",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "oset", "jump", "return",
+    "fap", "lit", "fap", "extern", "cases", "dec", "return", "return",
+    "return", "return", "return"]
+
+private def tailByteOwnerSharedFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "inc", "inc",
+    "dec", "jump", "lit", "fap", "extern", "join", "cases", "ctor", "jump",
+    "return",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "oset", "jump", "return",
+    "fap", "lit", "fap", "extern", "cases", "lit", "fap", "extern", "dec",
+    "fap", "oproj", "oproj", "join", "isShared", "cases", "jump", "lit",
+    "fap", "extern", "join", "cases", "oset", "jump", "return",
+    "fap", "lit", "fap", "extern", "cases", "dec", "return", "return",
+    "return", "return", "ctor", "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -6274,6 +6343,105 @@ private def postConversionCases : Array Case := #[
         "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Project one repeated constructor capture while preserving its twin and outside alias" },
+  { id := "tail-byte-owner-unique-transfer"
+    entry := ``Source.tailByteOwnerUnique
+    dependencies :=
+      #[``Source.mkTailByteOwner, ``Source.TailByteOwner.setByte,
+        ``Source.tailUpdateByteOwner]
+    args := #[.nat 3, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.nat, .bytes]
+    resultSchema := tailByteOwnerSchema
+    native := fun _ => tailByteOwnerDatum
+      (Source.tailByteOwnerUnique 3 mixedLayoutBytes)
+    tags :=
+      #["stress", "tail-control", "tail-ownership", "unique-transfer", "recursion",
+        "multiplicity", "mutation", "bytearray", "bytes", "external", "heap",
+        "ownership", "unique", "reuse", "constructor", "nested", "string"]
+    requiredLcnfForms :=
+      #["fap", "return", "inc", "ctor", "lit", "cases", "dec", "oproj", "join",
+        "oset", "jump", "isShared", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "extern", "cases", "dec", "oproj",
+        "join", "isShared", "jump", "oset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 19, maximum := some 19 },
+        { form := "lit", minimum := 11, maximum := some 11 },
+        { form := "return", minimum := 10, maximum := some 10 },
+        { form := "inc", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 10, maximum := some 10 },
+        { form := "cases", minimum := 10, maximum := some 10 },
+        { form := "dec", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 6, maximum := some 6 },
+        { form := "join", minimum := 6, maximum := some 6 },
+        { form := "isShared", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 6, maximum := some 6 },
+        { form := "oset", minimum := 3, maximum := some 3 }]
+    requiredExecutedLcnfFormTrace := some tailByteOwnerUniqueFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!]
+    requiredExecutedExternals := #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.decEq, minimum := 4, maximum := some 4 },
+        { external := ``Nat.sub, minimum := 3, maximum := some 3 },
+        { external := ``ByteArray.set!, minimum := 3, maximum := some 3 }]
+    requiredExecutedExternalTrace :=
+      some #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!, ``Nat.decEq, ``Nat.sub,
+        ``ByteArray.set!, ``Nat.decEq, ``Nat.sub, ``ByteArray.set!, ``Nat.decEq]
+    provenance := firProvenance
+      "Transfer a nested ByteArray owner through three tail-recursive mutations" },
+  { id := "tail-byte-owner-shared-retain"
+    entry := ``Source.tailByteOwnerShared
+    dependencies :=
+      #[``Source.mkTailByteOwner, ``Source.TailByteOwner.setByte,
+        ``Source.tailUpdateByteOwner]
+    args := #[.nat 3, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.nat, .bytes]
+    resultSchema := tailByteOwnerPairSchema
+    native := fun _ => tailByteOwnerPairDatum
+      (Source.tailByteOwnerShared 3 mixedLayoutBytes)
+    tags :=
+      #["stress", "tail-control", "tail-ownership", "shared-retain", "recursion",
+        "multiplicity", "mutation", "bytearray", "bytes", "external", "heap",
+        "ownership", "shared", "outside-alias", "retain", "release", "copy-on-write",
+        "allocation", "reuse", "constructor", "nested", "string"]
+    requiredLcnfForms :=
+      #["fap", "inc", "ctor", "return", "lit", "cases", "dec", "oproj", "join",
+        "oset", "jump", "isShared", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "extern", "cases", "dec", "oproj",
+        "join", "isShared", "jump", "oset"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 19, maximum := some 19 },
+        { form := "lit", minimum := 11, maximum := some 11 },
+        { form := "return", minimum := 10, maximum := some 10 },
+        { form := "inc", minimum := 4, maximum := some 4 },
+        { form := "ctor", minimum := 3, maximum := some 3 },
+        { form := "extern", minimum := 10, maximum := some 10 },
+        { form := "cases", minimum := 10, maximum := some 10 },
+        { form := "dec", minimum := 5, maximum := some 5 },
+        { form := "oproj", minimum := 6, maximum := some 6 },
+        { form := "join", minimum := 6, maximum := some 6 },
+        { form := "isShared", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 6, maximum := some 6 },
+        { form := "oset", minimum := 2, maximum := some 2 }]
+    requiredExecutedLcnfFormTrace := some tailByteOwnerSharedFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!]
+    requiredExecutedExternals := #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.decEq, minimum := 4, maximum := some 4 },
+        { external := ``Nat.sub, minimum := 3, maximum := some 3 },
+        { external := ``ByteArray.set!, minimum := 3, maximum := some 3 }]
+    requiredExecutedExternalTrace :=
+      some #[``Nat.decEq, ``Nat.sub, ``ByteArray.set!, ``Nat.decEq, ``Nat.sub,
+        ``ByteArray.set!, ``Nat.decEq, ``Nat.sub, ``ByteArray.set!, ``Nat.decEq]
+    provenance := firProvenance
+      "Retain the original nested owner across three tail-recursive mutations" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]

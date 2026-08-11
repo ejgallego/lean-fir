@@ -1853,6 +1853,21 @@ V8 agree for all four cases; matching source and V8 domains independently
 require ignored capture, read capture, ByteArray borrow, and constructor
 projection topology.
 
+The tail-ownership bridge carries a nested `ByteArray`/`String` owner through
+three recursive tail calls and compares transferring the unique owner with
+retaining an independent alias to the original. Both cases execute 19
+applications, three `isShared` decisions, four termination checks, three
+recursive `Nat.sub` calls, and exactly three ordered `ByteArray.set!`
+dispatches. The unique-transfer case pins 121 interpreter transitions, one
+`inc`, four `dec`, one `ctor`, and three in-place `oset` updates. The
+shared-retain case pins 126 transitions, four `inc`, five `dec`, three `ctor`,
+and two `oset` updates: it allocates a replacement on the first update, then
+reuses that transferred owner for the remaining two. Native Lean, LCNF, and
+real V8 agree on the final owner, while the shared result also proves that the
+outside alias remains unchanged. Exact complete form and external traces and
+matching tail-ownership domains prevent either allocation/reuse path from
+collapsing into a result-only regression test.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in
@@ -1876,7 +1891,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 186 corpus cases, including a natural
+The default native-to-V8 matrix covers all 647 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
 and saturating `Nat.sub`, paired `Nat.div`/`Nat.mod` including zero, all three

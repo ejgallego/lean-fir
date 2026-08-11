@@ -19,8 +19,8 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Execute S4 tail-call ownership from the landed S3 alias vocabulary |
-| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Use S4 tail-call ownership as the first joint slice |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land the prepared S4 tail-call ownership pair, then start S5 release/reuse |
+| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Land S4/B1, then schedule B2 application shapes |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
 | E Aggregates, erasure, and initialization | queued | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Add a compact source-generated aggregate/erasure pair without duplicating direct-machine reset tests |
@@ -32,11 +32,11 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 645-case source checkpoint, case counts are concentrated in
+At the current 647-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-303 `external`, and 146 `arithmetic`. In contrast, only 19 are tagged
-`constructor`, 12 `control-flow`, three `effect`, three `recursion`, one
-`tail-control`, and one `polymorphism`. The two float-tagged cases preserve
+305 `external`, and 146 `arithmetic`. In contrast, only 21 are tagged
+`constructor`, 12 `control-flow`, three `effect`, five `recursion`, three
+`tail-control`, two `tail-ownership`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
 not validate floating computation.
 
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 645 eligible cases, not a scalar
+historical: the plan currently selects all 647 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -95,7 +95,7 @@ near-synonym drift:
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
-| M3 Tail-call ownership (A/B bridge) | active | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while S4 prepares a nested ByteArray owner whose unique and outside-aliased paths make transfer, reuse, copy-on-write, and retention observable | Compile and inspect the paired final-LCNF ownership paths before admitting exact obligations |
+| M3 Tail-call ownership (A/B bridge) | prepared | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Land the green native/LCNF/V8 pair and its 106-tag/215-domain coverage ratchet |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
@@ -241,7 +241,7 @@ domains, with no finding.
 
 ### S4: tail-call ownership
 
-State: active on `validation/closure-ownership-fixtures`; consumes the landed
+State: prepared on `validation/closure-ownership-fixtures`; consumes the landed
 S3 alias vocabulary and changes no shared contract.
 
 The existing `local-tail` fixture proves that a compact source-level
@@ -263,6 +263,19 @@ unchanged outside alias and final bytes. Pin exact call, increment, decrement,
 projection, mutation, allocation/reuse, branch, external, and return counts,
 and require dedicated `tail-control`, `tail-ownership`, `unique-transfer`, and
 `shared-retain` coverage domains.
+
+The compact pair is admitted through native Lean, the final-LCNF interpreter,
+and real V8 with no finding. Both paths execute 19 applications, three
+`isShared` decisions, and exactly three ordered `ByteArray.set!` calls. The
+unique-transfer path pins 121 interpreter transitions, one `inc`, four `dec`,
+one `ctor`, and three `oset` updates. The shared-retain path pins 126
+transitions, four `inc`, five `dec`, three `ctor`, and two `oset` updates: its
+first update allocates the replacement while the next two reuse the transferred
+owner. Exact complete form and external traces retain all four termination
+checks and three recursive decrements as well as the ownership distinction.
+The coverage snapshot rises to 647 source cases, 656 aggregate unique cases,
+1,950 comparisons, 6,431 interpreter steps, 106 tag floors, and 215 semantic
+domains.
 
 Keep semantic validation and the W7 transform claim distinct.  The compact
 pair runs through native/LCNF/real-V8 using the ordinary validation provider.
