@@ -4418,7 +4418,7 @@ structure ConcreteStructuredSaturatedBindFrameFocus
               ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
             targetFrames)
   continuationAdapted :
-    CodeAdapted context sourceModule sourceFunction labels continuation
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
       targetRest
   stateRelated :
     StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
@@ -5995,7 +5995,7 @@ structure ConcreteStructuredSaturatedCallReadyFocus
           site.resultKind site.argumentCode site.argumentKinds) =
       .ok targetValue
   continuationAdapted :
-    CodeAdapted context sourceModule sourceFunction labels continuation
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
       targetRest
   callerStateRelated :
     StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
@@ -6081,10 +6081,9 @@ theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage
         sourceFunction targetModule site labels sourceRuntime continuation
         source.joins source.frames targetStore targetLocals targetValue
         targetRest target.frames witness resultIndex sourceAfter target := by
-  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-      targetCodeEq⟩ :=
-    CodeAdapted.let_eq related.adapted
+  obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+      valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.let_eq related.adapted
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
         .ok (compileClosureDispatch context decl.fvarId site.closureId
@@ -6105,10 +6104,6 @@ theorem ConcreteStructuredCodeFocus.advance_saturatedCall_stage
   have resultIndexEq : alignedResultIndex = resultIndex :=
     (Option.some.inj alignedResultFound).symm
   subst alignedResultIndex
-  have continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
-        targetRest :=
-    ⟨restCode, restCompiled, restAdapted⟩
   let sourceAfter : MachineState :=
     { source with
       control := .invokeValue site.sourceClosure site.semanticArgs
@@ -6205,7 +6200,7 @@ structure ConcreteStructuredSaturatedCallEntryFocus
               ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
             targetFrames)
   continuationAdapted :
-    CodeAdapted callerContext sourceModule callerFunction labels continuation
+    CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels continuation
       targetRest
   callerStateRelated :
     StateRelated callerFunction sourceRuntime callerEnv targetStore callerLocals
@@ -6490,7 +6485,9 @@ theorem ConcreteStructuredSaturatedCallReadyFocus.advance_enter
       sourceRuntimeEq := by simp [sourceEntry]
       targetStoreEq := by simp [targetEntry]
       targetControlEq := by simp [targetEntry]
-      adapted := row.bodyAdapted
+      adapted := by
+        rw [row.targetBodyEq]
+        exact CodeAdapted.withSuffix row.bodyAdapted
       stateRelated := calleeFrame.1.1.1.1.1
       frameAligned := calleeFrame.1.1.1.2.2.1 }
     sourceJoinsEq := by simp [sourceEntry]
@@ -6922,7 +6919,7 @@ structure ConcreteStructuredExternalCallReadyFocus
       (.call callIndex :: .localSet resultIndex :: targetRest)
   targetFramesEq : target.frames = targetFrames
   continuationAdapted :
-    CodeAdapted context sourceModule sourceFunction labels continuation
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
       targetRest
   callerStateRelated :
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore callerLocals
@@ -7052,10 +7049,9 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
         target.frames witness physicalArgs callIndex resultIndex sourceAfter
         targetAfter := by
   let site := supported.callShape
-  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-      targetCodeEq⟩ :=
-    CodeAdapted.let_eq related.adapted
+  obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+      valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.let_eq related.adapted
   have expectedCompiled :
       Fir.Wasm.compileLetValue context decl =
         .ok (site.argumentCode ++ [.call (.declaration site.name)]) := by
@@ -7093,10 +7089,6 @@ theorem ConcreteStructuredCodeFocus.advance_external_stage
   have resultIndexEq : alignedResultIndex = resultIndex :=
     (Option.some.inj alignedResultFound).symm
   subst alignedResultIndex
-  have continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
-        targetRest :=
-    ⟨restCode, restCompiled, restAdapted⟩
   subst targetCode
   let sourceAfter : MachineState :=
     { source with
@@ -7545,7 +7537,7 @@ structure ConcreteStructuredExternalBindFocus
       (.localSet resultIndex :: targetRest)
   targetFramesEq : target.frames = targetFrames
   continuationAdapted :
-    CodeAdapted context sourceModule sourceFunction labels continuation
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
       targetRest
   stateRelated :
     StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
@@ -9155,7 +9147,7 @@ inductive ConcreteStructuredFrameRel
       {tailResult : Option AbiKind}
       (programEq : program = context.program)
       (continuationAdapted :
-        CodeAdapted context sourceModule sourceFunction labels continuation
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
           targetRest)
       (callerStateRelated :
         StateRelated sourceFunction sourceRuntime callerEnv targetStore
@@ -9194,7 +9186,7 @@ inductive ConcreteStructuredFrameRel
       {tailResult : Option AbiKind}
       (programEq : program = context.program)
       (continuationAdapted :
-        CodeAdapted context sourceModule sourceFunction labels continuation
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
           targetRest)
       (callerStateRelated :
         StateRelated sourceFunction sourceRuntime callerEnv targetStore
@@ -9623,7 +9615,7 @@ inductive ConcreteStructuredSuspendedResourceStack
         activeEntryStore callerLocals activeEntryWitness)
       (programEq : program = context.program)
       (continuationAdapted :
-        CodeAdapted context sourceModule sourceFunction labels continuation
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
           targetRest)
       (resultFound :
         findFVar? (functionBindings sourceFunction) result = some resultIndex)
@@ -9671,7 +9663,7 @@ inductive ConcreteStructuredSuspendedResourceStack
         activeEntryWitness)
       (programEq : program = context.program)
       (continuationAdapted :
-        CodeAdapted context sourceModule sourceFunction labels continuation
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
           targetRest)
       (resultFound :
         findFVar? (functionBindings sourceFunction) result = some resultIndex)
@@ -14785,14 +14777,9 @@ theorem
       calleeIH continuedIH =>
       have programEq : context.program = program := functionSpec.contextProgram
       subst program
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-          targetCodeEq⟩ :=
-        CodeAdapted.let_eq related.adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
-            targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+          valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.let_eq related.adapted
       have expectedCompiled :
           Fir.Wasm.compileLetValue context decl =
             .ok (compileClosureDispatch context decl.fvarId site.closureId
@@ -14987,7 +14974,9 @@ theorem
           sourceRuntimeEq := by simp [sourceEntry]
           targetStoreEq := by simp [targetEntry]
           targetControlEq := by simp [targetEntry]
-          adapted := generatedRow.bodyAdapted
+          adapted := by
+            rw [generatedRow.targetBodyEq]
+            exact CodeAdapted.withSuffix generatedRow.bodyAdapted
           stateRelated := calleeFrame.1.1.1.1.1
           frameAligned := calleeFrame.1.1.1.2.2.1 }
         sourceJoinsEq := by simp [sourceEntry]
@@ -15950,7 +15939,9 @@ theorem
     targetStoreEq := by simp [targetInitial, concreteStructuredFunctionEntry]
     targetControlEq := by
       simp [targetInitial, targetLocals, concreteStructuredFunctionEntry]
-    adapted := spec.bodyAdapted
+    adapted := by
+      rw [spec.targetBodyEq]
+      exact CodeAdapted.withSuffix spec.bodyAdapted
     stateRelated := invariant.cacheFrame.stateRelated.stateRelated
     frameAligned := invariant.cacheFrame.1.1.1.2.2.1 }
   have entryInvariant :
@@ -16123,7 +16114,8 @@ theorem ConcreteStructuredCodeFocus.advance_defaultOnlyCase_ranked
     sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
     targetStoreEq := related.targetStoreEq
     targetControlEq := related.targetControlEq
-    adapted := CodeAdapted.defaultOnlyCases_selected supported related.adapted
+    adapted :=
+      CodeAdaptedWithSuffix.defaultOnlyCases_selected supported related.adapted
     stateRelated := related.stateRelated
     frameAligned := related.frameAligned }
   have silenceDecreases :
