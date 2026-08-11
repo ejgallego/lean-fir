@@ -5,21 +5,21 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: ready
-base: 31b9290c on main
-functional-head: 5a4fc4e0
-contract-base: 31b9290c on main
+state: active
+base: aa3940b6 on main
+functional-head: aa3940b6
+contract-base: aa3940b6 on main
 clean-at-update: true
-slice: Published the real Illuminate.HitScene.query as a clean immutable zero-import package. Added bit-exact Float32/Float closure capture/projection, the resident closure-application ownership protocol, and rewind-safe fresh lazy-singleton publication through the existing recursive cache persistence helper. Kept physical layout/discriminator fixtures stateless while production-linked helpers enable matcher-to-projection ownership
-files: Fir/Wasm/Emit/ResidentCache.lean; Fir/Wasm/Emit/ResidentClosureAllocation.lean; Fir/Wasm/Emit/ResidentRuntime.lean; integration/illuminate-hit-scene/**; integration/talos/artifact/resident-closure-projections-client.mjs; docs/build-examples.md; four fixed W7 bug cards; coordination/lanes/wasm-gen.md; coordination/BOARD.md
-contracts: consumes the existing semantic/concrete closure-application and persistent-cache contracts; executable helper implementation changed without changing RuntimeOp signatures, concrete object layout, public semantic ABI, or the W6-owned proof surface. Production matcher success now consumes the closure application and projection transfers captures; standalone layout artifacts deliberately omit that stateful protocol
-checks: PASS Lean Beam update/sync/save for ResidentCache and ResidentRuntime with zero diagnostics; PASS focused root and HitScene dependency cones; PASS git diff --check; PASS make check (642 unique cases, 1844/1844 comparisons equal, 123 active bug cards); PASS make talos-setup at a01d01c and make talos-check (3131 jobs); PASS complete deterministic resident-artifact gate (44/44 artifacts, 15/15 sources, 601-case V8 triangle); PASS clean HitScene frontier repeat, complete-runtime repeat, SHA256SUMS, 301 oracle queries, 10000 flat-frontier queries, two instances, disposal/error paths
-bug-cards: fixed FIR-BUG-wasm-none-resident-float-closure-capture; fixed FIR-BUG-wasm-none-resident-closure-application-transfer; fixed FIR-BUG-wasm-none-hitscene-lazy-cache-rewind; fixed FIR-BUG-wasm-none-rewindable-lazy-initializer-persistence
-blockers: none for generation or publication; W6 still owns the separate implementation-to-concrete-runtime refinement theorem for the resident closure-application helper and may audit the fresh-persistent lazy initializer transform against its existing cache proof cone
+slice: Generalize the accepted consumer-package build closure before resuming object-carrier/provenance interface adaptation. Start by removing application declaration-name rewrites from the resident Float linker, then separate reusable declaration/signature-driven runtime closure from package facades and raw-memory adapters
+files: coordination/BOARD.md; coordination/lanes/wasm-gen.md; planned Fir/Wasm/Emit/ResidentFloat.lean and only package/runtime files justified by the resulting closure evidence
+contracts: no shared semantic ABI or concrete-layout change planned; preserve the accepted final-LCNF source boundary and resident helper signatures unless a separately coordinated contract commit becomes necessary
+checks: not-run; baseline is accepted main aa3940b6 with green HitScene publication, root, Talos, and deterministic artifact gates
+bug-cards: none; add one before working around any newly exposed semantic discrepancy
+blockers: none
 artifacts: integration/illuminate-hit-scene/_build/illuminate-hit-scene-current -> illuminate-hit-scene-960979c729bc1199; 45595 bytes; SHA-256 960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6; zero imports; six function exports plus module-owned memory; BUILD.json records clean FIR package source da69d378 and clean Illuminate af088e313eaa
 measurements: 159 captured declarations, 34 reviewed source externals, 439 frontier functions, 15 unresolved Float/C-libm imports before the final resident merge, persistent checkpoint 69872, encoded scene allocation 4336 bytes, and flat post-query frontier across 10000 repeated calls
-handoff: integrate 48605780, da69d378, a8db316e, and 5a4fc4e0 in order, then resolve this mailbox commit from wasm/generation. The immutable package source identity remains da69d378 because the later commits change only card schema and standalone artifact separation
-next: after this package lands, rebase integration/object-provenance on the new main before resuming the interface adaptation fixtures and carrier/provenance descriptors
+handoff: none
+next: remove exact elapsedFrame closed-declaration handling, probe the ordinary captured Float.ofScientific/Float.ofNat path, and close any residual runtime frontier through generic declaration-and-signature-driven machinery
 ```
 
 ## Verso Flat end-to-end probe (2026-08-09)

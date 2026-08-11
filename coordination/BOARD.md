@@ -15,6 +15,29 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Active integration lease
 
+- Milestone: `W7-GENERIC-BUILD-CLOSURE`.
+- Integration owner: `wasm-gen`; the user asked to remove application-specific
+  build/runtime shortcuts before resuming interface adaptation.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, based directly on `main` at `aa3940b6`.
+- Lease boundary: consumer packages must continue to compile their real final-
+  LCNF source closures. Remove declaration-name rewrites for application
+  constants, distinguish thin source/transport facades from compiler behavior,
+  and move reusable external-runtime selection or linking behind checked generic
+  APIs. Do not copy application algorithms, weaken runtime domains, or hide
+  residual externals behind host fallbacks.
+- First slice: remove the exact
+  `Illuminate.AnimationPlayer.elapsedFrame._closed_0/_closed_1` handling from
+  `ResidentFloat`; establish whether the ordinary captured
+  `Float.ofScientific`/`Float.ofNat` path is already sufficient, and implement
+  the smallest declaration-and-signature-driven runtime repair if not.
+- Acceptance: PrettyM, Illuminate full/selection player, and HitScene keep their
+  exact public semantics, ownership policies, import/export contracts, and
+  external-engine differentials. Root, Talos, deterministic resident-artifact,
+  and consumer package gates must pass before landing.
+
+## Parked integration lease
+
 - Milestone: `WASM-OBJECT-CARRIER-PROVENANCE`.
 - Integration owner: `wasm-gen`; this is the principled successor to the
   accepted HitScene result-admission compromise.
