@@ -5972,6 +5972,14 @@ resources, and endpoint observation agreement without a caller-supplied focus
 or target path. This remains explicitly the terminating admitted-fragment
 boundary; it is not mislabeled as W6.7f, whose ranked relation must preserve
 every finite prefix without a termination premise.
+`ConcreteStructuredControlRel` is now the first unified relation component.
+Its seven constructors cover ordinary code/yield, direct-call argument-ready,
+callee-entry, and bind-return states, plus saturated-call callee-entry and
+matcher-unwinding bind-return states. One `observes` theorem discharges exact
+world/trace agreement for every constructor. Dynamic resource/admission
+evidence remains a separate future conjunct. External request staging and the
+pre-entry saturated-closure staging state remain explicit missing constructors
+before the unified relation can satisfy the per-source-step `advance` law.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

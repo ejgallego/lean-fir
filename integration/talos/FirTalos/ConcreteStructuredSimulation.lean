@@ -6333,6 +6333,96 @@ theorem ConcreteStructuredBindFrameFocus.observes
     rw [related.targetStoreEq, related.sourceRuntimeEq]
     exact related.stateRelated.1.trace
 
+/-- Unified control component of the compiler-derived structured relation.
+
+The constructors collect every focus shape that has already crossed the
+instruction-boundary proof: ordinary compiled code and return, direct-call
+argument staging/callee entry/caller resumption, and saturated-closure callee
+entry/caller resumption.  Resource/admission evidence remains an orthogonal
+conjunct of the eventual ranked relation.  Keeping control unification
+separate makes missing intermediate protocols explicit instead of hiding them
+inside a terminating path theorem. -/
+inductive ConcreteStructuredControlRel :
+    MachineState → StructuredWasmState Host → Prop where
+  | code
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+          sourceRuntime sourceEnv sourceCode targetStore targetLocals targetCode
+          witness source target) :
+      ConcreteStructuredControlRel source target
+  | yielded
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredYieldFocus context sourceFunction sourceRuntime
+          sourceEnv sourceValue targetStore targetLocals witness kind physical
+          source target) :
+      ConcreteStructuredControlRel source target
+  | directCallReady
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredDirectCallReadyFocus callerContext calleeContext
+          sourceModule callerFunction calleeFunction targetModule site row labels
+          sourceRuntime continuation callerJoins sourceFrames targetStore
+          callerLocals callerRemainder targetRest targetFrames witness
+          physicalArgs resultIndex source target) :
+      ConcreteStructuredControlRel source target
+  | directCallEntry
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredDirectCallEntryFocus callerContext calleeContext
+          sourceModule callerFunction calleeFunction targetModule site row labels
+          sourceRuntime continuation callerJoins sourceFrames targetStore
+          callerLocals callerRemainder targetRest targetFrames witness
+          physicalArgs resultIndex source target) :
+      ConcreteStructuredControlRel source target
+  | directBind
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredBindFrameFocus context sourceModule sourceFunction
+          labels sourceRuntime callerEnv sourceValue result continuation
+          callerJoins sourceFrames targetStore callerLocals callerRemainder
+          targetRest targetFrames returnedTail witness kind physical resultIndex
+          source target) :
+      ConcreteStructuredControlRel source target
+  | saturatedCallEntry
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredSaturatedCallEntryFocus callerContext calleeContext
+          sourceModule callerFunction calleeFunction targetModule site resolution
+          row labels sourceRuntime continuation callerJoins sourceFrames
+          targetStore callerLocals callerRemainder targetRest targetFrames
+          witness physicalArgs resultIndex matcherCount source target) :
+      ConcreteStructuredControlRel source target
+  | saturatedBind
+      {source : MachineState} {target : StructuredWasmState Host}
+      (related :
+        ConcreteStructuredSaturatedBindFrameFocus context sourceModule
+          sourceFunction labels sourceRuntime callerEnv sourceValue result
+          continuation callerJoins sourceFrames targetStore callerLocals
+          calleeLocals physicalArgs callerRemainder targetRest targetFrames
+          witness kind physical resultIndex matcherCount source target) :
+      ConcreteStructuredControlRel source target
+
+/-- Every currently unified compiler-control shape has exact concrete
+world/trace agreement.  The eventual `ConcreteRankedTraceSimulation.observes`
+field is therefore discharged once, independently of which code, call, or
+return constructor is active. -/
+theorem ConcreteStructuredControlRel.observes
+    {source : MachineState} {target : StructuredWasmState Host}
+    (related : ConcreteStructuredControlRel source target) :
+    ConcretePrefixObservationRel
+      (sourcePrefixObservation source)
+      (concretePrefixObservation target.store) := by
+  cases related with
+  | code focus => exact focus.observes
+  | yielded focus => exact focus.observes
+  | directCallReady focus => exact focus.observes
+  | directCallEntry focus => exact focus.observes
+  | directBind focus => exact focus.observes
+  | saturatedCallEntry focus => exact focus.calleeFocus.observes
+  | saturatedBind focus => exact focus.observes
+
 /-- Close the hereditary direct-call scope at a related callee yield.
 
 The callee's current state relation and the accumulated entry transports

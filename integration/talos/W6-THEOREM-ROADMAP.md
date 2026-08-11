@@ -1390,8 +1390,13 @@ acceptance tests pass.
      terminating fragment derivation. It also exposes related endpoint
      observations. This theorem deliberately retains the source `evaluation`
      premise: it closes the exact terminating boundary but does not claim the
-     prefix-general W6.7f theorem. Next add heap-valued cache misses and the
-     unified ranked relation, including target-only loop unwinding.
+     prefix-general W6.7f theorem. `ConcreteStructuredControlRel` now unifies
+     the seven completed code, yield, direct-call, and saturated-call focus
+     shapes and proves their observation obligation once. It intentionally
+     leaves resource/admission evidence orthogonal. The next relation slice
+     adds the intermediate external-request and saturated-call staging shapes,
+     then assembles the per-step `advance` law and structural rank. Heap-valued
+     cache misses and target-only loop unwinding remain later widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
