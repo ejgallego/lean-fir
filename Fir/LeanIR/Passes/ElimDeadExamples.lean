@@ -5697,7 +5697,7 @@ theorem deletedPapSourceOnlyKeepsAllocationLedger :
   simp [deletedPapLedgerResult,
     LedgerShadowRuntimeRel.evalLetValuePapLeftGarbage,
     LedgerShadowRuntimeRel.allocLeftGarbage,
-    TargetAllocationLedger.empty]
+    TargetAllocationLedger.empty, id]
 
 theorem deletedPapHeapResultSourceOnly :
     SourceOnlyUnderTargetLedger
@@ -6918,7 +6918,7 @@ theorem deletedReuseNoneSourceOnlyKeepsAllocationLedger :
     LedgerShadowRuntimeRel.reuseNoneLeftGarbage,
     LedgerShadowRuntimeRel.allocCtorLeftGarbage,
     LedgerShadowRuntimeRel.allocLeftGarbage,
-    TargetAllocationLedger.empty, oneFieldInfo]
+    TargetAllocationLedger.empty, oneFieldInfo, id]
 
 /-- The deleted failed-reuse result now exposes the stronger fact needed by
 later concrete reuse: its heap result is outside the target owner ledger. -/
