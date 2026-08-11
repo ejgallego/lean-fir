@@ -84,6 +84,7 @@ near-synonym drift:
 | S2 | `closure-ownership`, `multiplicity`, `zero-use`, `three-use`, `unique-final-application`, `shared-intermediate-application` | `closure-ownership-zero-use`, `closure-ownership-three-use`, `closure-ownership-unique-final`, `closure-ownership-shared-intermediate` |
 | S3 | `capture-alias-topology`, `repeated-capture`, `outside-alias`, plus the consumer action | `capture-topology-repeated`, `capture-topology-outside-alias`, and one action-sensitive domain |
 | S4/B1 | `tail-control`, `tail-ownership`, `unique-transfer`, `shared-retain` | `tail-ownership-unique-transfer`, `tail-ownership-shared-retain` |
+| S5 | `release-fidelity`, `recursive-release`, `repeated-child-alias`, plus the release stop boundary | `recursive-release-repeated-child`, `recursive-release-repeated-child-unique`, `recursive-release-repeated-child-shared-owner` |
 | B2 | `application-shape` plus `nullary`, `underapplication`, `overapplication`, or `returned-closure` | One domain per admitted application shape |
 | C1 | `effect`, `ordered-effect`, `call-boundary`, `alias-across-effect` | `effect-call-order`, `effect-alias-retention` |
 | E1 | `aggregate`, `erasure`, and the exercised construction/case/projection action | `aggregate-erasure` and one result-shape domain |
@@ -97,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Compile the first source-generated unique-release versus shared-stop pair and pin its exact paths |
+| M5 Recursive release | active, primary | S5a is landed with source-generated unique nested release versus shared-child stopping; direct LCNF additionally anchors repeated aliases and persistent owners | Use coverage-guided narrowing to admit the repeated-child-alias unique-release versus shared-owner-stop pair |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -288,7 +289,7 @@ control.
 ### S5: recursive release and reuse
 
 State: active on `validation/closure-ownership-fixtures` from `main` at
-`e2064631`; changes no shared contract.
+`5dfa5778`; changes no shared contract.
 
 Cover repeated child aliases, nested unique release, shared-child recursion
 stopping, persistent owners, erased/scalar neighbors, same-size reuse, retained
@@ -324,6 +325,44 @@ original leaf. Both execute exactly one ordered `Nat.add` external. The
 coverage snapshot advances to 649 source cases, 658 aggregate unique cases,
 1,956 comparisons, 6,563 interpreter steps, 116 tag floors, and 221 semantic
 domains.
+
+#### Coverage-guided narrowing
+
+Treat adversarial ownership fixtures as a small covering problem rather than a
+cartesian-product corpus. Candidate shapes are classified along these factors:
+
+| Factor | Values retained in the search space |
+| --- | --- |
+| Alias multiplicity | one, two, or three owner slots naming the same object |
+| Release stop boundary | no stop, owner, child, or leaf |
+| Surviving alias | none, leaf, child, owner, or independent sibling |
+| Continuation | ignore, read, return, same-size update, consume/mutate, or grow/change-tag |
+| Neighbor shape | erased, scalar, distinct heap field, or repeated heap field |
+| Control boundary | direct return, tail call, ordered external effect, suspension, or caught exception |
+
+Require pairwise coverage for the general factors and three-way coverage for
+`(alias multiplicity, release stop boundary, surviving alias)`, because that
+interaction determines how many decrements execute before reuse becomes legal.
+Rank candidates by new coverage, then by observation strength: a surviving
+alias plus a subsequent mutation outranks a result-only scalar. After compiling
+a candidate, use the tuple of portable observation, complete executed LCNF form
+trace/counts, administrative kinds, and external trace as its path signature.
+Discard a larger candidate when a smaller one has the same signature and covers
+the same factor interactions. A discrepancy is minimized by removing factor
+values while preserving the mismatch before its bug card is filed.
+
+This is a design/search discipline over the existing corpus and retained
+telemetry, not a new generator or orchestration layer. It keeps compiler source
+shapes explicit and reviewable while making case selection systematic.
+
+S5b covers the next missing three-way interaction: the same leaf occurs in two
+owner fields and also survives outside. The unique-owner case must release both
+fields, making the leaf exclusive before its update and therefore reusable. The
+paired case retains the owner itself; replacement must stop at that shared
+owner, preserve both original leaf fields, and force the outside leaf update to
+allocate. Exact decrement, increment, constructor, projection, branch, and
+reuse counts distinguish the paths, while returned aliases make under-release
+and over-release observable.
 
 ### S6: nonlocal ownership boundaries
 

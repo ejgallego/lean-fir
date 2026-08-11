@@ -5,17 +5,17 @@ lane: test-fixtures
 owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
-state: ready
-base: b3be5d1a9bfe72dede5d0a95e084d199a17361c5 on main
-functional-head: f25d26788eb9f5532bafa4eff9f128263c3fde0d
-contract-base: b3be5d1a9bfe72dede5d0a95e084d199a17361c5 on main; consumes the landed S4 transfer/reuse baseline, W6 external-evidence checkpoint, accepted mapped-owner proof slice, integration-lease record, and existing direct recursive-release/native-IR attestations; changes no shared contract
+state: active
+base: 5dfa5778abce04e0108052c79fc3be44e38d7019 on main
+functional-head: none yet; S5b planning seed only
+contract-base: 5dfa5778abce04e0108052c79fc3be44e38d7019 on main; consumes the landed S5a recursive-release pair and existing direct repeated-alias/native-IR attestation; changes no shared contract
 clean-at-update: true
-slice: S5a recursive release/reuse complete: compiler-generated unique owner release recursively decrements a retained leaf to the reuse path, paired with an outside child alias that stops recursion and forces the later leaf update to allocate while preserving the original leaf
-files: Fir/Validation/Corpus.lean; docs/validation.md; validation-plans/coverage-index.json; validation-plans/native-oracle-attestations.json; validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md
-contracts: none; fixture, trace, native-oracle, and coverage-policy changes only
-checks: Lean Beam update/sync/save Fir/Validation/Corpus.lean PASS with zero diagnostics; lake --rehash build fir-native-oracle Fir.Validation PASS; focused native-lcnf two-case matrix PASS 2/2 equal; focused native-lcnf-v8 two-case matrix PASS all six edges with all four provider products opened; complete post-proof make check PASS including lake dependency cones, 122 harness tests, 649/649 native-lcnf, nine direct-machine cases, 649/649 native-v8 and lcnf-v8, 1,298 native comparison witnesses, coverage-index generation/verification at 658 unique cases, 1,307 tier cases, 1,956 equal comparisons, 6,563 interpreter steps, 116 tag floors, 221 semantic domains, zero findings/obligation/telemetry failures, bug-card validation, trusted-assumption validation, and no-placeholders; clean rebase over board-only integration lease b3be5d1a; git diff --check PASS
+slice: S5b coverage-guided repeated-child release: compare consuming a unique owner with the same leaf in two slots against retaining that owner so release stops before both slots; an outside leaf alias and subsequent update expose reuse versus allocation
+files: validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md; planned Fir/Validation/Corpus.lean, validation coverage/oracle ratchets, and docs/validation.md
+contracts: none; fixture, trace, coverage-search documentation, native-oracle floor, and coverage-policy changes only
+checks: not-run; planning seed only
 bug-cards: none
-blockers: none; the mapped-owner proof lease is released and the existing direct native-IR recorder remains unchanged as the native recursive-release fact anchor
-handoff: base b3be5d1a9bfe72dede5d0a95e084d199a17361c5; functional head f25d26788eb9f5532bafa4eff9f128263c3fde0d; ready for integration by fast-forward after resolving this mailbox's containing commit from validation/closure-ownership-fixtures
-next: integrate S5a promptly; then keep S5 active with the next compact repeated-child-alias/release-order pair rather than expanding scalar coverage
+blockers: none; source-level repeated fields and outside aliases need no compiler, proof, W6, or W7 change
+handoff: none; active fixture-only slice
+next: implement the compact repeated-child pair, probe native versus final LCNF, and retain only distinct path signatures before exact admission
 ```
