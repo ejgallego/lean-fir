@@ -6060,7 +6060,8 @@ construct the exact target path and successor core from the production runtime
 law; returns obtain their dynamic lookup from the supplied successful source
 step and become terminal, direct-bind, or saturated-bind control according to
 the existing frame stack.
-The first complete nonterminating call boundary is now connected to the core.
+The complete admitted interprocedural call family is now connected to the
+pointwise core.
 `ConcreteStructuredCodeCoreRel.advance_directCall_stage` derives the semantic
 and physical arguments plus the exact generated prefix and moves to
 `ConcreteStructuredDirectCallReadyCoreRel`. Its `advance_enter` rule takes the
@@ -6069,8 +6070,17 @@ metadata atomically, and reconstructs the callee code core. Direct bind pop now
 exposes the resumed compiler focus, and `advance_popCore` restores the caller
 core without evaluating the callee as a whole. The relation-wide classifier
 will attach fresh local admission only after each dynamic code successor is
-known. The next boundary repeats this core composition for saturated closure
-calls, then wires the control variants into the one-step `advance` theorem.
+known. Exactly saturated closure calls now follow the same local discipline.
+Their state-indexed zero-cost admission stages one source step against a
+reflexive target path and a strict compiler-rank decrease. The saturated-ready
+core then derives matcher selection, closure consumption, capture/argument
+assembly, and generated callee entry from the compiler/runtime contracts while
+atomically pushing the caller scope and result ABI. Saturated bind pop exposes
+the resumed compiler focus and reconstructs the caller core after the exact
+matcher-label unwind. These rules neither evaluate the callee nor assume that
+it terminates. The next boundary wires these core-preserving call variants and
+the already established local operation laws into the relation-wide one-step
+`advance` theorem.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

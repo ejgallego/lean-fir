@@ -1471,9 +1471,17 @@ acceptance tests pass.
      the caller scope plus result ABI, and direct bind pop restores the caller
      core. None of these theorems evaluates the callee as a whole. Fresh local
      admission is attached only after the dynamic successor code state is
-     known. The next slice repeats this composition for saturated closure calls
-     and then widens the one-step `advance` case split to the established
-     external, lazy, case, and effect laws.
+     known. Exactly saturated closure calls now cross the same pointwise core
+     boundary. State-indexed local admission and strict compiler-rank descent
+     account for the source-only staging step. The saturated-ready core derives
+     matcher selection, closure consumption, capture/argument assembly, and
+     generated callee entry, then pushes the caller scope and result ABI in one
+     hereditary constructor. Saturated bind pop exposes the resumed compiler
+     focus and restores the complete caller core after every matcher label is
+     unwound. These local rules contain no whole-callee evaluation or
+     termination premise. The next slice widens the relation-wide one-step
+     `advance` case split over these call rules and the established external,
+     lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
