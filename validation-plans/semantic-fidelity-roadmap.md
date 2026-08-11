@@ -19,8 +19,8 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land the prepared S4 tail-call ownership pair, then start S5 release/reuse |
-| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Land S4/B1, then schedule B2 application shapes |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Start S5 recursive release/reuse from the landed S4 transfer baseline |
+| B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Schedule B2 application shapes while preserving S4/B1 |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
 | E Aggregates, erasure, and initialization | queued | Inductive shapes, erased fields, polymorphic dictionaries, arrays, constants, caches, and initialization order | Add a compact source-generated aggregate/erasure pair without duplicating direct-machine reset tests |
@@ -95,7 +95,7 @@ near-synonym drift:
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
-| M3 Tail-call ownership (A/B bridge) | prepared | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Land the green native/LCNF/V8 pair and its 106-tag/215-domain coverage ratchet |
+| M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
@@ -241,8 +241,8 @@ domains, with no finding.
 
 ### S4: tail-call ownership
 
-State: prepared on `validation/closure-ownership-fixtures`; consumes the landed
-S3 alias vocabulary and changes no shared contract.
+State: `landed` and real-engine validated through functional head `2f93f54e`;
+consumes the landed S3 alias vocabulary and changes no shared contract.
 
 The existing `local-tail` fixture proves that a compact source-level
 tail-recursive list worker agrees across native Lean, final LCNF interpretation,
@@ -310,9 +310,9 @@ not yet cover overapplication.
 
 ### B1: tail ownership bridge
 
-Execute S4 as the first B-track slice. Keep the compact semantic pair separate
-from the large-depth W7 transform probe so agreement with native Lean and
-stack-safe rewrite execution remain independently attributable claims.
+S4 is landed as the first B-track slice. Keep the compact semantic pair
+separate from the large-depth W7 transform probe so agreement with native Lean
+and stack-safe rewrite execution remain independently attributable claims.
 
 ### B2: application shapes
 

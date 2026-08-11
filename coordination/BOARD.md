@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-TAIL-OWNERSHIP-S4-B1`.
+- Integration owner: `test-fixtures`; the user authorized this lane to take
+  the short lease, and the owner accepted the clean S4/B1 handoff after its
+  exact post-rebase cross-lane gate passed.
+- Integration branch/worktree: `validation/closure-ownership-fixtures` in
+  `.worktrees/validation-closure-ownership-fixtures`, rebased directly on
+  `main` at `05ebaab1` after the W6 structured-external proof checkpoint.
+- Published stack: planning seed `3fc08865`, functional head `2f93f54e`, and
+  ready mailbox `7daee1fa`.
+  Two fixtures carry a nested `ByteArray`/`String` owner through three
+  tail-recursive mutations. The unique-transfer path performs three `oset`
+  updates; the outside-aliased path allocates its first replacement and reuses
+  it for the remaining two updates.
+- Contracts: none. The stack changes only fixture source, exact trace,
+  validation-policy, roadmap, documentation, and this lane's mailbox files;
+  it changes no W6, W7, LCNF-proof, or shared semantic contract.
+- Acceptance: Lean Beam update/sync/save with zero diagnostics; targeted
+  importer build; focused native/LCNF and native/LCNF/real-V8 checks;
+  `git diff --check`; and complete pre-rebase and post-rebase `make check`.
+  The final candidate has 647/647 source and V8 cases, 9/9 direct cases, 656
+  unique cases, 1,950/1,950 equal comparisons, 6,431 machine steps, 106 tag
+  floors, 215 conjunctive domains, 1,294 native-oracle witnesses, and zero
+  findings.
+- Coordination: the W6 checkpoint consumed as the rebase base is already on
+  `main`; the fixture stack owns no proof/runtime/compiler file. Other lanes
+  rebase on this acceptance before their next integration handoff.
+- Result: `main` fast-forwards through this completion record and is pushed
+  before further fixture work. S4/B1 is landed/released; the fixture lane next
+  designs S5 recursive release/reuse while keeping W7's large-depth tail
+  transform probe separate.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-EXTERNAL-PROTOCOL`.
 - Integration owner: `wasm-proof`; this short lease lands the complete
   per-source-step control protocol for generated pure external calls.
