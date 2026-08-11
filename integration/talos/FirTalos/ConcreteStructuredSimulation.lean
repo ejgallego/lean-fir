@@ -117,6 +117,28 @@ theorem structuredWasmExecutes_fallthrough_of_wp
     simpa [StructuredWasmOutcome.toContinuation] using
       stable fuel (Nat.le_refl fuel)⟩
 
+/-- Exact-locals variant of `structuredWasmExecutes_fallthrough_of_wp`.
+Unlike the same-tail specialization above, this boundary also reifies flat
+prefixes that deliberately grow the operand stack, such as closure capture
+and ordinary-argument assembly. -/
+theorem structuredWasmExecutes_exactFallthrough_of_wp
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {targetStore nextStore : Wasm.Store Host}
+    {targetLocals nextLocals : Wasm.Locals}
+    {target : Wasm.Program}
+    (executed :
+      Wasm.wp module target
+        (fun continuation =>
+          continuation = .Fallthrough nextStore nextLocals)
+        targetStore targetLocals hostEnv) :
+    StructuredWasmExecutes module hostEnv targetStore targetLocals target
+      (.fallthrough nextStore nextLocals) := by
+  unfold Wasm.wp at executed
+  obtain ⟨fuel, stable⟩ := executed
+  exact ⟨fuel, by
+    simpa [StructuredWasmOutcome.toContinuation] using
+      stable fuel (Nat.le_refl fuel)⟩
+
 /-- Reify the target prefix guaranteed by an ordinary concrete `let` law as
 an exact successful Talos execution.  The continuation-transformer law is
 specialized to the empty continuation; no independent target-execution
@@ -732,6 +754,196 @@ theorem
     StructuredWasmFlatProgram.append argumentsFlat
       (structuredWasmFlatProgram_importCall_localSet
         (resultIndex := resultIndex) imported)
+
+/-- Prefix-only form of the local-read/runtime-call flatness theorem.  Closure
+capture assembly needs the projected value left on the operand stack rather
+than immediately written to a destination local. -/
+theorem
+    ConcreteSupportedFunction.structuredFlatProgram_localGet_runtimeCallPrefix
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context sourceCode sourceModule
+        sourceFunction target hosts)
+    {labels : List Lean.FVarId} {fvarId : Lean.FVarId}
+    {operation : RuntimeOp} {targetValue : Wasm.Program}
+    (valueAdapted :
+      instructions sourceModule sourceFunction labels
+          [.localGet fvarId, .call (.runtime operation)] =
+        .ok targetValue) :
+    StructuredWasmFlatProgram target.wasmModule targetValue := by
+  obtain ⟨targetArguments, callIndex, argumentsAdapted, callFound,
+      targetEq⟩ :=
+    instructions_append_call_eq
+      (argumentCode := [.localGet fvarId]) valueAdapted
+  obtain ⟨imp, imported, _⟩ := spec.runtimeCallsAligned callFound
+  have argumentsFlat :
+      StructuredWasmFlatProgram target.wasmModule targetArguments :=
+    structuredWasmFlatProgram_localGet_of_instructions argumentsAdapted
+  subst targetValue
+  exact StructuredWasmFlatProgram.append argumentsFlat
+    (.cons (.importedCall imported) .nil)
+
+/-- Any compiler-selected fixed-capture row adapts to a flat target prefix.
+Erased captures become constants; represented captures become one local read
+and one resolver-proved imported projection call. -/
+theorem ClosureCaptureRows.structuredFlatProgram_of_adapted
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List Lean.FVarId}
+    {closureId : Lean.FVarId} {function : Lean.Name}
+    {arity fixed : Nat}
+    {captures : Array Value} {captureKinds parameterKinds : Array AbiKind}
+    {target : Lean.Compiler.LCNF.Decl .impure}
+    {indices : List Nat} {expectedKinds : List AbiKind}
+    {semanticValues : List Value} {targetCode : Wasm.Program}
+    (rows : ClosureCaptureRows parameterKinds captureKinds captures indices
+      expectedKinds semanticValues)
+    (targetName : target.name = function)
+    (adapted : instructions sourceModule sourceFunction labels
+      (indices.flatMap
+        (Fir.Wasm.compileFixedClosureField closureId target arity fixed
+          parameterKinds)) = .ok targetCode) :
+    StructuredWasmFlatProgram targetModule.wasmModule targetCode := by
+  induction rows generalizing targetCode with
+  | nil =>
+      simp only [List.flatMap_nil, instructions] at adapted
+      change (Except.ok [] : Except AdapterError Wasm.Program) =
+        .ok targetCode at adapted
+      have targetEq : targetCode = [] := (Except.ok.inj adapted).symm
+      subst targetCode
+      exact .nil
+  | @cons index expectedKind actualKind value indices expectedKinds
+      semanticValues expectedAt actualAt valueAt kindRefines rest ih =>
+      obtain ⟨targetField, targetRest, fieldAdapted, restAdapted,
+          targetEq⟩ :=
+        instructions_append_eq_ok (by simpa using adapted)
+      subst targetCode
+      have restFlat := ih restAdapted
+      by_cases expectedErased : expectedKind = .erased
+      · subst expectedKind
+        have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [.i32Const .erased 0] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt]
+        rw [fieldSource] at fieldAdapted
+        have targetFieldEq : targetField = [.const 0] := by
+          have adaptedEq :
+              (Except.ok [.const 0] : Except AdapterError Wasm.Program) =
+                .ok targetField := by
+            simpa [instructions, instruction, Bind.bind, Except.bind, pure,
+              Except.pure] using fieldAdapted
+          exact (Except.ok.inj adaptedEq).symm
+        subst targetField
+        exact StructuredWasmFlatProgram.append
+          (.cons (.atomic (by trivial)) .nil) restFlat
+      · have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [
+              .localGet closureId,
+              .call (.runtime
+                (.closureProj function arity fixed index expectedKind))] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt, targetName]
+        rw [fieldSource] at fieldAdapted
+        exact StructuredWasmFlatProgram.append
+          (spec.structuredFlatProgram_localGet_runtimeCallPrefix fieldAdapted)
+          restFlat
+  | @snoc indices expectedKinds semanticValues index expectedKind actualKind
+      value rest expectedAt actualAt valueAt kindRefines ih =>
+      obtain ⟨targetPrefix, targetField, prefixAdapted, fieldAdapted,
+          targetEq⟩ :=
+        instructions_append_eq_ok
+          (by simpa [List.flatMap_append] using adapted)
+      subst targetCode
+      have prefixFlat := ih prefixAdapted
+      by_cases expectedErased : expectedKind = .erased
+      · subst expectedKind
+        have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [.i32Const .erased 0] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt]
+        rw [fieldSource] at fieldAdapted
+        have targetFieldEq : targetField = [.const 0] := by
+          have adaptedEq :
+              (Except.ok [.const 0] : Except AdapterError Wasm.Program) =
+                .ok targetField := by
+            simpa [instructions, instruction, Bind.bind, Except.bind, pure,
+              Except.pure] using fieldAdapted
+          exact (Except.ok.inj adaptedEq).symm
+        subst targetField
+        exact StructuredWasmFlatProgram.append prefixFlat
+          (.cons (.atomic (by trivial)) .nil)
+      · have fieldSource :
+            Fir.Wasm.compileFixedClosureField closureId target arity fixed
+                parameterKinds index = [
+              .localGet closureId,
+              .call (.runtime
+                (.closureProj function arity fixed index expectedKind))] := by
+          simp [Fir.Wasm.compileFixedClosureField, expectedAt, targetName]
+        rw [fieldSource] at fieldAdapted
+        exact StructuredWasmFlatProgram.append prefixFlat
+          (spec.structuredFlatProgram_localGet_runtimeCallPrefix fieldAdapted)
+
+/-- The complete selected saturated-call argument prefix—fixed capture
+projections followed by ordinary compiled arguments—is flat after real
+production adaptation.  Capture ABI compatibility chooses the exact
+projection row; no target syntax is supplied separately. -/
+theorem SaturatedClosureCallResolution.argumentsStructuredFlatProgram
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env} {sourceRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List Lean.FVarId}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {address : Word32} {captureKinds : Array AbiKind}
+    {targetCode : Wasm.Program}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (adapted : instructions sourceModule sourceFunction labels
+      (Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+          resolution.arity resolution.captures.size
+            resolution.parameterKinds ++ site.argumentCode) =
+        .ok targetCode)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds
+        resolution.captures) :
+    StructuredWasmFlatProgram targetModule.wasmModule targetCode := by
+  obtain ⟨targetCaptures, targetArguments, capturesAdapted,
+      argumentsAdapted, targetEq⟩ :=
+    instructions_append_eq_ok adapted
+  subst targetCode
+  have captureKindsRefine :=
+    resolution.captureKindsRefine aligned applicationRelated
+  have rows := ClosureCaptureRows.prefix
+    applicationRelated.captureKindsSize captureKindsRefine
+    resolution.captures.size (le_refl _)
+  have capturesFlat :
+      StructuredWasmFlatProgram targetModule.wasmModule targetCaptures := by
+    apply rows.structuredFlatProgram_of_adapted spec resolution.targetName
+    simpa [Fir.Wasm.compileFixedClosureFields] using capturesAdapted
+  have argumentsFlat :
+      StructuredWasmFlatProgram targetModule.wasmModule targetArguments :=
+    (ConstructorArgsCompiled.ofCompileArgs site.argumentsCompiled).structuredFlatProgram
+      argumentsAdapted
+  exact StructuredWasmFlatProgram.append capturesFlat argumentsFlat
 
 /-- Recover the one-local/one-runtime-call target shape from the actual
 `compileLetValue` result before applying the generic adapter theorem. -/
@@ -4033,6 +4245,112 @@ theorem ConstructorArgsReady.finitePath
         · simp only [Wasm.execOne.eq_def]
       simpa [List.reverse_cons, List.append_assoc] using
         FinitePath.cons head (ih (tail := .i32 0 :: tail))
+
+/-- A proved closure capture/argument assembly contains an exact Talos
+fallthrough that leaves the physical argument row on the operand stack. -/
+theorem ClosureArgumentAssembly.structuredExecutes
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {argumentCode : Wasm.Program} {physicalArgs : List Wasm.Value}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {tail : List Wasm.Value}
+    (assembled : ClosureArgumentAssembly module hostEnv argumentCode
+      physicalArgs store locals) :
+    StructuredWasmExecutes module hostEnv store
+      { locals with values := tail } argumentCode
+      (.fallthrough store
+        { locals with values := physicalArgs.reverse ++ tail }) := by
+  apply structuredWasmExecutes_exactFallthrough_of_wp
+  let Q : Wasm.Assertion Host := fun continuation =>
+    continuation = .Fallthrough store
+      { locals with values := physicalArgs.reverse ++ tail }
+  have finalWP :
+      Wasm.wp module [] Q store
+        { locals with values := physicalArgs.reverse ++ tail } hostEnv :=
+    (Wasm.wp_nil).2 rfl
+  simpa [Q] using assembled [] Q tail finalWP
+
+/-- When compiler inversion establishes that the adapted assembly prefix is
+flat, its WP law reifies to one structured target step per emitted
+instruction beneath arbitrary residual code and saved control frames. -/
+theorem ClosureArgumentAssembly.structuredFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {argumentCode : Wasm.Program} {physicalArgs : List Wasm.Value}
+    {store : Wasm.Store Host} {locals : Wasm.Locals}
+    {tail : List Wasm.Value} {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (assembled : ClosureArgumentAssembly module hostEnv argumentCode
+      physicalArgs store locals)
+    (flat : StructuredWasmFlatProgram module argumentCode) :
+    FinitePath (StructuredWasmStep module hostEnv) argumentCode.length
+      ⟨store,
+        .running { locals with values := tail } (argumentCode ++ rest),
+        frames⟩
+      ⟨store,
+        .running { locals with values := physicalArgs.reverse ++ tail } rest,
+        frames⟩ := by
+  exact flat.finitePathWithSuffix (suffix := rest) (frames := frames)
+    assembled.structuredExecutes
+
+/-- End-to-end exact structured execution of the selected saturated-call
+capture/argument prefix.  The physical row and its semantic relation are
+derived from source resolution, allocation ABI alignment, concrete closure
+application refinement, and the real adapter equation. -/
+theorem SaturatedClosureCallResolution.argumentsStructuredFinitePath
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {sourceEnv : Env} {sourceRuntime stateRuntime : RuntimeState}
+    {site : SaturatedClosureCallSite context decl sourceEnv}
+    (resolution : SaturatedClosureCallResolution context sourceRuntime site)
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context sourceCode sourceModule
+      sourceFunction targetModule hosts)
+    {labels : List Lean.FVarId}
+    {initial : Wasm.Store Host} {locals : Wasm.Locals}
+    {witness : RefinementWitness} {application : ClosureApplication}
+    {closureIndex : Nat} {address : Word32}
+    {captureKinds : Array AbiKind} {targetCode rest : Wasm.Program}
+    {tail : List Wasm.Value} {frames : List StructuredWasmFrame}
+    (aligned : ClosureAllocationsAbiAligned context.program witness)
+    (closureFound :
+      findFVar? (functionBindings sourceFunction) site.closureId =
+        some closureIndex)
+    (closureLocal : locals.get closureIndex =
+      some (.i32 (UInt32.ofNat address.value)))
+    (adapted : instructions sourceModule sourceFunction labels
+      (Fir.Wasm.compileFixedClosureFields site.closureId resolution.target
+          resolution.arity resolution.captures.size
+            resolution.parameterKinds ++ site.argumentCode) =
+        .ok targetCode)
+    (applicationFound : initial.host.closureApplication? = some application)
+    (applicationRelated : ClosureApplicationRel witness application address
+      resolution.function resolution.arity captureKinds
+        resolution.captures)
+    (stateRelated : StateRelated sourceFunction stateRuntime sourceEnv initial
+      locals witness)
+    (failureClear : clearFailure initial = initial) :
+    ∃ physicalArgs,
+      ConstructorArgumentsRelated witness resolution.parameterKinds.toList
+          physicalArgs (resolution.captures ++ site.semanticArgs).toList ∧
+        FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+          targetCode.length
+          ⟨initial,
+            .running { locals with values := tail } (targetCode ++ rest),
+            frames⟩
+          ⟨initial,
+            .running
+              { locals with values := physicalArgs.reverse ++ tail } rest,
+            frames⟩ := by
+  obtain ⟨physicalArgs, assembled, argumentsRelated⟩ :=
+    resolution.argumentsAssembly spec aligned closureFound closureLocal adapted
+      applicationFound applicationRelated stateRelated failureClear
+  have flat := resolution.argumentsStructuredFlatProgram spec aligned adapted
+    applicationRelated
+  exact ⟨physicalArgs, argumentsRelated,
+    assembled.structuredFinitePath flat⟩
 
 /-- One compiler-resolved closure matcher has an exact two-step structured
 execution.  The concrete host contract determines the matcher bit and next

@@ -5927,11 +5927,20 @@ executes the real compiler fold to the first matching candidate. A prefix of
 `3 * (n + 1)` target steps and leaves the selected body under the exact `n +
 1` nested conditional frames; failed matchers are proved store-neutral, while
 the selected matcher's ownership-consuming store is retained. No candidate
-execution or branch-selection certificate is supplied. The next closure
-slice executes the selected capture/argument prefix, recursively enters the
-generated callee, and unwinds these recorded labels into the caller
-continuation. Heap-valued cache misses remain the facts-aware transport
-redesign after saturated calls.
+execution or branch-selection certificate is supplied. The selected
+capture/argument prefix is now exact too.
+`ClosureCaptureRows.structuredFlatProgram_of_adapted` proves that erased
+captures become constants and represented captures become resolver-proved
+imported projections, while the ordinary `compileArgs` suffix is already
+flat. `SaturatedClosureCallResolution.argumentsStructuredFinitePath` combines
+that compiler theorem with the existing semantic assembly law: in exactly
+`argumentTarget.length` structured steps it leaves the complete physical
+callee row on the operand stack, related to the captured and newly supplied
+source arguments. The caller supplies neither target syntax nor execution.
+The next closure slice recursively enters the generated callee and unwinds
+the recorded call and conditional labels into the caller continuation.
+Heap-valued cache misses remain the facts-aware transport redesign after
+saturated calls.
 
 ## Parallel agent packages
 

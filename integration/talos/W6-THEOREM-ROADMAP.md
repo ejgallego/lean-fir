@@ -1350,10 +1350,18 @@ acceptance tests pass.
      precise nested label stack. Failed matchers are proved store-neutral;
      the selected matcher retains its ownership-consuming store. This theorem
      takes neither a target execution certificate nor a caller-chosen selected
-     branch. Subsequent slices compose the selected capture/argument assembly,
-     recursive generated-callee path, result-local write, and label unwinding;
-     then add heap-valued cache misses and target-only loop unwinding to this
-     induction.
+     branch. The capture/argument component is now complete:
+     `ClosureCaptureRows.structuredFlatProgram_of_adapted` derives a flat
+     target prefix from the real fixed-capture adapter equation, and
+     `SaturatedClosureCallResolution.argumentsStructuredFinitePath` combines
+     it with the existing ABI-related assembly theorem. The resulting path
+     takes exactly one structured step per emitted projection/local/constant
+     instruction and leaves the full related physical callee row on the
+     operand stack beneath arbitrary residual code and frames. No target code
+     or path enters its premises. Subsequent slices compose recursive
+     generated-callee entry, the result-local write, and exact conditional
+     label unwinding; then add heap-valued cache misses and target-only loop
+     unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
