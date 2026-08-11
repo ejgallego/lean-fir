@@ -9,11 +9,14 @@ open Lean
 def entry : Name := ``VersoSlides.Pretty.formatHtmlForRuntime
 
 /--
-Replay the exact deferred final-LCNF groups for each source module in the
-entry's closure, retaining prebuilt Lean/runtime declarations as externals.
+Capture the real entry immediately before Lean's final LCNF-to-IR handoff.
+
+This is the same single-unit capture used by the accepted Flat package. It
+lets Lean specialize the imported `Std.Format.prettyM` closure for the HTML
+monad and leaves only genuine runtime primitives at the resident boundary.
 -/
 def captureSource : CoreM Fir.Validation.Lcnf.Artifact :=
-  Fir.Wasm.Emit.Source.compileEntryModuleWiseInternalized entry
+  Fir.Wasm.Emit.Source.compileEntryFinalCapturedInternalized entry #[]
     Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames
 
 /-- Lower the unmodified source closure before resident-runtime linking. -/

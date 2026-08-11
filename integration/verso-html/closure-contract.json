@@ -1,0 +1,13 @@
+{
+  "capturedDeclarations": 128,
+  "reviewedExternalsBeforeLink": 31,
+  "retainedSourceFunctions": 93,
+  "residentHelpers": 631,
+  "completeFunctions": 724,
+  "baseWasmBytes": 66762,
+  "completeWasmBytes": 187855,
+  "retainedSourceFunctionSha256": "a6f57cd15550598234003ce29c5c2bc9d0bb6ccd6b5204e7044fc5ad0a0ca040",
+  "residentHelperSha256": "839019a88555ad6d9f138560f40cd934e6b551eb9d2da4f89fa19299a9b407c7",
+  "lazyCacheInitializers": 0,
+  "residentGlobals": 3
+}
