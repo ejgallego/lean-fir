@@ -95,7 +95,7 @@ near-synonym drift:
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
-| M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
+| M3 Tail-call ownership (A/B bridge) | active | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while S4 prepares a nested ByteArray owner whose unique and outside-aliased paths make transfer, reuse, copy-on-write, and retention observable | Compile and inspect the paired final-LCNF ownership paths before admitting exact obligations |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
@@ -241,8 +241,8 @@ domains, with no finding.
 
 ### S4: tail-call ownership
 
-State: `queued`; schedule after capture alias topology so it can reuse the S3
-alias shapes rather than introduce a parallel ownership vocabulary.
+State: active on `validation/closure-ownership-fixtures`; consumes the landed
+S3 alias vocabulary and changes no shared contract.
 
 The existing `local-tail` fixture proves that a compact source-level
 tail-recursive list worker agrees across native Lean, final LCNF interpretation,
@@ -252,12 +252,15 @@ memory-fidelity coverage: final LCNF executes ordinary `fap`/return frames, the
 fixture carries no ownership-sensitive heap accumulator, and the coverage
 policy has no tail-ownership domain.
 
-Add a compact pair of tail-recursive workers that carry the same heap-backed
-accumulator through several iterations.  One worker transfers a unique
-accumulator at every tail call; the other retains an independent alias, forcing
-the shared/copy-on-write path while preserving that alias.  Native results must
-expose both the final accumulator and any surviving alias.  Pin exact call,
-increment, decrement, projection, mutation, allocation/reuse, and return counts,
+The first slice uses a two-object-field owner containing a `ByteArray` and a
+`String`. A three-iteration tail-recursive worker updates ByteArray positions
+two, one, and zero through `ByteArray.set!`, then transfers the updated owner
+directly into the next self call. The unique entry returns only the final owner.
+The shared entry retains the original owner outside the worker and returns it
+beside the final owner, forcing copy-on-write on the first update while later
+iterations may reuse the transferred replacement. Native results expose the
+unchanged outside alias and final bytes. Pin exact call, increment, decrement,
+projection, mutation, allocation/reuse, branch, external, and return counts,
 and require dedicated `tail-control`, `tail-ownership`, `unique-transfer`, and
 `shared-retain` coverage domains.
 
