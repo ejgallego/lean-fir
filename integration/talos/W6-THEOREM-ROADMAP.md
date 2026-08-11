@@ -1301,11 +1301,14 @@ acceptance tests pass.
      constructor tests followed by a default cover a first hit, a second hit
      after one failed comparison, and the default after two failed comparisons.
      The exact path retains one generated label per executed test and discharges
-     all of them after recursively executing the selected branch. The current
-     fragment makes its empty join environment explicit. Subsequent slices
-     generalize object chains, connect scalar chains and effects, and add
-     saturated closure calls, heap-valued cache misses, and target-only
-     label/loop unwinding to this induction.
+     all of them after recursively executing the selected branch. This is now
+     generalized by induction over `ObjectConstructorCaseAltsSupported`:
+     arbitrary normalized constructor tables produce exactly five target steps
+     and one saved label per executed test, including a zero-test default
+     suffix. The current fragment makes its empty join environment explicit.
+     Subsequent slices connect scalar chains and effects and add saturated
+     closure calls, heap-valued cache misses, and target-only label/loop
+     unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
