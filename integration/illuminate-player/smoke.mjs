@@ -8,11 +8,12 @@ import {
   ILLUMINATE_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-player-browser-adapter.mjs";
 
-const bytes = await readFile("_build/illuminate-player-resident.wasm");
+const bytes = await readFile("_build/illuminate-player-complete.wasm");
 const manifest = JSON.parse(await readFile(
-  "_build/illuminate-player-resident.wasm.json", "utf8"));
+  "_build/illuminate-player-complete.wasm.json", "utf8"));
 const build = {
   capabilities: {
+    completeRuntime: { externalRuntime: manifest.externalRuntime },
     browserAdapter: { apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION },
     inputLayout: { version: ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION },
     ownership: { version: ILLUMINATE_PLAYER_OWNERSHIP_VERSION },
@@ -130,7 +131,8 @@ adapter.disposePlayer(second.player);
 for (let index = 0; index < 32; ++index) {
   const cycle = adapter.createPlayer(animation);
   assert.equal(cycle.ok, true);
-  assert.equal(cycle.memory.frontierBefore, 1024);
+  assert.equal(cycle.memory.frontierBefore,
+    manifest.externalRuntime.reservedMemoryBytes);
   adapter.disposePlayer(cycle.player);
 }
 

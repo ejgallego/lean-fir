@@ -22,6 +22,8 @@ import {
   ILLUMINATE_SELECTION_PLAYER_INPUT_LAYOUT_VERSION,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
+import { standardMathRuntimeCapability } from
+  "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -31,6 +33,18 @@ const buildDirectory = join(directory, "_build");
 const baseStem = join(buildDirectory, "illuminate-selection-player-base.wasm");
 const generatedStem = join(buildDirectory,
   "illuminate-selection-player-resident.wasm");
+const completeStem = join(buildDirectory,
+  "illuminate-selection-player-complete.wasm");
+const externalMathStem = join(buildDirectory,
+  "illuminate-selection-player-external-math.wasm");
+const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
+const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
+const externalRuntimeLinker = join(externalRuntimeDirectory,
+  "link-runtime.mjs");
+const externalRuntimeContract = join(externalRuntimeDirectory,
+  "contract.mjs");
+const emcc = join(firRoot,
+  ".deps/lcnf-c-wasm/emsdk/upstream/emscripten/emcc");
 const expectedIlluminateSource = Object.freeze(JSON.parse(readFileSync(
   join(directory, "illuminate-source.json"), "utf8")));
 const illuminateSourceFiles = [
@@ -40,17 +54,17 @@ const illuminateSourceFiles = [
   "src/Illuminate/Animation/FirSelection.lean",
 ];
 const expectedClosure = Object.freeze({
-  finalLcnfDeclarations: 127,
+  finalLcnfDeclarations: 111,
   finalLcnfDeclarationSha256:
-    "0ee1e73c21173216a80746bd2432944e42ca0d439f6ba178e3713b112c56b32b",
-  retainedSourceFunctions: 82,
+    "a563644df812361a24e6c2935cf578ad8ed7761977b956a30eab1f39e950fbe4",
+  retainedSourceFunctions: 81,
   retainedSourceFunctionSha256:
-    "fdf43ab9f6c0bd8d85ea8bd951c25af8189aa13739cf419110f31d05c85dd471",
-  residentHelpers: 167,
+    "5097a2c841288d8862caf2cfbeff1332fe5bfc92b297d124ceb282a6cd498a94",
+  residentHelpers: 207,
   residentHelperSha256:
-    "f37cef4296f3fdcb4005c9a964ad98ac1c447f4e4c5481f211a125f8ad876532",
-  baseWasmBytes: 20761,
-  completeWasmBytes: 56156,
+    "fb51d0c3ed5efab80637dacfd431e9b71c860368bfe08428cffc4f701182b73f",
+  baseWasmBytes: 21046,
+  completeWasmBytes: 31929,
 });
 const outputNames = [
   "BUILD.json",
@@ -135,16 +149,33 @@ run("lake", [
   "lean",
   "SelectionEmit.lean",
 ]);
+run(emcc, [externalMathSource, "-O3", "-flto", "--no-entry",
+  "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
+  "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
+  "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
+  "-o", externalMathStem]);
+run(process.execPath, [externalRuntimeLinker, generatedStem,
+  externalMathStem, completeStem]);
 
-const wasm = readFileSync(generatedStem);
+const wasm = readFileSync(completeStem);
+const frontierWasm = readFileSync(generatedStem);
 const baseWasm = readFileSync(baseStem);
-const descriptorBytes = readFileSync(`${generatedStem}.json`);
-const descriptor = JSON.parse(descriptorBytes);
+const module = new WebAssembly.Module(wasm);
+const imports = WebAssembly.Module.imports(module);
+const frontierImports = WebAssembly.Module.imports(
+  new WebAssembly.Module(frontierWasm));
+const descriptor = {
+  ...JSON.parse(readFileSync(`${generatedStem}.json`, "utf8")),
+  imports: [],
+  completeRuntime: true,
+  externalRuntime: standardMathRuntimeCapability(
+    frontierImports.map(({ name }) => name)),
+};
+const descriptorBytes = Buffer.from(`${JSON.stringify(descriptor)}\n`);
+writeFileSync(`${completeStem}.json`, descriptorBytes);
 const inventory = JSON.parse(readFileSync(`${generatedStem}.inventory.json`,
   "utf8"));
 const lcnf = readFileSync(`${generatedStem}.lcnf`, "utf8");
-const module = new WebAssembly.Module(wasm);
-const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
 const functionImports = imports.filter((item) => item.kind === "function");
 const memoryImports = imports.filter((item) => item.kind === "memory");
@@ -166,6 +197,10 @@ const leanVersion = capture("lake", ["--keep-toolchain", "env", "lean",
 
 assert.deepEqual(imports, []);
 assert.deepEqual(descriptor.imports, []);
+assert.deepEqual(frontierImports, [
+  { module: "lean.extern", name: "Float.ofScientific", kind: "function" },
+  { module: "lean.extern", name: "Float.ofNat", kind: "function" },
+]);
 assert.deepEqual(memoryExports, ["memory"]);
 assert.deepEqual(functionExports, [
   "Illuminate.AnimationPlayer.initialSelectionLive",
@@ -229,7 +264,14 @@ assert.equal(wasm.byteLength, expectedClosure.completeWasmBytes,
 const build = {
   schemaVersion: "fir.illuminate-selection-player.build/v1",
   sources: { fir, illuminate },
-  toolchain: { leanToolchain, leanVersion },
+  toolchain: {
+    leanToolchain,
+    leanVersion,
+    emscriptenVersion: capture(emcc, ["--version"]).split("\n")[0],
+    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
+    externalRuntimeContractSha256:
+      sha256(readFileSync(externalRuntimeContract)),
+  },
   entries: [
     {
       sourceName: "Illuminate.AnimationPlayer.initialSelectionLive",
@@ -288,6 +330,11 @@ const build = {
     byteLength: wasm.byteLength,
     sha256: wasmHash,
     base: { byteLength: baseWasm.byteLength, sha256: sha256(baseWasm) },
+    frontier: {
+      byteLength: frontierWasm.byteLength,
+      sha256: sha256(frontierWasm),
+      imports: frontierImports,
+    },
     functionImportCount: functionImports.length,
     memoryImportCount: memoryImports.length,
     memoryOwner: "module",
@@ -298,7 +345,9 @@ const build = {
     completeRuntime: {
       version: "fir.illuminate-player.complete-runtime/v1",
       selfContained: true,
-      unresolvedRuntimeOperations: imports,
+      unresolvedRuntimeOperations: [],
+      externalRuntime: standardMathRuntimeCapability(
+        frontierImports.map(({ name }) => name)),
     },
     browserAdapter: {
       apiVersion: ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION,
@@ -409,10 +458,10 @@ const staging = join(packages, `.staging-${packageId}-${process.pid}`);
 mkdirSync(packages, { recursive: true });
 rmSync(staging, { recursive: true, force: true });
 mkdirSync(staging);
-copyFileSync(generatedStem,
+copyFileSync(completeStem,
   join(staging, "illuminate-selection-player.wasm"));
-copyFileSync(`${generatedStem}.json`,
-  join(staging, "illuminate-selection-player.wasm.json"));
+writeFileSync(join(staging, "illuminate-selection-player.wasm.json"),
+  descriptorBytes);
 writeFileSync(join(staging, "illuminate-selection-player-browser-adapter.mjs"),
   adapterBytes);
 writeFileSync(join(staging, "smoke.mjs"), smokeBytes);

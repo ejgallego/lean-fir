@@ -831,11 +831,29 @@ function validateBuild(build) {
   "BUILD.json has the wrong ownership version");
 }
 
+function runtimeReservedFrontier(manifest, build) {
+  const descriptorRuntime = requireObject(manifest.externalRuntime,
+    "module descriptor externalRuntime");
+  const buildRuntime = requireObject(
+    build.capabilities?.completeRuntime?.externalRuntime,
+    "BUILD.json complete-runtime externalRuntime");
+  requireCondition(descriptorRuntime.version === buildRuntime.version,
+    "external-runtime versions disagree");
+  requireCondition(descriptorRuntime.reservedMemoryBytes ===
+    buildRuntime.reservedMemoryBytes,
+  "external-runtime memory reservations disagree");
+  const reserved = descriptorRuntime.reservedMemoryBytes;
+  requireCondition(Number.isSafeInteger(reserved) && reserved >= HEAP_BASE &&
+    reserved <= MAX_UINT32 && reserved % 8 === 0,
+  "external-runtime reservedMemoryBytes is invalid");
+  return reserved;
+}
+
 function errorMessage(error) {
   return error instanceof Error ? error.message : String(error);
 }
 
-function instanceState(module, now, maximumNodes) {
+function instanceState(module, now, maximumNodes, reservedFrontier) {
   const started = now();
   const instance = new WebAssembly.Instance(module, {});
   const instantiateMs = elapsed(now, started);
@@ -867,14 +885,23 @@ function instanceState(module, now, maximumNodes) {
     decoder: new TextDecoder("utf-8", { fatal: true }),
     maximumNodes,
     instantiateMs,
+    reservedFrontier,
   };
-  readFrontier(state);
+  const freshFrontier = u32(state.frontier());
+  requireCondition(freshFrontier >= HEAP_BASE && freshFrontier % 8 === 0 &&
+    freshFrontier <= reservedFrontier,
+  `fresh resident frontier ${freshFrontier} overlaps the external runtime`);
+  requireCondition(reservedFrontier <= state.memory.buffer.byteLength,
+    `external runtime reservation ${reservedFrontier} exceeds module memory`);
+  if (freshFrontier !== reservedFrontier) state.setFrontier(reservedFrontier);
+  requireCondition(readFrontier(state) === reservedFrontier,
+    `resident frontier did not advance to ${reservedFrontier}`);
   return state;
 }
 
 function readFrontier(state) {
   const value = u32(state.frontier());
-  requireCondition(value >= HEAP_BASE && value % 8 === 0,
+  requireCondition(value >= state.reservedFrontier && value % 8 === 0,
     `resident frontier ${value} is invalid`);
   requireCondition(value <= state.memory.buffer.byteLength,
     `resident frontier ${value} exceeds module memory`);
@@ -916,7 +943,8 @@ function invalidatePlayer(state, status) {
 }
 
 export class IlluminatePlayerAdapter {
-  constructor({ module, manifest, build, now, startupTimings, maximumNodes }) {
+  constructor({ module, manifest, build, now, startupTimings, maximumNodes,
+    reservedFrontier }) {
     this.manifest = manifest;
     this.build = build;
     this.startupTimings = Object.freeze({ ...startupTimings });
@@ -924,6 +952,7 @@ export class IlluminatePlayerAdapter {
       module,
       now,
       maximumNodes,
+      reservedFrontier,
     });
   }
 
@@ -967,9 +996,11 @@ export class IlluminatePlayerAdapter {
       persistentAllocationCalls: 0,
       pagesBefore: undefined,
       pagesAfter: undefined,
+      reservedFrontier: adapter.reservedFrontier,
     };
     try {
-      state = instanceState(adapter.module, adapter.now, adapter.maximumNodes);
+      state = instanceState(adapter.module, adapter.now, adapter.maximumNodes,
+        adapter.reservedFrontier);
       timings.instantiateMs = state.instantiateMs;
       memory.frontierBefore = readFrontier(state);
       memory.pagesBefore = state.memory.buffer.byteLength / PAGE_BYTES;
@@ -1219,6 +1250,7 @@ export async function createIlluminatePlayerAdapter({
     "maximumNodes must be a positive safe integer");
   validateManifest(manifest);
   validateBuild(build);
+  const reservedFrontier = runtimeReservedFrontier(manifest, build);
   const compileStarted = now();
   const module = await WebAssembly.compile(bytes);
   const compileMs = elapsed(now, compileStarted);
@@ -1230,6 +1262,7 @@ export async function createIlluminatePlayerAdapter({
     build,
     now,
     maximumNodes,
+    reservedFrontier,
     startupTimings: {
       fetchMs: startupTimings.fetchMs ?? 0,
       compileMs,

@@ -144,8 +144,10 @@ decoding, or rewind failure poisons and drops the instance.
 The live lowering replaces private lazy-cache-global sequences with direct
 zero-argument calls. Those declarations are pure; this keeps their values in
 scratch and makes the allocator frontier the module's sole mutable heap root.
-`Emit.lean` fails unless the linked module has zero cache initializers, exactly
-one resident global, zero unresolved operations, and zero imports.
+`Emit.lean` fails unless the resident frontier has zero cache initializers,
+exactly one resident global, zero unresolved operations, and only declarations
+covered by the shared external-runtime policy. Packaging then links that
+checked frontier with `integration/wasm-runtime` and requires zero imports.
 
 The public function surface is exactly:
 
@@ -158,7 +160,10 @@ fir_heap_rewind
 fir_heap_alloc
 ```
 
-Memory is module-owned. `fir_heap_set_frontier` keeps its historical monotonic
+Memory is module-owned. The complete module descriptor and `BUILD.json`
+declare the shared runtime's reserved low-memory prefix; the adapter validates
+both records and advances a fresh frontier past that prefix before encoding.
+`fir_heap_set_frontier` keeps its historical monotonic
 synchronization contract; backward restoration is deliberately isolated in
 `fir_heap_rewind`. Resident helpers remain internal unless listed above.
 `BUILD.json` records both entry ABIs, source and helper inventories, the absent
@@ -206,7 +211,8 @@ The v4 package preserves the v3 persistent-checkpoint ownership protocol:
 one shared compiled module, one instance per opaque player, a retained compact
 selection graph and fixed state slot below the checkpoint, and cleared/re-wound
 event and result scratch after every call. Its source and package smokes enforce
-the 16 KiB/400-allocation/one-page creation bounds and a flat frontier across
+the 16 KiB/400-allocation creation bounds, the declared runtime reservation,
+and a flat frontier across
 10,000 scalar ticks. The hot path has zero host-encoded event bytes and zero
 host resident-allocation calls; result scratch is still cleared and rewound.
 
@@ -224,19 +230,17 @@ fir_heap_alloc
 ```
 
 Against an Illuminate checkout that has generated
-`test_output/anim-comparison.html`, the package-level dashboard check and the
-order-balanced phase benchmark are:
+`test_output/anim-comparison.html`, the order-balanced phase and hot-event
+benchmarks are:
 
 ```sh
-ILLUMINATE_ROOT=/path/to/illuminate node check-selection-dashboard.mjs
 ILLUMINATE_ROOT=/path/to/illuminate node selection-benchmark.mjs
 ILLUMINATE_ROOT=/path/to/illuminate node selection-hot-event-benchmark.mjs
 ```
 
-The dashboard check compares v4 after host-side patch-row materialization with
-v3 at every segment boundary, step, and final frame of all 16 examples. The
-benchmark excludes a warmup, alternates v3/v4 order for at least seven rounds,
-records raw samples and median/p95/MAD summaries, and writes
+The phase benchmark compares v4 after host-side patch-row materialization with
+v3 over all 16 examples, excludes a warmup, alternates v3/v4 order for at
+least seven rounds, records raw samples and median/p95/MAD summaries, and writes
 `_build/illuminate-selection-benchmark.json`.
 The hot-event benchmark compares generic tagged-event encoding with
 `dispatchTick` in balanced order on the same package and writes

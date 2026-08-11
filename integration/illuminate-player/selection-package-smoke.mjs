@@ -26,6 +26,8 @@ assert.equal(build.capabilities.ownership.version,
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION);
 assert.equal(build.capabilities.hotEvent.version,
   ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION);
+assert.equal(build.capabilities.completeRuntime.externalRuntime.reservedMemoryBytes,
+  manifest.externalRuntime.reservedMemoryBytes);
 
 const module = new WebAssembly.Module(bytes);
 assert.deepEqual(WebAssembly.Module.imports(module), []);
@@ -39,6 +41,18 @@ assert.deepEqual(WebAssembly.Module.exports(module), [
   { name: "fir_heap_alloc", kind: "function" },
   { name: "memory", kind: "memory" },
 ]);
+
+await assert.rejects(createIlluminateSelectionPlayerAdapter({
+  bytes,
+  manifest: {
+    ...manifest,
+    externalRuntime: {
+      ...manifest.externalRuntime,
+      reservedMemoryBytes: manifest.externalRuntime.reservedMemoryBytes - 8,
+    },
+  },
+  build,
+}), /external-runtime memory reservations disagree/);
 
 const animation = {
   fps: 20,
@@ -94,7 +108,11 @@ assert.deepEqual(materialize(created.action), [
 assert.ok(created.memory.selectionBytes <= 16 * 1024);
 assert.ok(created.memory.persistentAllocationCalls <= 400);
 assert.equal(created.memory.selectionAllocationCalls, 1);
-assert.equal(created.memory.pagesAfter, 1);
+assert.equal(created.memory.frontierBefore,
+  manifest.externalRuntime.reservedMemoryBytes);
+assert.equal(created.memory.reservedFrontier,
+  manifest.externalRuntime.reservedMemoryBytes);
+assert.ok(created.memory.pagesAfter >= 2);
 
 const events = [
   { kind: "advance" },

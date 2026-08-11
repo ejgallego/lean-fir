@@ -4,11 +4,9 @@
 #define EXPORT(name) __attribute__((export_name(name)))
 
 /*
- * FIR's current resident Natural domain is one 64-bit limb.  HitScene's
- * Float.ofNat and Float.ofScientific calls are compiler-generated source
- * helpers over that same domain, so the compiled math side reads the shared
- * module-owned representation directly instead of asking JavaScript to
- * translate it.
+ * FIR's current external-math boundary accepts canonical Naturals with at
+ * most one 64-bit limb. The compiled runtime reads the shared module-owned
+ * Lean representation directly; application JavaScript is never involved.
  */
 static uint64_t fir_natural_u64(uint32_t word) {
   if ((word & 1u) != 0u) return (uint64_t)(word >> 1);
@@ -49,9 +47,9 @@ double fir_float_of_nat(uint32_t value) {
 }
 
 /*
- * This is the Lean 4.32 Init.Data.OfScientific algorithm specialized to the
- * source closure's checked one-limb Natural domain.  The HitScene closure's
- * largest decimal exponent is 20, so every intermediate fits in u128.
+ * This is the Lean 4.32 Init.Data.OfScientific algorithm on the checked
+ * one-limb Natural domain.  Exponents through 20 guarantee that every
+ * intermediate fits in u128 for either exponent sign and every u64 mantissa.
  */
 EXPORT("Float.ofScientific")
 double fir_float_of_scientific(uint32_t mantissa_word, uint8_t negative_exp,

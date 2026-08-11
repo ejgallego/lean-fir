@@ -19,21 +19,7 @@ used by upstream Lean's final-LCNF emitter.
 def captureSource : CoreM (Except Fir.Wasm.Emit.Source.CompileError
     Fir.Validation.Lcnf.Artifact) := do
   return .ok (← Fir.Wasm.Emit.Source.compileEntriesFinalCapturedInternalized
-    liveEntries)
-
-private def configureLiveModule
-    (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :
-    Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact := do
-  let module ← Fir.Wasm.Emit.ResidentCache.eliminateLazyInitializers
-      artifact.module |>.mapError fun error =>
-        Fir.Wasm.Emit.Source.CompileError.manifest
-          s!"failed to make the live module rewind-safe: {repr error}"
-  unless module.globals.isEmpty do
-    throw (.manifest "live source module unexpectedly retained resident globals")
-  let bytes ← match Fir.Wasm.Emit.encode module with
-    | .ok bytes => pure bytes
-    | .error error => throw (.encoding error)
-  return { artifact with module, bytes }
+    liveEntries Fir.Wasm.Emit.ResidentLinker.closedApplicationRetainedExternalNames)
 
 /-- Lower the unmodified Illuminate final-LCNF closure before resident linking. -/
 def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
@@ -44,7 +30,7 @@ def compileBaseModule : CoreM (Except Fir.Wasm.Emit.Source.CompileError
   | .ok source => do
       let result ← Fir.Wasm.Emit.Source.compileModuleArtifactWithExports source
         liveEntries .ok
-      return result.bind configureLiveModule
+      return result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
 
 /-- Link every reusable resident helper family already accepted by W7, then
 retain exactly the requested source and allocator exports. -/
@@ -53,7 +39,7 @@ def internalizeExistingRuntimeForExports
     (sourceExports : Array Name) :
     Except Fir.Wasm.Emit.Source.CompileError Fir.Wasm.Emit.Source.ModuleArtifact :=
   Fir.Wasm.Emit.ResidentLinker.linkArtifact
-    (Fir.Wasm.Emit.ResidentLinker.closedApplicationPolicy sourceExports) artifact
+    (Fir.Wasm.Emit.ResidentLinker.closedApplicationFrontierPolicy sourceExports) artifact
 
 /-- Link the accepted resident runtime for the v3 live-player entries. -/
 def internalizeExistingRuntime (artifact : Fir.Wasm.Emit.Source.ModuleArtifact) :

@@ -7,14 +7,13 @@ open Fir.Wasm.Concrete
 open Lean
 
 /-!
-# Wasm-resident `Nat.mod` for Illuminate frame arithmetic
+# Wasm-resident bounded `Nat.mod`
 
-Illuminate uses `Nat.mod` to wrap a frame offset within a finite animation
-interval.  This helper keeps that operation inside the generated module.  It
+This helper keeps `Nat.mod` inside the generated module. It
 accepts every canonical natural whose value fits in 32 bits, implements Lean's
 zero-divisor result (`n % 0 = n`), and traps explicitly for wider operands.
-The width restriction is an input capability of the Illuminate package, not a
-host fallback.
+The width restriction is a declared input capability of each consuming
+package, not a host fallback.
 -/
 
 inductive LinkError where

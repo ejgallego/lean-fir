@@ -9,6 +9,17 @@ const bytes = await readFile(new URL("illuminate-player.wasm", here));
 const manifest = JSON.parse(await readFile(
   new URL("illuminate-player.wasm.json", here), "utf8"));
 const build = JSON.parse(await readFile(new URL("BUILD.json", here), "utf8"));
+await assert.rejects(createIlluminatePlayerAdapter({
+  bytes,
+  manifest: {
+    ...manifest,
+    externalRuntime: {
+      ...manifest.externalRuntime,
+      reservedMemoryBytes: manifest.externalRuntime.reservedMemoryBytes - 8,
+    },
+  },
+  build,
+}), /external-runtime memory reservations disagree/);
 const adapter = await createIlluminatePlayerAdapter({ bytes, manifest, build });
 
 const animation = {
@@ -56,6 +67,8 @@ assert.equal(live.memory.animationBytes,
   live.memory.frontierAfterAnimation - live.memory.frontierBefore);
 assert.ok(live.memory.animationObjectCount > 1);
 assert.equal(live.memory.animationAllocationCalls, 1);
+assert.equal(live.memory.frontierBefore,
+  manifest.externalRuntime.reservedMemoryBytes);
 assert.equal(live.memory.stateSlotBytes,
   live.memory.persistentCheckpoint - live.memory.frontierAfterAnimation);
 assert.equal(live.memory.stateSlotObjectCount,

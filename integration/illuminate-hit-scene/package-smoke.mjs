@@ -32,6 +32,8 @@ assert.deepEqual(WebAssembly.Module.exports(module).map(({ name, kind }) =>
 
 const adapter = await createIlluminateHitSceneAdapter({ bytes: wasm, build });
 const created = adapter.createHitScene(fixture.encodedScene);
+assert.equal(created.memory.reservedFrontier,
+  build.capabilities.completeRuntime.externalRuntime.reservedMemoryBytes);
 assert(created.memory.persistentCheckpoint > created.memory.reservedFrontier);
 
 for (const query of fixture.queries) {

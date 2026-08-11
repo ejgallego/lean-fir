@@ -8,13 +8,13 @@ open Lean
 open Lean.Compiler
 
 /-!
-# Persistent arena arrays for whole-trace execution
+# Persistent arena arrays
 
-The Illuminate package transfers one complete input graph and decodes one
-complete output graph. Arrays therefore use a module-private persistent arena
-layout: every push allocates a fresh array, and reclamation happens when the
-Wasm instance is discarded. JavaScript only writes this documented layout;
-all Array semantics below execute in Wasm.
+Closed applications transfer a complete input graph and decode copied output
+values. Arrays use a module-private persistent arena layout: every push
+allocates a fresh array, and reclamation happens when the Wasm instance is
+discarded. Hosts only write this documented layout; all Array semantics below
+execute in Wasm.
 -/
 
 inductive LinkError where

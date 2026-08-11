@@ -42,8 +42,8 @@ address escapes.
 The immutable scene graph lies below a persistent checkpoint. Query results
 are copied to JavaScript; query scratch is cleared and rewound on success and
 failure. Disposing a scene drops its instance and invalidates the opaque
-handle. The resident math runtime occupies the first 64 KiB, and the FIR arena
-starts above that reserved page.
+handle. `BUILD.json` declares the shared runtime's low-memory reservation, and
+the adapter starts the FIR arena above that prefix before encoding the scene.
 
 ## Build and publish
 
@@ -81,9 +81,11 @@ publication must use fresh generation. `FIR_ALLOW_DIRTY_PACKAGE=1` exists for
 diagnosis and must not be used for a release handoff.
 
 The publisher writes an immutable directory named by the first 16 hex digits
-of the complete Wasm SHA-256, runs its packaged smoke test, verifies every
-checksum, and atomically moves `illuminate-hit-scene-current` only after the
-gate passes.
+of the complete package-inventory SHA-256, runs its packaged smoke test,
+verifies every checksum, and atomically moves
+`illuminate-hit-scene-current` only after the gate passes. Adapter or metadata
+changes therefore publish a new directory even when the Wasm bytes are
+unchanged.
 
 ## Accepted coverage
 
@@ -101,5 +103,9 @@ The closure contains 159 source declarations and 34 reviewed externals. The
 resident frontier contains 439 functions and 15 C/libm Float operations before
 the final merge. Exact counts, hashes, sizes, and inventories are ratcheted in
 `closure-contract.json` and reproduced in package `BUILD.json`.
+
+The standard C/libm boundary and checked export-preserving linker are shared
+with other closed applications under `integration/wasm-runtime`; this package
+does not carry a HitScene-specific runtime implementation.
 
 See [CLIENT_HANDOFF.md](CLIENT_HANDOFF.md) for the concise tester handoff.

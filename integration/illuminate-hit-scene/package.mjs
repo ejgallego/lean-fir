@@ -21,6 +21,8 @@ import {
   ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION,
   ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION,
 } from "./illuminate-hit-scene-browser-adapter.mjs";
+import { standardMathRuntimeCapability } from
+  "../wasm-runtime/contract.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -123,24 +125,28 @@ if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
 
 const emsdk = join(firRoot, ".deps/lcnf-c-wasm/emsdk");
 const emcc = join(emsdk, "upstream/emscripten/emcc");
-run(emcc, [join(directory, "runtime-math.c"), "-O3", "-flto",
+const externalRuntimeDirectory = join(firRoot, "integration/wasm-runtime");
+const externalMathSource = join(externalRuntimeDirectory, "math-runtime.c");
+const externalRuntimeLinker = join(externalRuntimeDirectory, "link-runtime.mjs");
+const externalRuntimeContract = join(externalRuntimeDirectory, "contract.mjs");
+run(emcc, [externalMathSource, "-O3", "-flto",
   "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
   "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
   "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
   "-o", mathStem], { capture: false });
-run(process.execPath, [join(directory, "link-runtime.mjs"), frontierStem,
+run(process.execPath, [externalRuntimeLinker, frontierStem,
   mathStem, completeStem], { capture: false });
 const firstCompleteHash = sha256(readFileSync(completeStem));
 if (process.env.FIR_HIT_SCENE_REQUIRE_REPEAT === "1") {
   const repeatedMath = join(buildDirectory, "illuminate-hit-scene-math-repeat.wasm");
   const repeatedComplete = join(buildDirectory,
     "illuminate-hit-scene-complete-repeat.wasm");
-  run(emcc, [join(directory, "runtime-math.c"), "-O3", "-flto",
+  run(emcc, [externalMathSource, "-O3", "-flto",
     "--no-entry", "-sSTANDALONE_WASM=1", "-sIMPORTED_MEMORY=1",
     "-sALLOW_MEMORY_GROWTH=1", "-sINITIAL_MEMORY=65536",
     "-sSTACK_SIZE=16384", "-Wl,--gc-sections", "-Wl,--strip-all",
     "-o", repeatedMath], { capture: false });
-  run(process.execPath, [join(directory, "link-runtime.mjs"), frontierStem,
+  run(process.execPath, [externalRuntimeLinker, frontierStem,
     repeatedMath, repeatedComplete], { capture: false });
   assert.equal(sha256(readFileSync(repeatedComplete)), firstCompleteHash,
     "repeated complete-runtime link was not deterministic");
@@ -156,7 +162,8 @@ const frontierInventory = JSON.parse(readFileSync(
 const descriptor = JSON.parse(readFileSync(`${frontierStem}.json`, "utf8"));
 descriptor.imports = [];
 descriptor.completeRuntime = true;
-descriptor.mathRuntime = "compiled-emscripten-libm";
+descriptor.externalRuntime = standardMathRuntimeCapability(
+  frontierInventory.imports.map(({ name }) => name));
 const module = new WebAssembly.Module(wasm);
 const imports = WebAssembly.Module.imports(module);
 const exports = WebAssembly.Module.exports(module);
@@ -209,6 +216,9 @@ const build = {
     leanVersion,
     emscriptenVersion: capture(emcc, ["--version"]).split("\n")[0],
     emscriptenSha256: sha256(readFileSync(emcc)),
+    externalRuntimeSourceSha256: sha256(readFileSync(externalMathSource)),
+    externalRuntimeContractSha256:
+      sha256(readFileSync(externalRuntimeContract)),
   },
   entry: {
     sourceName: "Illuminate.HitScene.query",
@@ -246,7 +256,8 @@ const build = {
       selfContained: true,
       functionImports: 0,
       memoryImports: 0,
-      residentMath: "compiled C/libm merged into Wasm",
+      externalRuntime: standardMathRuntimeCapability(
+        frontierInventory.imports.map(({ name }) => name)),
     },
     inputLayout: {
       version: ILLUMINATE_HIT_SCENE_INPUT_LAYOUT_VERSION,
@@ -257,7 +268,8 @@ const build = {
       version: ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION,
       instance: "one WebAssembly.Instance per opaque scene",
       memoryOwner: "module",
-      mathReservedFrontier: 65536,
+      runtimeReservation:
+        "adapter advances the FIR frontier past the external runtime prefix",
       persistent: "scene graph below a per-instance checkpoint",
       scratch: "result graph cleared and rewound after every query",
       disposal: "drop instance; no raw Wasm address escapes",
@@ -299,8 +311,9 @@ run(process.execPath, [join(publication, "smoke.mjs")], {
   cwd: publication, capture: false,
 });
 
+const packageSha256 = sha256(sums);
 const destination = join(buildDirectory,
-  `illuminate-hit-scene-${sha256(wasm).slice(0, 16)}`);
+  `illuminate-hit-scene-${packageSha256.slice(0, 16)}`);
 if (existsSync(destination)) {
   for (const name of [...outputNames, "SHA256SUMS"]) {
     assert.equal(sha256(readFileSync(join(publication, name))),
@@ -317,6 +330,7 @@ console.log(JSON.stringify({
   current: join(buildDirectory, "illuminate-hit-scene-current"),
   wasmBytes: wasm.byteLength,
   wasmSha256: sha256(wasm),
+  packageSha256,
   imports,
   exports,
 }, null, 2));

@@ -4,6 +4,7 @@ import Fir.Wasm.Emit.ResidentCache
 import Fir.Wasm.Emit.ResidentClosureAllocation
 import Fir.Wasm.Emit.ResidentConstructor
 import Fir.Wasm.Emit.ResidentDeadCode
+import Fir.Wasm.Emit.ExternalRuntime
 import Fir.Wasm.Emit.ResidentFallback
 import Fir.Wasm.Emit.ResidentFloat
 import Fir.Wasm.Emit.ResidentLiteral
@@ -71,6 +72,7 @@ direct-call graph. The postconditions make package closure fail closed.
 structure Policy where
   steps : Array Step
   publicExports : Option (Array Name) := none
+  allowedExternalImports : Option (Array Name) := none
   requireResidentMemory : Bool := true
   requireZeroImports : Bool := true
   requireNoRuntimeOperations : Bool := true
@@ -101,6 +103,10 @@ private def validatePolicy (policy : Policy) : Except Source.CompileError Unit :
       throw (.manifest "resident linker policy requires at least one public export")
     if hasDuplicates exports then
       throw (.manifest s!"resident linker policy contains duplicate public exports: {exports}")
+  if let some declarations := policy.allowedExternalImports then
+    if hasDuplicates declarations then
+      throw (.manifest
+        s!"resident linker policy contains duplicate allowed imports: {declarations}")
 
 private def transform [Repr error] (label : String)
     (link : Module → Except error Module) (module : Module) :
@@ -185,6 +191,13 @@ private def checkPostconditions (policy : Policy) (module : Module) :
   if policy.requireZeroImports && !module.imports.isEmpty then
     throw (.manifest
       s!"resident linker left {module.imports.size} function import(s)")
+  if let some declarations := policy.allowedExternalImports then
+    for import_ in module.imports do
+      let some declaration := import_.declaration?
+        | throw (.manifest "resident linker retained a non-external import")
+      unless declarations.contains declaration do
+        throw (.manifest
+          s!"resident linker retained unsupported external {declaration}")
   if policy.requireNoRuntimeOperations && !module.runtimeOperations.isEmpty then
     throw (.manifest
       s!"resident linker left {module.runtimeOperations.size} runtime operation(s)")
@@ -210,6 +223,22 @@ def linkModule (policy : Policy) (module : Module) :
 def linkArtifact (policy : Policy) (artifact : Source.ModuleArtifact) :
     Except Source.CompileError Source.ModuleArtifact := do
   let module ← linkModule policy artifact.module
+  let bytes ← Fir.Wasm.Emit.encode module |>.mapError Source.CompileError.encoding
+  return { artifact with module, bytes }
+
+/--
+Prepare a source artifact for an instance-lifetime arena. Pure lazy constants
+become direct calls so no runtime root can retain scratch values; the source
+module must then contain no globals before the resident allocator is linked.
+-/
+def prepareArenaArtifact (artifact : Source.ModuleArtifact) :
+    Except Source.CompileError Source.ModuleArtifact := do
+  let module ← ResidentCache.eliminateLazyInitializers artifact.module
+    |>.mapError fun error =>
+      Source.CompileError.manifest
+        s!"failed to eliminate lazy initializers for the arena: {repr error}"
+  unless module.globals.isEmpty do
+    throw (.manifest "arena source module retained resident globals")
   let bytes ← Fir.Wasm.Emit.encode module |>.mapError Source.CompileError.encoding
   return { artifact with module, bytes }
 
@@ -249,6 +278,26 @@ def allocatorExports : Array Name := #[
   ResidentAllocator.allocateName]
 
 /--
+Standard external declarations that a closed application asks source capture
+to retain.  Every declaration is then either internalized by a checked resident
+helper family or left in `ExternalRuntime.mathDeclarations` for the separately
+compiled standard math runtime.  This inventory is independent of source entry
+names and replaces per-application retained-external lists.
+-/
+def closedApplicationExternalDeclarations : Array Name :=
+  let declarations :=
+    ResidentNumeric.externalDeclarations ++
+    ResidentFloat.externalDeclarations ++
+    ExternalRuntime.mathDeclarations ++
+    ResidentArray.availableExternalDeclarations ++
+    #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
+    ResidentUSize.externalDeclarations
+  declarations.foldl addUnique #[]
+
+def closedApplicationRetainedExternalNames : Array String :=
+  closedApplicationExternalDeclarations.map Name.toString
+
+/--
 Runtime policy for a closed structured application. It links only the
 available operations in the larger scalar families, then retains the requested
 source entries plus the low-level arena surface.
@@ -265,12 +314,29 @@ def closedApplicationPolicy (sourceExports : Array Name) : Policy := {
     .stringLiterals]
   publicExports := some (sourceExports ++ allocatorExports) }
 
+/--
+The same generic resident closure with standard math externals deliberately
+left for the checked external-runtime linker.
+-/
+def closedApplicationFrontierPolicy (sourceExports : Array Name) : Policy := {
+  closedApplicationPolicy sourceExports with
+  allowedExternalImports := some ExternalRuntime.mathDeclarations
+  requireZeroImports := false }
+
 #guard !hasDuplicates prettyFormatPolicy.steps
 
 #guard !hasDuplicates (closedApplicationPolicy #[`entry]).steps
 
 #guard (closedApplicationPolicy #[`entry]).publicExports ==
   some (#[`entry] ++ allocatorExports)
+
+#guard closedApplicationRetainedExternalNames.contains "Float.ofScientific"
+
+#guard (closedApplicationFrontierPolicy #[`entry]).allowedExternalImports ==
+  some ExternalRuntime.mathDeclarations
+
+#guard (closedApplicationRetainedExternalNames.foldl addUnique #[]).size ==
+  closedApplicationRetainedExternalNames.size
 
 #guard match validatePolicy { steps := #[.getTag, .getTag] } with
   | .error (.manifest _) => true

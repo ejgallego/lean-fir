@@ -12,12 +12,15 @@ const binaryen = join(firRoot,
   ".deps/lcnf-c-wasm/emsdk/upstream/bin");
 const [frontierArg, mathArg, outputArg] = process.argv.slice(2);
 if (outputArg === undefined) {
-  throw new Error("usage: node link-runtime.mjs FRONTIER MATH OUTPUT");
+  throw new Error("usage: node link-runtime.mjs FRONTIER EXTERNAL_RUNTIME OUTPUT");
 }
 const frontier = resolve(frontierArg);
 const math = resolve(mathArg);
 const output = resolve(outputArg);
-const temporary = mkdtempSync(join(tmpdir(), "fir-hit-scene-link-"));
+const temporary = mkdtempSync(join(tmpdir(), "fir-external-runtime-link-"));
+const expectedExports = WebAssembly.Module.exports(new WebAssembly.Module(
+  readFileSync(frontier)));
+const allowedExports = new Set(expectedExports.map(({ name }) => name));
 
 function run(tool, args) {
   execFileSync(join(binaryen, tool), args, { stdio: "inherit" });
@@ -53,18 +56,9 @@ try {
     frontier, "env", normalizedMath, "lean.extern", "-o", merged]);
   const mergedModule = new WebAssembly.Module(readFileSync(merged));
   assert.deepEqual(WebAssembly.Module.imports(mergedModule), [],
-    "merged HitScene module must be import-free");
+    "merged application module must be import-free");
 
   run("wasm-dis", [merged, "-o", mergedWat]);
-  const allowedExports = new Set([
-    "Illuminate.HitScene.query",
-    "Illuminate.HitScene.query._fir_bit_exact",
-    "fir_heap_frontier",
-    "fir_heap_set_frontier",
-    "fir_heap_rewind",
-    "fir_heap_alloc",
-    "memory",
-  ]);
   wat = readFileSync(mergedWat, "utf8");
   let removed = 0;
   wat = wat.replace(/^ \(export "([^"]+)" .*\)\n/gm,
@@ -83,18 +77,11 @@ try {
 
   const finalModule = new WebAssembly.Module(readFileSync(output));
   assert.deepEqual(WebAssembly.Module.imports(finalModule), [],
-    "final HitScene module must be import-free");
-  assert.deepEqual(WebAssembly.Module.exports(finalModule), [
-    { name: "Illuminate.HitScene.query", kind: "function" },
-    { name: "Illuminate.HitScene.query._fir_bit_exact", kind: "function" },
-    { name: "fir_heap_frontier", kind: "function" },
-    { name: "fir_heap_set_frontier", kind: "function" },
-    { name: "fir_heap_rewind", kind: "function" },
-    { name: "fir_heap_alloc", kind: "function" },
-    { name: "memory", kind: "memory" },
-  ]);
-  if (process.env.FIR_HIT_SCENE_LINK_DEBUG_DIR !== undefined) {
-    const debugDirectory = resolve(process.env.FIR_HIT_SCENE_LINK_DEBUG_DIR);
+    "final application module must be import-free");
+  assert.deepEqual(WebAssembly.Module.exports(finalModule), expectedExports,
+    "external-runtime linking must preserve exactly the frontier exports");
+  if (process.env.FIR_WASM_RUNTIME_LINK_DEBUG_DIR !== undefined) {
+    const debugDirectory = resolve(process.env.FIR_WASM_RUNTIME_LINK_DEBUG_DIR);
     mkdirSync(debugDirectory, { recursive: true });
     copyFileSync(merged, join(debugDirectory, "merged.wasm"));
     copyFileSync(mergedWat, join(debugDirectory, "merged.wat"));

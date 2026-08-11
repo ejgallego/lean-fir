@@ -9,10 +9,11 @@ import {
   ILLUMINATE_SELECTION_PLAYER_OWNERSHIP_VERSION,
 } from "./illuminate-selection-player-browser-adapter.mjs";
 
-const bytes = await readFile("_build/illuminate-selection-player-resident.wasm");
+const bytes = await readFile("_build/illuminate-selection-player-complete.wasm");
 const manifest = JSON.parse(await readFile(
-  "_build/illuminate-selection-player-resident.wasm.json", "utf8"));
+  "_build/illuminate-selection-player-complete.wasm.json", "utf8"));
 const build = { capabilities: {
+  completeRuntime: { externalRuntime: manifest.externalRuntime },
   browserAdapter: { apiVersion:
     ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
   hotEvent: { version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION },
@@ -77,7 +78,9 @@ assert.equal(created.memory.selectionBytes,
 assert.ok(created.memory.selectionBytes <= 16 * 1024);
 assert.equal(created.memory.selectionAllocationCalls, 1);
 assert.ok(created.memory.persistentAllocationCalls <= 400);
-assert.equal(created.memory.pagesAfter, 1);
+assert.equal(created.memory.reservedFrontier,
+  manifest.externalRuntime.reservedMemoryBytes);
+assert.ok(created.memory.pagesAfter >= 2);
 assert.equal(created.memory.postRewindFrontier,
   created.memory.persistentCheckpoint);
 

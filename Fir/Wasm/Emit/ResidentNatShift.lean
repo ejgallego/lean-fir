@@ -9,9 +9,7 @@ open Lean
 /-!
 # Wasm-resident bounded `Nat.shiftRight`
 
-Illuminate's binary-search specialization shifts the difference of two
-validated frame indices.  The package boundary accepts 32-bit naturals and the
-existing W7 numeric runtime represents up to one 64-bit limb.  This helper is
+The existing W7 numeric runtime represents up to one 64-bit limb. This helper is
 exact on that resident numeric domain, including Lean's zero result when the
 shift count is at least 64; wider numeric objects retain the existing explicit
 trap policy.

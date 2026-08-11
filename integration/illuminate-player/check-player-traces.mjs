@@ -413,11 +413,12 @@ for (let caseIndex = 0; caseIndex < 100; caseIndex += 1) {
   });
 }
 
-const bytes = await readFile("_build/illuminate-player-resident.wasm");
+const bytes = await readFile("_build/illuminate-player-complete.wasm");
 const manifest = JSON.parse(await readFile(
-  "_build/illuminate-player-resident.wasm.json", "utf8"));
+  "_build/illuminate-player-complete.wasm.json", "utf8"));
 const build = {
   capabilities: {
+    completeRuntime: { externalRuntime: manifest.externalRuntime },
     browserAdapter: { apiVersion: ILLUMINATE_PLAYER_ADAPTER_API_VERSION },
     inputLayout: { version: ILLUMINATE_PLAYER_INPUT_LAYOUT_VERSION },
     ownership: { version: ILLUMINATE_PLAYER_OWNERSHIP_VERSION },
@@ -425,10 +426,11 @@ const build = {
 };
 const adapter = await createIlluminatePlayerAdapter({ bytes, manifest, build });
 const selectionBytes = await readFile(
-  "_build/illuminate-selection-player-resident.wasm");
+  "_build/illuminate-selection-player-complete.wasm");
 const selectionManifest = JSON.parse(await readFile(
-  "_build/illuminate-selection-player-resident.wasm.json", "utf8"));
+  "_build/illuminate-selection-player-complete.wasm.json", "utf8"));
 const selectionBuild = { capabilities: {
+  completeRuntime: { externalRuntime: selectionManifest.externalRuntime },
   browserAdapter: { apiVersion:
     ILLUMINATE_SELECTION_PLAYER_ADAPTER_API_VERSION },
   hotEvent: { version: ILLUMINATE_SELECTION_PLAYER_HOT_EVENT_VERSION },

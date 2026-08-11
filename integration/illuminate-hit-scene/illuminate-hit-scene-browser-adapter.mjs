@@ -8,7 +8,7 @@ export const ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION =
   "fir.illuminate-hit-scene.persistent-checkpoint/v1";
 
 const PAGE_BYTES = 65536;
-const MATH_RESERVED_FRONTIER = PAGE_BYTES;
+const HEAP_BASE = 1024;
 const HEADER_BYTES = 32;
 const SLOT_BYTES = 8;
 const MAX_UINT32 = 0xffffffff;
@@ -118,7 +118,8 @@ function writeWord(view, address, value) {
 }
 
 class Encoder {
-  constructor(exports, memory, textEncoder, { persistent = true } = {}) {
+  constructor(exports, memory, textEncoder, reservedFrontier,
+    { persistent = true } = {}) {
     this.exports = exports;
     this.memory = memory;
     this.textEncoder = textEncoder;
@@ -126,13 +127,14 @@ class Encoder {
     this.bytes = 0;
     this.objects = 0;
     this.allocations = 0;
+    this.reservedFrontier = reservedFrontier;
   }
 
   allocate(bytes, label) {
     requireCondition(bytes >= HEADER_BYTES && bytes % 8 === 0,
       `${label} has invalid allocation size`);
     const address = u32(this.exports.fir_heap_alloc(bytes));
-    requireCondition(address >= MATH_RESERVED_FRONTIER && address % 8 === 0 &&
+    requireCondition(address >= this.reservedFrontier && address % 8 === 0 &&
       address + bytes <= this.memory.buffer.byteLength,
     `${label} returned invalid allocation ${address}`);
     new Uint8Array(this.memory.buffer, address, bytes).fill(0);
@@ -417,7 +419,7 @@ function decodeResult(memory, decoder, word) {
 
 function readFrontier(state) {
   const frontier = u32(state.frontier());
-  requireCondition(frontier >= MATH_RESERVED_FRONTIER && frontier % 8 === 0 &&
+  requireCondition(frontier >= state.reservedFrontier && frontier % 8 === 0 &&
     frontier <= state.memory.buffer.byteLength,
   `resident frontier ${frontier} is invalid`);
   return frontier;
@@ -436,7 +438,7 @@ function rewind(state, checkpoint) {
     postRewindFrontier: after };
 }
 
-function instantiate(module) {
+function instantiate(module, reservedFrontier) {
   const instance = new WebAssembly.Instance(module, {});
   const exports = instance.exports;
   const required = [
@@ -452,9 +454,15 @@ function instantiate(module) {
     requireCondition(typeof exports[name] === "function",
       `module is missing export ${name}`);
   }
-  requireCondition(u32(exports.fir_heap_frontier()) < MATH_RESERVED_FRONTIER,
-    "fresh instance frontier already overlaps the math reservation");
-  exports.fir_heap_set_frontier(MATH_RESERVED_FRONTIER);
+  const freshFrontier = u32(exports.fir_heap_frontier());
+  requireCondition(freshFrontier >= HEAP_BASE && freshFrontier % 8 === 0 &&
+    freshFrontier <= reservedFrontier,
+  "fresh instance frontier overlaps the external runtime reservation");
+  requireCondition(reservedFrontier <= exports.memory.buffer.byteLength,
+    "external runtime reservation exceeds module memory");
+  if (freshFrontier !== reservedFrontier) {
+    exports.fir_heap_set_frontier(reservedFrontier);
+  }
   return {
     instance,
     exports,
@@ -463,6 +471,7 @@ function instantiate(module) {
     rewind: exports.fir_heap_rewind,
     queryBits: exports["Illuminate.HitScene.query._fir_bit_exact"],
     decoder: new TextDecoder("utf-8", { fatal: true }),
+    reservedFrontier,
   };
 }
 
@@ -542,10 +551,11 @@ function queryCore(adapter, scene, x, y, diagnostic) {
 }
 
 export class IlluminateHitSceneAdapter {
-  constructor(module, build, now, maximumNodes, startupTimings) {
+  constructor(module, build, now, maximumNodes, startupTimings,
+    reservedFrontier) {
     this.build = build;
     this.startupTimings = Object.freeze(startupTimings);
-    ADAPTER_STATE.set(this, { module, now, maximumNodes });
+    ADAPTER_STATE.set(this, { module, now, maximumNodes, reservedFrontier });
   }
 
   createHitScene(encodedScene) {
@@ -556,13 +566,13 @@ export class IlluminateHitSceneAdapter {
     const totalStarted = adapter.now();
     const timings = { instantiateMs: 0, parseProjectMs: 0, encodeMs: 0 };
     const instantiateStarted = adapter.now();
-    const state = instantiate(adapter.module);
+    const state = instantiate(adapter.module, adapter.reservedFrontier);
     timings.instantiateMs = elapsed(adapter.now, instantiateStarted);
     const parseStarted = adapter.now();
     const projected = JSON.parse(encodedScene);
     timings.parseProjectMs = elapsed(adapter.now, parseStarted);
     const writer = new Encoder(state.exports, state.memory, new TextEncoder(),
-      { persistent: true });
+      adapter.reservedFrontier, { persistent: true });
     const encodeStarted = adapter.now();
     const sceneAddress = writer.scene(projected, adapter.maximumNodes);
     timings.encodeMs = elapsed(adapter.now, encodeStarted);
@@ -580,7 +590,7 @@ export class IlluminateHitSceneAdapter {
       timings: Object.freeze({ ...timings, totalMs,
         overheadMs: totalMs - measured }),
       memory: Object.freeze({
-        reservedFrontier: MATH_RESERVED_FRONTIER,
+        reservedFrontier: adapter.reservedFrontier,
         persistentCheckpoint: checkpoint,
         encodedBytes: writer.bytes,
         encodedObjects: writer.objects,
@@ -618,6 +628,15 @@ function validateBuild(build) {
   requireCondition(build.capabilities?.ownership?.version ===
     ILLUMINATE_HIT_SCENE_OWNERSHIP_VERSION,
   "BUILD.json has the wrong ownership version");
+  const runtime = requireObject(
+    build.capabilities?.completeRuntime?.externalRuntime,
+    "BUILD.json complete-runtime externalRuntime");
+  requireCondition(Number.isSafeInteger(runtime.reservedMemoryBytes) &&
+    runtime.reservedMemoryBytes >= HEAP_BASE &&
+    runtime.reservedMemoryBytes <= MAX_UINT32 &&
+    runtime.reservedMemoryBytes % 8 === 0,
+  "external-runtime reservedMemoryBytes is invalid");
+  return runtime.reservedMemoryBytes;
 }
 
 export async function createIlluminateHitSceneAdapter({
@@ -631,14 +650,14 @@ export async function createIlluminateHitSceneAdapter({
   requireCondition(typeof now === "function", "now must be a function");
   requireCondition(Number.isSafeInteger(maximumNodes) && maximumNodes > 0,
     "maximumNodes must be a positive safe integer");
-  validateBuild(build);
+  const reservedFrontier = validateBuild(build);
   const started = now();
   const module = await WebAssembly.compile(bytes);
   const compileMs = elapsed(now, started);
   requireCondition(WebAssembly.Module.imports(module).length === 0,
     "complete runtime module has imports");
   return new IlluminateHitSceneAdapter(module, build, now, maximumNodes,
-    { fetchMs: 0, compileMs, totalMs: compileMs });
+    { fetchMs: 0, compileMs, totalMs: compileMs }, reservedFrontier);
 }
 
 function baseUrl() { return globalThis.location?.href ?? "file:///"; }

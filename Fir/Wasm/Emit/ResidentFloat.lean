@@ -7,12 +7,13 @@ open Fir.Wasm.Concrete
 open Lean
 
 /-!
-# Wasm-resident Float frontier for Illuminate
+# Wasm-resident Float frontier
 
 This generation helper internalizes the exact Lean 4.32 floating operations
-reachable from Illuminate's pure animation player.  It deliberately assigns
-Lean extern semantics here, after the shared symbolic Wasm instruction layer
-has landed independently.
+supported by the resident runtime. It deliberately assigns Lean extern
+semantics here, after the shared symbolic Wasm instruction layer has landed
+independently. Other standard Float declarations remain at the checked
+external-runtime frontier.
 -/
 
 inductive LinkError where
@@ -23,8 +24,6 @@ inductive LinkError where
   | reservedDeclaration (name : Name)
   | missingExternal (name : Name)
   | incompatibleExternal (name : Name)
-  | missingSourceFunction (name : Name)
-  | incompatibleSourceFunction (name : Name)
   | incompatibleMemory
   | projectionOffsetOverflow (value : Nat)
   | invalidOutput (error : SymbolicError)
@@ -69,12 +68,6 @@ def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
 
 def externalHelperNames : Array Name := externalDeclarations.map externalName
-
-def sourceFloatOfNatName : Name := `Float.ofNat
-def millisecondsConstantName : Name :=
-  `Illuminate.AnimationPlayer.elapsedFrame._closed_0
-def zeroConstantName : Name :=
-  `Illuminate.AnimationPlayer.elapsedFrame._closed_1
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
   [.i32Const kind value, .i32Eq]
@@ -391,69 +384,7 @@ private def expectedExternalSignature? (declaration : Name) : Option Signature :
     some { params := #[.uint64], results := #[.tobject] }
   else none
 
-private def replaceFunction (functions : Array Function) (name : Name)
-    (replace : Function → Except LinkError Function) :
-    Except LinkError (Array Function) := do
-  let found := functions.filter (·.name == name)
-  unless found.size == 1 do
-    throw (.missingSourceFunction name)
-  let replacement ← replace found[0]!
-  return functions.map fun function => if function.name == name then replacement else function
-
-private def replaceFloatOfNat (function : Function) : Except LinkError Function := do
-  unless function.params.size == 1 && function.params[0]!.2 == .tobject &&
-      function.results == #[.float] do
-    throw (.incompatibleSourceFunction function.name)
-  let parameter := function.params[0]!.1
-  return { function with
-    locals := #[]
-    body := [
-      .localGet parameter,
-      .call (.declaration ResidentNumeric.naturalLowName),
-      .i64ExtendI32U .uint64,
-      .localGet parameter,
-      .call (.declaration ResidentNumeric.naturalHighName),
-      .i64ExtendI32U .uint64,
-      .i64Const .uint64 32,
-      .i64Shl,
-      .i64Or,
-      .f64ConvertI64U,
-      .ret] }
-
-private def replaceFloatConstant (bits : UInt64) (function : Function) :
-    Except LinkError Function := do
-  unless function.params.isEmpty && function.results == #[.float] do
-    throw (.incompatibleSourceFunction function.name)
-  return { function with locals := #[], body := [.f64Const bits, .ret] }
-
-private def rewriteSourceFloatFunctions (module : Module) : Except LinkError Module := do
-  let functions ← replaceFunction module.functions sourceFloatOfNatName replaceFloatOfNat
-  let functions ← replaceFunction functions millisecondsConstantName
-    (replaceFloatConstant 0x408f400000000000)
-  let functions ← replaceFunction functions zeroConstantName
-    (replaceFloatConstant 0)
-  return { module with functions }
-
-private def replaceFunctionIfPresent (functions : Array Function) (name : Name)
-    (replace : Function → Except LinkError Function) :
-    Except LinkError (Array Function) := do
-  if functions.any (·.name == name) then
-    replaceFunction functions name replace
-  else
-    pure functions
-
-private def rewriteAvailableSourceFloatFunctions (module : Module) :
-    Except LinkError Module := do
-  let functions ← replaceFunctionIfPresent module.functions sourceFloatOfNatName
-    replaceFloatOfNat
-  let functions ← replaceFunctionIfPresent functions millisecondsConstantName
-    (replaceFloatConstant 0x408f400000000000)
-  let functions ← replaceFunctionIfPresent functions zeroConstantName
-    (replaceFloatConstant 0)
-  return { module with functions }
-
-/-- Internalize the exact Float/runtime frontier and replace the two decimal
-constants plus `Float.ofNat` before later dead-declaration pruning. -/
+/-- Internalize the exact declaration-and-signature-checked Float frontier. -/
 def internalize (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
@@ -475,7 +406,6 @@ def internalize (module : Module) : Except LinkError Module := do
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
   let module ← internalizeRuntime module
-  let module ← rewriteSourceFloatFunctions module
   for name in externalHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) || module.exports.contains name then
@@ -497,12 +427,8 @@ def internalize (module : Module) : Except LinkError Module := do
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
 
-/--
-Internalizes the Float/runtime operations present in a source closure while
-retaining the strict historical `internalize` inventory above. Source helpers
-such as `Float.ofNat` and the elapsed-time constants are rewritten only when
-the compiler retained them.
--/
+/-- Internalize the supported Float/runtime operations present in a source
+closure while retaining the strict historical `internalize` inventory above. -/
 def internalizeAvailable (module : Module) : Except LinkError Module := do
   match Fir.Wasm.validateModule module with
   | .ok () => pure ()
@@ -526,7 +452,6 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
     unless imports[0]!.signature == signature do
       throw (.incompatibleExternal declaration)
   let module ← internalizeRuntime module
-  let module ← rewriteAvailableSourceFloatFunctions module
   for name in externalHelperNames do
     if module.imports.any (·.declaration? == some name) ||
         module.functions.any (·.name == name) || module.exports.contains name then
