@@ -18,10 +18,11 @@ the same heap layout.
 | M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the fixture-only admission on `main` |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair pass native/LCNF/V8 | Cover zero/three uses and unique/shared final application |
-| M3 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
-| M4 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
-| M5 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
-| M6 Real-engine promotion | continuous | Scalar closures and the mixed one-use/two-use pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M3 Tail-call ownership | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
+| M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
+| M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
+| M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
+| M7 Real-engine promotion | continuous | Scalar closures and the mixed one-use/two-use pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, or `parked`. A prepared
 slice is committed and locally validated but still waits at a named cross-lane
@@ -39,7 +40,7 @@ cross-product of these axes. Do not construct the full Cartesian product.
   multiple fields or captures, a nested chain, and a shared DAG.
 - Consumer behavior: ignore/drop, borrow/read, return/transfer, and
   consume/mutate.
-- Boundary: closure application, constructor reset/reuse, external
+- Boundary: closure application, tail call, constructor reset/reuse, external
   yield/effect, return, and eventually caught exception.
 - Heap kind: constructor, String, ByteArray, large Nat/Int, and floating box.
 - Observation: surviving-alias contents, copy-on-write, returned aliases,
@@ -111,7 +112,37 @@ ignore, read, return, and consume/mutate the capture. Use constructor, String,
 ByteArray, large Nat/Int, and floating boxes as pairwise representatives rather
 than repeating a scalar matrix.
 
-### S4: recursive release and reuse
+### S4: tail-call ownership
+
+State: `queued`; schedule after capture alias topology so it can reuse the S3
+alias shapes rather than introduce a parallel ownership vocabulary.
+
+The existing `local-tail` fixture proves that a compact source-level
+tail-recursive list worker agrees across native Lean, final LCNF interpretation,
+and real V8.  It pins four calls, four case selections, six projections, and an
+exact 31-step interpreter trace.  This is control-flow coverage, not yet
+memory-fidelity coverage: final LCNF executes ordinary `fap`/return frames, the
+fixture carries no ownership-sensitive heap accumulator, and the coverage
+policy has no tail-ownership domain.
+
+Add a compact pair of tail-recursive workers that carry the same heap-backed
+accumulator through several iterations.  One worker transfers a unique
+accumulator at every tail call; the other retains an independent alias, forcing
+the shared/copy-on-write path while preserving that alias.  Native results must
+expose both the final accumulator and any surviving alias.  Pin exact call,
+increment, decrement, projection, mutation, allocation/reuse, and return counts,
+and require dedicated `tail-control`, `tail-ownership`, `unique-transfer`, and
+`shared-retain` coverage domains.
+
+Keep semantic validation and the W7 transform claim distinct.  The compact
+pair runs through native/LCNF/real-V8 using the ordinary validation provider.
+A separate large-depth artifact probe checks that W7's optional direct
+self-tail-call rewrite actually ran, remains stack-safe, reinitializes locals,
+and preserves the same native observation.  Mutual tail recursion and effects
+before a tail call are later extensions; the latter belongs with S6 nonlocal
+control.
+
+### S5: recursive release and reuse
 
 Cover repeated child aliases, nested unique release, shared-child recursion
 stopping, persistent owners, erased/scalar neighbors, same-size reuse, retained
@@ -119,7 +150,7 @@ capacity, and grow/delete/allocation. Make release order observable through a
 surviving alias, later copy-on-write, or a reuse decision, and pin exact
 `project-dec`, `dec`, `reset`, `reuse`, `del`, `oset`, and `setTag` counts.
 
-### S5: nonlocal ownership boundaries
+### S6: nonlocal ownership boundaries
 
 Apply a closure, cross an external suspension or ordered effect, then reuse a
 different alias. Admit the captured aliased-ByteArray taken/skipped pair only
