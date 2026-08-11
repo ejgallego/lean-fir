@@ -1391,11 +1391,20 @@ acceptance tests pass.
      observations. This theorem deliberately retains the source `evaluation`
      premise: it closes the exact terminating boundary but does not claim the
      prefix-general W6.7f theorem. `ConcreteStructuredControlRel` now unifies
-     the seven completed code, yield, direct-call, and saturated-call focus
-     shapes and proves their observation obligation once. It intentionally
-     leaves resource/admission evidence orthogonal. The next relation slice
-     adds the intermediate external-request and saturated-call staging shapes,
-     then assembles the per-step `advance` law and structural rank. Heap-valued
+     nine completed code, yield, external-call, direct-call, and saturated-call
+     focus shapes and proves their observation obligation once. The external
+     `let` is no longer a three-source-step black box:
+     `advance_external_stage` stops after the exact compiler-derived argument
+     prefix, `ConcreteStructuredExternalCallReadyFocus.advance_call` matches
+     source request/resume with one imported-call step, and
+     `ConcreteStructuredExternalBindFocus.advance` matches source binding with
+     the one generated destination write. The middle theorem consumes
+     `ConcreteExternalCallEvidence`, an internal resource boundary containing
+     the concrete handler step and refinement extension. The next relation
+     slice constructs that evidence from the already proved Int/Nat/scalar
+     handler laws and allocation budget; it is not added to the public theorem
+     as a certificate. Pre-entry saturated-call staging then remains before the
+     per-step `advance` law and structural rank can be assembled. Heap-valued
      cache misses and target-only loop unwinding remain later widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
