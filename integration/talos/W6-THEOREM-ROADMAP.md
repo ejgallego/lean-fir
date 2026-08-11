@@ -1217,9 +1217,22 @@ acceptance tests pass.
      and enters the adapted continuation. One source yielded/bind resumption is
      matched by exactly `returnCall` plus `local.set`, reconstructing the code
      focus with the semantic result bound and the caller operand tail restored.
-     The next slices construct this bind/call frame relation at call entry,
-     handle target-only label/loop unwinding, and cover apply/cache source
-     frames plus positive target paths for non-terminal operations.
+     Direct named-call entry is now constructive as well.
+     `ConstructorArgsReady.finitePath` executes the real compiler-derived
+     local-read/erased-zero prefix in exactly one structured step per emitted
+     argument instruction. `advance_directCall_stage` matches the source's
+     bind-frame staging step with that prefix and derives a call-ready focus
+     from `CodeAdapted.let_eq`, the production call index, and related
+     physical arguments. `advance_enter` then matches the source dispatcher
+     with the structured machine's actual `enterCall`, re-indexes the local
+     relation to the generated callee row, and records the exact saved source
+     bind and target call frames. The target frame deliberately stores the
+     post-argument caller locals required by Wasm rather than identifying them
+     with the pre-push record. The next slice transports this saved caller
+     invariant across callee allocation/effects and turns a related callee
+     yield into the accepted bind-frame focus. Subsequent slices handle
+     target-only label/loop unwinding, apply/cache source frames, and positive
+     target paths for the remaining non-terminal operations.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
