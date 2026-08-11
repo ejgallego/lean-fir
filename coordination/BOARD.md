@@ -15,6 +15,39 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-CERTIFICATE-FREE-EXTERNAL-EXECUTION`.
+- Integration owner: `wasm-proof`; this short lease lands the concrete
+  execution proof behind the structured external-call protocol.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `e2064631` after the
+  tail-ownership fixture acceptance.
+- Published stack: active-slice record `49723b1c`, functional head `145f07cc`,
+  and ready mailbox `d3f1a764`.
+- Accepted proof: a budgeted pure external frame now derives the typed
+  physical arguments, exact concrete external request/result relation,
+  evolved store and runtime witness, and residual budget from the existing
+  `Nat`, `Int`, and scalar runtime laws. The public progression theorem needs
+  no caller-supplied target execution or representation certificate.
+- Protocol result: a complete admitted external `let` advances exactly three
+  source steps and `targetArguments.length + 2` target steps, returns to the
+  compiled continuation, and preserves the exact trace, frames, joins,
+  environment, concrete runtime relation, and reduced resource frame.
+- Contracts: none. The stack changes only W6-owned proof code and roadmap
+  documentation; it changes no shared semantic, concrete-runtime,
+  resident-helper, or symbolic-Wasm contract.
+- Acceptance: Lean Beam update/sync/save at version 8 with zero errors;
+  dependency-cone build of `FirTalos.ConcreteStructuredSimulation`;
+  `git diff --check`; all 3,133 Talos jobs; and complete post-rebase
+  `make check` with 647/647 source and V8 cases, 9/9 direct cases,
+  1,941/1,941 three-backend results, 1,950/1,950 indexed equal comparisons,
+  656 unique cases, 6,431 machine steps, 106 tag floors, 215 semantic domains,
+  and zero findings. No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next adds the
+  pre-entry saturated-closure staging boundary and then assembles the unified
+  ranked per-source-step simulation theorem.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-TAIL-OWNERSHIP-S4-B1`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take
   the short lease, and the owner accepted the clean S4/B1 handoff after its
