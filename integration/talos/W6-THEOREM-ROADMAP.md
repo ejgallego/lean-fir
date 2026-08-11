@@ -1313,10 +1313,14 @@ acceptance tests pass.
      connected recursively too: a persistent `inc` or `dec` takes one source
      step while production compilation erases it, so the target path is
      reflexive and the complete entry-relative cache/resource frame passes
-     unchanged to the continuation induction. Subsequent slices connect
-     ordinary ownership and mutation effects and add saturated closure calls,
-     heap-valued cache misses, and target-only label/loop unwinding to this
-     induction.
+     unchanged to the continuation induction. Successful ordinary increment
+     is connected too. Production compiler inversion identifies its exact
+     local-read/imported-call prefix, the concrete host contract supplies a
+     two-step structured path and updated heap, and the existing effect
+     transports rebuild the complete entry-relative frame before continuation
+     recursion. Subsequent slices connect ordinary decrement, delete, and
+     mutation effects and add saturated closure calls, heap-valued cache
+     misses, and target-only label/loop unwinding to this induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
