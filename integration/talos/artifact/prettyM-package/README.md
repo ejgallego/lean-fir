@@ -18,7 +18,7 @@ PrettyEvent := { kind : Nat, text : String, value : Nat }
 
 `prettyM-browser-adapter.mjs` is the production-oriented browser boundary.
 It accepts a compact, versioned JavaScript description of `Std.Format`, then
-constructs ordinary Lean 4.32 `Format` heap objects directly in the exported
+constructs ordinary Lean 4.33 `Format` heap objects directly in the exported
 module memory. It does not implement a second pretty printer or runtime.
 Consumers that need the compiler-facing boundary may still call the raw export
 and allocator operations directly.
@@ -36,7 +36,7 @@ stable.
 ## Browser adapter
 
 The public input layout is
-`lean-4.32-Std.Format.compact/v1`. Its TypeScript-style shape is:
+`lean-4.33-Std.Format.compact/v1`. Its TypeScript-style shape is:
 
 ```ts
 type NatInput = bigint | number /* safe integer */ | string /* canonical decimal */;
@@ -185,7 +185,7 @@ previous fail-closed behavior without a host import.
 The smoke clients prepare ordinary Lean values directly in the exported
 memory, advance the monotone resident frontier, decode the raw trace graph, and
 check both rendered text and exact tag boundaries against an event oracle also
-guarded by native Lean 4.32. The browser-adapter smoke reuses the same compact
+guarded by native Lean 4.33. The browser-adapter smoke reuses the same compact
 input, checks multi-limb Nat/Int values, verifies one resident bulk allocation
 per input, and checks frontier synchronization. Its stack-safety stress case
 additionally covers 8,192-limb Nat/Int inputs, 1 MiB of UTF-8 text, memory

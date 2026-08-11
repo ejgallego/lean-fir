@@ -188,6 +188,7 @@ theorem CapacityPreservingSuccessfulDeclaration.ofSimulation
     {sourceRuntime resultRuntime : RuntimeState}
     {sourceEnv : Env} {sourceCode : LCNF.Code .impure}
     {targetFunction : Wasm.Function} {functionIndex : Nat}
+    {targetBody : Wasm.Program}
     {initial afterCall : Wasm.Store Host}
     {targetLocals : Wasm.Locals}
     {initialWitness resultWitness : RefinementWitness}
@@ -201,7 +202,7 @@ theorem CapacityPreservingSuccessfulDeclaration.ofSimulation
     (simulation :
       ReuseCapacityCodeSimulation context sourceModule sourceFunction labels
         module hostEnv sourceExternals facts sourceRuntime sourceEnv sourceCode
-        targetFunction.body initial targetLocals initialWitness resultFacts
+        targetBody initial targetLocals initialWitness resultFacts
         resultRuntime resultValue resultKind afterCall resultWitness physical) :
     CapacityPreservingSuccessfulDeclaration context sourceModule sourceFunction
       module hostEnv sourceExternals sourceRuntime resultRuntime sourceEnv

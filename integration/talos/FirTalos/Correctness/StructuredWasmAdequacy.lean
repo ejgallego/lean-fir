@@ -1321,6 +1321,17 @@ def WasmInstructionHasZeroLoopParams : Wasm.Instruction → Prop
 
 end
 
+/-- The zero-loop-parameter invariant is closed under program concatenation. -/
+theorem wasmProgramHasZeroLoopParams_append
+    (left right : Wasm.Program)
+    (leftSafe : WasmProgramHasZeroLoopParams left)
+    (rightSafe : WasmProgramHasZeroLoopParams right) :
+    WasmProgramHasZeroLoopParams (left ++ right) := by
+  induction left with
+  | nil => exact rightSafe
+  | cons instruction rest ih =>
+      exact ⟨leftSafe.1, ih leftSafe.2⟩
+
 /-- Every internal function available to a structured call has the same
 zero-parameter-loop shape. -/
 def WasmModuleHasZeroLoopParams (module : Wasm.Module) : Prop :=
@@ -1489,6 +1500,17 @@ termination_by sizeOf body
 
 end
 
+/-- The adapter's validation-only function suffix is either empty or a single
+`unreachable`, so it introduces no loop parameters. -/
+theorem functionTerminal_hasZeroLoopParams
+    (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
+    WasmProgramHasZeroLoopParams (functionTerminal module source) := by
+  unfold functionTerminal
+  all_goals repeat' first
+    | split
+    | simp_all [WasmProgramHasZeroLoopParams,
+        WasmInstructionHasZeroLoopParams]
+
 /-- A successfully adapted FIR function has a target body satisfying the
 zero-parameter-loop invariant. -/
 theorem adapterFunction_hasZeroLoopParams
@@ -1503,8 +1525,10 @@ theorem adapterFunction_hasZeroLoopParams
   | ok targetBody =>
       simp [bodyEq, Bind.bind, Except.bind, Pure.pure, Except.pure] at adapted
       subst target
-      exact adapterInstructions_hasZeroLoopParams module source [] source.body
-        bodyEq
+      apply wasmProgramHasZeroLoopParams_append targetBody
+      · exact adapterInstructions_hasZeroLoopParams module source [] source.body
+          bodyEq
+      · exact functionTerminal_hasZeroLoopParams module source
 
 /-- Mapping function adaptation over a source list preserves the body
 invariant for every successfully produced target function. -/

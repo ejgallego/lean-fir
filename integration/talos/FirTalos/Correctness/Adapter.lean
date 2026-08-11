@@ -27,14 +27,29 @@ theorem function_preserves_signature
       contradiction
   | ok targetBody =>
       simp only [function, body] at adapted
-      change Except.ok {
-        params := source.params.toList.map fun entry => abiKind entry.snd
-        locals := source.locals.toList.map fun entry => abiKind entry.snd
-        results := source.results.toList.map abiKind
-        body := targetBody } = Except.ok target at adapted
       injection adapted with targetEq
       rw [← targetEq]
       simp [Function.comp_def]
+
+/-- A successfully adapted function consists of the exact numeric compiler
+body followed by its (possibly empty) physical validation marker. -/
+theorem function_preserves_body
+    {sourceModule : Fir.Wasm.Module} {source : Fir.Wasm.Function}
+    {target : Wasm.Function}
+    (adapted : function sourceModule source = .ok target) :
+    ∃ targetBody,
+      instructions sourceModule source [] source.body = .ok targetBody ∧
+        target.body = targetBody ++ functionTerminal sourceModule source := by
+  cases body : instructions sourceModule source [] source.body with
+  | error error =>
+      simp only [function, body] at adapted
+      change Except.error error = Except.ok target at adapted
+      contradiction
+  | ok targetBody =>
+      simp only [function, body, Bind.bind, Except.bind, pure, Except.pure,
+        Except.ok.injEq] at adapted
+      subst target
+      exact ⟨targetBody, rfl, rfl⟩
 
 /-- A resolved source local becomes the same positional Talos local. -/
 theorem instruction_localGet

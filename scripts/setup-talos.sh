@@ -3,7 +3,7 @@ set -euo pipefail
 
 repo_root="$(cd "$(dirname "$0")/.." && pwd)"
 destination="$repo_root/.deps/talos"
-revision="a01d01c778b794dd00956748a067b6793c2c9f9b"
+revision="0e05edbcfbb105b33e90c60b4f50e2cf193d9254"
 
 if [[ ! -d "$destination/.git" ]]; then
   mkdir -p "$repo_root/.deps"
@@ -20,8 +20,8 @@ if [[ "$actual" != "$revision" ]]; then
 fi
 
 toolchain="$(tr -d '\r\n' < "$destination/interpreter/lean-toolchain")"
-if [[ "$toolchain" != "leanprover/lean4:v4.32.0" ]]; then
-  echo "Talos toolchain mismatch: expected Lean 4.32.0, found $toolchain" >&2
+if [[ "$toolchain" != "leanprover/lean4:v4.33.0" ]]; then
+  echo "Talos toolchain mismatch: expected Lean 4.33.0, found $toolchain" >&2
   exit 1
 fi
 

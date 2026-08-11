@@ -39,6 +39,47 @@ def ReturnPost (sourceRuntime : RuntimeState) (sourceValue : Value)
       targetStore.host.runtime = sourceRuntime ∧
       DecodesValue targetStore.host.handles kind physical sourceValue
 
+/-- Appending a function-boundary suffix does not affect a total-correctness
+proof whose postcondition rejects ordinary fallthrough. -/
+theorem Wasm.wp_append_of_no_fallthrough
+    {m : Wasm.Module} {code suffix : Wasm.Program}
+    {Q : Wasm.Assertion α} {st : Wasm.Store α} {s : Wasm.Locals}
+    {env : Wasm.HostEnv α}
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬ Q (.Fallthrough nextStore nextLocals))
+    (correct : Wasm.wp m code Q st s env) :
+    Wasm.wp m (code ++ suffix) Q st s env := by
+  have execAppend : ∀ fuel initialStore initialLocals,
+      Wasm.exec fuel m initialStore initialLocals (code ++ suffix) env =
+        match Wasm.exec fuel m initialStore initialLocals code env with
+        | .Fallthrough nextStore nextLocals =>
+            Wasm.exec fuel m nextStore nextLocals suffix env
+        | other => other := by
+    intro fuel initialStore initialLocals
+    clear correct noFallthrough Q st s
+    induction code generalizing initialStore initialLocals with
+    | nil => simp [Wasm.exec]
+    | cons instruction rest ih =>
+        simp only [List.cons_append, Wasm.exec]
+        cases executed : Wasm.execOne fuel m initialStore initialLocals
+            instruction env <;> simp [executed, ih]
+  unfold Wasm.wp at correct ⊢
+  obtain ⟨bound, correct⟩ := correct
+  refine ⟨bound, fun fuel enough => ?_⟩
+  have result := correct fuel enough
+  rw [execAppend]
+  cases executed : Wasm.exec fuel m st s code env with
+  | Fallthrough nextStore nextLocals =>
+      rw [executed] at result
+      exact (noFallthrough nextStore nextLocals result).elim
+  | Break level nextStore nextLocals => simpa [executed] using result
+  | Return nextStore values => simpa [executed] using result
+  | Trap nextStore message => simpa [executed] using result
+  | Invalid message => simpa [executed] using result
+  | OutOfFuel => simpa [executed] using result
+  | ReturnCall functionIndex nextStore values => simpa [executed] using result
+  | Throwing tag args nextStore nextLocals => simpa [executed] using result
+
 /--
 Proof-facing semantic judgment for one adapted source code node. It joins the
 real two-stage compiler witness, the source/target state invariant, and Talos's
@@ -1085,11 +1126,12 @@ theorem StateRelated.clearFailures
         fault? := none
         targetFailure? := none } } =
       targetStore := by
-  rcases targetStore with
-    ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
-      gcHeap, host⟩
-  rcases host with ⟨runtime, handles, fault, targetFailure⟩
-  simp_all [StateRelated]
+  cases targetStore with
+  | mk globals globalIds functionIds mem extraMems memoryCaps memoryIds
+      dataSegments tables tableIds elementSegments elementValues tagIds exns
+      gcHeap host =>
+    cases host
+    simp_all [StateRelated]
 
 /-- Base semantic rule for a generated source return. -/
 theorem codeWP_return
@@ -2275,7 +2317,7 @@ theorem letStepSimulates_unbox
         tail hObject hImp hSat hi hContract hParams hResults typeEq decodedObject
         unboxed encodedResult targetSet continued
 
-/-- `isShared` instance with Lean 4.32's direct UInt8 result. -/
+/-- `isShared` instance with Lean 4.33's direct UInt8 result. -/
 theorem letStepSimulates_isShared
     {context : Fir.Wasm.Context} {sourceFunction : Fir.Wasm.Function}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv RuntimeHost}

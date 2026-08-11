@@ -37,7 +37,7 @@ theorem ConcreteSupportedExport.toSuccessfulDeclarationOfReuseCapacity
     (simulation :
       ReuseCapacityCodeSimulation context sourceModule sourceFunction []
         target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
-        sourceCode spec.targetFunction.body initial
+        sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore
         resultWitness physical)
@@ -78,7 +78,7 @@ theorem ConcreteSupportedExport.toCapacityPreservingSuccessfulDeclarationOfReuse
     (simulation :
       ReuseCapacityCodeSimulation context sourceModule sourceFunction []
         target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
-        sourceCode spec.targetFunction.body initial
+        sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore
         resultWitness physical)
@@ -121,7 +121,7 @@ theorem ConcreteSupportedExport.correctOfReuseCapacity
     (simulation :
       ReuseCapacityCodeSimulation context sourceModule sourceFunction []
         target.wasmModule hosts.env sourceExternals [] sourceRuntime sourceEnv
-        sourceCode spec.targetFunction.body initial
+        sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultFacts resultRuntime resultValue resultKind resultStore
         resultWitness physical)

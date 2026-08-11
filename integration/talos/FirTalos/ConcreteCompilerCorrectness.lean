@@ -3760,7 +3760,7 @@ theorem ConcreteSupportedExport.codeWP_naturalLiteralLet
             nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
       resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
     CodeAdapted.naturalLiteralLet_eq spec.localsAligned valueEq valueKind
@@ -3846,7 +3846,7 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet
             nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
       resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
     CodeAdapted.stringLiteralLet_eq spec.localsAligned valueEq valueKind
@@ -3941,7 +3941,7 @@ theorem ConcreteSupportedExport.codeWP_stringLiteralLet_of_budget
             nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨callIndex, resultIndex, targetRest, valueCompiled, callFound,
       resultFound, resultKindAt, continuationAdapted, bodyEq⟩ :=
     CodeAdapted.stringLiteralLet_eq spec.localsAligned valueEq valueKind
@@ -4038,7 +4038,7 @@ theorem ConcreteSupportedExport.codeWP_objectProjectionLet
             tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
       objectFound, callFound, resultFound, resultKindAt,
       continuationAdapted, bodyEq⟩ :=
@@ -4139,7 +4139,7 @@ theorem ConcreteSupportedExport.codeWP_usizeProjectionLet
             (clearFailure initial) updated witness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
       objectFound, callFound, resultFound, resultKindAt,
       continuationAdapted, bodyEq⟩ :=
@@ -4247,7 +4247,7 @@ theorem ConcreteSupportedExport.codeWP_scalarProjectionLet
             tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨objectIndex, callIndex, resultIndex, targetRest, valueCompiled,
       objectFound, callFound, resultFound, resultKindAt,
       continuationAdapted, bodyEq⟩ :=
@@ -4557,7 +4557,7 @@ theorem ConcreteSupportedExport.codeWP_constructorLet
             continuation targetRest nextStore updated nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨targetArguments, callIndex, resultIndex, targetRest, valueCompiled,
       argumentsAdapted, callFound, resultFound, resultKindAt,
       continuationAdapted, bodyEq⟩ :=
@@ -4668,7 +4668,7 @@ theorem ConcreteSupportedExport.codeWP_constructorNonemptyLet_of_capacity
             continuation targetRest nextStore updated nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   have operationFacts :
       (info.size = fieldKinds.size ∧
         fieldKinds.all AbiKind.isObjectField = true) ∧
@@ -4784,7 +4784,7 @@ theorem ConcreteSupportedExport.codeWP_constructorFVarLet
             continuation targetRest nextStore updated nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q := by
+      spec.targetBody initial locals witness tail Q := by
   obtain ⟨indices, callIndex, resultIndex, targetRest, valueCompiled,
       argumentsFound, callFound, resultFound, resultKindAt,
       continuationAdapted, bodyEq⟩ :=
@@ -18487,23 +18487,14 @@ theorem
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
   obtain ⟨resultStore, resultLocals, resultWitness, resultKind, physical,
-      bodyWP, resultInvariant, failureClear, valueRelated⟩ :=
-    spec.codeWP_of_reuseCapacityCodeEvaluates_of_runtimeRefines
-      (parameters := parameters) (callerTail := callerTail)
+      exactWP, resultInvariant, failureClear, valueRelated⟩ :=
+    spec.codeWP_of_reuseCapacityCodeEvaluates_exactReturn_of_runtimeRefines
       evaluation spec.bodyAdapted spec.localsAligned invariant runtimeRefines
-      parameterCount
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -18585,31 +18576,11 @@ theorem
     spec.codeWP_of_reuseCapacityEffectCodeEvaluates_exactReturn evaluation
       spec.bodyAdapted spec.localsAligned invariant frameRelated
       directRuntimeRefines effectRuntimeRefines
-  have bodyWP :
-      CodeWP context sourceModule sourceFunction [] target.wasmModule
-        hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
-        initial (spec.targetFunction.toLocals parameters.reverse)
-        initialWitness []
-        (ConcreteFunctionBodyPost spec.targetFunction
-          (parameters ++ callerTail)
-          (ExactReturnPost resultStore physical callerTail)) := by
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
-      ← parameterCount]
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -18717,31 +18688,11 @@ theorem
       spec.bodyAdapted spec.localsAligned invariant frameRelated
       directRuntimeRefines externalRuntimeRefines callRuntimeRefines
       lazyRuntimeRefines caseRuntimeRefines effectRuntimeRefines
-  have bodyWP :
-      CodeWP context sourceModule sourceFunction [] target.wasmModule
-        hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction.body
-        initial (spec.targetFunction.toLocals parameters.reverse)
-        initialWitness []
-        (ConcreteFunctionBodyPost spec.targetFunction
-          (parameters ++ callerTail)
-          (ExactReturnPost resultStore physical callerTail)) := by
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
-      ← parameterCount]
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -22470,6 +22421,80 @@ local, and recursively compiled continuation from the production pipeline;
 The return leaf derives the final ABI lane and physical value from
 `StateRelated`.
 -/
+theorem codeWP_of_directValueEvaluates_exactReturn
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {Invariant :
+      RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant : Invariant sourceRuntime sourceEnv initial locals witness)
+    (runtimeRefines :
+      DirectLetRuntimeRefines context sourceModule sourceFunction labels module
+        hostEnv Supported Invariant) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ExactReturnControlPost resultStore physical) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing target initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst target
+      exact ⟨initial, witness, kind, physical,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
+        stateRelated.1, stateRelated.2.1, valueRelated⟩
+  | letValue supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
+        runtimeRefines supported invariant sourceStep stateRelated valueCompiled
+          valueAdapted resultFound
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 nextInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+
+/-- Public function-body form of `codeWP_of_directValueEvaluates_exactReturn`. -/
 theorem codeWP_of_directValueEvaluates
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -22515,40 +22540,17 @@ theorem codeWP_of_directValueEvaluates
           resultRuntime ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness resultKind physical resultValue := by
-  induction evaluation generalizing target initial locals witness with
-  | ret sourceLookup =>
-      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
-          targetEq⟩ :=
-        CodeAdapted.return_eq localsAligned adapted
-      obtain ⟨physical, targetLookup, valueRelated⟩ :=
-        stateRelated.resolve sourceLookup resultFound kindAt
-      subst target
-      exact ⟨initial, witness, kind, physical,
-        codeWP_return_to_exactBodyPost
-          (callerTail := callerTail) localCompiled resultFound kindAt
-          sourceLookup stateRelated targetLookup parameterCount resultCount,
-        stateRelated.1, stateRelated.2.1, valueRelated⟩
-  | letValue supported sourceStep continued ih =>
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted,
-          resultFound, targetEq⟩ :=
-        CodeAdapted.let_eq adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction labels
-            _ targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
-      obtain ⟨nextStore, nextLocals, nextWitness, step, nextInvariant⟩ :=
-        runtimeRefines supported invariant sourceStep stateRelated valueCompiled
-          valueAdapted resultFound
-      obtain ⟨resultStore, resultWitness, resultKind, physical,
-          continuationWP, resultRuntimeRelated, failureClear,
-          valueRelated⟩ :=
-        ih continuationAdapted step.2.2.1 nextInvariant
-      subst target
-      exact ⟨resultStore, resultWitness, resultKind, physical,
-        codeWP_letValue valueCompiled valueAdapted resultFound step
-          continuationWP,
-        resultRuntimeRelated, failureClear, valueRelated⟩
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
+      runtimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_directValueEvaluates_exactReturn evaluation adapted localsAligned
+      stateRelated invariant runtimeRefines
+  refine ⟨resultStore, resultWitness, resultKind, physical, ?_, runtimeRelated,
+    failureClear, valueRelated⟩
+  apply exactWP.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+    ← parameterCount]
 
 /--
 Cost-indexed structural partial correctness for the direct-value code spine.
@@ -22559,6 +22561,95 @@ declaration's cost and the induction hypothesis receives exactly the
 continuation cost. This supports finite wasm32 allocation without adding a
 translation certificate or a target-derived resource witness.
 -/
+theorem codeWP_of_directValueEvaluates_withCost_exactReturn
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {Supported : LCNF.LetDecl .impure → Prop}
+    {letCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      DirectValueEvaluates context Supported sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant :
+      Invariant (DirectValuePathCost letCost sourceCode) sourceRuntime sourceEnv
+        initial locals witness)
+    (runtimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv Supported letCost Invariant) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ExactReturnControlPost resultStore physical) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  induction evaluation generalizing target initial locals witness with
+  | ret sourceLookup =>
+      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+          targetEq⟩ :=
+        CodeAdapted.return_eq localsAligned adapted
+      obtain ⟨physical, targetLookup, valueRelated⟩ :=
+        stateRelated.resolve sourceLookup resultFound kindAt
+      subst target
+      exact ⟨initial, witness, kind, physical,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
+        stateRelated.1, stateRelated.2.1, valueRelated⟩
+  | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
+      continuation _ _ supported sourceStep continued ih =>
+      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
+          valueCompiled, restCompiled, valueAdapted, restAdapted,
+          resultFound, targetEq⟩ :=
+        CodeAdapted.let_eq adapted
+      have continuationAdapted :
+          CodeAdapted context sourceModule sourceFunction labels
+            _ targetRest :=
+        ⟨restCode, restCompiled, restAdapted⟩
+      have stepFits :
+          letCost decl ≤
+            DirectValuePathCost letCost (.let decl continuation) := by
+        simp [DirectValuePathCost]
+      obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
+          _hostDescriptorsPreserved, _witnessDescriptorsPreserved,
+          nextInvariant⟩ :=
+        runtimeRefines supported stepFits invariant sourceStep stateRelated
+          valueCompiled valueAdapted resultFound
+      have continuationInvariant :
+          Invariant (DirectValuePathCost letCost continuation)
+            letNextRuntime (bind letSourceEnv decl.fvarId letSourceValue)
+            nextStore nextLocals nextWitness := by
+        simpa [DirectValuePathCost] using nextInvariant
+      obtain ⟨resultStore, resultWitness, resultKind, physical,
+          continuationWP, resultRuntimeRelated, failureClear,
+          valueRelated⟩ :=
+        ih continuationAdapted step.2.2.1 continuationInvariant
+      subst target
+      exact ⟨resultStore, resultWitness, resultKind, physical,
+        codeWP_letValue valueCompiled valueAdapted resultFound step
+          continuationWP,
+        resultRuntimeRelated, failureClear, valueRelated⟩
+
+/-- Public function-body form of the cost-indexed exact-return theorem. -/
 theorem codeWP_of_directValueEvaluates_withCost
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -22607,52 +22698,17 @@ theorem codeWP_of_directValueEvaluates_withCost
           resultRuntime ∧
         resultStore.host.failure? = none ∧
         PhysicalValueRel resultWitness resultKind physical resultValue := by
-  induction evaluation generalizing target initial locals witness with
-  | ret sourceLookup =>
-      obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
-          targetEq⟩ :=
-        CodeAdapted.return_eq localsAligned adapted
-      obtain ⟨physical, targetLookup, valueRelated⟩ :=
-        stateRelated.resolve sourceLookup resultFound kindAt
-      subst target
-      exact ⟨initial, witness, kind, physical,
-        codeWP_return_to_exactBodyPost
-          (callerTail := callerTail) localCompiled resultFound kindAt
-          sourceLookup stateRelated targetLookup parameterCount resultCount,
-        stateRelated.1, stateRelated.2.1, valueRelated⟩
-  | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
-      continuation _ _ supported sourceStep continued ih =>
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted,
-          resultFound, targetEq⟩ :=
-        CodeAdapted.let_eq adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction labels
-            _ targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
-      have stepFits :
-          letCost decl ≤
-            DirectValuePathCost letCost (.let decl continuation) := by
-        simp [DirectValuePathCost]
-      obtain ⟨nextStore, nextLocals, nextWitness, step, _externalsPreserved,
-          _hostDescriptorsPreserved, _witnessDescriptorsPreserved,
-          nextInvariant⟩ :=
-        runtimeRefines supported stepFits invariant sourceStep stateRelated
-          valueCompiled valueAdapted resultFound
-      have continuationInvariant :
-          Invariant (DirectValuePathCost letCost continuation)
-            letNextRuntime (bind letSourceEnv decl.fvarId letSourceValue)
-            nextStore nextLocals nextWitness := by
-        simpa [DirectValuePathCost] using nextInvariant
-      obtain ⟨resultStore, resultWitness, resultKind, physical,
-          continuationWP, resultRuntimeRelated, failureClear,
-          valueRelated⟩ :=
-        ih continuationAdapted step.2.2.1 continuationInvariant
-      subst target
-      exact ⟨resultStore, resultWitness, resultKind, physical,
-        codeWP_letValue valueCompiled valueAdapted resultFound step
-          continuationWP,
-        resultRuntimeRelated, failureClear, valueRelated⟩
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
+      runtimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_directValueEvaluates_withCost_exactReturn evaluation adapted
+      localsAligned stateRelated invariant runtimeRefines
+  refine ⟨resultStore, resultWitness, resultKind, physical, ?_, runtimeRelated,
+    failureClear, valueRelated⟩
+  apply exactWP.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+    ← parameterCount]
 
 /--
 Cost-indexed structural partial correctness for mixed direct and external
@@ -22664,7 +22720,7 @@ runtime laws discharge whole operation families. Compiler code, adapted
 instructions, local/import indices, concrete responses, and continuation
 splits are all reconstructed inside this induction.
 -/
-theorem codeWP_of_budgetedSpineEvaluates
+theorem codeWP_of_budgetedSpineEvaluates_exactReturn
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
@@ -22681,8 +22737,6 @@ theorem codeWP_of_budgetedSpineEvaluates
     {witness : RefinementWitness}
     {resultValue : Value}
     {requiredBytes : Nat}
-    {targetFunction : Wasm.Function}
-    {parameters callerTail : List Wasm.Value}
     {DirectSupported : LCNF.LetDecl .impure → Prop}
     {ExternalSupported :
       RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
@@ -22707,15 +22761,11 @@ theorem codeWP_of_budgetedSpineEvaluates
         module hostEnv DirectSupported directCost Invariant)
     (externalRuntimeRefines :
       ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
-        labels module hostEnv externals ExternalSupported Invariant)
-    (parameterCount : parameters.length = targetFunction.numParams)
-    (resultCount : targetFunction.results.length = 1) :
+        labels module hostEnv externals ExternalSupported Invariant) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction labels module hostEnv
           sourceRuntime sourceEnv sourceCode target initial locals witness []
-          (ConcreteFunctionBodyPost targetFunction
-            (parameters ++ callerTail)
-            (ExactReturnPost resultStore physical callerTail)) ∧
+          (ExactReturnControlPost resultStore physical) ∧
         ConcreteRuntimeRel resultStore.host.runtime resultWitness
           resultRuntime ∧
         resultStore.host.failure? = none ∧
@@ -22729,9 +22779,8 @@ theorem codeWP_of_budgetedSpineEvaluates
         stateRelated.resolve sourceLookup resultFound kindAt
       subst target
       exact ⟨initial, witness, kind, physical,
-        codeWP_return_to_exactBodyPost
-          (callerTail := callerTail) localCompiled resultFound kindAt
-          sourceLookup stateRelated targetLookup parameterCount resultCount,
+        codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup,
         stateRelated.1, stateRelated.2.1, valueRelated⟩
   | @letValue decl letSourceRuntime letSourceEnv letNextRuntime letSourceValue
       continuation _ _ continuationCost supported sourceStep continued ih =>
@@ -22797,6 +22846,76 @@ theorem codeWP_of_budgetedSpineEvaluates
         codeWP_externalLet valueCompiled valueAdapted resultFound step
           continuationWP,
         resultRuntimeRelated, failureClear, valueRelated⟩
+
+/-- Public function-body form of the budgeted-spine exact-return theorem. -/
+theorem codeWP_of_budgetedSpineEvaluates
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {initial : Wasm.Store Host}
+    {locals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {resultValue : Value}
+    {requiredBytes : Nat}
+    {targetFunction : Wasm.Function}
+    {parameters callerTail : List Wasm.Value}
+    {DirectSupported : LCNF.LetDecl .impure → Prop}
+    {ExternalSupported :
+      RuntimeState → Env → LCNF.LetDecl .impure → LCNF.Code .impure →
+        RuntimeState → Value → Nat → Prop}
+    {directCost : LCNF.LetDecl .impure → Nat}
+    {Invariant :
+      Nat → RuntimeState → Env → Wasm.Store Host → Wasm.Locals →
+        RefinementWitness → Prop}
+    (evaluation :
+      BudgetedSpineEvaluates context externals DirectSupported
+        ExternalSupported directCost sourceRuntime sourceEnv sourceCode
+        resultRuntime resultValue requiredBytes)
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode target)
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv initial locals witness)
+    (invariant :
+      Invariant requiredBytes sourceRuntime sourceEnv initial locals witness)
+    (directRuntimeRefines :
+      DirectLetRuntimeRefinesWithCost context sourceModule sourceFunction labels
+        module hostEnv DirectSupported directCost Invariant)
+    (externalRuntimeRefines :
+      ExternalLetRuntimeRefinesWithCost context sourceModule sourceFunction
+        labels module hostEnv externals ExternalSupported Invariant)
+    (parameterCount : parameters.length = targetFunction.numParams)
+    (resultCount : targetFunction.results.length = 1) :
+    ∃ resultStore resultWitness resultKind physical,
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+          sourceRuntime sourceEnv sourceCode target initial locals witness []
+          (ConcreteFunctionBodyPost targetFunction
+            (parameters ++ callerTail)
+            (ExactReturnPost resultStore physical callerTail)) ∧
+        ConcreteRuntimeRel resultStore.host.runtime resultWitness
+          resultRuntime ∧
+        resultStore.host.failure? = none ∧
+        PhysicalValueRel resultWitness resultKind physical resultValue := by
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
+      runtimeRelated, failureClear, valueRelated⟩ :=
+    codeWP_of_budgetedSpineEvaluates_exactReturn evaluation adapted
+      localsAligned stateRelated invariant directRuntimeRefines
+      externalRuntimeRefines
+  refine ⟨resultStore, resultWitness, resultKind, physical, ?_, runtimeRelated,
+    failureClear, valueRelated⟩
+  apply exactWP.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+    ← parameterCount]
 
 /--
 Cost-indexed structural partial correctness for mixed direct/external code
@@ -23122,25 +23241,16 @@ theorem ConcreteSupportedExport.correctBudgetedSpine
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedSpineEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedSpineEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨frameAligned, budget⟩ directRuntimeRefines externalRuntimeRefines
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -23226,25 +23336,17 @@ theorem ConcreteSupportedExport.correctBudgetedCode
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedCodeEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedCodeEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated invariant
       directRuntimeRefines externalRuntimeRefines caseRuntimeRefines
-      effectRuntimeRefines parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
+      effectRuntimeRefines
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -23313,27 +23415,18 @@ theorem ConcreteSupportedExport.correctBudgetedIntegerExternalSpine
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedSpineEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedSpineEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_integerExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureInteger externals)
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -23400,27 +23493,18 @@ theorem ConcreteSupportedExport.correctBudgetedNaturalExternalSpine
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedSpineEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedSpineEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_naturalExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureNatural externals)
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -23485,27 +23569,18 @@ theorem ConcreteSupportedExport.correctBudgetedScalarExternalSpine
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedSpineEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedSpineEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, implementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_scalarExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureScalar externals)
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -23577,28 +23652,19 @@ theorem ConcreteSupportedExport.correctBudgetedPureExternalSpine
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_budgetedSpineEvaluates
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_budgetedSpineEvaluates_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨⟨frameAligned, budget⟩, integerImplementation, naturalImplementation,
         scalarImplementation⟩
       (spec.directLetRuntimeRefines_budgetedDirect_pureExternal externals)
       (spec.externalLetRuntimeRefinesWithCost_pureExternal externals)
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -24829,25 +24895,16 @@ theorem ConcreteSupportedExport.correctBudgetedDirect
           initial (parameters ++ callerTail)
           (RefinedReturnPost resultRuntime resultValue resultKind
             callerTail) := by
-  obtain ⟨resultStore, resultWitness, resultKind, physical, bodyWP,
+  obtain ⟨resultStore, resultWitness, resultKind, physical, exactWP,
       resultRuntimeRelated, failureClear, valueRelated⟩ :=
-    codeWP_of_directValueEvaluates_withCost
-      (parameters := parameters) (callerTail := callerTail)
+    codeWP_of_directValueEvaluates_withCost_exactReturn
       evaluation spec.bodyAdapted spec.localsAligned stateRelated
       ⟨frameAligned, budget⟩ spec.directLetRuntimeRefines_budgetedDirect
-      parameterCount spec.singleResult
-  have parameterPrefix :
-      (parameters ++ callerTail).take spec.targetFunction.numParams =
-        parameters := by
-    rw [← parameterCount]
-    simp
   have targetTerminates :
       Wasm.TerminatesWith hosts.env target.wasmModule
         spec.targetFunctionIndex initial (parameters ++ callerTail)
-        (ExactReturnPost resultStore physical callerTail) := by
-    apply CodeWP.toConcreteTerminatesWith spec.notImport
-      spec.targetFunctionFound
-    simpa [parameterPrefix] using bodyWP
+        (ExactReturnPost resultStore physical callerTail) :=
+    spec.terminatesWithExactCore parameterCount exactWP
   refine
     ⟨evaluation.execEvaluates sourceExternals, resultKind,
       spec.targetFunctionIndex, spec.exported, ?_⟩
@@ -24913,11 +24970,11 @@ theorem ConcreteSupportedExport.correctReturn
             target.wasmModule hosts.env sourceRuntime sourceEnv
             (.return result) spec.targetFunction initial initial
             initialWitness parameters physical := by
-        refine ⟨parameterCount, spec.singleResult, fun tail => ?_⟩
+        refine ⟨parameterCount, spec.singleResult, spec.targetBody,
+          spec.targetBodyEq, ?_⟩
         rw [bodyEq]
-        exact codeWP_return_to_exactBodyPost
-          (callerTail := tail) localCompiled resultFound kindAt sourceLookup
-          stateRelated targetLookup parameterCount spec.singleResult
+        exact codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+          sourceLookup stateRelated targetLookup
       have declaration :
           SuccessfulDeclaration context sourceModule sourceFunction
             target.wasmModule hosts.env sourceExternals sourceRuntime
@@ -25045,19 +25102,18 @@ theorem ConcreteSupportedExport.correctNaturalLiteralReturn
         (.let decl (.return decl.fvarId)) spec.targetFunction initial
         (replaceHeap initial heap) initialWitness parameters
         (.i32 (UInt32.ofNat word.value)) := by
-    refine ⟨parameterCount, spec.singleResult, fun tail => ?_⟩
+    refine ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, ?_⟩
     rw [bodyEq]
     have continued :=
-      codeWP_return_to_exactBodyPost
+      codeWP_return_to_exactControlPost
         (context := context) (sourceModule := sourceModule)
         (sourceFunction := sourceFunction) (labels := [])
         (module := target.wasmModule) (hostEnv := hosts.env)
-        (targetFunction := spec.targetFunction)
-        (parameters := parameters) (callerTail := tail)
         localCompiled resultFound resultKindAt
         (lookup_bind_self sourceEnv decl.fvarId
           (literal sourceRuntime (.nat value)).2)
-        step.2.2.1 resultLookup parameterCount spec.singleResult
+        step.2.2.1 resultLookup
     simpa using
       codeWP_letValue valueCompiled valueAdapted resultFound step continued
   have failureClear :
@@ -25183,19 +25239,18 @@ theorem ConcreteSupportedExport.correctStringLiteralReturn
         (.let decl (.return decl.fvarId)) spec.targetFunction initial
         (replaceHeap initial heap) initialWitness parameters
         (.i32 (UInt32.ofNat word.value)) := by
-    refine ⟨parameterCount, spec.singleResult, fun tail => ?_⟩
+    refine ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, ?_⟩
     rw [bodyEq]
     have continued :=
-      codeWP_return_to_exactBodyPost
+      codeWP_return_to_exactControlPost
         (context := context) (sourceModule := sourceModule)
         (sourceFunction := sourceFunction) (labels := [])
         (module := target.wasmModule) (hostEnv := hosts.env)
-        (targetFunction := spec.targetFunction)
-        (parameters := parameters) (callerTail := tail)
         localCompiled resultFound resultKindAt
         (lookup_bind_self sourceEnv decl.fvarId
           (literal sourceRuntime (.str value)).2)
-        step.2.2.1 resultLookup parameterCount spec.singleResult
+        step.2.2.1 resultLookup
     simpa using
       codeWP_letValue valueCompiled valueAdapted resultFound step continued
   have failureClear :
@@ -25337,18 +25392,17 @@ theorem ConcreteSupportedExport.correctConstructorReturn
         hosts.env sourceRuntime sourceEnv
         (.let decl (.return decl.fvarId)) spec.targetFunction initial nextStore
         initialWitness parameters (.i32 (UInt32.ofNat word.value)) := by
-    refine ⟨parameterCount, spec.singleResult, fun tail => ?_⟩
+    refine ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, ?_⟩
     rw [bodyEq]
     have continued :=
-      codeWP_return_to_exactBodyPost
+      codeWP_return_to_exactControlPost
         (context := context) (sourceModule := sourceModule)
         (sourceFunction := sourceFunction) (labels := [])
         (module := target.wasmModule) (hostEnv := hosts.env)
-        (targetFunction := spec.targetFunction)
-        (parameters := parameters) (callerTail := tail)
         localCompiled resultFound resultKindAt
         (lookup_bind_self sourceEnv decl.fvarId sourceValue)
-        step.2.2.1 resultLookup parameterCount spec.singleResult
+        step.2.2.1 resultLookup
     simpa [List.append_assoc] using
       codeWP_constructorArgs_let valueEq valueCompiled argumentsAdapted
         callFound evaluated semanticStep stateRelated resultFound resultKindAt
@@ -25585,18 +25639,17 @@ theorem ConcreteSupportedExport.correctConstructorFVarReturn
         hosts.env sourceRuntime sourceEnv
         (.let decl (.return decl.fvarId)) spec.targetFunction initial nextStore
         initialWitness parameters (.i32 (UInt32.ofNat word.value)) := by
-    refine ⟨parameterCount, spec.singleResult, fun tail => ?_⟩
+    refine ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, ?_⟩
     rw [bodyEq]
     have continued :=
-      codeWP_return_to_exactBodyPost
+      codeWP_return_to_exactControlPost
         (context := context) (sourceModule := sourceModule)
         (sourceFunction := sourceFunction) (labels := [])
         (module := target.wasmModule) (hostEnv := hosts.env)
-        (targetFunction := spec.targetFunction)
-        (parameters := parameters) (callerTail := tail)
         localCompiled resultFound resultKindAt
         (lookup_bind_self sourceEnv decl.fvarId sourceValue)
-        step.2.2.1 resultLookup parameterCount spec.singleResult
+        step.2.2.1 resultLookup
     simpa [List.append_assoc] using
       codeWP_constructor_let valueEq valueCompiled argumentsFound callFound
         evaluated semanticStep stateRelated resultFound resultKindAt hGets

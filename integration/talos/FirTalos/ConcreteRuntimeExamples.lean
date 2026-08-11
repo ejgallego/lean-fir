@@ -207,7 +207,7 @@ private def oversizedReuseTrapsOnConcreteCapacity : Bool :=
 #guard fixtureDeadObjectClassifiesAsSourceAddress? deletedProgram
 
 /-- The positive scalar-mutation fixture uses the exact slot index emitted by
-Lean 4.32's `ToImpure`: object fields plus `USize` fields. -/
+Lean 4.33's `ToImpure`: object fields plus `USize` fields. -/
 private def compilerShapedScalarMutationProgram : Fir.LeanIR.ImpureProgram :=
   { decls := #[decl `main #[] u64Type (.code <|
       .let (letDecl x LCNF.ImpureType.tobject (.lit (.nat 1))) <|

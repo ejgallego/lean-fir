@@ -9,18 +9,46 @@ open Fir.LeanIR.Impure
 open Fir.Wasm.Concrete
 open FirTalos.Correctness
 
-/--
-Exact control-flow postcondition used by syntax-directed case composition.
-
-Unlike `ConcreteFunctionBodyPost`, this assertion admits only an explicit
-Wasm `return`. It is therefore invariant under the resumption wrapper installed
-around generated case arms: returns pass through unchanged, while fallthrough
-and branch continuations are deliberately unavailable.
--/
-def ExactReturnControlPost (afterCall : Wasm.Store Host)
-    (physical : Wasm.Value) : Wasm.Assertion Host :=
-  fun continuation =>
-    continuation = .Return afterCall [physical]
+/-- An exact-return proof for the compiler core installs across the adapter's
+physical validation suffix and yields the ordinary direct-call contract. -/
+theorem CodeWP.toConcreteTerminatesWith_of_exactReturnSuffix
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {code : LCNF.Code .impure} {function : Wasm.Function}
+    {functionIndex : Nat} {targetBody suffix : Wasm.Program}
+    {initial afterCall : Wasm.Store Host}
+    {parameters callerTail : List Wasm.Value}
+    {witness : RefinementWitness} {physical : Wasm.Value}
+    (notImport : module.imports[functionIndex]? = none)
+    (found :
+      module.funcs[functionIndex - module.imports.length]? = some function)
+    (bodyEq : function.body = targetBody ++ suffix)
+    (parameterCount : parameters.length = function.numParams)
+    (resultCount : function.results.length = 1)
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code targetBody initial
+        (function.toLocals parameters.reverse) witness []
+        (ExactReturnControlPost afterCall physical)) :
+    Wasm.TerminatesWith hostEnv module functionIndex initial
+      (parameters ++ callerTail)
+      (ExactReturnPost afterCall physical callerTail) := by
+  have parameterPrefix :
+      (parameters ++ callerTail).take function.numParams = parameters := by
+    rw [← parameterCount]
+    simp
+  apply CodeWP.toConcreteTerminatesWith_of_suffix
+    (Q := ExactReturnControlPost afterCall physical) notImport found bodyEq
+  · intro nextStore nextLocals impossible
+    simp [ExactReturnControlPost] at impossible
+  · intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+      ← parameterCount]
+  · simpa [parameterPrefix] using correct
 
 /--
 Two exact-return proofs for the same concrete execution identify the same
@@ -75,84 +103,6 @@ theorem CodeWP.exactReturn_unique
   injection resultEq with storeEq valuesEq
   injection valuesEq with physicalEq
   exact ⟨storeEq, physicalEq⟩
-
-/-- Weakening the target continuation preserves the concrete code judgment. -/
-theorem CodeWP.conseq
-    {context : Fir.Wasm.Context}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
-    {module : Wasm.Module}
-    {hostEnv : Wasm.HostEnv Host}
-    {sourceRuntime : RuntimeState}
-    {sourceEnv : Env}
-    {code : LCNF.Code .impure}
-    {target : Wasm.Program}
-    {targetStore : Wasm.Store Host}
-    {targetLocals : Wasm.Locals}
-    {witness : RefinementWitness}
-    {tail : List Wasm.Value}
-    {Q Q' : Wasm.Assertion Host}
-    (post : Q ⇛ Q')
-    (correct :
-      CodeWP context sourceModule sourceFunction labels module hostEnv
-        sourceRuntime sourceEnv code target targetStore targetLocals witness
-        tail Q) :
-    CodeWP context sourceModule sourceFunction labels module hostEnv
-      sourceRuntime sourceEnv code target targetStore targetLocals witness
-      tail Q' :=
-  ⟨correct.1, correct.2.1, Wasm.wp.conseq post correct.2.2⟩
-
-/--
-Concrete-host return rule with the exact control result exposed directly.
-This is the terminal leaf used internally by case-aware structural proofs.
--/
-theorem codeWP_return_to_exactControlPost
-    {context : Fir.Wasm.Context}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
-    {module : Wasm.Module}
-    {hostEnv : Wasm.HostEnv Host}
-    {sourceRuntime : RuntimeState}
-    {sourceEnv : Env}
-    {targetStore : Wasm.Store Host}
-    {targetLocals : Wasm.Locals}
-    {witness : RefinementWitness}
-    {result : Lean.FVarId}
-    {sourceValue : Value}
-    {kind : AbiKind}
-    {resultIndex : Nat}
-    {physical : Wasm.Value}
-    (localCompiled :
-      Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
-    (resultFound :
-      findFVar? (functionBindings sourceFunction) result = some resultIndex)
-    (kindAt :
-      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
-    (sourceLookup : lookup sourceEnv result = some sourceValue)
-    (stateRelated :
-      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
-        targetLocals witness)
-    (targetLookup : targetLocals.get resultIndex = some physical) :
-    CodeWP context sourceModule sourceFunction labels module hostEnv sourceRuntime
-      sourceEnv (.return result) [.localGet resultIndex, .ret]
-      targetStore targetLocals witness []
-      (ExactReturnControlPost targetStore physical) := by
-  obtain ⟨actual, actualLookup, _⟩ :=
-    stateRelated.resolve sourceLookup resultFound kindAt
-  rw [targetLookup] at actualLookup
-  injection actualLookup with physicalEq
-  subst actual
-  refine ⟨codeAdapted_return localCompiled resultFound, stateRelated, ?_⟩
-  rw [Wasm.wp_localGet_cons]
-  have targetLookupWithStack :
-      ({ targetLocals with values := [] } : Wasm.Locals).get resultIndex =
-        some physical := by
-    simpa [Wasm.Locals.get] using targetLookup
-  simp only [targetLookupWithStack]
-  rw [Wasm.wp_ret_cons]
-  rfl
 
 /-- Concrete-host return rule for an arbitrary generated function and caller
 operand remainder. The compiler-selected local contains the exact related
@@ -743,6 +693,50 @@ inductive ConcreteCodeSimulation
 
 /-- The concrete syntax induction constructs the exact compiler/adaptor body
 judgment for every caller operand remainder. -/
+theorem ConcreteCodeSimulation.toCodeWP_exactReturn
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceExternals : ExternalImpl}
+    {sourceRuntime resultRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {sourceCode : LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore resultStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness resultWitness : RefinementWitness}
+    {resultValue : Value}
+    {resultKind : AbiKind}
+    {physical : Wasm.Value}
+    (simulation :
+      ConcreteCodeSimulation context sourceModule sourceFunction labels module
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
+        targetLocals witness resultRuntime resultValue resultKind resultStore
+        resultWitness physical) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv sourceCode target targetStore targetLocals witness
+      [] (ExactReturnControlPost resultStore physical) := by
+  induction simulation with
+  | ret localCompiled resultFound kindAt sourceLookup stateRelated targetLookup =>
+      exact codeWP_return_to_exactControlPost localCompiled resultFound kindAt
+        sourceLookup stateRelated targetLookup
+  | letValue valueCompiled valueAdapted resultFound step continued ih =>
+      exact codeWP_letValue valueCompiled valueAdapted resultFound step ih
+  | callLet valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_callLet valueCompiled valueAdapted resultFound step ih
+  | externalLet valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_externalLet valueCompiled valueAdapted resultFound step ih
+  | lazyLet _ valueCompiled valueAdapted resultFound step _ ih =>
+      exact codeWP_lazyLet valueCompiled valueAdapted resultFound step ih
+  | caseOf _ _ step _ ih =>
+      exact codeWP_caseOf step ih
+  | effect _ _ step _ ih =>
+      exact codeWP_effect step ih
+
+/-- Public function-body form of the exact simulation WP. -/
 theorem ConcreteCodeSimulation.toCodeWP
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -765,9 +759,9 @@ theorem ConcreteCodeSimulation.toCodeWP
     {parameters callerTail : List Wasm.Value}
     (simulation :
       ConcreteCodeSimulation context sourceModule sourceFunction labels module
-        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target targetStore
-        targetLocals witness resultRuntime resultValue resultKind resultStore
-        resultWitness physical)
+        hostEnv sourceExternals sourceRuntime sourceEnv sourceCode target
+        targetStore targetLocals witness resultRuntime resultValue resultKind
+        resultStore resultWitness physical)
     (parameterCount : parameters.length = targetFunction.numParams)
     (resultCount : targetFunction.results.length = 1) :
     CodeWP context sourceModule sourceFunction labels module hostEnv
@@ -776,23 +770,11 @@ theorem ConcreteCodeSimulation.toCodeWP
       (ConcreteFunctionBodyPost targetFunction
         (parameters ++ callerTail)
         (ExactReturnPost resultStore physical callerTail)) := by
-  induction simulation with
-  | ret localCompiled resultFound kindAt sourceLookup stateRelated targetLookup =>
-      exact codeWP_return_to_exactBodyPost (callerTail := callerTail)
-        localCompiled resultFound kindAt sourceLookup stateRelated targetLookup
-        parameterCount resultCount
-  | letValue valueCompiled valueAdapted resultFound step continued ih =>
-      exact codeWP_letValue valueCompiled valueAdapted resultFound step ih
-  | callLet valueCompiled valueAdapted resultFound step _ ih =>
-      exact codeWP_callLet valueCompiled valueAdapted resultFound step ih
-  | externalLet valueCompiled valueAdapted resultFound step _ ih =>
-      exact codeWP_externalLet valueCompiled valueAdapted resultFound step ih
-  | lazyLet _ valueCompiled valueAdapted resultFound step _ ih =>
-      exact codeWP_lazyLet valueCompiled valueAdapted resultFound step ih
-  | caseOf _ _ step _ ih =>
-      exact codeWP_caseOf step ih
-  | effect _ _ step _ ih =>
-      exact codeWP_effect step ih
+  apply simulation.toCodeWP_exactReturn.conseq
+  intro continuation returned
+  subst continuation
+  simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+    ← parameterCount]
 
 /--
 The concrete syntax induction retains the exact terminal source runtime while
@@ -1033,6 +1015,7 @@ theorem ConcreteCodeSimulation.toSuccessfulDeclaration
     {sourceEnv : Env}
     {sourceCode : LCNF.Code .impure}
     {targetFunction : Wasm.Function}
+    {targetBody : Wasm.Program}
     {functionIndex : Nat}
     {initial resultStore : Wasm.Store Host}
     {initialWitness resultWitness : RefinementWitness}
@@ -1043,9 +1026,11 @@ theorem ConcreteCodeSimulation.toSuccessfulDeclaration
     (simulation :
       ConcreteCodeSimulation context sourceModule sourceFunction []
         module hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
-        targetFunction.body initial
+        targetBody initial
         (targetFunction.toLocals parameters.reverse) initialWitness resultRuntime
         resultValue resultKind resultStore resultWitness physical)
+    (bodyEq : targetFunction.body =
+      targetBody ++ functionTerminal sourceModule sourceFunction)
     (parameterCount : parameters.length = targetFunction.numParams)
     (resultCount : targetFunction.results.length = 1)
     (notImport : module.imports[functionIndex]? = none)
@@ -1059,9 +1044,8 @@ theorem ConcreteCodeSimulation.toSuccessfulDeclaration
   sourceResult := simulation.sourceResult
   notImport
   functionFound
-  body := ⟨parameterCount, resultCount,
-    fun callerTail =>
-      simulation.toCodeWP (callerTail := callerTail) parameterCount resultCount⟩
+  body := ⟨parameterCount, resultCount, targetBody, bodyEq,
+    simulation.toCodeWP_exactReturn⟩
   runtimeRelated := simulation.runtimeRelated
   failureClear := simulation.failureClear
   valueRelated := simulation.valueRelated }
@@ -1079,6 +1063,7 @@ theorem ConcreteCodeSimulation.correct
     {sourceEnv : Env}
     {sourceCode : LCNF.Code .impure}
     {targetFunction : Wasm.Function}
+    {targetBody : Wasm.Program}
     {functionIndex : Nat}
     {initial resultStore : Wasm.Store Host}
     {initialWitness resultWitness : RefinementWitness}
@@ -1089,9 +1074,11 @@ theorem ConcreteCodeSimulation.correct
     (simulation :
       ConcreteCodeSimulation context sourceModule sourceFunction []
         module hostEnv sourceExternals sourceRuntime sourceEnv sourceCode
-        targetFunction.body initial
+        targetBody initial
         (targetFunction.toLocals parameters.reverse) initialWitness resultRuntime
         resultValue resultKind resultStore resultWitness physical)
+    (bodyEq : targetFunction.body =
+      targetBody ++ functionTerminal sourceModule sourceFunction)
     (parameterCount : parameters.length = targetFunction.numParams)
     (resultCount : targetFunction.results.length = 1)
     (notImport : module.imports[functionIndex]? = none)
@@ -1104,7 +1091,7 @@ theorem ConcreteCodeSimulation.correct
       Wasm.TerminatesWith hostEnv module functionIndex initial
         (parameters ++ callerTail)
         (RefinedReturnPost resultRuntime resultValue resultKind callerTail) :=
-  (simulation.toSuccessfulDeclaration parameterCount resultCount notImport
+  (simulation.toSuccessfulDeclaration bodyEq parameterCount resultCount notImport
     functionFound).correct callerTail
 
 end FirTalos.Concrete

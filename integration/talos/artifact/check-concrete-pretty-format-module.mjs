@@ -7,7 +7,7 @@ function equalParams(actual, expected) {
 
 /**
  * Exercise prettyM through the concrete Wasm memory ABI. These helpers only
- * spell Lean 4.32's raw Format constructor layouts and packed-byte positions.
+ * spell Lean 4.33's raw Format constructor layouts and packed-byte positions.
  */
 export function checkConcretePrettyFormatModule({
   manifest,

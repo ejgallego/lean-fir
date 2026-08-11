@@ -121,7 +121,7 @@ const coverageOracle = [
 ];
 
 /**
- * Exercise the styled facade using only Lean 4.32's raw Format and result
+ * Exercise the styled facade using only Lean 4.33's raw Format and result
  * layouts. The expected event sequence is also guarded by the native Lean
  * oracle in `FirWasmSourceExample.lean`.
  */

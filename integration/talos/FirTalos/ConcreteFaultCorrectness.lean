@@ -182,6 +182,12 @@ theorem wp_exact_host_call_of_trap
     subst actualFinal
     subst actualMessage
     exact post
+  · intro actualFinal tag arguments contract
+    change Wasm.HostResult.Throw actualFinal tag arguments =
+      step initial
+        (locals.values.take imp.params.length).reverse at contract
+    rw [hArgs, operation] at contract
+    contradiction
 
 /-- A direct source `let` error is already a complete finite execution: the
 initial machine state takes no successful prefix steps and its next

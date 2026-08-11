@@ -178,13 +178,36 @@ def globalDecls (source : Fir.Wasm.Module) : List Wasm.GlobalDecl :=
   source.cacheGlobalKinds.toList.map (fun kind => { init := zeroValue kind }) ++
     source.globals.toList.map (fun global => { init := globalValue global.init })
 
+/-- Physical validator marker added after a structured function body that has
+no fallthrough but does not already end in an explicit terminal instruction. -/
+def functionTerminal (module : Fir.Wasm.Module)
+    (source : Fir.Wasm.Function) : Wasm.Program :=
+  let context : Fir.Wasm.CheckContext := {
+    module
+    function := source
+    locals := (source.params ++ source.locals).toList }
+  match Fir.Wasm.checkInstructions context (some []) source.body with
+  | .ok flow =>
+      if flow.fallthrough.isNone then
+        match source.body.getLast? with
+        | some .ret | some .unreachable | some (.br _) => []
+        | _ => [.unreachable]
+      else
+        []
+  | .error _ => []
+
 def function (module : Fir.Wasm.Module) (source : Fir.Wasm.Function) :
     Except AdapterError Wasm.Function := do
   return {
     params := source.params.toList.map fun entry => abiKind entry.snd
     locals := source.locals.toList.map fun entry => abiKind entry.snd
     results := source.results.toList.map abiKind
-    body := ← instructions module source [] source.body }
+    -- Match the binary encoder's explicit terminal for a zero-result
+    -- structured construct whose branches cannot fall through. Talos's full
+    -- Wasm stack checker needs the same polymorphic-stack marker that the
+    -- encoded artifact already carries.
+    body := (← instructions module source [] source.body) ++
+      functionTerminal module source }
 
 def adapt (source : Fir.Wasm.Module) : Except AdapterError AdaptedModule := do
   match Fir.Wasm.validateModule source with

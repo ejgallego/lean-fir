@@ -114,9 +114,10 @@ def ConcreteExternalCallsAligned
 /-- Static whole-pipeline evidence for one concrete generated function.
 
 `bodyAdapted` is the crucial compiler-facing equation: it ties the selected
-source code to the actual generated target body through `compileCode` and the
-numeric Talos adapter. Dynamic source behavior, target-state refinement, and
-export-table membership are deliberately absent from this reusable package.
+source code to the generated core through `compileCode` and the numeric Talos
+adapter. `targetBodyEq` then records the physical validation marker separately.
+Dynamic source behavior, target-state refinement, and export-table membership
+are deliberately absent from this reusable package.
 -/
 structure ConcreteSupportedFunction
     (program : Fir.LeanIR.ImpureProgram)
@@ -150,8 +151,12 @@ structure ConcreteSupportedFunction
     target.wasmModule.funcs[
         targetFunctionIndex - target.wasmModule.imports.length]? =
       some targetFunction
+  targetBody : Wasm.Program
+  targetBodyEq :
+    targetFunction.body =
+      targetBody ++ functionTerminal sourceModule sourceFunction
   bodyAdapted :
-    CodeAdapted context sourceModule sourceFunction [] code targetFunction.body
+    CodeAdapted context sourceModule sourceFunction [] code targetBody
   singleResult : targetFunction.results.length = 1
 
 /-- A supported generated function together with the one extra static fact
@@ -205,6 +210,32 @@ theorem ConcreteSupportedFunction.hostsSatisfy
         sourceFunction target hosts) :
     hosts.env.Satisfies target.wasmModule hosts.spec :=
   hosts.satisfies target.wasmModule spec.hostsAligned
+
+/-- Install an exact-return proof for the compiler core as the selected
+physical target function, crossing its validation-only suffix once. -/
+theorem ConcreteSupportedFunction.terminatesWithExactCore
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context} {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts}
+    (spec :
+      ConcreteSupportedFunction program context code sourceModule
+        sourceFunction target hosts)
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {initial afterCall : Wasm.Store Host}
+    {parameters callerTail : List Wasm.Value}
+    {witness : RefinementWitness} {physical : Wasm.Value}
+    (parameterCount : parameters.length = spec.targetFunction.numParams)
+    (correct :
+      CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
+        sourceRuntime sourceEnv code spec.targetBody initial
+        (spec.targetFunction.toLocals parameters.reverse) witness []
+        (ExactReturnControlPost afterCall physical)) :
+    Wasm.TerminatesWith hosts.env target.wasmModule spec.targetFunctionIndex
+      initial (parameters ++ callerTail)
+      (ExactReturnPost afterCall physical callerTail) :=
+  correct.toConcreteTerminatesWith_of_exactReturnSuffix spec.notImport
+    spec.targetFunctionFound spec.targetBodyEq parameterCount spec.singleResult
 
 /-- Specialize whole-pipeline external alignment to one compiler-selected
 named call. -/
@@ -826,7 +857,7 @@ theorem ConcreteSupportedExport.toSuccessfulDeclaration
     (simulation :
       ConcreteCodeSimulation context sourceModule sourceFunction []
         target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
-        sourceCode spec.targetFunction.body initial
+        sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultRuntime resultValue resultKind resultStore resultWitness physical)
     (parameterCount :
@@ -836,7 +867,8 @@ theorem ConcreteSupportedExport.toSuccessfulDeclaration
       sourceEnv sourceCode spec.targetFunction spec.targetFunctionIndex initial
       resultStore initialWitness resultWitness parameters resultKind resultValue
       physical :=
-  simulation.toSuccessfulDeclaration parameterCount spec.singleResult
+  simulation.toSuccessfulDeclaration spec.targetBodyEq parameterCount
+    spec.singleResult
     spec.notImport spec.targetFunctionFound
 
 /-- T3 whole-export success. The target function and index come from the
@@ -866,7 +898,7 @@ theorem ConcreteSupportedExport.correct
     (simulation :
       ConcreteCodeSimulation context sourceModule sourceFunction []
         target.wasmModule hosts.env sourceExternals sourceRuntime sourceEnv
-        sourceCode spec.targetFunction.body initial
+        sourceCode spec.targetBody initial
         (spec.targetFunction.toLocals parameters.reverse) initialWitness
         resultRuntime resultValue resultKind resultStore resultWitness physical)
     (parameterCount :

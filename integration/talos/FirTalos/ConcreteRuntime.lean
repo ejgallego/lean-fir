@@ -1088,7 +1088,7 @@ theorem getTagFn_satisfies_contract (initial args) :
   rfl
 
 /-- Executable concrete sharing observation. The returned UInt8 is represented
-directly in an i32 lane, matching Lean 4.32's final-impure ABI. -/
+directly in an i32 lane, matching Lean 4.33's final-impure ABI. -/
 def isSharedStep (store : Wasm.Store Host) (args : List Wasm.Value) :
     Wasm.HostResult Host :=
   let store := clearFailure store
@@ -5008,7 +5008,8 @@ theorem decrementStep_ne_releaseFuelExhausted_of_refines
                     (fun result =>
                       match result with
                       | .Trap store _ => store.host.failure?
-                      | .Return _ _ => none)
+                      | .Return _ _ => none
+                      | .Throw _ _ _ => none)
                     targetStep
                   have trapEq :
                       failure.toTrap =
@@ -5375,7 +5376,8 @@ theorem resetStep_ne_releaseFuelExhausted_of_refines
                     (fun result =>
                       match result with
                       | .Trap store _ => store.host.failure?
-                      | .Return _ _ => none)
+                      | .Return _ _ => none
+                      | .Throw _ _ _ => none)
                     targetStep
                   have trapEq :
                       failure.toTrap =
@@ -7406,8 +7408,9 @@ theorem StateRelated.clearFailure
       targetStore targetLocals witness) :
     clearFailure targetStore = targetStore := by
   rcases targetStore with
-    ⟨globals, mem, extraMems, dataSegments, tables, elementSegments, exns,
-      gcHeap, host⟩
+    ⟨globals, globalIds, functionIds, mem, extraMems, memoryCaps, memoryIds,
+      dataSegments, tables, tableIds, elementSegments, elementValues, tagIds,
+      exns, gcHeap, host⟩
   rcases host with
     ⟨runtime, closureDispatch, closureDescriptors, closureApplication,
       externals, failure⟩
@@ -7624,6 +7627,91 @@ def ConcreteFunctionBodyPost (function : Wasm.Function)
           (values.take function.results.length ++ args.drop function.numParams)
     | _ => False
 
+/-- Exact control-flow postcondition used by syntax-directed composition.
+
+Unlike `ConcreteFunctionBodyPost`, this assertion admits only an explicit
+Wasm `return`. It is therefore invariant under validation-only suffixes and
+the resumption wrappers installed around generated case arms. -/
+def ExactReturnControlPost (afterCall : Wasm.Store Host)
+    (physical : Wasm.Value) : Wasm.Assertion Host :=
+  fun continuation =>
+    continuation = .Return afterCall [physical]
+
+/-- Weakening the target continuation preserves the concrete code judgment. -/
+theorem CodeWP.conseq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {tail : List Wasm.Value}
+    {Q Q' : Wasm.Assertion Host}
+    (post : Q ⇛ Q')
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code target targetStore targetLocals witness
+        tail Q) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv
+      sourceRuntime sourceEnv code target targetStore targetLocals witness
+      tail Q' :=
+  ⟨correct.1, correct.2.1, Wasm.wp.conseq post correct.2.2⟩
+
+/-- Concrete-host return rule with the exact control result exposed directly. -/
+theorem codeWP_return_to_exactControlPost
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness : RefinementWitness}
+    {result : Lean.FVarId}
+    {sourceValue : Value}
+    {kind : AbiKind}
+    {resultIndex : Nat}
+    {physical : Wasm.Value}
+    (localCompiled :
+      Fir.Wasm.getLocal context result = .ok (.localGet result, kind))
+    (resultFound :
+      findFVar? (functionBindings sourceFunction) result = some resultIndex)
+    (kindAt :
+      (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind)
+    (sourceLookup : lookup sourceEnv result = some sourceValue)
+    (stateRelated :
+      StateRelated sourceFunction sourceRuntime sourceEnv targetStore
+        targetLocals witness)
+    (targetLookup : targetLocals.get resultIndex = some physical) :
+    CodeWP context sourceModule sourceFunction labels module hostEnv sourceRuntime
+      sourceEnv (.return result) [.localGet resultIndex, .ret]
+      targetStore targetLocals witness []
+      (ExactReturnControlPost targetStore physical) := by
+  obtain ⟨actual, actualLookup, _⟩ :=
+    stateRelated.resolve sourceLookup resultFound kindAt
+  rw [targetLookup] at actualLookup
+  injection actualLookup with physicalEq
+  subst actual
+  refine ⟨codeAdapted_return localCompiled resultFound, stateRelated, ?_⟩
+  rw [Wasm.wp_localGet_cons]
+  have targetLookupWithStack :
+      ({ targetLocals with values := [] } : Wasm.Locals).get resultIndex =
+        some physical := by
+    simpa [Wasm.Locals.get] using targetLookup
+  simp only [targetLookupWithStack]
+  rw [Wasm.wp_ret_cons]
+  rfl
+
 /-- Store-specific bridge from a concrete body WP to Talos's fuel-free public
 function predicate. -/
 theorem concreteTerminatesWith_of_wp_body_at
@@ -7698,6 +7786,45 @@ theorem CodeWP.toConcreteTerminatesWith
     Wasm.TerminatesWith hostEnv module functionIndex initial args Post := by
   apply concreteTerminatesWith_of_wp_body_at notImport found
   simpa [Wasm.Function.toLocals] using correct.2.2
+
+/-- Install a verified compiler core as a physical function body with a
+validation-only suffix. The core postcondition must rule out fallthrough, so
+the suffix is unreachable on every verified execution. -/
+theorem CodeWP.toConcreteTerminatesWith_of_suffix
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId} {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {sourceRuntime : RuntimeState} {sourceEnv : Env}
+    {code : Lean.Compiler.LCNF.Code .impure} {function : Wasm.Function}
+    {functionIndex : Nat} {targetBody suffix : Wasm.Program}
+    {initial : Wasm.Store Host} {args : List Wasm.Value}
+    {witness : RefinementWitness} {Q : Wasm.Assertion Host}
+    {Post : Wasm.Store Host → List Wasm.Value → Prop}
+    (notImport : module.imports[functionIndex]? = none)
+    (found :
+      module.funcs[functionIndex - module.imports.length]? = some function)
+    (bodyEq : function.body = targetBody ++ suffix)
+    (noFallthrough : ∀ nextStore nextLocals,
+      ¬ Q (.Fallthrough nextStore nextLocals))
+    (post : Q ⇛ ConcreteFunctionBodyPost function args Post)
+    (correct :
+      CodeWP context sourceModule sourceFunction labels module hostEnv
+        sourceRuntime sourceEnv code targetBody initial
+        (function.toLocals (args.take function.numParams).reverse) witness [] Q) :
+    Wasm.TerminatesWith hostEnv module functionIndex initial args Post := by
+  apply concreteTerminatesWith_of_wp_body_at notImport found
+  have coreWP :
+      Wasm.wp module targetBody Q initial
+        (function.toLocals (args.take function.numParams).reverse) hostEnv := by
+    simpa [Wasm.Function.toLocals] using correct.2.2
+  have physicalWP :
+      Wasm.wp module function.body Q initial
+        (function.toLocals (args.take function.numParams).reverse) hostEnv := by
+    rw [bodyEq]
+    exact FirTalos.Correctness.Wasm.wp_append_of_no_fallthrough
+      noFallthrough coreWP
+  exact Wasm.wp.conseq post physicalWP
 
 /-- One direct source `let` step paired with its concrete host/local update.
 Separate witnesses allow later allocation operations to grow ghost metadata. -/
@@ -8053,6 +8180,12 @@ theorem wp_exact_host_call_of_return
     exact continued
   · intro trapped message contract
     change Wasm.HostResult.Trap trapped message =
+      step initial
+        (locals.values.take imp.params.length).reverse at contract
+    rw [hArgs, operation] at contract
+    contradiction
+  · intro thrown tag arguments contract
+    change Wasm.HostResult.Throw thrown tag arguments =
       step initial
         (locals.values.take imp.params.length).reverse at contract
     rw [hArgs, operation] at contract

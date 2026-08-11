@@ -41,7 +41,7 @@ assert.equal(
 );
 assert.equal(
   build.capabilities.inputLayout.version,
-  "lean-4.32-Std.Format.compact/v1",
+  "lean-4.33-Std.Format.compact/v1",
 );
 assert.equal(
   build.capabilities.ownership.version,

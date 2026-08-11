@@ -16,7 +16,8 @@ private def caseBodyCheck : Wasm.Program → Bool
         [.localGet cLoad1, .call getTag1, .const trueTag, .eq,
           .iff depth1 results1
             [.call literal1, .localSet trueIndex, .localGet trueLoad, .ret]
-            [.unreachable]]] =>
+            [.unreachable]],
+      .unreachable] =>
       alloc == 0 && cIndex == 0 && cLoad0 == 0 && getTag0 == 1 &&
       falseTag == 0 && depth0 == 0 && results0 == 0 &&
       literal0 == 2 && falseIndex == 1 && falseLoad == 1 &&
@@ -34,7 +35,8 @@ private theorem caseBody_eq_of_check {body : Wasm.Program}
         [.localGet 0, .call 1, .const 1, .eq,
           .iff 0 0
             [.call 3, .localSet 1, .localGet 1, .ret]
-            [.unreachable]]] := by
+            [.unreachable]],
+      .unreachable] := by
   unfold caseBodyCheck at checked
   split at checked <;> simp_all
 
@@ -186,9 +188,26 @@ theorem abiCaseMain_body :
         [.localGet 0, .call 1, .const 1, .eq,
           .iff 0 0
             [.call 3, .localSet 1, .localGet 1, .ret]
-            [.unreachable]]] := by
+            [.unreachable]],
+      .unreachable] := by
   apply caseBody_eq_of_check
   native_decide
+
+/-- The compositional compiler body, before the adapter's validation marker. -/
+def abiCaseMainCore : Wasm.Program :=
+  [.call 0, .localSet 0,
+    .localGet 0, .call 1, .const 0, .eq,
+    .iff 0 0
+      [.call 2, .localSet 1, .localGet 1, .ret]
+      [.localGet 0, .call 1, .const 1, .eq,
+        .iff 0 0
+          [.call 3, .localSet 1, .localGet 1, .ret]
+          [.unreachable]]]
+
+theorem abiCaseMain_body_eq_core :
+    abiCaseMainFunction.body = abiCaseMainCore ++ [.unreachable] := by
+  rw [abiCaseMain_body]
+  rfl
 
 theorem abiCaseMain_exported :
     abiCaseAdaptedModule.wasmModule.findExport "main" = some 4 := by
@@ -628,7 +647,7 @@ theorem abiCaseCasesStep :
 theorem abiCaseMain_simulation :
     CodeSimulation abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-      {} [] abiCaseCode abiCaseMainFunction.body abiCaseInitialStore
+      {} [] abiCaseCode abiCaseMainCore abiCaseInitialStore
       (abiCaseMainFunction.toLocals []) {} abiCaseTrueValue .tobject := by
   have valueAdapted :
       instructions abiCaseSourceModule abiCaseSourceFunction []
@@ -636,8 +655,7 @@ theorem abiCaseMain_simulation :
         .ok [.call 0] := by
     simp [instructions, instruction, abiCaseAllocCall_found]
     rfl
-  rw [abiCaseMain_body]
-  simp only [abiCaseCode]
+  simp only [abiCaseCode, abiCaseMainCore]
   apply CodeSimulation.letValue abiCaseCompileC valueAdapted
     (by native_decide) abiCaseCtorStep
   apply CodeSimulation.caseOf abiCaseCasesStep
@@ -647,7 +665,7 @@ theorem abiCaseMain_simulation :
 theorem abiCaseMain_codeWP :
     CodeWP abiCaseContext abiCaseSourceModule abiCaseSourceFunction []
       abiCaseAdaptedModule.wasmModule abiCaseResolvedHosts.env
-      {} [] abiCaseCode abiCaseMainFunction.body abiCaseInitialStore
+      {} [] abiCaseCode abiCaseMainCore abiCaseInitialStore
       (abiCaseMainFunction.toLocals []) []
       (ReturnPost {} abiCaseTrueValue .tobject []) :=
   abiCaseMain_simulation.toCodeWP
@@ -681,9 +699,11 @@ theorem abiCaseMain_correct :
         abiCaseAdaptedModule.wasmModule "main" abiCaseInitialStore []
         (RelatedPost #[.tobject]
           (ReturnedObservation {} abiCaseTrueValue)) := by
-  apply abiCaseSupportedExport.correct_of_simulation abiCaseObservation_related
+  apply abiCaseSupportedExport.correct_of_simulation_with_suffix
+    abiCaseObservation_related (suffix := [.unreachable])
   · simpa [abiCaseSupportedExport, abiCaseInitialStore] using
       abiCaseMain_simulation
+  · simpa [abiCaseSupportedExport] using abiCaseMain_body_eq_core
   · simp [abiCaseSupportedExport]
 
 /-- End-to-end W3/W4 theorem for the generated explicit constructor case. -/
@@ -708,10 +728,7 @@ theorem abiCaseMain_exec_correct (externals : ExternalImpl) :
         abiCaseAdaptedModule.wasmModule "main" abiCaseInitialStore []
         (RelatedPost #[.tobject]
           (ReturnedObservation {} abiCaseTrueValue)) := by
-  apply abiCaseSupportedExport.execCorrect_of_simulation
-    abiCaseObservation_related
-  · simpa [abiCaseSupportedExport, abiCaseInitialStore] using
-      abiCaseMain_simulation
-  · simp [abiCaseSupportedExport]
+  exact ⟨abiCaseMain_correct.1.execEvaluates externals,
+    abiCaseMain_correct.2⟩
 
 end FirTalos.Correctness

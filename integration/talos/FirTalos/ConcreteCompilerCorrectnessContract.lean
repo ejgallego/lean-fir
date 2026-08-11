@@ -685,7 +685,7 @@ example
       parameters.length = spec.targetFunction.numParams) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
-          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode spec.targetBody initial
           locals witness []
           (ConcreteFunctionBodyPost spec.targetFunction
             (parameters ++ callerTail)
@@ -993,7 +993,7 @@ example
       parameters.length = spec.targetFunction.numParams) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
-          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode spec.targetBody initial
           locals witness []
           (ConcreteFunctionBodyPost spec.targetFunction
             (parameters ++ callerTail)
@@ -1046,7 +1046,7 @@ example
       parameters.length = spec.targetFunction.numParams) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
-          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode spec.targetBody initial
           locals witness []
           (ConcreteFunctionBodyPost spec.targetFunction
             (parameters ++ callerTail)
@@ -1099,7 +1099,7 @@ example
       parameters.length = spec.targetFunction.numParams) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
-          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode spec.targetBody initial
           locals witness []
           (ConcreteFunctionBodyPost spec.targetFunction
             (parameters ++ callerTail)
@@ -1152,7 +1152,7 @@ example
       parameters.length = spec.targetFunction.numParams) :
     ∃ resultStore resultWitness resultKind physical,
       CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
-          sourceRuntime sourceEnv sourceCode spec.targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode spec.targetBody initial
           locals witness []
           (ConcreteFunctionBodyPost spec.targetFunction
             (parameters ++ callerTail)
@@ -3174,7 +3174,7 @@ example
             nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_naturalLiteralLet valueEq valueKind localCompiled stateRelated
     allocated localSetReady continued
 
@@ -3250,7 +3250,7 @@ example
             nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_stringLiteralLet_of_budget valueEq valueKind localCompiled
     stateRelated budget allocationFits localSetReady continued
 
@@ -3449,7 +3449,7 @@ example
             tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_objectProjectionLet valueEq valueKind objectCompiled
     objectRefines localCompiled sourceLookup projected stateRelated
     fieldKindAligned localSetReady continued
@@ -3514,7 +3514,7 @@ example
             (clearFailure initial) updated witness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_usizeProjectionLet valueEq valueKind objectCompiled
     objectRefines localCompiled sourceLookup projected stateRelated
     localSetReady continued
@@ -3591,7 +3591,7 @@ example
             tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_scalarProjectionLet valueEq valueKind objectCompiled
     objectRefines localCompiled sourceLookup projected stateRelated concreteStep
     localSetReady continued
@@ -3681,7 +3681,7 @@ example
             continuation targetRest nextStore updated nextWitness tail Q) :
     CodeWP context sourceModule sourceFunction [] target.wasmModule hosts.env
       sourceRuntime sourceEnv (.let decl continuation)
-      spec.targetFunction.body initial locals witness tail Q :=
+      spec.targetBody initial locals witness tail Q :=
   spec.codeWP_constructorNonemptyLet_of_capacity valueEq fits valueKind
     argumentsCompiled localCompiled operationWellFormed nonempty
     objectFieldsFit usizeFieldsFit scalarBytesFit evaluated semanticStep

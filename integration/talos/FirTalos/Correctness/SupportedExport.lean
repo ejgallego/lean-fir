@@ -67,6 +67,38 @@ theorem ExportTerminatesWith.toPartiallyMeets
   rcases correct with ⟨functionIndex, exported, terminates⟩
   exact ⟨functionIndex, exported, terminates.toPartiallyMeets⟩
 
+/-- A weakest-precondition proof for the physical adapted body is sufficient
+at the checked-export boundary. The local compiler relation remains attached
+to the core body that produced this proof. -/
+theorem SupportedExport.terminatesWithRelated_of_return_wp
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts} {exportName : String}
+    (spec : SupportedExport program context code sourceModule sourceFunction
+      target hosts exportName)
+    {resultSourceRuntime : RuntimeState}
+    {sourceValue : Value} {kind : AbiKind}
+    {initial : Wasm.Store RuntimeHost}
+    (related :
+      compareObservations (ReturnedObservation resultSourceRuntime sourceValue)
+          (.returned sourceValue resultSourceRuntime) =
+        .related (ReturnedObservation resultSourceRuntime sourceValue)
+          (.returned sourceValue resultSourceRuntime))
+    (correct :
+      Wasm.wp target.wasmModule spec.targetFunction.body
+        (ReturnPost resultSourceRuntime sourceValue kind []) initial
+        (spec.targetFunction.toLocals []) hosts.env) :
+    ExportTerminatesWith hosts.env target.wasmModule exportName initial []
+      (RelatedPost #[kind]
+        (ReturnedObservation resultSourceRuntime sourceValue)) := by
+  refine ⟨spec.targetFunctionIndex, spec.exported, ?_⟩
+  apply terminatesWith_of_wp_body_at spec.notImport spec.targetFunctionFound
+  simpa using Wasm.wp.conseq
+    (ReturnPost.toFunctionBodyPost spec.singleResult related) correct
+
 /--
 Reusable W4 export theorem for a closed, single-result return in the supported
 fragment. The observation premise remains explicit because the comparison

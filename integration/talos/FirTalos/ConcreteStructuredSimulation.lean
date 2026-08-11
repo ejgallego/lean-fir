@@ -27,6 +27,498 @@ open Fir.Wasm.Concrete
 open Fir.LeanIR.Impure
 open FirTalos.Correctness
 
+/-- A compiler-derived code fragment followed by physical residual code that
+cannot be reached before the fragment's explicit return. The adapter's Lean
+4.33 validation marker is the root instance; recursive compiler steps retain
+it in their residual program or move it into a structured-control frame. -/
+def CodeAdaptedWithSuffix
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (sourceCode : Lean.Compiler.LCNF.Code .impure)
+    (targetCode : Wasm.Program) : Prop :=
+  ∃ targetCore targetSuffix,
+    CodeAdapted context sourceModule sourceFunction labels sourceCode
+        targetCore ∧
+      targetCode = targetCore ++ targetSuffix
+
+theorem CodeAdapted.withSuffix
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetCore targetSuffix : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode
+        targetCore) :
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels sourceCode
+      (targetCore ++ targetSuffix) :=
+  ⟨targetCore, targetSuffix, adapted, rfl⟩
+
+theorem CodeAdapted.withEmptySuffix
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {sourceCode : Lean.Compiler.LCNF.Code .impure}
+    {targetCode : Wasm.Program}
+    (adapted :
+      CodeAdapted context sourceModule sourceFunction labels sourceCode
+        targetCode) :
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels sourceCode
+      targetCode := by
+  simpa using CodeAdapted.withSuffix (targetSuffix := []) adapted
+
+/-- Suffix-aware inversion of a source return. The physical residual remains
+after `ret`, so the explicit return discards it before it can execute. -/
+theorem CodeAdaptedWithSuffix.return_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {result : Lean.FVarId}
+    {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.return result) target) :
+    ∃ kind resultIndex targetSuffix,
+      Fir.Wasm.getLocal context result =
+          .ok (.localGet result, kind) ∧
+        findFVar? (functionBindings sourceFunction) result = some resultIndex ∧
+        (functionBindings sourceFunction)[resultIndex]?.map Prod.snd =
+          some kind ∧
+        target = [.localGet resultIndex, .ret] ++ targetSuffix := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt, rfl⟩ :=
+    CodeAdapted.return_eq localsAligned coreAdapted
+  exact ⟨kind, resultIndex, targetSuffix, localCompiled, resultFound, kindAt,
+    rfl⟩
+
+/-- Suffix-aware inversion of a direct `let`. The independently adapted
+continuation inherits the same physical residual. -/
+theorem CodeAdaptedWithSuffix.let_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.let decl continuation) target) :
+    ∃ valueCode targetValue targetRest resultIndex,
+      Fir.Wasm.compileLetValue context decl = .ok valueCode ∧
+        instructions sourceModule sourceFunction labels valueCode =
+          .ok targetValue ∧
+        findFVar? (functionBindings sourceFunction) decl.fvarId =
+          some resultIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = targetValue ++ .localSet resultIndex :: targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨valueCode, _restCode, targetValue, coreRest, resultIndex,
+      valueCompiled, _restCompiled, valueAdapted, restAdapted, resultFound,
+      rfl⟩ := CodeAdapted.let_eq coreAdapted
+  refine ⟨valueCode, targetValue, coreRest ++ targetSuffix, resultIndex,
+    valueCompiled, valueAdapted, resultFound, ?_, ?_⟩
+  · exact CodeAdapted.withSuffix (targetSuffix := targetSuffix)
+      ⟨_, _restCompiled, restAdapted⟩
+  · simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.incPersistent_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.inc objectId amount check true continuation) target) :
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
+      target := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  exact CodeAdapted.withSuffix (targetSuffix := targetSuffix)
+    (CodeAdapted.incPersistent_eq coreAdapted)
+
+theorem CodeAdaptedWithSuffix.decPersistent_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.dec objectId amount check true objectFields? continuation) target) :
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
+      target := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  exact CodeAdapted.withSuffix (targetSuffix := targetSuffix)
+    (CodeAdapted.decPersistent_eq coreAdapted)
+
+theorem CodeAdaptedWithSuffix.inc_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.inc objectId amount check false continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some objectKind ∧
+        callIndex? sourceModule (.runtime (.inc amount check)) = some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, callIndex, coreRest, objectFound, kindAt, callFound,
+      continuationAdapted, rfl⟩ :=
+    CodeAdapted.inc_eq localsAligned objectCompiled coreAdapted
+  refine ⟨objectIndex, callIndex, coreRest ++ targetSuffix, objectFound, kindAt,
+    callFound, CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.dec_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {amount : Nat} {check : Bool}
+    {objectFields? : Option Nat} {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.dec objectId amount check false objectFields? continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some objectKind ∧
+        callIndex? sourceModule (.runtime (.dec amount check objectFields?)) =
+          some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, callIndex, coreRest, objectFound, kindAt, callFound,
+      continuationAdapted, rfl⟩ :=
+    CodeAdapted.dec_eq localsAligned objectCompiled coreAdapted
+  refine ⟨objectIndex, callIndex, coreRest ++ targetSuffix, objectFound, kindAt,
+    callFound, CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.del_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {objectKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, objectKind))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.del objectId continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some objectKind ∧
+        callIndex? sourceModule (.runtime .delete) = some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, callIndex, coreRest, objectFound, kindAt, callFound,
+      continuationAdapted, rfl⟩ :=
+    CodeAdapted.del_eq localsAligned objectCompiled coreAdapted
+  refine ⟨objectIndex, callIndex, coreRest ++ targetSuffix, objectFound, kindAt,
+    callFound, CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.setTag_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {tag : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.setTag objectId tag continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        callIndex? sourceModule (.runtime (.setTag tag)) = some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = [.localGet objectIndex, .call callIndex] ++ targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, callIndex, coreRest, objectFound, kindAt, callFound,
+      continuationAdapted, rfl⟩ :=
+    CodeAdapted.setTag_eq localsAligned objectCompiled coreAdapted
+  refine ⟨objectIndex, callIndex, coreRest ++ targetSuffix, objectFound, kindAt,
+    callFound, CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.objectSetFVar_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId fieldId : Lean.FVarId} {index : Nat} {fieldKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.oset objectId index (.fvar fieldId) continuation) target) :
+    ∃ objectIndex fieldIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        findFVar? (functionBindings sourceFunction) fieldId = some fieldIndex ∧
+        (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd =
+          some fieldKind ∧
+        callIndex? sourceModule (.runtime (.objectSet index fieldKind)) =
+          some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target =
+          [.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+            targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, fieldIndex, callIndex, coreRest, objectFound, objectKindAt,
+      fieldFound, fieldKindAt, callFound, continuationAdapted, rfl⟩ :=
+    CodeAdapted.objectSetFVar_eq localsAligned objectCompiled fieldCompiled
+      coreAdapted
+  refine ⟨objectIndex, fieldIndex, callIndex, coreRest ++ targetSuffix,
+    objectFound, objectKindAt, fieldFound, fieldKindAt, callFound,
+    CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.objectSetErased_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.oset objectId index .erased continuation) target) :
+    ∃ objectIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        callIndex? sourceModule (.runtime (.objectSet index .erased)) =
+          some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target = [.localGet objectIndex, .const 0, .call callIndex] ++
+          targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, callIndex, coreRest, objectFound, objectKindAt, callFound,
+      continuationAdapted, rfl⟩ :=
+    CodeAdapted.objectSetErased_eq localsAligned objectCompiled coreAdapted
+  refine ⟨objectIndex, callIndex, coreRest ++ targetSuffix, objectFound,
+    objectKindAt, callFound, CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.usizeSet_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId fieldId : Lean.FVarId} {index : Nat}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, .usize))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.uset objectId index fieldId continuation) target) :
+    ∃ objectIndex fieldIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        findFVar? (functionBindings sourceFunction) fieldId = some fieldIndex ∧
+        (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd =
+          some .usize ∧
+        callIndex? sourceModule (.runtime (.usizeSet index)) = some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target =
+          [.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+            targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, fieldIndex, callIndex, coreRest, objectFound, objectKindAt,
+      fieldFound, fieldKindAt, callFound, continuationAdapted, rfl⟩ :=
+    CodeAdapted.usizeSet_eq localsAligned objectCompiled fieldCompiled coreAdapted
+  refine ⟨objectIndex, fieldIndex, callIndex, coreRest ++ targetSuffix,
+    objectFound, objectKindAt, fieldFound, fieldKindAt, callFound,
+    CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.scalarSet_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {objectId fieldId : Lean.FVarId} {slotIndex byteOffset : Nat}
+    {type : Lean.Expr} {fieldKind : AbiKind}
+    {continuation : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (objectCompiled : Fir.Wasm.getLocal context objectId =
+      .ok (.localGet objectId, .object))
+    (fieldCompiled : Fir.Wasm.getLocal context fieldId =
+      .ok (.localGet fieldId, fieldKind))
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.sset objectId slotIndex byteOffset fieldId type continuation) target) :
+    ∃ objectIndex fieldIndex callIndex targetRest,
+      findFVar? (functionBindings sourceFunction) objectId = some objectIndex ∧
+        (functionBindings sourceFunction)[objectIndex]?.map Prod.snd =
+          some .object ∧
+        findFVar? (functionBindings sourceFunction) fieldId = some fieldIndex ∧
+        (functionBindings sourceFunction)[fieldIndex]?.map Prod.snd =
+          some fieldKind ∧
+        callIndex? sourceModule
+            (.runtime (.scalarSet slotIndex byteOffset fieldKind)) =
+          some callIndex ∧
+        CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+          continuation targetRest ∧
+        target =
+          [.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+            targetRest := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨objectIndex, fieldIndex, callIndex, coreRest, objectFound, objectKindAt,
+      fieldFound, fieldKindAt, callFound, continuationAdapted, rfl⟩ :=
+    CodeAdapted.scalarSet_eq localsAligned objectCompiled fieldCompiled
+      coreAdapted
+  refine ⟨objectIndex, fieldIndex, callIndex, coreRest ++ targetSuffix,
+    objectFound, objectKindAt, fieldFound, fieldKindAt, callFound,
+    CodeAdapted.withSuffix continuationAdapted, ?_⟩
+  simp [List.append_assoc]
+
+theorem CodeAdaptedWithSuffix.defaultOnlyCases_selected
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {selected : Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (onlyDefault : cases.alts.toList = [.default selected])
+    (adapted :
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+        (.cases cases) target) :
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
+      target := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  exact CodeAdapted.withSuffix (targetSuffix := targetSuffix)
+    (CodeAdapted.defaultOnlyCases_selected onlyDefault coreAdapted)
+
+theorem CodeAdaptedWithSuffix.singleObjectConstructorCases_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {info : Lean.Compiler.LCNF.CtorInfo}
+    {selected : Lean.Compiler.LCNF.Code .impure} {target : Wasm.Program}
+    (altsEq : cases.alts.toList = [.ctorAlt info selected])
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
+    (fits : Fir.Wasm.constructorTagFitsI32 info = true)
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) target) :
+    ∃ selectedTarget discrIndex getTagIndex targetSuffix,
+      CodeAdapted context sourceModule sourceFunction labels selected
+          selectedTarget ∧
+      findFVar? (functionBindings sourceFunction) cases.discr =
+        some discrIndex ∧
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
+      target = ([.localGet discrIndex, .call getTagIndex,
+        .const (UInt32.ofNat info.cidx), .eq,
+        .iff 0 0 selectedTarget [.unreachable]] : Wasm.Program) ++
+          targetSuffix := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨selectedTarget, discrIndex, getTagIndex, selectedAdapted,
+      discrFound, getTagFound, targetEq⟩ :=
+    CodeAdapted.singleObjectConstructorCases_eq altsEq modeEq fits coreAdapted
+  subst targetCore
+  exact ⟨selectedTarget, discrIndex, getTagIndex, targetSuffix,
+    selectedAdapted, discrFound, getTagFound, rfl⟩
+
+theorem CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq
+    {context : Fir.Wasm.Context} {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function} {labels : List Lean.FVarId}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {firstInfo secondInfo : Lean.Compiler.LCNF.CtorInfo}
+    {firstBranch secondBranch defaultBranch :
+      Lean.Compiler.LCNF.Code .impure}
+    {target : Wasm.Program}
+    (altsEq : cases.alts.toList =
+      [.ctorAlt firstInfo firstBranch, .ctorAlt secondInfo secondBranch,
+        .default defaultBranch])
+    (modeEq : Fir.Wasm.caseDiscriminatorMode context cases.discr = .objectTag)
+    (firstFits : Fir.Wasm.constructorTagFitsI32 firstInfo = true)
+    (secondFits : Fir.Wasm.constructorTagFitsI32 secondInfo = true)
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) target) :
+    ∃ firstTarget secondTarget defaultTarget discrIndex getTagIndex
+        targetSuffix,
+      CodeAdapted context sourceModule sourceFunction labels firstBranch
+          firstTarget ∧
+      CodeAdapted context sourceModule sourceFunction labels secondBranch
+          secondTarget ∧
+      CodeAdapted context sourceModule sourceFunction labels defaultBranch
+          defaultTarget ∧
+      findFVar? (functionBindings sourceFunction) cases.discr =
+        some discrIndex ∧
+      callIndex? sourceModule (.runtime .getTag) = some getTagIndex ∧
+      target = ([.localGet discrIndex, .call getTagIndex,
+          .const (UInt32.ofNat firstInfo.cidx), .eq,
+          .iff 0 0 firstTarget
+            [.localGet discrIndex, .call getTagIndex,
+              .const (UInt32.ofNat secondInfo.cidx), .eq,
+              .iff 0 0 secondTarget defaultTarget]] : Wasm.Program) ++
+        targetSuffix := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, rfl⟩
+  obtain ⟨firstTarget, secondTarget, defaultTarget, discrIndex, getTagIndex,
+      firstAdapted, secondAdapted, defaultAdapted, discrFound, getTagFound,
+      targetEq⟩ :=
+    CodeAdapted.twoObjectConstructorDefaultCases_eq altsEq modeEq firstFits
+      secondFits coreAdapted
+  subst targetCore
+  exact ⟨firstTarget, secondTarget, defaultTarget, discrIndex, getTagIndex,
+    targetSuffix, firstAdapted, secondAdapted, defaultAdapted, discrFound,
+    getTagFound, rfl⟩
+
+theorem CodeAdaptedWithSuffix.cases_eq
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {cases : Lean.Compiler.LCNF.Cases .impure}
+    {target : Wasm.Program}
+    (adapted : CodeAdaptedWithSuffix context sourceModule sourceFunction labels
+      (.cases cases) target) :
+    ∃ fallback targetCore targetSuffix,
+      Fir.Wasm.compileCaseFallback context cases.alts.toList = .ok fallback ∧
+      CaseChainAdapted context sourceModule sourceFunction labels cases.discr
+        cases.alts.toList fallback targetCore ∧
+      target = targetCore ++ targetSuffix := by
+  rcases adapted with ⟨targetCore, targetSuffix, coreAdapted, targetEq⟩
+  rcases CodeAdapted.cases_eq coreAdapted with
+    ⟨fallback, fallbackCompiled, chainAdapted⟩
+  exact ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
+    targetEq⟩
+
 /-- Local compiler relation at a source code node and a running structured
 target node.  It fixes the source program, runtime and environment and the
 target store, locals and residual program, while leaving both continuation
@@ -52,7 +544,8 @@ structure ConcreteStructuredCodeFocus
   targetStoreEq : target.store = targetStore
   targetControlEq : target.control = .running targetLocals targetCode
   adapted :
-    CodeAdapted context sourceModule sourceFunction labels sourceCode targetCode
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels sourceCode
+      targetCode
   stateRelated :
     StateRelated sourceFunction sourceRuntime sourceEnv targetStore targetLocals
       witness
@@ -2230,7 +2723,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
     (targetCodeEq :
       targetCode = targetValue ++ .localSet resultIndex :: targetRest)
     (continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
         targetRest)
     (flat : StructuredWasmFlatProgram module
       (targetValue ++ [.localSet resultIndex]))
@@ -2372,7 +2865,7 @@ theorem ConcreteStructuredCodeFocus.advance_flatExternalLet
     (targetCodeEq :
       targetCode = targetValue ++ .localSet resultIndex :: targetRest)
     (continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
         targetRest)
     (flat : StructuredWasmFlatProgram module
       (targetValue ++ [.localSet resultIndex]))
@@ -2561,9 +3054,9 @@ theorem ConcreteStructuredCodeFocus.advance_return
       sourceAfter.joins = source.joins ∧
       sourceAfter.frames = source.frames ∧
       targetAfter.frames = target.frames := by
-  obtain ⟨kind, resultIndex, localCompiled, resultFound, kindAt,
+  obtain ⟨kind, resultIndex, targetSuffix, localCompiled, resultFound, kindAt,
       targetCodeEq⟩ :=
-    CodeAdapted.return_eq localsAligned related.adapted
+    CodeAdaptedWithSuffix.return_eq localsAligned related.adapted
   obtain ⟨physical, targetLookup, valueRelated⟩ :=
     related.stateRelated.resolve sourceLookup resultFound kindAt
   subst targetCode
@@ -2574,7 +3067,7 @@ theorem ConcreteStructuredCodeFocus.advance_return
       control := .running
         { targetLocals with
           values := physical :: targetLocals.values }
-        [.ret] }
+        (.ret :: targetSuffix) }
   let targetAfter : StructuredWasmState Host :=
     { target with
       control := .returning (physical :: targetLocals.values) }
@@ -2597,7 +3090,8 @@ theorem ConcreteStructuredCodeFocus.advance_return
       subst store
       have controlEq := related.targetControlEq
       change control =
-        .running targetLocals [.localGet resultIndex, .ret] at controlEq
+        .running targetLocals
+          ([.localGet resultIndex, .ret] ++ targetSuffix) at controlEq
       subst control
       apply StructuredWasmStep.atomic (fuel := 1)
       · trivial
@@ -2770,14 +3264,9 @@ theorem
   | @letValue facts decl letSourceRuntime letSourceEnv letNextRuntime
       letSourceValue nextFacts continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-          targetCodeEq⟩ :=
-        CodeAdapted.let_eq related.adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction labels continuation
-            targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+          valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.let_eq related.adapted
       have stepFits :
           letCost decl ≤ letCost decl + continuationCost :=
         Nat.le_add_right _ _
@@ -3284,7 +3773,8 @@ import, expected-tag constant, equality, and conditional entry. -/
 theorem structuredWasmObjectCaseHitPrefixFinitePath
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host} {store : Wasm.Store Host}
-    {locals : Wasm.Locals} {frames : List StructuredWasmFrame}
+    {locals : Wasm.Locals} {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
     {thenTarget elseTarget : Wasm.Program} {discrIndex getTagIndex : Nat}
     {imp : Wasm.ImportDecl} {word : Word32} {actualTag expectedTag : Nat}
     (tagEq : actualTag = expectedTag)
@@ -3301,52 +3791,52 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
       getTagStep store [.i32 (UInt32.ofNat word.value)] =
         .Return [.i32 (UInt32.ofNat actualTag)] store) :
     FinitePath (StructuredWasmStep module hostEnv) 5
-      ⟨store, .running locals [
+      ⟨store, .running locals ([
           .localGet discrIndex,
           .call getTagIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget], frames⟩
+          .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } thenTarget,
-        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+        .label 0 (locals.values.drop 0) rest :: frames⟩ := by
   let afterLocal : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat word.value) :: locals.values } [
+        values := .i32 (UInt32.ofNat word.value) :: locals.values } ([
           .call getTagIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterHost : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
         (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values := .i32 1 :: locals.values }
-        [.iff 0 0 thenTarget elseTarget],
+        ([.iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   have loadLocal :
       StructuredWasmStep module hostEnv
-        ⟨store, .running locals [
+        ⟨store, .running locals ([
             .localGet discrIndex,
             .call getTagIndex,
             .const (UInt32.ofNat expectedTag),
             .eq,
-            .iff 0 0 thenTarget elseTarget], frames⟩
+            .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
     · trivial
@@ -3382,11 +3872,11 @@ theorem structuredWasmObjectCaseHitPrefixFinitePath
       StructuredWasmStep module hostEnv afterEq
         ⟨store,
           .running { locals with values := locals.values } thenTarget,
-          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
-    simpa only [afterEq] using
+          .label 0 (locals.values.drop 0) rest :: frames⟩ := by
+    simpa only [afterEq, List.singleton_append] using
       (StructuredWasmStep.enterIffThen (module := module) (env := hostEnv)
         (store := store) (locals := locals) (thenBody := thenTarget)
-        (elseBody := elseTarget) (rest := []) (frames := frames)
+        (elseBody := elseTarget) (rest := rest) (frames := frames)
         (condition := 1) (by decide))
   exact .cons loadLocal
     (.cons callHost
@@ -3398,7 +3888,8 @@ the recursively compiled remainder of the ordered case chain. -/
 theorem structuredWasmObjectCaseMissPrefixFinitePath
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {spec : Wasm.HostSpec Host} {store : Wasm.Store Host}
-    {locals : Wasm.Locals} {frames : List StructuredWasmFrame}
+    {locals : Wasm.Locals} {rest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
     {thenTarget elseTarget : Wasm.Program} {discrIndex getTagIndex : Nat}
     {imp : Wasm.ImportDecl} {word : Word32} {actualTag expectedTag : Nat}
     (tagNe : actualTag ≠ expectedTag)
@@ -3417,52 +3908,52 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
       getTagStep store [.i32 (UInt32.ofNat word.value)] =
         .Return [.i32 (UInt32.ofNat actualTag)] store) :
     FinitePath (StructuredWasmStep module hostEnv) 5
-      ⟨store, .running locals [
+      ⟨store, .running locals ([
           .localGet discrIndex,
           .call getTagIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget], frames⟩
+          .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } elseTarget,
-        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+        .label 0 (locals.values.drop 0) rest :: frames⟩ := by
   let afterLocal : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat word.value) :: locals.values } [
+        values := .i32 (UInt32.ofNat word.value) :: locals.values } ([
           .call getTagIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterHost : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
         (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values := .i32 0 :: locals.values }
-        [.iff 0 0 thenTarget elseTarget],
+        ([.iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   have loadLocal :
       StructuredWasmStep module hostEnv
-        ⟨store, .running locals [
+        ⟨store, .running locals ([
             .localGet discrIndex,
             .call getTagIndex,
             .const (UInt32.ofNat expectedTag),
             .eq,
-            .iff 0 0 thenTarget elseTarget], frames⟩
+            .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
     · trivial
@@ -3503,11 +3994,11 @@ theorem structuredWasmObjectCaseMissPrefixFinitePath
       StructuredWasmStep module hostEnv afterEq
         ⟨store,
           .running { locals with values := locals.values } elseTarget,
-          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
-    simpa only [afterEq] using
+          .label 0 (locals.values.drop 0) rest :: frames⟩ := by
+    simpa only [afterEq, List.singleton_append] using
       (StructuredWasmStep.enterIffElse (module := module) (env := hostEnv)
         (store := store) (locals := locals) (thenBody := thenTarget)
-        (elseBody := elseTarget) (rest := []) (frames := frames))
+        (elseBody := elseTarget) (rest := rest) (frames := frames))
   exact .cons loadLocal
     (.cons callHost
       (.cons pushExpected
@@ -3567,48 +4058,48 @@ local read, expected-tag constant, equality, and conditional entry. -/
 theorem structuredWasmScalarUInt8CaseHitPrefixFinitePath
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {store : Wasm.Store Host} {locals : Wasm.Locals}
-    {frames : List StructuredWasmFrame}
+    {rest : Wasm.Program} {frames : List StructuredWasmFrame}
     {thenTarget elseTarget : Wasm.Program} {discrIndex : Nat}
     {actualTag expectedTag : Nat}
     (tagEq : actualTag = expectedTag)
     (localFound :
       locals.get discrIndex = some (.i32 (UInt32.ofNat actualTag))) :
     FinitePath (StructuredWasmStep module hostEnv) 4
-      ⟨store, .running locals [
+      ⟨store, .running locals ([
           .localGet discrIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget], frames⟩
+          .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } thenTarget,
-        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+        .label 0 (locals.values.drop 0) rest :: frames⟩ := by
   let afterLocal : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
         (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values := .i32 1 :: locals.values }
-        [.iff 0 0 thenTarget elseTarget],
+        ([.iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   have loadLocal :
       StructuredWasmStep module hostEnv
-        ⟨store, .running locals [
+        ⟨store, .running locals ([
             .localGet discrIndex,
             .const (UInt32.ofNat expectedTag),
             .eq,
-            .iff 0 0 thenTarget elseTarget], frames⟩
+            .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
     · trivial
@@ -3626,11 +4117,11 @@ theorem structuredWasmScalarUInt8CaseHitPrefixFinitePath
       StructuredWasmStep module hostEnv afterEq
         ⟨store,
           .running { locals with values := locals.values } thenTarget,
-          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
-    simpa only [afterEq] using
+          .label 0 (locals.values.drop 0) rest :: frames⟩ := by
+    simpa only [afterEq, List.singleton_append] using
       (StructuredWasmStep.enterIffThen (module := module) (env := hostEnv)
         (store := store) (locals := locals) (thenBody := thenTarget)
-        (elseBody := elseTarget) (rest := []) (frames := frames)
+        (elseBody := elseTarget) (rest := rest) (frames := frames)
         (condition := 1) (by decide))
   exact .cons loadLocal
     (.cons pushExpected
@@ -3641,7 +4132,7 @@ recursively compiled remainder of the case chain. -/
 theorem structuredWasmScalarUInt8CaseMissPrefixFinitePath
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {store : Wasm.Store Host} {locals : Wasm.Locals}
-    {frames : List StructuredWasmFrame}
+    {rest : Wasm.Program} {frames : List StructuredWasmFrame}
     {thenTarget elseTarget : Wasm.Program} {discrIndex : Nat}
     {actualTag expectedTag : Nat}
     (tagNe : actualTag ≠ expectedTag)
@@ -3650,41 +4141,41 @@ theorem structuredWasmScalarUInt8CaseMissPrefixFinitePath
     (localFound :
       locals.get discrIndex = some (.i32 (UInt32.ofNat actualTag))) :
     FinitePath (StructuredWasmStep module hostEnv) 4
-      ⟨store, .running locals [
+      ⟨store, .running locals ([
           .localGet discrIndex,
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget], frames⟩
+          .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
       ⟨store, .running { locals with values := locals.values } elseTarget,
-        .label 0 (locals.values.drop 0) [] :: frames⟩ := by
+        .label 0 (locals.values.drop 0) rest :: frames⟩ := by
   let afterLocal : StructuredWasmState Host :=
     ⟨store,
       .running { locals with
-        values := .i32 (UInt32.ofNat actualTag) :: locals.values } [
+        values := .i32 (UInt32.ofNat actualTag) :: locals.values } ([
           .const (UInt32.ofNat expectedTag),
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterConst : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values :=
         (.i32 (UInt32.ofNat expectedTag) ::
-          .i32 (UInt32.ofNat actualTag) :: locals.values) } [
+          .i32 (UInt32.ofNat actualTag) :: locals.values) } ([
           .eq,
-          .iff 0 0 thenTarget elseTarget],
+          .iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   let afterEq : StructuredWasmState Host :=
     ⟨store,
       .running { locals with values := .i32 0 :: locals.values }
-        [.iff 0 0 thenTarget elseTarget],
+        ([.iff 0 0 thenTarget elseTarget] ++ rest),
       frames⟩
   have loadLocal :
       StructuredWasmStep module hostEnv
-        ⟨store, .running locals [
+        ⟨store, .running locals ([
             .localGet discrIndex,
             .const (UInt32.ofNat expectedTag),
             .eq,
-            .iff 0 0 thenTarget elseTarget], frames⟩
+            .iff 0 0 thenTarget elseTarget] ++ rest), frames⟩
         afterLocal := by
     apply StructuredWasmStep.atomic (fuel := 1)
     · trivial
@@ -3707,11 +4198,11 @@ theorem structuredWasmScalarUInt8CaseMissPrefixFinitePath
       StructuredWasmStep module hostEnv afterEq
         ⟨store,
           .running { locals with values := locals.values } elseTarget,
-          .label 0 (locals.values.drop 0) [] :: frames⟩ := by
-    simpa only [afterEq] using
+          .label 0 (locals.values.drop 0) rest :: frames⟩ := by
+    simpa only [afterEq, List.singleton_append] using
       (StructuredWasmStep.enterIffElse (module := module) (env := hostEnv)
         (store := store) (locals := locals) (thenBody := thenTarget)
-        (elseBody := elseTarget) (rest := []) (frames := frames))
+        (elseBody := elseTarget) (rest := rest) (frames := frames))
   exact .cons loadLocal
     (.cons pushExpected
       (.cons compare (.cons enterRemainder (.refl _))))
@@ -4166,6 +4657,55 @@ theorem List.replicate_succ_append
       simpa only [Nat.succ_eq_add_one, List.replicate_succ,
         List.cons_append, List.cons.injEq, true_and] using ih
 
+/-- Labels retained after selecting one arm of a generated case chain.  The
+outermost test saves the physical function suffix; all nested tests save an
+empty remainder because their code already lives inside that outer arm. -/
+def structuredWasmCaseLabels (belowStack : List Wasm.Value)
+    (rest : Wasm.Program) : Nat → List StructuredWasmFrame
+  | 0 => []
+  | count + 1 =>
+      List.replicate count (.label 0 belowStack []) ++
+        [.label 0 belowStack rest]
+
+theorem structuredWasmCaseLabels_empty_then_outer
+    (belowStack : List Wasm.Value) (rest : Wasm.Program) (count : Nat)
+    (frames : List StructuredWasmFrame) :
+    structuredWasmCaseLabels belowStack [] count ++
+        .label 0 belowStack rest :: frames =
+      structuredWasmCaseLabels belowStack rest (count + 1) ++ frames := by
+  cases count with
+  | zero => rfl
+  | succ count =>
+      simp [structuredWasmCaseLabels, List.append_assoc,
+        List.replicate_succ_append]
+
+/-- Returning from a selected case arm pops every generated conditional label,
+including the outer label that stores the function-level physical suffix. -/
+theorem structuredWasmReturnCaseLabelsFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host} {values belowStack : List Wasm.Value}
+    {rest : Wasm.Program} {frames : List StructuredWasmFrame} (count : Nat) :
+    FinitePath (StructuredWasmStep module hostEnv) count
+      ⟨store, .returning values,
+        structuredWasmCaseLabels belowStack rest count ++ frames⟩
+      ⟨store, .returning values, frames⟩ := by
+  cases count with
+  | zero => exact .refl _
+  | succ count =>
+      have emptyLabels :=
+        structuredWasmReturnReplicatedCaseLabelsFinitePath
+          (module := module) (hostEnv := hostEnv) (store := store)
+          (values := values) (belowStack := belowStack)
+          (frames := .label 0 belowStack rest :: frames) count
+      have outer :
+          StructuredWasmStep module hostEnv
+            ⟨store, .returning values,
+              .label 0 belowStack rest :: frames⟩
+            ⟨store, .returning values, frames⟩ := by
+        exact StructuredWasmStep.returnLabel
+      simpa [structuredWasmCaseLabels, Nat.succ_eq_add_one] using
+        emptyLabels.trans (.single outer)
+
 /-- Exact structured path through an arbitrary normalized object-constructor
 case chain. Production compiler inversion supplies every generated branch and
 test. Source selection determines how many five-step tests execute; the
@@ -4185,6 +4725,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback : List Fir.Wasm.Instruction} {chainTarget : Wasm.Program}
+    {targetSuffix : Wasm.Program}
     {selected : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
     {witness : RefinementWitness} {sourceObject : Value} {actualTag : Nat}
@@ -4206,17 +4747,18 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
     ∃ selectedTarget testCount,
-      CodeAdapted context sourceModule sourceFunction labels selected
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
           selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (5 * testCount)
-          ⟨targetStore, .running targetLocals chainTarget, frames⟩
+          ⟨targetStore, .running targetLocals
+            (chainTarget ++ targetSuffix), frames⟩
           ⟨targetStore,
             .running { targetLocals with values := targetLocals.values }
               selectedTarget,
-            List.replicate testCount
-                (.label 0 (targetLocals.values.drop 0) []) ++ frames⟩ := by
-  induction supported generalizing chainTarget selected frames with
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix testCount ++ frames⟩ := by
+  induction supported generalizing chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -4234,7 +4776,9 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
         ⟨fallback, branchCompiled,
           CaseChainAdapted.nil_eq
             (CaseChainAdapted.default_eq chainAdapted)⟩
-      exact ⟨chainTarget, 0, branchAdapted, .refl _⟩
+      exact ⟨chainTarget ++ targetSuffix, 0,
+        CodeAdapted.withSuffix (targetSuffix := targetSuffix) branchAdapted,
+        .refl _⟩
   | @ctor info alts code fits rest ih =>
       have fallbackCompiledRest :
           Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
@@ -4292,13 +4836,14 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, thenAdapted, ?_⟩
+        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_⟩
         rw [targetEq]
-        simpa using
+        simpa [structuredWasmCaseLabels] using
           structuredWasmObjectCaseHitPrefixFinitePath
             (module := target.wasmModule) (hostEnv := hosts.env)
             (spec := hosts.spec) (store := targetStore)
             (locals := targetLocals) (frames := frames)
+            (rest := targetSuffix)
             (thenTarget := thenTarget) (elseTarget := elseTarget)
             (discrIndex := discrIndex) (getTagIndex := getTagIndex)
             (imp := imp) (word := word) (actualTag := actualTag)
@@ -4311,13 +4856,14 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
           simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
             using selection
         let caseLabel : StructuredWasmFrame :=
-          .label 0 (targetLocals.values.drop 0) []
+          .label 0 (targetLocals.values.drop 0) targetSuffix
         obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
-            (frames := caseLabel :: frames)
+            (targetSuffix := []) (frames := caseLabel :: frames)
         have headPath :
             FinitePath (StructuredWasmStep target.wasmModule hosts.env) 5
-              ⟨targetStore, .running targetLocals chainTarget, frames⟩
+              ⟨targetStore, .running targetLocals
+                (chainTarget ++ targetSuffix), frames⟩
               ⟨targetStore,
                 .running { targetLocals with values := targetLocals.values }
                   elseTarget,
@@ -4328,6 +4874,7 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               (module := target.wasmModule) (hostEnv := hosts.env)
               (spec := hosts.spec) (store := targetStore)
               (locals := targetLocals) (frames := frames)
+              (rest := targetSuffix)
               (thenTarget := thenTarget) (elseTarget := elseTarget)
               (discrIndex := discrIndex) (getTagIndex := getTagIndex)
               (imp := imp) (word := word) (actualTag := actualTag)
@@ -4335,8 +4882,10 @@ theorem ConcreteSupportedFunction.objectConstructorCaseChainFinitePath
               targetLookup imported spec.hostsSatisfy inBounds
               getTagContracted parameterCount resultCount tagOperation
         refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
+        simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
-          List.replicate_succ_append] using headPath.trans tailPath
+          structuredWasmCaseLabels_empty_then_outer] using
+            headPath.trans tailPath
 
 /-- Exact structured path through an arbitrary normalized scalar `UInt8` case
 chain. Each compiler-generated direct comparison costs four steps and retains
@@ -4356,6 +4905,7 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
     {sourceRuntime : RuntimeState} {sourceEnv : Env}
     {discr : Lean.FVarId} {alts : List (Lean.Compiler.LCNF.Alt .impure)}
     {fallback : List Fir.Wasm.Instruction} {chainTarget : Wasm.Program}
+    {targetSuffix : Wasm.Program}
     {selected : Lean.Compiler.LCNF.Code .impure}
     {targetStore : Wasm.Store Host} {targetLocals : Wasm.Locals}
     {witness : RefinementWitness} {sourceValue : Value} {actualTag : Nat}
@@ -4376,17 +4926,18 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
       CaseChainAdapted context sourceModule sourceFunction labels discr alts
         fallback chainTarget) :
     ∃ selectedTarget testCount,
-      CodeAdapted context sourceModule sourceFunction labels selected
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels selected
           selectedTarget ∧
         FinitePath (StructuredWasmStep target.wasmModule hosts.env)
           (4 * testCount)
-          ⟨targetStore, .running targetLocals chainTarget, frames⟩
+          ⟨targetStore, .running targetLocals
+            (chainTarget ++ targetSuffix), frames⟩
           ⟨targetStore,
             .running { targetLocals with values := targetLocals.values }
               selectedTarget,
-            List.replicate testCount
-                (.label 0 (targetLocals.values.drop 0) []) ++ frames⟩ := by
-  induction supported generalizing chainTarget selected frames with
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix testCount ++ frames⟩ := by
+  induction supported generalizing chainTarget targetSuffix selected frames with
   | nil =>
       simp [chooseAlt, findCtorAlt, findDefaultAlt] at selection
   | default code =>
@@ -4404,7 +4955,9 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
         ⟨fallback, branchCompiled,
           CaseChainAdapted.nil_eq
             (CaseChainAdapted.default_eq chainAdapted)⟩
-      exact ⟨chainTarget, 0, branchAdapted, .refl _⟩
+      exact ⟨chainTarget ++ targetSuffix, 0,
+        CodeAdapted.withSuffix (targetSuffix := targetSuffix) branchAdapted,
+        .refl _⟩
   | @ctor info alts code fits rest ih =>
       have fallbackCompiledRest :
           Fir.Wasm.compileCaseFallback context alts = .ok fallback := by
@@ -4432,12 +4985,13 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
               using selection
           exact branchEq.symm
         subst selected
-        refine ⟨thenTarget, 1, thenAdapted, ?_⟩
+        refine ⟨thenTarget, 1, CodeAdapted.withEmptySuffix thenAdapted, ?_⟩
         rw [targetEq]
-        simpa using
+        simpa [structuredWasmCaseLabels] using
           structuredWasmScalarUInt8CaseHitPrefixFinitePath
             (module := target.wasmModule) (hostEnv := hosts.env)
             (store := targetStore) (locals := targetLocals) (frames := frames)
+            (rest := targetSuffix)
             (thenTarget := thenTarget) (elseTarget := elseTarget)
             (discrIndex := discrIndex) (actualTag := actualTag)
             (expectedTag := info.cidx) hit localFound
@@ -4447,13 +5001,14 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
           simpa [chooseAlt, findCtorAlt, findDefaultAlt, hit, reverseMiss]
             using selection
         let caseLabel : StructuredWasmFrame :=
-          .label 0 (targetLocals.values.drop 0) []
+          .label 0 (targetLocals.values.drop 0) targetSuffix
         obtain ⟨selectedTarget, testCount, selectedAdapted, tailPath⟩ :=
           ih selectionRest fallbackCompiledRest elseAdapted
-            (frames := caseLabel :: frames)
+            (targetSuffix := []) (frames := caseLabel :: frames)
         have headPath :
             FinitePath (StructuredWasmStep target.wasmModule hosts.env) 4
-              ⟨targetStore, .running targetLocals chainTarget, frames⟩
+              ⟨targetStore, .running targetLocals
+                (chainTarget ++ targetSuffix), frames⟩
               ⟨targetStore,
                 .running { targetLocals with values := targetLocals.values }
                   elseTarget,
@@ -4463,13 +5018,16 @@ theorem ConcreteSupportedFunction.scalarUInt8CaseChainFinitePath
             structuredWasmScalarUInt8CaseMissPrefixFinitePath
               (module := target.wasmModule) (hostEnv := hosts.env)
               (store := targetStore) (locals := targetLocals)
-              (frames := frames) (thenTarget := thenTarget)
+              (frames := frames) (rest := targetSuffix)
+              (thenTarget := thenTarget)
               (elseTarget := elseTarget) (discrIndex := discrIndex)
               (actualTag := actualTag) (expectedTag := info.cidx) hit
               actualFits expectedFits localFound
         refine ⟨selectedTarget, testCount + 1, selectedAdapted, ?_⟩
+        simp only [List.append_nil] at tailPath
         simpa [caseLabel, Nat.mul_add, Nat.add_comm,
-          List.replicate_succ_append] using headPath.trans tailPath
+          structuredWasmCaseLabels_empty_then_outer] using
+            headPath.trans tailPath
 
 /-- Compiler-derived structured simulation of one generated lazy-cache hit.
 
@@ -4510,7 +5068,7 @@ theorem ConcreteStructuredCodeFocus.advance_lazyHit_of_compiler
     (targetCodeEq :
       targetCode = targetValue ++ .localSet resultIndex :: targetRest)
     (continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction labels continuation
+      CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
         targetRest)
     (supported :
       LazyCacheCallSupported context decl declaration sourceDeclaration
@@ -7702,7 +8260,8 @@ structure ConcreteStructuredDirectCallReadyFocus
         .localSet resultIndex :: targetRest)
   targetFramesEq : target.frames = targetFrames
   continuationAdapted :
-    CodeAdapted callerContext sourceModule callerFunction labels continuation
+    CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
+      continuation
       targetRest
   callerStateRelated :
     StateRelated callerFunction sourceRuntime callerEnv targetStore callerLocals
@@ -7805,10 +8364,9 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage
         sourceRuntime continuation source.joins source.frames targetStore
         targetLocals targetLocals.values targetRest target.frames witness
         physicalArgs resultIndex sourceAfter targetAfter := by
-  obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-      valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-      targetCodeEq⟩ :=
-    CodeAdapted.let_eq related.adapted
+  obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+      valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+    CodeAdaptedWithSuffix.let_eq related.adapted
   have expectedCompiled :
       Fir.Wasm.compileLetValue callerContext decl =
         .ok (site.argumentCode ++
@@ -7849,10 +8407,6 @@ theorem ConcreteStructuredCodeFocus.advance_directCall_stage
   have resultIndexEq : alignedResultIndex = resultIndex :=
     (Option.some.inj alignedResultFound).symm
   subst alignedResultIndex
-  have continuationAdapted :
-      CodeAdapted callerContext sourceModule callerFunction labels continuation
-        targetRest :=
-    ⟨restCode, restCompiled, restAdapted⟩
   subst targetCode
   let sourceAfter : MachineState :=
     { source with
@@ -8007,7 +8561,8 @@ structure ConcreteStructuredDirectCallEntryFocus
       .call 1 callerRemainder callerLocals
           (.localSet resultIndex :: targetRest) :: targetFrames
   continuationAdapted :
-    CodeAdapted callerContext sourceModule callerFunction labels continuation
+    CodeAdaptedWithSuffix callerContext sourceModule callerFunction labels
+      continuation
       targetRest
   callerStateRelated :
     StateRelated callerFunction sourceRuntime callerEnv targetStore callerLocals
@@ -8256,7 +8811,9 @@ theorem ConcreteStructuredDirectCallReadyFocus.advance_enter
       sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
       targetStoreEq := by simp [targetAfter, related.targetStoreEq]
       targetControlEq := by simp [targetAfter]
-      adapted := row.bodyAdapted
+      adapted := by
+        rw [row.targetBodyEq]
+        exact CodeAdapted.withSuffix row.bodyAdapted
       stateRelated := calleeStateRelated
       frameAligned := calleeFrameAligned }
 
@@ -8382,7 +8939,7 @@ structure ConcreteStructuredBindFrameFocus
       .call 1 callerRemainder callerLocals
           (.localSet resultIndex :: targetRest) :: targetFrames
   continuationAdapted :
-    CodeAdapted context sourceModule sourceFunction labels continuation
+    CodeAdaptedWithSuffix context sourceModule sourceFunction labels continuation
       targetRest
   stateRelated :
     StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
@@ -10794,9 +11351,12 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
       fits =>
       obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
           callFound, continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.inc_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.inc_eq functionSpec.localsAligned objectCompiled
           related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       obtain ⟨imp, imported, inBounds, contracted, parameterCount,
           resultCount⟩ :=
         functionSpec.incrementCall callFound
@@ -10827,14 +11387,14 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.inc objectId amount check false continuation)
                 continuation
-                ([.localGet objectIndex, .call callIndex] ++ targetRest)
-                targetRest targetStore (replaceHeap targetStore heap)
+                ([.localGet objectIndex, .call callIndex] ++ targetCore)
+                targetCore targetStore (replaceHeap targetStore heap)
                 targetLocals witness witness := by
             apply effectStepSimulates_unaryHost
               (spec := hosts.spec) (step := incrementStep amount check)
             · exact sourceStep
             · exact codeAdapted_inc objectCompiled objectFound callFound
-                continuationAdapted
+                continuationCoreAdapted
             · exact related.stateRelated
             · exact nextRelated
             · exact targetLookup
@@ -10999,9 +11559,12 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
       objectLookup updated =>
       obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
           callFound, continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.dec_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.dec_eq functionSpec.localsAligned objectCompiled
           related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       obtain ⟨imp, imported, inBounds, contracted, parameterCount,
           resultCount⟩ :=
         functionSpec.decrementCall callFound
@@ -11034,15 +11597,15 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDecrement
                 sourceEnv
                 (.dec objectId amount check false objectFields? continuation)
                 continuation
-                ([.localGet objectIndex, .call callIndex] ++ targetRest)
-                targetRest targetStore (replaceHeap targetStore heap)
+                ([.localGet objectIndex, .call callIndex] ++ targetCore)
+                targetCore targetStore (replaceHeap targetStore heap)
                 targetLocals witness witness := by
             apply effectStepSimulates_unaryHost
               (spec := hosts.spec)
               (step := decrementStep amount check objectFields?)
             · exact sourceStep
             · exact codeAdapted_dec objectCompiled objectFound callFound
-                continuationAdapted
+                continuationCoreAdapted
             · exact related.stateRelated
             · exact nextRelated
             · exact targetLookup
@@ -11205,9 +11768,12 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
       sourceObject objectCompiled objectLookup updated =>
       obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
           callFound, continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.del_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.del_eq functionSpec.localsAligned objectCompiled
           related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       obtain ⟨imp, imported, inBounds, contracted, parameterCount,
           resultCount⟩ :=
         functionSpec.deleteCall callFound
@@ -11236,14 +11802,14 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryDelete
               EffectStepSimulates context sourceModule sourceFunction []
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.del objectId continuation) continuation
-                ([.localGet objectIndex, .call callIndex] ++ targetRest)
-                targetRest targetStore (replaceHeap targetStore heap)
+                ([.localGet objectIndex, .call callIndex] ++ targetCore)
+                targetCore targetStore (replaceHeap targetStore heap)
                 targetLocals witness witness := by
             apply effectStepSimulates_unaryHost
               (spec := hosts.spec) (step := deleteStep)
             · exact sourceStep
             · exact codeAdapted_delete objectCompiled objectFound callFound
-                continuationAdapted
+                continuationCoreAdapted
             · exact related.stateRelated
             · exact nextRelated
             · exact targetLookup
@@ -11406,9 +11972,12 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
       objectEq tagFits =>
       obtain ⟨objectIndex, callIndex, targetRest, objectFound, kindAt,
           callFound, continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.setTag_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.setTag_eq functionSpec.localsAligned objectCompiled
           related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       obtain ⟨imp, imported, inBounds, contracted, parameterCount,
           resultCount⟩ :=
         functionSpec.setTagCall callFound
@@ -11438,14 +12007,14 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
               EffectStepSimulates context sourceModule sourceFunction []
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.setTag objectId tag continuation) continuation
-                ([.localGet objectIndex, .call callIndex] ++ targetRest)
-                targetRest targetStore (replaceHeap targetStore heap)
+                ([.localGet objectIndex, .call callIndex] ++ targetCore)
+                targetCore targetStore (replaceHeap targetStore heap)
                 targetLocals witness witness := by
             apply effectStepSimulates_unaryHost
               (spec := hosts.spec) (step := setTagStep tag)
             · exact sourceStep
             · exact codeAdapted_setTag objectCompiled objectFound callFound
-                continuationAdapted
+                continuationCoreAdapted
             · exact related.stateRelated
             · exact nextRelated
             · exact targetLookup
@@ -11610,9 +12179,12 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
       obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
           objectKindAt, fieldFound, fieldKindAt, callFound,
           continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.objectSetFVar_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.objectSetFVar_eq functionSpec.localsAligned objectCompiled
           fieldCompiled related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       have objectSourceLookup :
           lookup sourceEnv objectId = some (.object (.heap location)) := by
         unfold lookupValue at objectLookup
@@ -11675,8 +12247,8 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
                     (.oset objectId index (.fvar fieldId) continuation)
                     continuation
                     ([.localGet objectIndex, .localGet fieldIndex,
-                        .call callIndex] ++ targetRest)
-                    targetRest targetStore (replaceHeap targetStore heap)
+                        .call callIndex] ++ targetCore)
+                    targetCore targetStore (replaceHeap targetStore heap)
                     targetLocals witness witness := by
                 apply effectStepSimulates_binaryHost
                   (spec := hosts.spec)
@@ -11690,7 +12262,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
                     exact .cons
                       (by simpa [functionBindings] using fieldFound) .nil
                   · exact callFound
-                  · exact continuationAdapted
+                  · exact continuationCoreAdapted
                 · exact related.stateRelated
                 · exact nextRelated
                 · exact targetObjectLookup
@@ -11868,9 +12440,12 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
       objectEq indexValid fieldKindAligned =>
       obtain ⟨objectIndex, callIndex, targetRest, objectFound, objectKindAt,
           callFound, continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.objectSetErased_eq functionSpec.localsAligned
+        CodeAdaptedWithSuffix.objectSetErased_eq functionSpec.localsAligned
           objectCompiled related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       have objectSourceLookup :
           lookup sourceEnv objectId = some (.object (.heap location)) := by
         unfold lookupValue at objectLookup
@@ -11925,8 +12500,8 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
                 sourceEnv (.oset objectId index .erased continuation)
                 continuation
                 ([.localGet objectIndex, .const 0, .call callIndex] ++
-                  targetRest)
-                targetRest targetStore (replaceHeap targetStore heap)
+                  targetCore)
+                targetCore targetStore (replaceHeap targetStore heap)
                 targetLocals witness witness := by
             apply effectStepSimulates_localI32ConstHost
               (spec := hosts.spec)
@@ -11939,7 +12514,7 @@ theorem ConcreteStructuredCodeFocus.advance_objectFieldErased
               · simp [instructions, instruction, pure, Except.pure, Bind.bind,
                   Except.bind]
               · exact callFound
-              · exact continuationAdapted
+              · exact continuationCoreAdapted
             · exact related.stateRelated
             · exact nextRelated
             · exact targetObjectLookup
@@ -12105,9 +12680,12 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
       obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
           objectKindAt, fieldFound, fieldKindAt, callFound,
           continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.usizeSet_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.usizeSet_eq functionSpec.localsAligned objectCompiled
           fieldCompiled related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
       have objectSourceLookup :
           lookup sourceEnv objectId = some (.object (.heap location)) := by
         unfold lookupValue at objectLookup
@@ -12155,14 +12733,14 @@ theorem ConcreteStructuredCodeFocus.advance_usizeField
                         nextRuntime sourceEnv
                         (.uset objectId index fieldId continuation) continuation
                         ([.localGet objectIndex, .localGet fieldIndex,
-                            .call callIndex] ++ targetRest)
-                        targetRest targetStore (replaceHeap targetStore heap)
+                            .call callIndex] ++ targetCore)
+                        targetCore targetStore (replaceHeap targetStore heap)
                         targetLocals witness witness := by
                     apply effectStepSimulates_binaryHost
                       (spec := hosts.spec) (step := usizeSetStep index)
                     · exact sourceStep
                     · exact codeAdapted_uset objectCompiled fieldCompiled
-                        objectFound fieldFound callFound continuationAdapted
+                        objectFound fieldFound callFound continuationCoreAdapted
                     · exact related.stateRelated
                     · exact nextRelated
                     · exact targetObjectLookup
@@ -12303,7 +12881,7 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
     {targetLocals : Wasm.Locals}
     {witness entryWitness : RefinementWitness}
     {objectIndex fieldIndex callIndex : Nat}
-    {targetRest : Wasm.Program}
+    {targetRest targetCore : Wasm.Program}
     {objectWord : Word32} {physicalField : Wasm.Value}
     {heap : MemoryState} {imp : Wasm.ImportDecl}
     {source : MachineState} {target : StructuredWasmState Host}
@@ -12327,8 +12905,13 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
           targetRest)
         witness source target)
     (continuationAdapted :
-      CodeAdapted context sourceModule sourceFunction [] continuation
+      CodeAdaptedWithSuffix context sourceModule sourceFunction [] continuation
         targetRest)
+    (coreAdapted :
+      CodeAdapted context sourceModule sourceFunction []
+        (.sset objectId slotIndex byteOffset fieldId type continuation)
+        ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+          targetCore))
     (invariant :
       ReuseCapacityEntryRelativeFrame
         (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
@@ -12383,14 +12966,14 @@ private theorem ConcreteStructuredCodeFocus.advance_scalarFieldOperation
         (.sset objectId slotIndex byteOffset fieldId type continuation)
         continuation
         ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
-          targetRest)
-        targetRest targetStore (replaceHeap targetStore heap) targetLocals
+          targetCore)
+        targetCore targetStore (replaceHeap targetStore heap) targetLocals
         witness witness := by
     apply effectStepSimulates_binaryHost
       (spec := hosts.spec)
       (step := scalarSetStep slotIndex byteOffset fieldKind)
     · exact sourceStep
-    · exact related.adapted
+    · exact coreAdapted
     · exact related.stateRelated
     · exact nextRelated
     · exact targetObjectLookup
@@ -12549,9 +13132,19 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
       obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
           objectKindAt, fieldFound, fieldKindAt, callFound,
           continuationAdapted, targetCodeEq⟩ :=
-        CodeAdapted.scalarSet_eq functionSpec.localsAligned objectCompiled
+        CodeAdaptedWithSuffix.scalarSet_eq functionSpec.localsAligned objectCompiled
           fieldCompiled related.adapted
       subst targetCode
+      have continuationAdaptedSaved := continuationAdapted
+      obtain ⟨targetCore, _targetSuffix, continuationCoreAdapted,
+          _targetRestEq⟩ := continuationAdaptedSaved
+      have coreAdapted :
+          CodeAdapted context sourceModule sourceFunction []
+            (.sset objectId slotIndex byteOffset fieldId type continuation)
+            ([.localGet objectIndex, .localGet fieldIndex, .call callIndex] ++
+              targetCore) :=
+        codeAdapted_sset objectCompiled fieldCompiled objectFound fieldFound
+          callFound continuationCoreAdapted
       have objectSourceLookup :
           lookup sourceEnv objectId = some (.object (.heap location)) := by
         unfold lookupValue at objectLookup
@@ -12614,7 +13207,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
                       exact
                         ConcreteStructuredCodeFocus.advance_scalarFieldOperation
                           functionSpec objectLookup fieldLookup updated sourceStep
-                          related continuationAdapted invariant
+                          related continuationAdapted coreAdapted invariant
                           targetObjectLookup targetFieldLookup imported inBounds
                           contracted parameterCount resultCount operation
                           runtimeRelated capacity cursor
@@ -12640,7 +13233,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
                       exact
                         ConcreteStructuredCodeFocus.advance_scalarFieldOperation
                           functionSpec objectLookup fieldLookup updated sourceStep
-                          related continuationAdapted invariant
+                          related continuationAdapted coreAdapted invariant
                           targetObjectLookup targetFieldLookup imported inBounds
                           contracted parameterCount resultCount operation
                           runtimeRelated capacity cursor
@@ -12666,7 +13259,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
                       exact
                         ConcreteStructuredCodeFocus.advance_scalarFieldOperation
                           functionSpec objectLookup fieldLookup updated sourceStep
-                          related continuationAdapted invariant
+                          related continuationAdapted coreAdapted invariant
                           targetObjectLookup targetFieldLookup imported inBounds
                           contracted parameterCount resultCount operation
                           runtimeRelated capacity cursor
@@ -12690,7 +13283,7 @@ theorem ConcreteStructuredCodeFocus.advance_scalarField
                       exact
                         ConcreteStructuredCodeFocus.advance_scalarFieldOperation
                           functionSpec objectLookup fieldLookup updated sourceStep
-                          related continuationAdapted invariant
+                          related continuationAdapted coreAdapted invariant
                           targetObjectLookup targetFieldLookup imported inBounds
                           contracted parameterCount resultCount operation
                           runtimeRelated capacity cursor
@@ -12845,7 +13438,8 @@ theorem
         targetStoreEq := related.targetStoreEq
         targetControlEq := related.targetControlEq
         adapted :=
-          CodeAdapted.defaultOnlyCases_selected supported related.adapted
+          CodeAdaptedWithSuffix.defaultOnlyCases_selected supported
+            related.adapted
         stateRelated := related.stateRelated
         frameAligned := related.frameAligned }
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -12887,9 +13481,9 @@ theorem
         actualTagFits lookupFound tagged
       have expectedFits : info.cidx < UInt32.size := by
         simpa [Fir.Wasm.constructorTagFitsI32] using expectedTagFits
-      obtain ⟨selectedTarget, discrIndex, getTagIndex, selectedAdapted,
-          discrFound, getTagFound, targetCodeEq⟩ :=
-        CodeAdapted.singleObjectConstructorCases_eq altsEq modeEq
+      obtain ⟨selectedTarget, discrIndex, getTagIndex, targetSuffix,
+          selectedAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.singleObjectConstructorCases_eq altsEq modeEq
           expectedTagFits related.adapted
       obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
         functionSpec.localsAligned discrCompiled
@@ -12957,7 +13551,7 @@ theorem
         control := .running
           { targetLocals with values := targetLocals.values } selectedTarget
         frames :=
-          .label 0 (targetLocals.values.drop 0) [] :: target.frames }
+          .label 0 (targetLocals.values.drop 0) targetSuffix :: target.frames }
       have targetPrefix :
           FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env) 5 target
@@ -12974,7 +13568,8 @@ theorem
           structuredWasmObjectCaseHitPrefixFinitePath
             (module := targetModule.wasmModule) (hostEnv := hosts.env)
             (spec := hosts.spec) (store := targetStore)
-            (locals := targetLocals) (frames := actualFrames)
+            (locals := targetLocals) (rest := targetSuffix)
+            (frames := actualFrames)
             (thenTarget := selectedTarget) (elseTarget := [.unreachable])
             (discrIndex := discrIndex)
             (getTagIndex := getTagIndex) (imp := imp) (word := word)
@@ -12992,7 +13587,7 @@ theorem
         sourceRuntimeEq := by simp [sourceSelected, related.sourceRuntimeEq]
         targetStoreEq := by simp [targetSelected]
         targetControlEq := by simp [targetSelected]
-        adapted := selectedAdapted
+        adapted := CodeAdapted.withEmptySuffix selectedAdapted
         stateRelated := related.stateRelated.withValues targetLocals.values
         frameAligned := related.frameAligned.withValues targetLocals.values }
       obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -13020,14 +13615,14 @@ theorem
         subst afterControl
         change afterFrames = _ at selectedTargetFramesEq
         rw [show targetSelected.frames =
-          .label 0 (targetLocals.values.drop 0) [] :: target.frames by
+          .label 0 (targetLocals.values.drop 0) targetSuffix :: target.frames by
             simp [targetSelected]] at selectedTargetFramesEq
         subst afterFrames
         simpa [targetFinal] using
           (StructuredWasmStep.returnLabel
             (module := targetModule.wasmModule) (env := hosts.env)
             (values := physical :: resultLocals.values) (resultArity := 0)
-            (belowStack := targetLocals.values.drop 0) (rest := [])
+            (belowStack := targetLocals.values.drop 0) (rest := targetSuffix)
             (store := resultStore) (frames := target.frames))
       have finalYielded :
           ConcreteStructuredYieldFocus context sourceFunction resultRuntime
@@ -13077,10 +13672,10 @@ theorem
       have secondExpectedFits : secondInfo.cidx < UInt32.size := by
         simpa [Fir.Wasm.constructorTagFitsI32] using secondTagFits
       obtain ⟨firstTarget, secondTarget, defaultTarget, discrIndex,
-          getTagIndex, firstAdapted, secondAdapted, defaultAdapted,
-          discrFound, getTagFound, targetCodeEq⟩ :=
-        CodeAdapted.twoObjectConstructorDefaultCases_eq altsEq modeEq
-          firstTagFits secondTagFits related.adapted
+          getTagIndex, targetSuffix, firstAdapted, secondAdapted,
+          defaultAdapted, discrFound, getTagFound, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.twoObjectConstructorDefaultCases_eq altsEq
+          modeEq firstTagFits secondTagFits related.adapted
       obtain ⟨alignedIndex, alignedFound, discrKind⟩ :=
         functionSpec.localsAligned discrCompiled
       rw [discrFound] at alignedFound
@@ -13144,13 +13739,13 @@ theorem
           chosen]
       have targetStateEq :
           target =
-            ⟨targetStore, .running targetLocals [
+            ⟨targetStore, .running targetLocals ([
                 .localGet discrIndex, .call getTagIndex,
                 .const (UInt32.ofNat firstInfo.cidx), .eq,
                 .iff 0 0 firstTarget [
                   .localGet discrIndex, .call getTagIndex,
                   .const (UInt32.ofNat secondInfo.cidx), .eq,
-                  .iff 0 0 secondTarget defaultTarget]],
+                  .iff 0 0 secondTarget defaultTarget]] ++ targetSuffix),
               target.frames⟩ := by
         rcases target with ⟨actualStore, actualControl, actualFrames⟩
         have storeEq := related.targetStoreEq
@@ -13175,8 +13770,8 @@ theorem
                 .running
                   { targetLocals with values := targetLocals.values }
                   selectedTarget,
-                List.replicate testCount
-                    (.label 0 (targetLocals.values.drop 0) []) ++
+                structuredWasmCaseLabels (targetLocals.values.drop 0)
+                    targetSuffix testCount ++
                   target.frames⟩) :
           ∃ sourceAfter targetAfter resultStore resultLocals resultWitness kind
               physical sourceCount targetCount,
@@ -13205,8 +13800,8 @@ theorem
           control := .running
             { targetLocals with values := targetLocals.values } selectedTarget
           frames :=
-            List.replicate testCount
-                (.label 0 (targetLocals.values.drop 0) []) ++ target.frames }
+            structuredWasmCaseLabels (targetLocals.values.drop 0)
+                targetSuffix testCount ++ target.frames }
         have selectedFocus :
             ConcreteStructuredCodeFocus context sourceModule sourceFunction []
               sourceRuntime sourceEnv selected targetStore
@@ -13218,7 +13813,7 @@ theorem
           sourceRuntimeEq := by simp [sourceSelected, related.sourceRuntimeEq]
           targetStoreEq := by simp [targetSelected]
           targetControlEq := by simp [targetSelected]
-          adapted := selectedAdapted
+          adapted := CodeAdapted.withEmptySuffix selectedAdapted
           stateRelated := related.stateRelated.withValues targetLocals.values
           frameAligned := related.frameAligned.withValues targetLocals.values }
         obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -13247,18 +13842,18 @@ theorem
           subst afterControl
           change afterFrames = _ at selectedTargetFramesEq
           rw [show targetSelected.frames =
-              List.replicate testCount
-                  (.label 0 (targetLocals.values.drop 0) []) ++
+              structuredWasmCaseLabels (targetLocals.values.drop 0)
+                  targetSuffix testCount ++
                 target.frames by simp [targetSelected]]
             at selectedTargetFramesEq
           subst afterFrames
           simpa [targetFinal] using
-            structuredWasmReturnReplicatedCaseLabelsFinitePath
+            structuredWasmReturnCaseLabelsFinitePath
               (module := targetModule.wasmModule) (hostEnv := hosts.env)
               (store := resultStore)
               (values := physical :: resultLocals.values)
               (belowStack := targetLocals.values.drop 0)
-              (frames := target.frames) testCount
+              (rest := targetSuffix) (frames := target.frames) testCount
         have finalYielded :
             ConcreteStructuredYieldFocus context sourceFunction resultRuntime
               resultEnv resultValue resultStore resultLocals resultWitness kind
@@ -13293,11 +13888,12 @@ theorem
         subst selected
         apply finishCase firstTarget firstAdapted 1
         rw [targetStateEq]
-        simpa using
+        simpa [structuredWasmCaseLabels] using
           structuredWasmObjectCaseHitPrefixFinitePath
             (module := targetModule.wasmModule) (hostEnv := hosts.env)
             (spec := hosts.spec) (store := targetStore)
-            (locals := targetLocals) (frames := target.frames)
+            (locals := targetLocals) (rest := targetSuffix)
+            (frames := target.frames)
             (thenTarget := firstTarget)
             (elseTarget := [
               .localGet discrIndex, .call getTagIndex,
@@ -13327,14 +13923,16 @@ theorem
                   .localGet discrIndex, .call getTagIndex,
                   .const (UInt32.ofNat secondInfo.cidx), .eq,
                   .iff 0 0 secondTarget defaultTarget],
-              .label 0 (targetLocals.values.drop 0) [] :: target.frames⟩
+              .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                target.frames⟩
           let afterSecondHit : StructuredWasmState Host :=
             ⟨targetStore,
               .running
                 { targetLocals with values := targetLocals.values }
                 secondTarget,
               .label 0 (targetLocals.values.drop 0) [] ::
-                .label 0 (targetLocals.values.drop 0) [] :: target.frames⟩
+                .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                  target.frames⟩
           have firstPrefix :
               FinitePath
                 (StructuredWasmStep targetModule.wasmModule hosts.env) 5
@@ -13344,7 +13942,8 @@ theorem
               structuredWasmObjectCaseMissPrefixFinitePath
                 (module := targetModule.wasmModule) (hostEnv := hosts.env)
                 (spec := hosts.spec) (store := targetStore)
-                (locals := targetLocals) (frames := target.frames)
+                (locals := targetLocals) (rest := targetSuffix)
+                (frames := target.frames)
                 (thenTarget := firstTarget)
                 (elseTarget := [
                   .localGet discrIndex, .call getTagIndex,
@@ -13366,7 +13965,9 @@ theorem
                 (spec := hosts.spec) (store := targetStore)
                 (locals := targetLocals)
                 (frames :=
-                  .label 0 (targetLocals.values.drop 0) [] :: target.frames)
+                  .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                    target.frames)
+                (rest := [])
                 (thenTarget := secondTarget) (elseTarget := defaultTarget)
                 (discrIndex := discrIndex) (getTagIndex := getTagIndex)
                 (imp := imp) (word := word) (actualTag := actualTag)
@@ -13374,7 +13975,8 @@ theorem
                 functionSpec.hostsSatisfy inBounds getTagContracted
                 parameterCount resultCount tagOperation
           apply finishCase secondTarget secondAdapted 2
-          simpa [afterSecondHit] using firstPrefix.trans secondPrefix
+          simpa [afterSecondHit, structuredWasmCaseLabels] using
+            firstPrefix.trans secondPrefix
         · have selectedEq : selected = defaultBranch := by
             have firstMiss' : firstInfo.cidx ≠ actualTag :=
               fun equal => firstHit equal.symm
@@ -13393,14 +13995,16 @@ theorem
                   .localGet discrIndex, .call getTagIndex,
                   .const (UInt32.ofNat secondInfo.cidx), .eq,
                   .iff 0 0 secondTarget defaultTarget],
-              .label 0 (targetLocals.values.drop 0) [] :: target.frames⟩
+              .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                target.frames⟩
           let afterSecondMiss : StructuredWasmState Host :=
             ⟨targetStore,
               .running
                 { targetLocals with values := targetLocals.values }
                 defaultTarget,
               .label 0 (targetLocals.values.drop 0) [] ::
-                .label 0 (targetLocals.values.drop 0) [] :: target.frames⟩
+                .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                  target.frames⟩
           have firstPrefix :
               FinitePath
                 (StructuredWasmStep targetModule.wasmModule hosts.env) 5
@@ -13410,7 +14014,8 @@ theorem
               structuredWasmObjectCaseMissPrefixFinitePath
                 (module := targetModule.wasmModule) (hostEnv := hosts.env)
                 (spec := hosts.spec) (store := targetStore)
-                (locals := targetLocals) (frames := target.frames)
+                (locals := targetLocals) (rest := targetSuffix)
+                (frames := target.frames)
                 (thenTarget := firstTarget)
                 (elseTarget := [
                   .localGet discrIndex, .call getTagIndex,
@@ -13432,7 +14037,9 @@ theorem
                 (spec := hosts.spec) (store := targetStore)
                 (locals := targetLocals)
                 (frames :=
-                  .label 0 (targetLocals.values.drop 0) [] :: target.frames)
+                  .label 0 (targetLocals.values.drop 0) targetSuffix ::
+                    target.frames)
+                (rest := [])
                 (thenTarget := secondTarget) (elseTarget := defaultTarget)
                 (discrIndex := discrIndex) (getTagIndex := getTagIndex)
                 (imp := imp) (word := word) (actualTag := actualTag)
@@ -13441,7 +14048,8 @@ theorem
                 functionSpec.hostsSatisfy inBounds getTagContracted
                 parameterCount resultCount tagOperation
           apply finishCase defaultTarget defaultAdapted 2
-          simpa [afterSecondMiss] using firstPrefix.trans secondPrefix
+          simpa [afterSecondMiss, structuredWasmCaseLabels] using
+            firstPrefix.trans secondPrefix
   | @objectCases context sourceRuntime sourceEnv cases selected expectedResult
       facts resultFacts resultRuntime resultEnv resultValue requiredBytes
       supported sourceStep continued ih =>
@@ -13460,14 +14068,15 @@ theorem
             rfl
       have actualFits : actualTag < UInt32.size :=
         actualTagFits lookupFound tagged
-      rcases CodeAdapted.cases_eq related.adapted with
-        ⟨fallback, fallbackCompiled, chainAdapted⟩
+      rcases CodeAdaptedWithSuffix.cases_eq related.adapted with
+        ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
+          targetCodeEq⟩
       obtain ⟨selectedTarget, testCount, selectedAdapted,
           rawTargetPrefix⟩ :=
         functionSpec.objectConstructorCaseChainFinitePath altsSupported
           modeEq discrCompiled chosen sourceLookup tagged actualFits
           related.stateRelated fallbackCompiled chainAdapted
-          (frames := target.frames)
+          (targetSuffix := targetSuffix) (frames := target.frames)
       let sourceSelected : MachineState := {
         source with control := .code selected }
       have selectSourceStep :
@@ -13494,8 +14103,8 @@ theorem
         control := .running
           { targetLocals with values := targetLocals.values } selectedTarget
         frames :=
-          List.replicate testCount
-              (.label 0 (targetLocals.values.drop 0) []) ++ target.frames }
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+              testCount ++ target.frames }
       have targetPrefix :
           FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
@@ -13507,6 +14116,7 @@ theorem
         have controlEq := related.targetControlEq
         change actualControl = .running targetLocals targetCode at controlEq
         subst actualControl
+        subst targetCode
         simpa [targetSelected] using rawTargetPrefix
       have selectedFocus :
           ConcreteStructuredCodeFocus context sourceModule sourceFunction []
@@ -13547,18 +14157,18 @@ theorem
         subst afterControl
         change afterFrames = _ at selectedTargetFramesEq
         rw [show targetSelected.frames =
-            List.replicate testCount
-                (.label 0 (targetLocals.values.drop 0) []) ++ target.frames by
+            structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+                testCount ++ target.frames by
               simp [targetSelected]]
           at selectedTargetFramesEq
         subst afterFrames
         simpa [targetFinal] using
-          structuredWasmReturnReplicatedCaseLabelsFinitePath
+          structuredWasmReturnCaseLabelsFinitePath
             (module := targetModule.wasmModule) (hostEnv := hosts.env)
             (store := resultStore)
             (values := physical :: resultLocals.values)
             (belowStack := targetLocals.values.drop 0)
-            (frames := target.frames) testCount
+            (rest := targetSuffix) (frames := target.frames) testCount
       have finalYielded :
           ConcreteStructuredYieldFocus context sourceFunction resultRuntime
             resultEnv resultValue resultStore resultLocals resultWitness kind
@@ -13598,13 +14208,15 @@ theorem
               simpa [lookupValue, lookupEq] using lookupFound
             subst value
             rfl
-      rcases CodeAdapted.cases_eq related.adapted with
-        ⟨fallback, fallbackCompiled, chainAdapted⟩
+      rcases CodeAdaptedWithSuffix.cases_eq related.adapted with
+        ⟨fallback, targetCore, targetSuffix, fallbackCompiled, chainAdapted,
+          targetCodeEq⟩
       obtain ⟨selectedTarget, testCount, selectedAdapted,
           rawTargetPrefix⟩ :=
         functionSpec.scalarUInt8CaseChainFinitePath altsSupported modeEq
           discrCompiled chosen sourceLookup tagged related.stateRelated
-          fallbackCompiled chainAdapted (frames := target.frames)
+          fallbackCompiled chainAdapted (targetSuffix := targetSuffix)
+          (frames := target.frames)
       let sourceSelected : MachineState := {
         source with control := .code selected }
       have selectSourceStep :
@@ -13631,8 +14243,8 @@ theorem
         control := .running
           { targetLocals with values := targetLocals.values } selectedTarget
         frames :=
-          List.replicate testCount
-              (.label 0 (targetLocals.values.drop 0) []) ++ target.frames }
+          structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+              testCount ++ target.frames }
       have targetPrefix :
           FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
@@ -13644,6 +14256,7 @@ theorem
         have controlEq := related.targetControlEq
         change actualControl = .running targetLocals targetCode at controlEq
         subst actualControl
+        subst targetCode
         simpa [targetSelected] using rawTargetPrefix
       have selectedFocus :
           ConcreteStructuredCodeFocus context sourceModule sourceFunction []
@@ -13684,18 +14297,18 @@ theorem
         subst afterControl
         change afterFrames = _ at selectedTargetFramesEq
         rw [show targetSelected.frames =
-            List.replicate testCount
-                (.label 0 (targetLocals.values.drop 0) []) ++ target.frames by
+            structuredWasmCaseLabels (targetLocals.values.drop 0) targetSuffix
+                testCount ++ target.frames by
               simp [targetSelected]]
           at selectedTargetFramesEq
         subst afterFrames
         simpa [targetFinal] using
-          structuredWasmReturnReplicatedCaseLabelsFinitePath
+          structuredWasmReturnCaseLabelsFinitePath
             (module := targetModule.wasmModule) (hostEnv := hosts.env)
             (store := resultStore)
             (values := physical :: resultLocals.values)
             (belowStack := targetLocals.values.drop 0)
-            (frames := target.frames) testCount
+            (rest := targetSuffix) (frames := target.frames) testCount
       have finalYielded :
           ConcreteStructuredYieldFocus context sourceFunction resultRuntime
             resultEnv resultValue resultStore resultLocals resultWitness kind
@@ -13748,7 +14361,7 @@ theorem
               simp [sourceMiddle, related.sourceRuntimeEq]
             targetStoreEq := related.targetStoreEq
             targetControlEq := related.targetControlEq
-            adapted := CodeAdapted.incPersistent_eq related.adapted
+            adapted := CodeAdaptedWithSuffix.incPersistent_eq related.adapted
             stateRelated := related.stateRelated
             frameAligned := related.frameAligned }
           obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -13790,7 +14403,7 @@ theorem
               simp [sourceMiddle, related.sourceRuntimeEq]
             targetStoreEq := related.targetStoreEq
             targetControlEq := related.targetControlEq
-            adapted := CodeAdapted.decPersistent_eq related.adapted
+            adapted := CodeAdaptedWithSuffix.decPersistent_eq related.adapted
             stateRelated := related.stateRelated
             frameAligned := related.frameAligned }
           obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
@@ -13969,14 +14582,9 @@ theorem
   | @letValue context facts decl sourceRuntime sourceEnv nextRuntime sourceValue
       nextFacts expectedResult continuation resultFacts resultRuntime resultEnv
       resultValue continuationCost supported sourceStep transfer continued ih =>
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-          targetCodeEq⟩ :=
-        CodeAdapted.let_eq related.adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
-            targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+          valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.let_eq related.adapted
       have stepFits :
           directLetAllocationCost decl ≤
             (directLetAllocationCost decl + continuationCost) + slack := by
@@ -14518,14 +15126,9 @@ theorem
       sourceValue stepCost facts nextFacts expectedResult resultFacts
       resultRuntime resultEnv resultValue continuationCost supported sourceStep
       transfer continued ih =>
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-          targetCodeEq⟩ :=
-        CodeAdapted.let_eq related.adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
-            targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+          valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.let_eq related.adapted
       have stepFits :
           stepCost ≤ (stepCost + continuationCost) + slack := by
         omega
@@ -14579,14 +15182,9 @@ theorem
       sourceRuntime sourceEnv continuation nextRuntime sourceValue facts
       nextFacts expectedResult resultFacts resultRuntime resultEnv resultValue
       continuationCost call sourceStep transfer continued ih =>
-        obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-            valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-            targetCodeEq⟩ :=
-          CodeAdapted.let_eq related.adapted
-        have continuationAdapted :
-            CodeAdapted context sourceModule sourceFunction [] continuation
-              targetRest :=
-          ⟨restCode, restCompiled, restAdapted⟩
+        obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+            valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+          CodeAdaptedWithSuffix.let_eq related.adapted
         have ordinaryLowering :
             Fir.Wasm.lower program = .ok sourceModule :=
           LazyCacheGeneratedEnvironment.lower_of_lowerSupported
@@ -14674,14 +15272,9 @@ theorem
           resultCompiled⟩, bodyEq⟩
       have programEq : context.program = program := functionSpec.contextProgram
       subst program
-      obtain ⟨valueCode, restCode, targetValue, targetRest, resultIndex,
-          valueCompiled, restCompiled, valueAdapted, restAdapted, resultFound,
-          targetCodeEq⟩ :=
-        CodeAdapted.let_eq related.adapted
-      have continuationAdapted :
-          CodeAdapted context sourceModule sourceFunction [] continuation
-            targetRest :=
-        ⟨restCode, restCompiled, restAdapted⟩
+      obtain ⟨valueCode, targetValue, targetRest, resultIndex, valueCompiled,
+          valueAdapted, resultFound, continuationAdapted, targetCodeEq⟩ :=
+        CodeAdaptedWithSuffix.let_eq related.adapted
       obtain ⟨targetResultKind, cacheIndex, declarationId, cacheSetId,
           recoveredTargetResultEq, cacheEq, declarationCall, cacheSetCall,
           _valueCodeEq, targetValueEq⟩ :=
@@ -14886,7 +15479,9 @@ theorem
         sourceRuntimeEq := by simp [sourceEntry]
         targetStoreEq := by simp [targetEntry]
         targetControlEq := by simp [targetEntry]
-        adapted := generatedRow.bodyAdapted
+        adapted := by
+          rw [generatedRow.targetBodyEq]
+          exact CodeAdapted.withSuffix generatedRow.bodyAdapted
         stateRelated := calleeFrame.1.1.1.1.1
         frameAligned := calleeFrame.1.1.1.2.2.1 }
       have calleeEntryInvariant :
@@ -15635,7 +16230,7 @@ theorem ConcreteStructuredCodeFocus.advance_incPersistent
       sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
       targetStoreEq := related.targetStoreEq
       targetControlEq := related.targetControlEq
-      adapted := CodeAdapted.incPersistent_eq related.adapted
+      adapted := CodeAdaptedWithSuffix.incPersistent_eq related.adapted
       stateRelated := related.stateRelated
       frameAligned := related.frameAligned }
   · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,
@@ -15691,7 +16286,7 @@ theorem ConcreteStructuredCodeFocus.advance_decPersistent
       sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
       targetStoreEq := related.targetStoreEq
       targetControlEq := related.targetControlEq
-      adapted := CodeAdapted.decPersistent_eq related.adapted
+      adapted := CodeAdaptedWithSuffix.decPersistent_eq related.adapted
       stateRelated := related.stateRelated
       frameAligned := related.frameAligned }
   · simp [compilerCodeSilenceRank, compilerCodeSilenceDepth, sourceAfter,

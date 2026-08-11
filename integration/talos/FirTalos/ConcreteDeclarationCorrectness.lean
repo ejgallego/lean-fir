@@ -33,9 +33,10 @@ def RefinedReturnPost (sourceRuntime : RuntimeState) (sourceValue : Value)
       PhysicalValueRel witness kind physical sourceValue ∧
       results = physical :: callerTail
 
-/-- Compiler-and-adapter proof for one concrete declaration body. Physical
-parameters are fixed, while the proof is polymorphic in the caller operand
-remainder restored by Talos's direct-call convention. -/
+/-- Compiler-and-adapter proof for one concrete declaration body. The
+compositional proof ranges over the compiler core and exposes an explicit
+return; the adapter's validation-only terminal suffix is recorded by the
+physical-body equation. -/
 def DeclarationBodyWP
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -52,14 +53,14 @@ def DeclarationBodyWP
     (physical : Wasm.Value) : Prop :=
   parameters.length = targetFunction.numParams ∧
     targetFunction.results.length = 1 ∧
-      ∀ callerTail,
+      ∃ targetBody,
+        targetFunction.body =
+            targetBody ++ functionTerminal sourceModule sourceFunction ∧
         CodeWP context sourceModule sourceFunction [] module hostEnv
-          sourceRuntime sourceEnv sourceCode targetFunction.body initial
+          sourceRuntime sourceEnv sourceCode targetBody initial
           (targetFunction.toLocals parameters.reverse)
           initialWitness []
-          (ConcreteFunctionBodyPost targetFunction
-            (parameters ++ callerTail)
-            (ExactReturnPost afterCall physical callerTail))
+          (ExactReturnControlPost afterCall physical)
 
 /-- A complete successful-execution theorem package for one generated concrete
 declaration. This is the first program-level W6 boundary: it joins actual
@@ -165,13 +166,23 @@ theorem SuccessfulDeclaration.terminatesWithExact
     Wasm.TerminatesWith hostEnv module functionIndex initial
       (parameters ++ callerTail)
       (ExactReturnPost afterCall physical callerTail) := by
+  obtain ⟨parameterCount, resultCount, targetBody, bodyEq, bodyWP⟩ :=
+    correct.body
   have parameterPrefix :
       (parameters ++ callerTail).take targetFunction.numParams =
         parameters := by
-    rw [← correct.body.1]
+    rw [← parameterCount]
     simp
-  apply CodeWP.toConcreteTerminatesWith correct.notImport correct.functionFound
-  simpa [parameterPrefix] using correct.body.2.2 callerTail
+  apply CodeWP.toConcreteTerminatesWith_of_suffix
+    (Q := ExactReturnControlPost afterCall physical) correct.notImport
+      correct.functionFound bodyEq
+  · intro nextStore nextLocals impossible
+    simp [ExactReturnControlPost] at impossible
+  · intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, ExactReturnPost, resultCount,
+      ← parameterCount]
+  · simpa [parameterPrefix] using bodyWP
 
 /-- Public successful target theorem. It hides the chosen final representation
 witness behind `RefinedReturnPost` while retaining the complete concrete
@@ -269,9 +280,9 @@ theorem DeclarationBodyWP.toCachedDeclarationBodyWP
     CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime sourceCode targetFunction initial afterCall initialWitness
       physical := by
-  refine ⟨?_, body.2.1, fun callerTail => ?_⟩
-  · simpa using body.1.symm
-  · exact body.2.2 callerTail
+  obtain ⟨parameterCount, resultCount, targetBody, bodyEq, bodyWP⟩ := body
+  exact ⟨by simpa using parameterCount.symm, resultCount, targetBody, bodyEq,
+    bodyWP⟩
 
 /-- Existing exact cached-body proofs enter the general nullary declaration
 boundary without re-proving the generated body. -/
@@ -294,9 +305,9 @@ theorem CachedDeclarationBodyWP.toDeclarationBodyWP
     DeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime [] sourceCode targetFunction initial afterCall
       initialWitness [] physical := by
-  refine ⟨?_, body.2.1, fun callerTail => ?_⟩
-  · simpa using body.1.symm
-  · exact body.2.2 callerTail
+  obtain ⟨parameterCount, resultCount, targetBody, bodyEq, bodyWP⟩ := body
+  exact ⟨by simpa using parameterCount.symm, resultCount, targetBody, bodyEq,
+    bodyWP⟩
 
 /-- The exact body retained by a successful nullary declaration is directly
 consumable by the existing lazy-cache miss/publication proof. -/

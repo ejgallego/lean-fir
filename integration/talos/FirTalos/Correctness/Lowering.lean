@@ -872,6 +872,11 @@ theorem wp_host_call_of_return
       hostStep operation initial (s.values.take imp.params.length).reverse at contract
     rw [hArgs, step] at contract
     contradiction
+  · intro thrown tag arguments contract
+    change Wasm.HostResult.Throw thrown tag arguments =
+      hostStep operation initial (s.values.take imp.params.length).reverse at contract
+    rw [hArgs, step] at contract
+    contradiction
 
 /--
 Stack-shaped form of `wp_host_call_of_return`. Generated argument code pushes
@@ -978,6 +983,14 @@ theorem wp_naturalLiteral_call
     simp only [List.length_nil, List.take_zero, List.reverse_nil] at contract
     rw [hostStep_naturalLiteral_of_encode initial value encoded] at contract
     contradiction
+  · intro final tag arguments contract
+    change Wasm.HostResult.Throw final tag arguments =
+      hostStep (.naturalLiteral value .tobject) initial
+        (s.values.take imp.params.length).reverse at contract
+    rw [hParams] at contract
+    simp only [List.length_nil, List.take_zero, List.reverse_nil] at contract
+    rw [hostStep_naturalLiteral_of_encode initial value encoded] at contract
+    contradiction
 
 /-- Instruction-level lifting for a string-literal import. -/
 theorem wp_stringLiteral_call
@@ -1020,6 +1033,14 @@ theorem wp_stringLiteral_call
     simpa [hParams, hResults] using continued
   · intro final message contract
     change Wasm.HostResult.Trap final message =
+      hostStep (.stringLiteral value .object) initial
+        (s.values.take imp.params.length).reverse at contract
+    rw [hParams] at contract
+    simp only [List.length_nil, List.take_zero, List.reverse_nil] at contract
+    rw [hostStep_stringLiteral_of_encode initial value encoded] at contract
+    contradiction
+  · intro final tag arguments contract
+    change Wasm.HostResult.Throw final tag arguments =
       hostStep (.stringLiteral value .object) initial
         (s.values.take imp.params.length).reverse at contract
     rw [hParams] at contract

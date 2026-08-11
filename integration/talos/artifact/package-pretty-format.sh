@@ -293,8 +293,8 @@ const build = {
       ],
     },
     inputLayout: {
-      version: "lean-4.32-Std.Format.compact/v1",
-      leanVersion: "4.32.0",
+      version: "lean-4.33-Std.Format.compact/v1",
+      leanVersion: "4.33.0",
       representation: "compact-discriminated-union",
       constructors: [
         "nil",
@@ -316,7 +316,7 @@ const build = {
         "safe-integer",
         "canonical-signed-decimal-string",
       ],
-      rawTarget: "Lean 4.32 Std.Format",
+      rawTarget: "Lean 4.33 Std.Format",
     },
     ownership: {
       version: "fir.prettyM.module-owned-transfer/v1",

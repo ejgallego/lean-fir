@@ -276,9 +276,9 @@ theorem compileCachedLetValue_adapted_inv
 declaration before its result may be published through the lazy cache.
 
 The declaration body itself starts with empty source locals and an empty
-callee operand stack. `ConcreteFunctionBodyPost` reattaches each arbitrary
-caller tail after the singleton cached result, exactly as Talos direct calls
-do. Keeping the package tail-polymorphic makes it usable by every call site. -/
+callee operand stack. The compiler core proves an explicit return; the
+adapter's validation-only terminal suffix is recorded separately so it can be
+installed at the direct-call boundary without weakening compositional WPs. -/
 def CachedDeclarationBodyWP
     (context : Fir.Wasm.Context)
     (sourceModule : Fir.Wasm.Module)
@@ -293,14 +293,14 @@ def CachedDeclarationBodyWP
     (physical : Wasm.Value) : Prop :=
   targetFunction.numParams = 0 ∧
     targetFunction.results.length = 1 ∧
-      ∀ tail,
+      ∃ targetBody,
+        targetFunction.body =
+            targetBody ++ functionTerminal sourceModule sourceFunction ∧
         CodeWP context sourceModule sourceFunction [] module hostEnv
-          sourceRuntime [] sourceCode targetFunction.body initial
+          sourceRuntime [] sourceCode targetBody initial
           (targetFunction.toLocals [])
           witness []
-          (ConcreteFunctionBodyPost targetFunction tail
-            (fun final results =>
-              final = afterCall ∧ results = physical :: tail))
+          (ExactReturnControlPost afterCall physical)
 
 /-- Weakening the continuation assertion preserves the concrete code
 judgment. This local form mirrors the semantic-host helper but ranges over the
@@ -369,9 +369,8 @@ theorem codeWP_return_to_bodyPost
   rw [Wasm.wp_ret_cons]
   simp [ConcreteFunctionBodyPost, resultEq]
 
-/-- For a zero-argument, singleton-result declaration it is enough to prove
-the generated body once with an empty caller remainder. Wasm's function-body
-postcondition restores every arbitrary caller tail structurally. -/
+/-- Package one exact-return compiler core and its physical suffix equation as
+a zero-argument, singleton-result cached declaration. -/
 theorem CachedDeclarationBodyWP.of_emptyTail
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
@@ -380,24 +379,21 @@ theorem CachedDeclarationBodyWP.of_emptyTail
     {sourceRuntime : RuntimeState}
     {sourceCode : Lean.Compiler.LCNF.Code .impure}
     {targetFunction : Wasm.Function}
+    {targetBody : Wasm.Program}
     {initial afterCall : Wasm.Store Host}
     {witness : RefinementWitness} {physical : Wasm.Value}
     (paramsEq : targetFunction.numParams = 0)
     (resultEq : targetFunction.results.length = 1)
+    (bodyEq : targetFunction.body =
+      targetBody ++ functionTerminal sourceModule sourceFunction)
     (correct :
       CodeWP context sourceModule sourceFunction [] module hostEnv
-        sourceRuntime [] sourceCode targetFunction.body initial
+        sourceRuntime [] sourceCode targetBody initial
         (targetFunction.toLocals []) witness []
-        (ConcreteFunctionBodyPost targetFunction []
-          (fun final results =>
-            final = afterCall ∧ results = [physical]))) :
+        (ExactReturnControlPost afterCall physical)) :
     CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime sourceCode targetFunction initial afterCall witness physical := by
-  refine ⟨paramsEq, resultEq, fun tail => ?_⟩
-  apply concreteCodeWP_conseq (correct := correct)
-  intro continuation post
-  cases continuation <;>
-    simp_all [ConcreteFunctionBodyPost]
+  exact ⟨paramsEq, resultEq, targetBody, bodyEq, correct⟩
 
 /-- First declaration-specific cache body family: a compiler-generated
 zero-argument declaration that allocates one natural literal and returns it.
@@ -446,13 +442,13 @@ theorem cachedDeclarationBodyWP_naturalLiteral
         some updated)
     (paramsEq : targetFunction.numParams = 0)
     (resultEq : targetFunction.results.length = 1)
-    (bodyEq : targetFunction.body = [
-      .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+    (bodyEq : targetFunction.body =
+      [.call id, .localSet resultIndex, .localGet resultIndex, .ret] ++
+        functionTerminal sourceModule sourceFunction) :
     CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
       (replaceHeap initial heap) witness (.i32 (UInt32.ofNat word.value)) := by
-  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
-  rw [bodyEq]
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq bodyEq
   apply codeWP_naturalLiteral_let valueEq valueCompiled callFound
     initialRelated resultFound resultKindAt allocated hImp hSat hi hContract
     hParams hResults targetSet
@@ -462,10 +458,10 @@ theorem cachedDeclarationBodyWP_naturalLiteral
     simp [replaceHeap, clearFailure]
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt valueRelated targetSet
-  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+  apply codeWP_return_to_exactControlPost localCompiled resultFound resultKindAt
     (lookup_bind_self [] decl.fvarId
       (literal sourceRuntime (.nat value)).2)
-    nextState (localUpdate_of_set? targetSet).1 resultEq
+    nextState (localUpdate_of_set? targetSet).1
 
 /-- Cached-declaration body family for a compiler-generated UTF-8 string
 literal. This is the object-lane counterpart of the natural theorem above and
@@ -512,13 +508,13 @@ theorem cachedDeclarationBodyWP_stringLiteral
         some updated)
     (paramsEq : targetFunction.numParams = 0)
     (resultEq : targetFunction.results.length = 1)
-    (bodyEq : targetFunction.body = [
-      .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+    (bodyEq : targetFunction.body =
+      [.call id, .localSet resultIndex, .localGet resultIndex, .ret] ++
+        functionTerminal sourceModule sourceFunction) :
     CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
       (replaceHeap initial heap) witness (.i32 (UInt32.ofNat word.value)) := by
-  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
-  rw [bodyEq]
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq bodyEq
   apply codeWP_stringLiteral_let valueEq valueCompiled callFound
     initialRelated resultFound resultKindAt allocated hImp hSat hi hContract
     hParams hResults targetSet
@@ -528,10 +524,10 @@ theorem cachedDeclarationBodyWP_stringLiteral
     simp [replaceHeap, clearFailure]
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt valueRelated targetSet
-  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+  apply codeWP_return_to_exactControlPost localCompiled resultFound resultKindAt
     (lookup_bind_self [] decl.fvarId
       (literal sourceRuntime (.str value)).2)
-    nextState (localUpdate_of_set? targetSet).1 resultEq
+    nextState (localUpdate_of_set? targetSet).1
 
 /-- Cached-declaration body family for generated constructor allocation and
 return. The operation premises deliberately retain either tagged or
@@ -605,22 +601,22 @@ theorem cachedDeclarationBodyWP_constructor
     (paramsEq : targetFunction.numParams = 0)
     (resultEq : targetFunction.results.length = 1)
     (bodyEq : targetFunction.body =
-      indices.map Wasm.Instruction.localGet ++ [
-        .call id, .localSet resultIndex, .localGet resultIndex, .ret]) :
+      (indices.map Wasm.Instruction.localGet ++ [
+        .call id, .localSet resultIndex, .localGet resultIndex, .ret]) ++
+        functionTerminal sourceModule sourceFunction) :
     CachedDeclarationBodyWP context sourceModule sourceFunction module hostEnv
       sourceRuntime (.let decl (.return decl.fvarId)) targetFunction initial
       nextStore witness (.i32 (UInt32.ofNat word.value)) := by
-  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq
-  rw [bodyEq]
+  apply CachedDeclarationBodyWP.of_emptyTail paramsEq resultEq bodyEq
   apply codeWP_constructor_let valueEq valueCompiled argumentsFound callFound
     evaluated semanticStep initialRelated resultFound resultKindAt hGets hImp
     hSat hi hContract hParams hResults operation extension nextRuntimeRelated
     failureClear valueRelated targetSet
   have nextState := initialRelated.bindAfter extension nextRuntimeRelated
     failureClear resultFound resultKindAt valueRelated targetSet
-  apply codeWP_return_to_bodyPost localCompiled resultFound resultKindAt
+  apply codeWP_return_to_exactControlPost localCompiled resultFound resultKindAt
     (lookup_bind_self [] decl.fvarId sourceValue)
-    nextState (localUpdate_of_set? targetSet).1 resultEq
+    nextState (localUpdate_of_set? targetSet).1
 
 /-- A per-declaration body package supplies the store-specific, fuel-free
 termination theorem expected by generated direct calls. -/
@@ -649,8 +645,15 @@ theorem CachedDeclarationBodyWP.terminatesWith
     Wasm.TerminatesWith hostEnv module functionIndex initial tail
       (fun final results =>
         final = afterCall ∧ results = physical :: tail) := by
-  apply CodeWP.toConcreteTerminatesWith notImport found
-  simpa [body.1] using body.2.2 tail
+  obtain ⟨paramsEq, resultEq, targetBody, bodyEq, correct⟩ := body
+  apply CodeWP.toConcreteTerminatesWith_of_suffix
+    (Q := ExactReturnControlPost afterCall physical) notImport found bodyEq
+  · intro nextStore nextLocals impossible
+    simp [ExactReturnControlPost] at impossible
+  · intro continuation returned
+    subst continuation
+    simp [ConcreteFunctionBodyPost, resultEq, paramsEq]
+  · simpa [paramsEq] using correct
 
 /-- The exact two-global postcondition established by generated cache
 publication. It is factored out of the miss proof so the next invocation can

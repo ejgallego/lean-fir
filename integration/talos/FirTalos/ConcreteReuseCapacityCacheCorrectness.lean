@@ -11069,9 +11069,13 @@ structure ConcreteSupportedDeclaration
     target.wasmModule.funcs[
         targetFunctionIndex - target.wasmModule.imports.length]? =
       some targetFunction
+  targetBody : Wasm.Program
+  targetBodyEq :
+    targetFunction.body =
+      targetBody ++ functionTerminal sourceModule sourceFunction
   bodyAdapted :
     CodeAdapted context sourceModule sourceFunction [] sourceCode
-      targetFunction.body
+      targetBody
   localsAligned : LocalLayoutAligned context sourceFunction
   singleResult : targetFunction.results.length = 1
 
@@ -11447,6 +11451,8 @@ def ConcreteGeneratedInternalDeclaration.toSupportedFunction
   targetFunction := row.targetFunction
   notImport := row.notImport
   targetFunctionFound := row.targetFunctionFound
+  targetBody := row.targetBody
+  targetBodyEq := row.targetBodyEq
   bodyAdapted := row.bodyAdapted
   singleResult := row.singleResult }
 
@@ -11918,9 +11924,10 @@ theorem
     List.getElem?_eq_some_iff.mp physicalFound
   have physicalAt :
       (row.targetFunction.toLocals physicalArgs).get index = some physical := by
-    simp only [Wasm.Function.toLocals, Wasm.Locals.get]
-    rw [if_pos physicalBound]
-    exact physicalFound
+    unfold Wasm.Locals.get
+    rw [if_pos (by
+      simpa [Wasm.Function.toLocals] using physicalBound)]
+    simpa [Wasm.Function.toLocals] using physicalFound
   exact ⟨index, kind, physical, localFound, kindAtBinding, physicalAt,
     valueRelated⟩
 
@@ -12033,9 +12040,10 @@ theorem ConcreteGeneratedInternalDeclaration.entryEnvLocalsRelated
     List.getElem?_eq_some_iff.mp physicalFound
   have physicalAt :
       (row.targetFunction.toLocals physicalArgs).get index = some physical := by
-    simp only [Wasm.Function.toLocals, Wasm.Locals.get]
-    rw [if_pos physicalBound]
-    exact physicalFound
+    unfold Wasm.Locals.get
+    rw [if_pos (by
+      simpa [Wasm.Function.toLocals] using physicalBound)]
+    simpa [Wasm.Function.toLocals] using physicalFound
   exact ⟨index, kind, physical, localFound, kindAtBinding, physicalAt,
     valueRelated⟩
 
@@ -13189,19 +13197,14 @@ private theorem codeAdapted_of_function
       Fir.Wasm.compileCode context sourceCode = .ok sourceFunction.body)
     (adapted :
       FirTalos.function sourceModule sourceFunction = .ok targetFunction) :
-    CodeAdapted context sourceModule sourceFunction [] sourceCode
-      targetFunction.body := by
-  unfold FirTalos.function at adapted
-  cases bodyEq :
-      FirTalos.instructions sourceModule sourceFunction [] sourceFunction.body with
-  | error error =>
-      simp only [bodyEq, Bind.bind, Except.bind] at adapted
-      contradiction
-  | ok targetBody =>
-      simp only [bodyEq, Bind.bind, Except.bind, pure, Except.pure,
-        Except.ok.injEq] at adapted
-      subst targetFunction
-      exact ⟨sourceFunction.body, compiled, bodyEq⟩
+    ∃ targetBody,
+      CodeAdapted context sourceModule sourceFunction [] sourceCode targetBody ∧
+        targetFunction.body =
+          targetBody ++ functionTerminal sourceModule sourceFunction := by
+  obtain ⟨targetBody, bodyAdapted, targetBodyEq⟩ :=
+    FirTalos.Correctness.function_preserves_body adapted
+  exact ⟨targetBody, ⟨sourceFunction.body, compiled, bodyAdapted⟩,
+    targetBodyEq⟩
 
 /--
 Select the matching concrete function from one actual adapted symbolic row.
@@ -13262,6 +13265,8 @@ theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
   have singleResult : targetFunction.results.length = 1 := by
     rw [signature.2.2]
     simpa using sourceSingleResult
+  obtain ⟨targetBody, bodyAdapted, targetBodyEq⟩ :=
+    codeAdapted_of_function compiled functionAdapted
   exact ⟨{
     sourceFunctionIndex
     sourceFunctionFound
@@ -13271,7 +13276,9 @@ theorem ConcreteGeneratedDeclaration.exists_ofAdaptedFunction
     functionAdapted
     notImport
     targetFunctionFound
-    bodyAdapted := codeAdapted_of_function compiled functionAdapted
+    targetBody
+    targetBodyEq
+    bodyAdapted
     localsAligned
     singleResult }⟩
 
@@ -13587,6 +13594,8 @@ def ConcreteSupportedExport.toSupportedDeclaration
   targetFunction := spec.targetFunction
   notImport := spec.notImport
   targetFunctionFound := spec.targetFunctionFound
+  targetBody := spec.targetBody
+  targetBodyEq := spec.targetBodyEq
   bodyAdapted := spec.bodyAdapted
   localsAligned := spec.localsAligned
   singleResult := spec.singleResult }
@@ -13715,12 +13724,8 @@ theorem
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction initial
         resultStore initialWitness parameters physical := by
-    refine ⟨parameterCount, spec.singleResult, fun callerTail => ?_⟩
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
-      ← parameterCount]
+    exact ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, exactWP⟩
   have successful :
       SuccessfulDeclaration context sourceModule sourceFunction
         target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
@@ -13908,12 +13913,8 @@ theorem
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction initial
         resultStore initialWitness parameters physical := by
-    refine ⟨parameterCount, spec.singleResult, fun callerTail => ?_⟩
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
-      ← parameterCount]
+    exact ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, exactWP⟩
   have successful :
       SuccessfulDeclaration context sourceModule sourceFunction
         target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
@@ -14618,13 +14619,8 @@ theorem codeWP_of_reuseCapacityDirectHereditaryCodeEvaluates_generated
             site.calleeCode generatedRow.targetFunction initial afterCall
             witness physicalArgs.reverse physical := by
         refine ⟨parameterCount, generatedRow.singleResult,
-          fun callerTail => ?_⟩
-        simp only [List.reverse_reverse]
-        apply calleeWP.conseq
-        intro returnedContinuation returned
-        subst returnedContinuation
-        simp [ConcreteFunctionBodyPost, ExactReturnPost,
-          generatedRow.singleResult, ← parameterCount]
+          generatedRow.targetBody, generatedRow.targetBodyEq, ?_⟩
+        simpa only [List.reverse_reverse] using calleeWP
       have calleeSuccessful :
           SuccessfulDeclaration loweredRow.context sourceModule calleeFunction
             target.wasmModule hosts.env sourceExternals sourceRuntime
@@ -15418,13 +15414,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
             site.calleeCode generatedRow.targetFunction initial afterCall
             witness physicalArgs.reverse physical := by
         refine ⟨parameterCount, generatedRow.singleResult,
-          fun callerTail => ?_⟩
-        simp only [List.reverse_reverse]
-        apply calleeWP.conseq
-        intro returnedContinuation returned
-        subst returnedContinuation
-        simp [ConcreteFunctionBodyPost, ExactReturnPost,
-          generatedRow.singleResult, ← parameterCount]
+          generatedRow.targetBody, generatedRow.targetBodyEq, ?_⟩
+        simpa only [List.reverse_reverse] using calleeWP
       have calleeSuccessful :
           SuccessfulDeclaration loweredRow.context sourceModule calleeFunction
             target.wasmModule hosts.env sourceExternals sourceRuntime
@@ -15697,13 +15688,8 @@ theorem codeWP_of_reuseCapacityProductionHereditaryCodeEvaluates_generated
             selected.nextStore afterCall witness physicalArgs.reverse
             physical := by
         refine ⟨parameterCount, generatedRow.singleResult,
-          fun callerTail => ?_⟩
-        simp only [List.reverse_reverse]
-        apply calleeWP.conseq
-        intro returnedContinuation returned
-        subst returnedContinuation
-        simp [ConcreteFunctionBodyPost, ExactReturnPost,
-          generatedRow.singleResult, ← parameterCount]
+          generatedRow.targetBody, generatedRow.targetBodyEq, ?_⟩
+        simpa only [List.reverse_reverse] using calleeWP
       have calleeSuccessful :
           SuccessfulDeclaration loweredRow.context sourceModule calleeFunction
             target.wasmModule hosts.env sourceExternals callRuntime nextRuntime
@@ -16010,12 +15996,8 @@ theorem ProductionHereditaryGeneratedDeclarationInduction.ofOperationLaws
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode row.targetFunction initial
         resultStore initialWitness parameters physical := by
-    refine ⟨parameterCount, row.singleResult, fun callerTail => ?_⟩
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, row.singleResult,
-      ← parameterCount]
+    exact ⟨parameterCount, row.singleResult, row.targetBody, row.targetBodyEq,
+      exactWP⟩
   have successful :
       SuccessfulDeclaration context sourceModule sourceFunction
         target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
@@ -16156,12 +16138,8 @@ theorem DirectHereditaryGeneratedDeclarationInduction.ofOperationLaws
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode row.targetFunction initial
         resultStore initialWitness parameters physical := by
-    refine ⟨parameterCount, row.singleResult, fun callerTail => ?_⟩
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, row.singleResult,
-      ← parameterCount]
+    exact ⟨parameterCount, row.singleResult, row.targetBody, row.targetBodyEq,
+      exactWP⟩
   have successful :
       SuccessfulDeclaration context sourceModule sourceFunction
         target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime
@@ -18056,12 +18034,8 @@ theorem
       DeclarationBodyWP context sourceModule sourceFunction target.wasmModule
         hosts.env sourceRuntime sourceEnv sourceCode spec.targetFunction initial
         resultStore initialWitness parameters physical := by
-    refine ⟨parameterCount, spec.singleResult, fun callerTail => ?_⟩
-    apply exactWP.conseq
-    intro continuation returned
-    subst continuation
-    simp [ConcreteFunctionBodyPost, ExactReturnPost, spec.singleResult,
-      ← parameterCount]
+    exact ⟨parameterCount, spec.singleResult, spec.targetBody,
+      spec.targetBodyEq, exactWP⟩
   have successful :
       SuccessfulDeclaration context sourceModule sourceFunction
         target.wasmModule hosts.env sourceExternals sourceRuntime resultRuntime

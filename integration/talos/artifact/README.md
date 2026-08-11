@@ -64,7 +64,7 @@ The historical hand-written `mutation` fixture is intentionally not in that
 success allowlist: it uses packed-scalar slot index `1` despite a one-object,
 one-`USize` prefix. The concrete runner asserts its exact
 `scalarFieldMissing(1, 0)` failure, while `compiler-shaped-mutation` uses Lean
-4.32's emitted index `2` and passes `USize` plus `UInt64` write/read execution.
+4.33's emitted index `2` and passes `USize` plus `UInt64` write/read execution.
 
 The W5 corpus also covers an effect-producing external call and a zero-argument
 external cached across two source calls. V8 and Talos agree on the returned
@@ -167,7 +167,7 @@ deterministically. The `isShared` module implements the valid-input portion of
 `isShared`: immediates and persistent/non-unique heap objects return one,
 while a unique live heap object returns zero. The 983-byte projection module
 exports the exact four object and four packed-`UInt8` reads reachable from
-compiler-produced Lean 4.32 `prettyM`. Raw-header and concrete-host checks
+compiler-produced Lean 4.33 `prettyM`. Raw-header and concrete-host checks
 exercise all eight helpers; recognized non-heap, misaligned, dead, and
 non-constructor inputs trap without invoking JavaScript. The 1,466-byte
 closure-projection module exports the twelve distinct capture slot/result
@@ -247,7 +247,7 @@ not implement the concrete-memory boundary.
 
 This builds the Lean emitter, runs the semantic oracle through Lean, emits the corpus and oracle
 results twice, byte-compares all outputs, validates and instantiates every module in Node,
-executes `main`, and compares the V8 observation with FIR. It requires Lean 4.32, the
+executes `main`, and compares the V8 observation with FIR. It requires Lean 4.33, the
 worktree-local Talos setup, and Node; no external WAT or WebAssembly CLI is required. The
 oracle uses `lean --run` so a fresh worktree does not native-compile the full upstream Wasm
 semantics just to check this corpus.
@@ -358,7 +358,7 @@ retains its source floating export and adds a canonical integer-lane facade.
 Its `bitExactFloatTransport` descriptor maps Float32 to `uint32` and Float to
 `uint64`; the facade reinterprets those bits inside Wasm, so JavaScript never
 coerces them through `number`.
-The source checks additionally execute Lean 4.32's compiler-produced small
+The source checks additionally execute Lean 4.33's compiler-produced small
 `Nat` literal, reconstruct a Unicode string and a list containing a natural
 above the tagged-immediate range, then execute the list classifier through the
 semantic `getTag` import. The natural-literal regression emits the captured
@@ -385,7 +385,7 @@ embedded inside `Format.text`; V8 again compares with a native Lean oracle.
 
 `call-pretty-format.mjs` demonstrates the consumer boundary using the
 invocation-free module descriptor. It creates an empty `SemanticHost`,
-instantiates the module once, allocates the eight ordinary Lean 4.32 `Format`
+instantiates the module once, allocates the eight ordinary Lean 4.33 `Format`
 layouts directly in that heap, encodes their raw `tobject` handles, and calls
 the same export repeatedly. The small constructor helpers describe only
 runtime layout; they do not form a second AST. Run it after artifact generation
@@ -445,7 +445,7 @@ node call-concrete-pretty-format.mjs \
 ```
 
 Node and the browser exercise the same native-oracle strings, all eight raw
-Lean 4.32 `Format` constructors, Unicode, line behavior, repeated calls, and
+Lean 4.33 `Format` constructors, Unicode, line behavior, repeated calls, and
 module-owned memory. This is an incremental generation result, not the final
 zero-function-import W7 artifact or a proof that the linked helper implements
 the W6 semantic contract.
@@ -741,14 +741,14 @@ owns its memory and allocator and has zero imports while preserving the exact
 `MonadPrettyFormat` output/newline/start-tag/end-tags event stream. The
 browser adapter separately declares versioned API, compact `Std.Format` input,
 and ownership capabilities in `BUILD.json`. It validates and measures the
-input, performs one bulk resident allocation, constructs the Lean 4.32 raw
+input, performs one bulk resident allocation, constructs the Lean 4.33 raw
 graph directly in module memory, synchronizes the monotone frontier across
 repeated calls, decodes the styled `PrettyTrace`, and reports phase timings.
 The plain rendered `String` remains available as the trace's text projection.
 Its resident String byte walkers use structured Wasm loops, so their call-stack
 usage is independent of String size. Node and the Chrome Worker exercise this
 adapter as well as the raw client, compare the exact event stream with the
-native Lean 4.32 oracle, render exactly 1 MiB of UTF-8 text while requiring
+native Lean 4.33 oracle, render exactly 1 MiB of UTF-8 text while requiring
 module-memory growth, and make 32 additional calls on the same synchronized
 frontier.
 
@@ -837,7 +837,7 @@ be reused and released. Fixing that requires one coordinated persistence
 transition in the FIR interpreter, semantic host, and W6 refinement; this lane
 does not hide the discrepancy with a V8-only repair.
 
-Lean 4.32 initially exposes 23 helper declarations outside the raw local
+Lean 4.33 initially exposes 23 helper declarations outside the raw local
 closure because primitives and compiler-generated specializations are emitted
 as external LCNF declarations. Recursive source internalization leaves 20
 actual declaration-level runtime primitives. The manifest contains more

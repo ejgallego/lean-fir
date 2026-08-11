@@ -534,6 +534,44 @@ Proof-facing W4 theorem for one checked closed export: a syntax-directed
 simulation certificate entails source evaluation and fuel-free total target
 correctness under the shared observation policy.
 -/
+theorem SupportedExport.correct_of_simulation_with_suffix
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context} {code : LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module} {sourceFunction : Fir.Wasm.Function}
+    {target : AdaptedModule} {hosts : ResolvedHosts} {exportName : String}
+    (spec : SupportedExport program context code sourceModule sourceFunction
+      target hosts exportName)
+    {initialRuntime resultRuntime : RuntimeState}
+    {initial : Wasm.Store RuntimeHost} {targetLocals : Wasm.Locals}
+    {targetCode suffix : Wasm.Program}
+    {resultValue : Value} {resultKind : AbiKind}
+    (related :
+      compareObservations (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime) =
+        .related (ReturnedObservation resultRuntime resultValue)
+          (.returned resultValue resultRuntime))
+    (simulation :
+      CodeSimulation context sourceModule sourceFunction [] target.wasmModule
+        hosts.env initialRuntime [] code targetCode initial targetLocals
+        resultRuntime resultValue resultKind)
+    (bodyEq : spec.targetFunction.body = targetCode ++ suffix)
+    (canonicalLocals : targetLocals = spec.targetFunction.toLocals []) :
+    CodeEvaluates context initialRuntime [] code resultRuntime resultValue ∧
+      ExportTerminatesWith hosts.env target.wasmModule exportName initial []
+        (RelatedPost #[resultKind]
+          (ReturnedObservation resultRuntime resultValue)) := by
+  constructor
+  · exact simulation.sourceEvaluates
+  · apply spec.terminatesWithRelated_of_return_wp related
+    rw [bodyEq]
+    apply Wasm.wp_append_of_no_fallthrough
+    · rintro nextStore nextLocals
+        ⟨returnedStore, physical, impossible, runtimeEq, decoded⟩
+      cases impossible
+    · simpa [canonicalLocals, Wasm.Function.toLocals] using
+        simulation.toCodeWP.2.2
+
+/-- The exact-body specialization of `correct_of_simulation_with_suffix`. -/
 theorem SupportedExport.correct_of_simulation
     {program : Fir.LeanIR.ImpureProgram}
     {context : Fir.Wasm.Context} {code : LCNF.Code .impure}
@@ -558,10 +596,10 @@ theorem SupportedExport.correct_of_simulation
       ExportTerminatesWith hosts.env target.wasmModule exportName initial []
         (RelatedPost #[resultKind]
           (ReturnedObservation resultRuntime resultValue)) := by
-  constructor
-  · exact simulation.sourceEvaluates
-  · apply spec.terminatesWithRelated_of_return related
-    simpa [canonicalLocals] using simulation.toCodeWP
+  apply spec.correct_of_simulation_with_suffix related simulation
+      (suffix := [])
+  · simp
+  · exact canonicalLocals
 
 /--
 Full W4 theorem for one checked closed export, stated over FIR's executable

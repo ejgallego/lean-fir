@@ -1,5 +1,5 @@
 /**
- * Browser-safe adapter for the packaged Lean 4.32 `Std.Format.prettyM` facade.
+ * Browser-safe adapter for the packaged Lean 4.33 `Std.Format.prettyM` facade.
  *
  * The public input is a compact discriminated union. The adapter validates and
  * measures it, performs one bulk allocation through the module's resident
@@ -10,7 +10,7 @@
 
 export const PRETTY_M_BROWSER_API_VERSION = "fir.prettyM.browser/v1";
 export const PRETTY_M_INPUT_LAYOUT_VERSION =
-  "lean-4.32-Std.Format.compact/v1";
+  "lean-4.33-Std.Format.compact/v1";
 export const PRETTY_M_OWNERSHIP_VERSION =
   "fir.prettyM.module-owned-transfer/v1";
 

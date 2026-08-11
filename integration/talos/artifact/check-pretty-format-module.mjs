@@ -6,7 +6,7 @@ function equalParams(actual, expected) {
 }
 
 /**
- * Exercise a loaded prettyM module through Lean 4.32's raw Format layouts.
+ * Exercise a loaded prettyM module through Lean 4.33's raw Format layouts.
  * The helpers below describe constructor memory only; they are not a second
  * format AST or a source-level adapter.
  */

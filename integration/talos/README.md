@@ -8,9 +8,11 @@ This package translates FIR's symbolic semantic-Wasm module into Talos's
 is a fast-moving AGPL-3.0 project, while FIR's semantic core should not force
 that dependency on every consumer.
 
-The bridge is pinned to Talos commit
-`a01d01c778b794dd00956748a067b6793c2c9f9b`, whose interpreter package uses
-Lean 4.32.0. From the FIR repository root, set it up and validate it with:
+The bridge is provisionally pinned to the Lean-4.33 upgrade head
+`0e05edbcfbb105b33e90c60b4f50e2cf193d9254`, whose interpreter package uses
+Lean 4.33.0. Replace this pin with the merged upstream Talos commit once
+[Talos PR #172](https://github.com/cajal-technologies/talos/pull/172) lands.
+From the FIR repository root, set it up and validate it with:
 
 ```sh
 make talos-setup
@@ -267,7 +269,7 @@ one initial budget imply the matching executable source observation and
 fuel-free concrete Wasm termination under `RefinedReturnPost`, with no
 translation certificate or target-level witnesses.
 The next structural layer covers external calls without inventing an `Int`
-literal that Lean 4.32 LCNF does not have. `BudgetedSpineEvaluates` mixes
+literal that Lean 4.33 LCNF does not have. `BudgetedSpineEvaluates` mixes
 direct lets with each exact three-step source external protocol and indexes
 the path by its required allocation budget. Direct costs remain
 syntax-computed; external result costs are source-execution indices because
@@ -568,7 +570,7 @@ the semantic `getTag` import in V8.
 The artifact and validation runners import the same semantic host module. The
 main native↔V8 validation matrix now exercises that constructor graph directly
 from the shared corpus and receipts the host as a captured runtime tool.
-It also checks Lean 4.32's scalar `UInt8` result representation for `Bool`,
+It also checks Lean 4.33's scalar `UInt8` result representation for `Bool`,
 accepting only zero and one at both the LCNF and V8 schema boundaries.
 `#fir_wasm_emit_case "case-id"` consumes the validation corpus directly. Its
 schema-driven API checks argument datums and the emitted result lane, carries
