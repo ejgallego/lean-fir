@@ -193,7 +193,8 @@ path from disappearing. All four cases pass native Lean, LCNF, and real V8.
 
 ### S3: capture alias topology
 
-State: `landed` and real-engine validated on `main` at `eacdd3bd`.
+State: S3a is `landed` and real-engine validated on `main` at `eacdd3bd`;
+S3b is active on `validation/closure-ownership-fixtures`.
 
 Compare one captured heap object with the same object captured in multiple
 slots, then retain an independent alias outside the closure. Cover callees that
@@ -218,6 +219,16 @@ Both execute a real `pap`, `fvar` closure invocation, Boolean branch, and two
 result constructors. The 641-case snapshot raises the aggregate floor to 650
 unique cases, 1,932 comparisons, 6,050 interpreter steps, 96 tag floors, and
 201 conjunctive domains, with no finding.
+
+S3b adds two ignore-versus-read pairs without widening a shared contract. The
+first partially applies the same `ByteArray` into two fixed slots while its
+caller retains a third alias. One branch returns the first capture and drops
+the second; the other borrows the second through `ByteArray.get!` and returns
+the observation beside both surviving aliases. The second pair constructs a
+small one-field object internally, repeats it across the same capture/outside
+shape, and distinguishes dropping the second capture from projecting its
+field. Exact traces must retain and execute real `pap`/`fvar` closure paths,
+the ignored-capture release, and the read-specific external or projection.
 
 ### S4: tail-call ownership
 
