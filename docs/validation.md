@@ -1817,6 +1817,21 @@ admission does not claim concrete Talos execution: the concrete-product client
 still records initial-runtime `ByteArray` layout and the `ByteArray.get!`/
 `ByteArray.set!` concrete external registrations as explicit boundaries.
 
+The repeated-capture pair strengthens that one-slot baseline by passing the
+same source `ByteArray` into both fixed slots of one partial application while
+retaining a third alias in the caller. A noinline closure consumer prevents
+the compiler from replacing the closure with a saturated direct call. The
+returned path exposes the outside alias and both captures unchanged; its exact
+22-transition execution includes one `inc`, one real `pap`, one `fvar` value
+invocation, the Boolean `cases`, two result constructors, and no literal or
+external step. The consuming path exposes the unchanged outside and first
+captured aliases beside the second capture's updated copy; its exact
+27-transition execution adds two literals and exactly one
+`ByteArray.set!` dispatch. Matching source and V8 domains require repeated
+capture, outside-alias preservation, the external-free returned path, and the
+copy-on-write consumed path. Native Lean, LCNF, and V8 agree on all three
+returned arrays in both cases.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in

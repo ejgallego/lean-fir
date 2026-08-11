@@ -1627,6 +1627,30 @@ def capturedByteArrayOutsideAliasMutation
     (fun byte => source.set! 0 byte) 42
   (source, updated)
 
+@[noinline]
+def applyRepeatedCapturedByteArray
+    (first second : ByteArray) (mutate : Bool) : ByteArray × ByteArray :=
+  if mutate then
+    (first, second.set! 0 42)
+  else
+    (first, second)
+
+@[noinline]
+def invokeRepeatedCapturedByteArray
+    (f : Bool → ByteArray × ByteArray) (mutate : Bool) : ByteArray × ByteArray :=
+  f mutate
+
+/--
+Capture the same ByteArray in two partial-application slots while retaining a
+third alias outside the closure. The selected branch either returns both
+captures or consumes the second through copy-on-write.
+-/
+def repeatedCapturedByteArrayOutsideAlias
+    (mutate : Bool) (source : ByteArray) : ByteArray × ByteArray × ByteArray :=
+  let captured := invokeRepeatedCapturedByteArray
+    (applyRepeatedCapturedByteArray source source) mutate
+  (source, captured)
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -2062,6 +2086,10 @@ private def byteArrayDatum (value : ByteArray) : ValidationDatum :=
 private def byteArrayPairDatum (value : ByteArray × ByteArray) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayDatum value.2]
 
+private def byteArrayTripleDatum
+    (value : ByteArray × ByteArray × ByteArray) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[byteArrayDatum value.1, byteArrayPairDatum value.2]
+
 private def byteArrayNatPairDatum
     (value : ByteArray × Nat) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[byteArrayDatum value.1, .nat value.2]
@@ -2270,6 +2298,9 @@ private def byteArrayObjectSwapArgSchemas : Array ValidationSchema :=
 private def byteArrayPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[.bytes, .bytes]
 
+private def byteArrayTripleSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[.bytes, byteArrayPairSchema]
+
 private def byteArrayPairPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
 
@@ -2390,6 +2421,15 @@ private def capturedByteArrayOutsideAliasReadFormTrace : Array String :=
 private def capturedByteArrayOutsideAliasMutationFormTrace : Array String :=
   #["inc", "pap", "lit", "fap", "box", "fvar", "unbox", "fap", "lit",
     "fap", "extern", "return", "return", "return", "ctor", "return"]
+
+private def repeatedCapturedByteArrayReturnedFormTrace : Array String :=
+  #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "ctor",
+    "return", "return", "return", "ctor", "return"]
+
+private def repeatedCapturedByteArrayConsumedFormTrace : Array String :=
+  #["inc", "pap", "fap", "box", "fvar", "unbox", "fap", "cases", "lit",
+    "lit", "fap", "extern", "ctor", "return", "return", "return", "ctor",
+    "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -5868,6 +5908,92 @@ private def postConversionCases : Array Case := #[
       #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind", "admin:yield-done"]
     provenance := firProvenance
       "Consume a captured ByteArray through copy-on-write while preserving its outside alias" },
+  { id := "repeated-captured-byte-array-returned"
+    entry := ``Source.repeatedCapturedByteArrayOutsideAlias
+    dependencies :=
+      #[``Source.applyRepeatedCapturedByteArray,
+        ``Source.invokeRepeatedCapturedByteArray]
+    args := #[.bool false, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := byteArrayTripleSchema
+    native := fun _ => byteArrayTripleDatum
+      (Source.repeatedCapturedByteArrayOutsideAlias false mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "heap", "ownership", "shared", "capture-alias-topology",
+        "repeated-capture", "outside-alias", "return-capture", "path-exclusion"]
+    requiredLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "lit", "extern",
+        "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "ctor", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 2, maximum := some 2 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 0, maximum := some 0 },
+        { form := "extern", minimum := 0, maximum := some 0 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 4, maximum := some 4 }]
+    requiredExecutedLcnfFormTrace :=
+      some repeatedCapturedByteArrayReturnedFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``ByteArray.set!, minimum := 0, maximum := some 0 }]
+    requiredExecutedExternalTrace := some #[]
+    provenance := firProvenance
+      "Return two identical captured aliases while retaining the caller's outside alias" },
+  { id := "repeated-captured-byte-array-consumed"
+    entry := ``Source.repeatedCapturedByteArrayOutsideAlias
+    dependencies :=
+      #[``Source.applyRepeatedCapturedByteArray,
+        ``Source.invokeRepeatedCapturedByteArray]
+    args := #[.bool true, byteArrayDatum mixedLayoutBytes]
+    argSchemas := #[.bool, .bytes]
+    resultSchema := byteArrayTripleSchema
+    native := fun _ => byteArrayTripleDatum
+      (Source.repeatedCapturedByteArrayOutsideAlias true mixedLayoutBytes)
+    tags :=
+      #["stress", "closure", "closure-ownership", "capture", "partial-application",
+        "bytearray", "bytes", "external", "heap", "ownership", "shared",
+        "capture-alias-topology", "repeated-capture", "outside-alias", "consume",
+        "mutation", "copy-on-write", "allocation"]
+    requiredLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "lit", "extern",
+        "ctor", "return"]
+    requiredExecutedLcnfForms :=
+      #["inc", "pap", "fap", "box", "fvar", "unbox", "cases", "lit", "extern",
+        "ctor", "return"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "inc", minimum := 1, maximum := some 1 },
+        { form := "pap", minimum := 1, maximum := some 1 },
+        { form := "fap", minimum := 3, maximum := some 3 },
+        { form := "box", minimum := 1, maximum := some 1 },
+        { form := "fvar", minimum := 1, maximum := some 1 },
+        { form := "unbox", minimum := 1, maximum := some 1 },
+        { form := "cases", minimum := 1, maximum := some 1 },
+        { form := "lit", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 1, maximum := some 1 },
+        { form := "ctor", minimum := 2, maximum := some 2 },
+        { form := "return", minimum := 4, maximum := some 4 }]
+    requiredExecutedLcnfFormTrace :=
+      some repeatedCapturedByteArrayConsumedFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:invoke-value", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``ByteArray.set!]
+    requiredExecutedExternals := #[``ByteArray.set!]
+    requiredExecutedExternalCounts := exactlyOnceExternalCounts #[``ByteArray.set!]
+    requiredExecutedExternalTrace := some #[``ByteArray.set!]
+    provenance := firProvenance
+      "Consume one of two identical captures while preserving the other and an outside alias" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]

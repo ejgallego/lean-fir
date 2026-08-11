@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 639-case source checkpoint, case counts are concentrated in
+At the current 641-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-300 `external`, and 146 `arithmetic`. In contrast, only 17 are tagged
+301 `external`, and 146 `arithmetic`. In contrast, only 17 are tagged
 `constructor`, 12 `control-flow`, three `effect`, three `recursion`, one
 `tail-control`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -94,7 +94,7 @@ near-synonym drift:
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | active | S2 is on `main`: the zero/one/two/three-use matrix pins 14/36/62/87 transitions and passes native/LCNF/V8; the outside-alias ByteArray pair remains green | Execute S3 repeated-capture and outside-alias topology |
+| M2 Closure/capture ownership | active | S2 is on `main`; S3a adds a real two-slot repeated-ByteArray capture with a third outside alias and pins 22/27 transitions across returned/consumed paths | Integrate S3a, then add ignore/read and a second heap-shape representative |
 | M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
@@ -193,7 +193,8 @@ path from disappearing. All four cases pass native Lean, LCNF, and real V8.
 
 ### S3: capture alias topology
 
-State: `active` on `validation/closure-ownership-fixtures`.
+State: `prepared` and real-engine validated on
+`validation/closure-ownership-fixtures`.
 
 Compare one captured heap object with the same object captured in multiple
 slots, then retain an independent alias outside the closure. Cover callees that
@@ -210,6 +211,14 @@ or copy-on-write decision is visible. Exact final-LCNF traces must prove the
 repeated capture, partial application, branch choice, returned-alias path, and
 consuming external path actually execute. The already-landed single-capture
 outside-alias mutation remains the one-slot comparison point.
+
+The prepared pair passes native Lean, the LCNF interpreter, and real V8. The
+returned path pins 22 interpreter transitions and zero `ByteArray.set!`
+dispatches; the consumed path pins 27 transitions and exactly one dispatch.
+Both execute a real `pap`, `fvar` closure invocation, Boolean branch, and two
+result constructors. The 641-case snapshot raises the aggregate floor to 650
+unique cases, 1,932 comparisons, 6,050 interpreter steps, 96 tag floors, and
+201 conjunctive domains, with no finding.
 
 ### S4: tail-call ownership
 
