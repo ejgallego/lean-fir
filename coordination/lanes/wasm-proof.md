@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: f9df6e24 on main
+state: active
+base: 1e9d4965 on main
 functional-head: 9518acdc (recursive structured simulation now includes `USize` field mutation)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam 0.2.0-beta (source 662b514f) update/sync/save document version 3 hash bc077906782428d1 (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check; Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready for integration; functional head 9518acdc is a proof-only extension over main f9df6e24.
+handoff: none; `USize` field mutation landed on main at 1e9d4965 and the lane is active on packed-integer scalar field mutation.
 next: Connect packed-integer scalar field mutation through the existing two-local binary host boundary. Keep heap-valued lazy publication and saturated closure calls separate.
 ```
