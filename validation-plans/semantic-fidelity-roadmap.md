@@ -48,11 +48,51 @@ and `reset`/`reuse` execution is likewise confined to the direct-machine tier.
 These are portfolio gaps even though all current instruction-form, tag, and
 conjunctive-domain floors are green.
 
+## Executable plan map
+
+| Plan | Role | Selection invariant |
+| --- | --- | --- |
+| `native-lcnf.json` | Primary source/native-oracle comparison | Every source case, including cases not yet admitted to Wasm |
+| `direct-lcnf.json` | Source-unreachable machine-state comparison | Handwritten direct cases only; `direct-native` is its machine oracle |
+| `native-lcnf-v8-scalars.json` | Real-engine triangle | Every case not tagged `wasm-generation-pending`; all three native/LCNF/V8 edges are retained |
+| `native-oracle-attestations.json` | Offline oracle policy | Complete equal `native -> lcnf` and `native -> v8` edges over the same selected case set |
+| `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
+
+The `-scalars` suffix on the V8 plan and its provider/adapter files is
+historical: the plan currently selects all 637 eligible cases, not a scalar
+subset. Rename those root-wired assets through the integration owner rather
+than creating a second semantically identical plan in this lane.
+
+Every admitted slice updates its executable ratchets atomically:
+
+1. Add the cases, exact final-LCNF obligations, and executed traces/counts.
+2. Raise tier, aggregate, interpreter-step, and native-oracle case floors for
+   every newly eligible case.
+3. Add a tag floor and at least one conjunctive domain for the distinguishing
+   semantic claim; case-count growth alone is not acceptance.
+4. Add matching source and V8 domains in the same slice when the W7 surface is
+   linked. Otherwise retain the explicit pending fence without claiming V8
+   coverage.
+5. Do not add a policy floor for a contract-blocked track until the contract
+   and its first witness case land together.
+
+The initial domain vocabulary for the next slices is fixed here to prevent
+near-synonym drift:
+
+| Slice | Distinguishing tags | Required initial domains |
+| --- | --- | --- |
+| S2 | `closure-ownership`, `multiplicity`, `zero-use`, `three-use`, `unique-final-application`, `shared-intermediate-application` | `closure-ownership-zero-use`, `closure-ownership-three-use`, `closure-ownership-unique-final`, `closure-ownership-shared-intermediate` |
+| S3 | `capture-alias-topology`, `repeated-capture`, `outside-alias`, plus the consumer action | `capture-topology-repeated`, `capture-topology-outside-alias`, and one action-sensitive domain |
+| S4/B1 | `tail-control`, `tail-ownership`, `unique-transfer`, `shared-retain` | `tail-ownership-unique-transfer`, `tail-ownership-shared-retain` |
+| B2 | `application-shape` plus `nullary`, `underapplication`, `overapplication`, or `returned-closure` | One domain per admitted application shape |
+| C1 | `effect`, `ordered-effect`, `call-boundary`, `alias-across-effect` | `effect-call-order`, `effect-alias-retention` |
+| E1 | `aggregate`, `erasure`, and the exercised construction/case/projection action | `aggregate-erasure` and one result-shape domain |
+
 ## Track A: memory-fidelity progress
 
 | Milestone | State | Current checkpoint | Next acceptance step |
 | --- | --- | --- | --- |
-| M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the fixture-only admission on `main` |
+| M0 Mixed closure baseline | prepared | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Land the prepared fixture/documentation stack on `main` |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
 | M2 Closure/capture ownership | active | One-use/two-use mixed captures and the outside-alias ByteArray read/mutate pair pass native/LCNF/V8 | Cover zero/three uses and unique/shared final application |
 | M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
@@ -61,10 +101,12 @@ conjunctive-domain floors are green.
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures and the mixed one-use/two-use pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
-States are `queued`, `active`, `prepared`, `landed`, or `parked`. A prepared
-slice is committed and locally validated but still waits at a named cross-lane
-boundary. A milestone becomes landed only after its fixture commit is on
-`main` and every eligible case has passed its required backend triangle.
+States are `queued`, `active`, `prepared`, `landed`, `parked`, or
+`contract-blocked`. A prepared slice is committed and locally validated but
+still waits at a named cross-lane boundary. A contract-blocked track has no
+fixture or coverage-floor work in flight. A milestone becomes landed only
+after its fixture commit is on `main` and every eligible case has passed its
+required backend triangle.
 
 ## Coverage model
 
@@ -90,26 +132,31 @@ add a coverage requirement for the distinguishing conjunction.
 
 ## Per-fixture acceptance
 
-Every memory-fidelity fixture must satisfy the applicable requirements below.
+Every source-generated semantic-fidelity fixture must satisfy the applicable
+requirements below.
 
 1. Native Lean supplies the result, ordered effects, failure, and output
    observation. No expected semantic result is substituted for the oracle.
-2. The source and dependency list are small enough that the targeted ownership
+2. The source and dependency list are small enough that the targeted semantic
    path is identifiable in final LCNF.
 3. Required final-LCNF forms prove the compiler retained the intended path.
-4. Exact executed form traces and exact multiplicities prove the interpreter
-   executed the allocation, `pap`/closure invocation, increment, decrement,
-   projection, mutation, reuse, or release operations being claimed.
-5. The returned value or ordered effect makes an ownership mistake observable.
-   Copy-on-write and retained aliases are preferred over internal-state-only
-   assertions.
-6. Native ownership attestations are added when compiler-generated ownership
+4. Exact executed form/external traces and exact relevant multiplicities prove
+   the interpreter executed the control, allocation, call, ownership, effect,
+   termination, or aggregate operations being claimed.
+5. The returned value, termination, output, or ordered effect makes the
+   semantic mistake observable. Copy-on-write and retained aliases remain the
+   preferred memory observations.
+6. Native ownership or compiler-fact attestations are added when generated
    facts, rather than only semantic behavior, form part of the claim.
 7. The case runs in V8 after the W7 compiler surface and W6 contract for that
    feature are linked. Until then it carries the existing explicit pending
    fence and does not inflate V8 coverage.
-8. Any semantic discrepancy receives a bug card before a workaround or model
-   accommodation is introduced.
+8. The same slice raises the executable case/step/oracle ratchets and adds a
+   tag floor plus a conjunctive domain for its distinguishing claim.
+9. A new value, result schema, effect, or termination kind consumes a linked
+   shared contract; it is never approximated by an existing observation.
+10. Any semantic discrepancy receives a bug card before a workaround or model
+    accommodation is introduced.
 
 ## Planned fixture slices
 

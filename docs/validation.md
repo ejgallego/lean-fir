@@ -460,7 +460,7 @@ can consume the same envelope contract independently.
 
 `validation-plans/native-oracle-attestations.json` makes the source of truth
 explicit. It requires complete matching `native -> lcnf` and `native -> v8`
-edges over all 581 currently accepted real-engine cases. Required oracle edges
+edges over all 637 currently accepted real-engine cases. Required oracle edges
 must share one matrix
 selection, run identity, and ordered case set; every case must have an equal
 observation witness and there may be no comparison findings. Additional edges
@@ -550,7 +550,7 @@ the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 581 source cases are shared by the source-LCNF and V8
+current baseline, the 637 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
