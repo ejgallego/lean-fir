@@ -25,7 +25,7 @@ function expectTrap(action, message) {
   expect(trapped, message);
 }
 
-/** Exercise Lean-compatible UInt8 boxing and UInt8/UInt32 unboxing. */
+/** Exercise Lean-compatible scalar boxing, unboxing, and fixed-width equality. */
 export async function checkResidentScalarBox(bytes) {
   const module = await WebAssembly.compile(bytes);
   equal(WebAssembly.Module.imports(module).length, 0,
@@ -39,6 +39,7 @@ export async function checkResidentScalarBox(bytes) {
     "fir_box_uint8",
     "fir_unbox_uint8",
     "fir_unbox_uint32",
+    "fir_ext_UInt32_decEq",
   ]) {
     equal(typeof exports[name], "function", `missing export ${name}`);
   }
@@ -59,6 +60,10 @@ export async function checkResidentScalarBox(bytes) {
     equal(exports.fir_unbox_uint32(Number(word)) >>> 0, value >>> 0,
       `immediate UInt32 ${value} unboxed incorrectly`);
   }
+  equal(exports.fir_ext_UInt32_decEq(0xffffffff, 0xffffffff), 1,
+    "UInt32.decEq equal");
+  equal(exports.fir_ext_UInt32_decEq(0xffffffff, 0), 0,
+    "UInt32.decEq unequal");
 
   writePromotedTag(exports.memory, 1024, 0x80000000n);
   writePromotedTag(exports.memory, 1064, 0xffffffffn);

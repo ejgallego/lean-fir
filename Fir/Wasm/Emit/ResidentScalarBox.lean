@@ -5,6 +5,7 @@ namespace Fir.Wasm.Emit.ResidentScalarBox
 open Fir.Wasm
 open Fir.Wasm.Concrete
 open Lean
+open Lean.Compiler
 
 /-!
 # Wasm-resident small scalar boxing
@@ -19,6 +20,8 @@ needed by compiler-generated boxed wrappers without adding host imports.
 inductive LinkError where
   | invalidInput (error : SymbolicError)
   | reservedDeclaration (name : Name)
+  | missingExternal (name : Name)
+  | incompatibleExternal (name : Name)
   | unsupportedOperation
   | incompatibleMemory
   | invalidOutput (error : SymbolicError)
@@ -28,6 +31,8 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 
 private def valueParam : FVarId := ⟨`value⟩
 private def objectParam : FVarId := ⟨`object⟩
+private def leftParam : FVarId := ⟨`left⟩
+private def rightParam : FVarId := ⟨`right⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def raw64Local : FVarId := ⟨`raw64⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
@@ -37,8 +42,12 @@ private def uint8ResultLocal : FVarId := ⟨`uint8Result⟩
 def boxUInt8Name : Name := `fir_box_uint8
 def unboxUInt8Name : Name := `fir_unbox_uint8
 def unboxUInt32Name : Name := `fir_unbox_uint32
+def uint32DecEqName : Name := `fir_ext_UInt32_decEq
 
-def helperNames : Array Name := #[boxUInt8Name, unboxUInt8Name, unboxUInt32Name]
+def externalDeclarations : Array Name := #[`UInt32.decEq]
+
+def helperNames : Array Name :=
+  #[boxUInt8Name, unboxUInt8Name, unboxUInt32Name, uint32DecEqName]
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
   [.i32Const kind value, .i32Eq]
@@ -145,6 +154,19 @@ def unboxUInt32Function : Function := {
     .i32And,
     .ifElse immediateUInt32Body promotedUInt32Body] }
 
+/-- Upstream fixed-width equality is physical wasm32 equality. -/
+def uint32DecEqFunction : Function := {
+  name := uint32DecEqName
+  params := #[(leftParam, .uint32), (rightParam, .uint32)]
+  results := #[.uint8]
+  locals := #[(rawLocal, .uint32), (savedScratchLocal, .uint32),
+    (uint8ResultLocal, .uint8)]
+  body := [
+    .localGet leftParam,
+    .localGet rightParam,
+    .i32Eq,
+    .localSet rawLocal] ++ retypeRaw .uint8 uint8ResultLocal }
+
 private def runtimeName? : RuntimeOp → Option Name
   | .box .uint8 .tagged => some boxUInt8Name
   | .unbox .uint8 => some unboxUInt8Name
@@ -164,6 +186,11 @@ private structure Binding where
 
 private partial def rewriteInstruction (bindings : Array Binding) :
     Instruction → Instruction
+  | .call (.declaration declaration) =>
+      if externalDeclarations.contains declaration then
+        .call (.declaration uint32DecEqName)
+      else
+        .call (.declaration declaration)
   | .call (.runtime operation) =>
       match bindings.find? (fun binding => binding.operation == operation) with
       | some binding => .call (.declaration binding.name)
@@ -191,6 +218,20 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
   | .error error => throw (.invalidInput error)
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
+  let presentExternal := module.imports.any
+    (·.declaration? == some `UInt32.decEq)
+  if presentExternal then
+    if module.imports.any (·.declaration? == some uint32DecEqName) ||
+        module.functions.any (·.name == uint32DecEqName) ||
+        module.exports.contains uint32DecEqName then
+      throw (.reservedDeclaration uint32DecEqName)
+    let imports := module.imports.filter
+      (·.declaration? == some `UInt32.decEq)
+    unless imports.size == 1 do
+      throw (.missingExternal `UInt32.decEq)
+    unless imports[0]!.signature == {
+        params := #[.uint32, .uint32], results := #[.uint8] } do
+      throw (.incompatibleExternal `UInt32.decEq)
   let operations := module.runtimeOperations.filter (runtimeName? · |>.isSome)
   let bindings ← operations.mapM fun operation => do
     let some name := runtimeName? operation |
@@ -201,16 +242,24 @@ def internalizeAvailable (module : Module) : Except LinkError Module := do
   let functions := module.functions.map fun function =>
     { function with body := function.body.map (rewriteInstruction bindings) }
   let functions ← bindings.foldlM (init := functions) installBinding
+  let functions := if presentExternal then functions.push uint32DecEqFunction
+    else functions
   let runtimeOperations := Fir.Wasm.collectRuntimeOps functions
-  let externalImports := module.imports.filter (·.operation?.isNone)
+  let externalImports := module.imports.filter fun import_ =>
+    import_.operation?.isNone &&
+      !(presentExternal && import_.declaration? == some `UInt32.decEq)
+  let exports := bindings.foldl
+    (fun exports binding => Fir.Wasm.addUnique exports binding.name)
+    module.exports
+  let exports := if presentExternal then
+    Fir.Wasm.addUnique exports uint32DecEqName
+  else exports
   let result : Module := {
     module with
     functions
     runtimeOperations
     imports := runtimeOperations.mapIdx Fir.Wasm.runtimeImport ++ externalImports
-    exports := bindings.foldl
-      (fun exports binding => Fir.Wasm.addUnique exports binding.name)
-      module.exports }
+    exports }
   match Fir.Wasm.validateModule result with
   | .ok () => return result
   | .error error => throw (.invalidOutput error)
@@ -239,7 +288,14 @@ private def unboxUInt32ExampleFunction : Function := {
   body := [.localGet objectParam, .call (.runtime exampleOperations[2]!), .ret] }
 
 def exampleModule : Module := {
-  imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport
+  imports := exampleOperations.mapIdx Fir.Wasm.runtimeImport ++ #[{
+    key := .external `UInt32.decEq
+    moduleName := "lean.extern"
+    itemName := "UInt32.decEq"
+    signature := { params := #[.uint32, .uint32], results := #[.uint8] }
+    externalTypes? := some {
+      params := #[LCNF.ImpureType.uint32, LCNF.ImpureType.uint32]
+      result := LCNF.ImpureType.uint8 } }]
   functions := #[roundtripFunction, unboxUInt32ExampleFunction]
   exports := #[roundtripName, unboxUInt32ExampleName]
   initializers := #[]
@@ -270,7 +326,7 @@ def manifest : Json :=
 #guard match residentExampleModule with
   | .ok module =>
       module.imports.isEmpty && module.runtimeOperations.isEmpty &&
-      module.functions.size == 5 &&
+      module.functions.size == 6 &&
       helperNames.all module.exports.contains &&
       (Fir.Wasm.validateModule module).isOk && (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false

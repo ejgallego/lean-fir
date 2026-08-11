@@ -302,7 +302,8 @@ def closedApplicationExternalDeclarations : Array Name :=
     ResidentArray.availableExternalDeclarations ++
     #[ResidentNatMod.declaration, ResidentNatShift.declaration] ++
     ResidentUSize.externalDeclarations ++
-    ResidentString.externalDeclarations ++
+    ResidentString.availableExternalDeclarations ++
+    ResidentScalarBox.externalDeclarations ++
     ResidentFallback.externalDeclarations
   declarations.foldl addUnique #[]
 
