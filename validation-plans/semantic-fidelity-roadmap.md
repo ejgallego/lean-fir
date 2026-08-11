@@ -314,6 +314,17 @@ reference even when allocation identity is not part of portable Lean results.
 The existing opt-in direct native-IR attestations remain the native ownership
 fact anchor; this fixture slice adds no orchestration or recorder surface.
 
+The compact pair now passes native Lean versus final LCNF and the full
+native/LCNF/real-V8 triangle with no finding. The unique case pins a complete
+63-step trace with two increments, two decrements, four constructors, and two
+reuse writes. The shared-stop case pins a complete 69-step trace with five
+increments, three decrements, six constructors, and one reuse write: the leaf
+update takes the allocation branch while the returned child preserves its
+original leaf. Both execute exactly one ordered `Nat.add` external. The
+coverage snapshot advances to 649 source cases, 658 aggregate unique cases,
+1,956 comparisons, 6,563 interpreter steps, 116 tag floors, and 221 semantic
+domains.
+
 ### S6: nonlocal ownership boundaries
 
 Apply a closure, cross an external suspension or ordered effect, then reuse a

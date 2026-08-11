@@ -1728,6 +1728,71 @@ def tailByteOwnerShared
   let updated := tailUpdateByteOwner steps owner
   (owner, updated)
 
+structure ReleaseLeaf where
+  payload : Nat
+  marker : String
+
+structure ReleaseChild where
+  leaf : ReleaseLeaf
+  marker : Nat
+
+structure ReleaseOwner where
+  proof : True
+  child : ReleaseChild
+  marker : Nat
+
+structure ReleaseReplacement where
+  payload : Nat
+  marker : Nat
+
+@[noinline]
+def mkReleaseLeaf (payload : Nat) : ReleaseLeaf :=
+  { payload, marker := "release-leaf" }
+
+@[noinline]
+def mkReleaseChild (leaf : ReleaseLeaf) : ReleaseChild :=
+  { leaf, marker := 17 }
+
+@[noinline]
+def mkReleaseOwner (child : ReleaseChild) : ReleaseOwner :=
+  { proof := True.intro, child, marker := 23 }
+
+@[noinline]
+def replaceReleaseOwner
+    (owner : ReleaseOwner) (payload : Nat) : ReleaseReplacement :=
+  { payload, marker := owner.marker }
+
+@[noinline]
+def ReleaseLeaf.bump (leaf : ReleaseLeaf) : ReleaseLeaf :=
+  { leaf with payload := leaf.payload + 1 }
+
+/--
+Consume a unique owner and child while retaining the leaf. Recursive release of
+the child must decrement the retained leaf to exclusive ownership, allowing the
+subsequent update to reuse it.
+-/
+def recursiveReleaseLeafUniqueReuse
+    (payload replacementPayload : Nat) : ReleaseReplacement × ReleaseLeaf :=
+  let leaf := mkReleaseLeaf payload
+  let child := mkReleaseChild leaf
+  let owner := mkReleaseOwner child
+  let replacement := replaceReleaseOwner owner replacementPayload
+  (replacement, leaf.bump)
+
+/--
+Retain the child while consuming its owner. Release must stop at the shared
+child; retaining the original child then keeps its leaf shared while the update
+allocates a distinct leaf.
+-/
+def recursiveReleaseSharedChildStop
+    (payload replacementPayload : Nat) :
+    ReleaseReplacement × ReleaseChild × ReleaseLeaf :=
+  let leaf := mkReleaseLeaf payload
+  let child := mkReleaseChild leaf
+  let owner := mkReleaseOwner child
+  let replacement := replaceReleaseOwner owner replacementPayload
+  (replacement, child, child.leaf.bump)
+
 set_option genInjectivity false in
 structure BigCtor where
   f01 : Nat := 0
@@ -2196,6 +2261,26 @@ private def tailByteOwnerPairDatum
     (value : Source.TailByteOwner × Source.TailByteOwner) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[tailByteOwnerDatum value.1, tailByteOwnerDatum value.2]
 
+private def releaseLeafDatum (value : Source.ReleaseLeaf) : ValidationDatum :=
+  .ctor "ReleaseLeaf.mk" 0 #[.nat value.payload, .string value.marker]
+
+private def releaseChildDatum (value : Source.ReleaseChild) : ValidationDatum :=
+  .ctor "ReleaseChild.mk" 0 #[releaseLeafDatum value.leaf, .nat value.marker]
+
+private def releaseReplacementDatum
+    (value : Source.ReleaseReplacement) : ValidationDatum :=
+  .ctor "ReleaseReplacement.mk" 0 #[.nat value.payload, .nat value.marker]
+
+private def releaseUniqueResultDatum
+    (value : Source.ReleaseReplacement × Source.ReleaseLeaf) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[releaseReplacementDatum value.1, releaseLeafDatum value.2]
+
+private def releaseSharedResultDatum
+    (value : Source.ReleaseReplacement × Source.ReleaseChild ×
+      Source.ReleaseLeaf) : ValidationDatum :=
+  .ctor "Prod.mk" 0 #[releaseReplacementDatum value.1,
+    .ctor "Prod.mk" 0 #[releaseChildDatum value.2.1, releaseLeafDatum value.2.2]]
+
 private def stringPairDatum (value : String × String) : ValidationDatum :=
   .ctor "Prod.mk" 0 #[.string value.1, .string value.2]
 
@@ -2419,6 +2504,22 @@ private def tailByteOwnerSchema : ValidationSchema :=
 private def tailByteOwnerPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[tailByteOwnerSchema, tailByteOwnerSchema]
 
+private def releaseLeafSchema : ValidationSchema :=
+  .ctor "ReleaseLeaf.mk" 0 #[.nat, .string]
+
+private def releaseChildSchema : ValidationSchema :=
+  .ctor "ReleaseChild.mk" 0 #[releaseLeafSchema, .nat]
+
+private def releaseReplacementSchema : ValidationSchema :=
+  .ctor "ReleaseReplacement.mk" 0 #[.nat, .nat]
+
+private def releaseUniqueResultSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[releaseReplacementSchema, releaseLeafSchema]
+
+private def releaseSharedResultSchema : ValidationSchema :=
+  .ctor "Prod.mk" 0 #[releaseReplacementSchema,
+    .ctor "Prod.mk" 0 #[releaseChildSchema, releaseLeafSchema]]
+
 private def byteArrayPairPairSchema : ValidationSchema :=
   .ctor "Prod.mk" 0 #[byteArrayPairSchema, byteArrayPairSchema]
 
@@ -2597,6 +2698,23 @@ private def tailByteOwnerSharedFormTrace : Array String :=
     "fap", "extern", "join", "cases", "oset", "jump", "return",
     "fap", "lit", "fap", "extern", "cases", "dec", "return", "return",
     "return", "return", "ctor", "return"]
+
+private def recursiveReleaseUniqueFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "inc", "fap",
+    "lit", "ctor", "return", "fap", "lit", "ctor", "return", "fap", "oproj",
+    "join", "isShared", "cases", "oproj", "dec", "jump", "join", "cases",
+    "oset", "jump", "return", "fap", "oproj", "oproj", "join", "isShared",
+    "cases", "jump", "lit", "fap", "extern", "dec", "join", "cases", "oset",
+    "jump", "return", "ctor", "return"]
+
+private def recursiveReleaseSharedFormTrace : Array String :=
+  #["fap", "fap", "lit", "return", "inc", "ctor", "return", "fap", "lit",
+    "ctor", "return", "oproj", "inc", "inc", "fap", "lit", "ctor", "return",
+    "fap", "oproj", "join", "isShared", "cases", "oproj", "dec", "jump",
+    "join", "cases", "oset", "jump", "return", "fap", "oproj", "oproj",
+    "join", "isShared", "cases", "inc", "inc", "dec", "jump", "lit", "fap",
+    "extern", "dec", "join", "cases", "ctor", "jump", "return", "ctor", "ctor",
+    "return"]
 
 private def intClassifyFormTrace : Array String :=
   #["fap", "lit", "fap", "extern", "return",
@@ -6442,6 +6560,97 @@ private def postConversionCases : Array Case := #[
         ``ByteArray.set!, ``Nat.decEq, ``Nat.sub, ``ByteArray.set!, ``Nat.decEq]
     provenance := firProvenance
       "Retain the original nested owner across three tail-recursive mutations" },
+  { id := "recursive-release-leaf-unique-reuse"
+    entry := ``Source.recursiveReleaseLeafUniqueReuse
+    dependencies :=
+      #[``Source.mkReleaseLeaf, ``Source.mkReleaseChild, ``Source.mkReleaseOwner,
+        ``Source.replaceReleaseOwner, ``Source.ReleaseLeaf.bump]
+    args := #[.nat Source.largeNat, .nat 29]
+    argSchemas := #[.nat, .nat]
+    resultSchema := releaseUniqueResultSchema
+    native := fun _ => releaseUniqueResultDatum
+      (Source.recursiveReleaseLeafUniqueReuse Source.largeNat 29)
+    tags :=
+      #["stress", "ownership", "reference-count", "recursive-release", "nested",
+        "erased", "unique", "reuse", "constructor", "object", "heap", "string",
+        "large-nat", "allocation", "release-fidelity"]
+    requiredLcnfForms :=
+      #["fap", "inc", "ctor", "return", "lit", "oproj", "join", "cases",
+        "oset", "jump", "isShared", "dec", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "oproj", "join", "isShared",
+        "cases", "dec", "jump", "oset", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 7, maximum := some 7 },
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "return", minimum := 7, maximum := some 7 },
+        { form := "inc", minimum := 2, maximum := some 2 },
+        { form := "ctor", minimum := 4, maximum := some 4 },
+        { form := "oproj", minimum := 4, maximum := some 4 },
+        { form := "join", minimum := 4, maximum := some 4 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 2, maximum := some 2 },
+        { form := "jump", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 2, maximum := some 2 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some recursiveReleaseUniqueFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.add, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some #[``Nat.add]
+    provenance := firProvenance
+      "Recursively release a unique child so its retained leaf becomes reusable" },
+  { id := "recursive-release-shared-child-stop"
+    entry := ``Source.recursiveReleaseSharedChildStop
+    dependencies :=
+      #[``Source.mkReleaseLeaf, ``Source.mkReleaseChild, ``Source.mkReleaseOwner,
+        ``Source.replaceReleaseOwner, ``Source.ReleaseLeaf.bump]
+    args := #[.nat Source.largeNat, .nat 29]
+    argSchemas := #[.nat, .nat]
+    resultSchema := releaseSharedResultSchema
+    native := fun _ => releaseSharedResultDatum
+      (Source.recursiveReleaseSharedChildStop Source.largeNat 29)
+    tags :=
+      #["stress", "ownership", "reference-count", "recursive-release", "nested",
+        "erased", "shared", "stop-recursion", "outside-alias", "retain", "release",
+        "copy-on-write", "constructor", "object", "heap", "string", "large-nat",
+        "allocation", "release-fidelity", "path-exclusion"]
+    requiredLcnfForms :=
+      #["fap", "oproj", "inc", "ctor", "return", "lit", "join", "cases",
+        "oset", "jump", "isShared", "dec", "extern"]
+    requiredExecutedLcnfForms :=
+      #["fap", "lit", "return", "inc", "ctor", "oproj", "join", "isShared",
+        "cases", "dec", "jump", "oset", "extern"]
+    requiredExecutedLcnfFormCounts :=
+      #[{ form := "fap", minimum := 7, maximum := some 7 },
+        { form := "lit", minimum := 4, maximum := some 4 },
+        { form := "return", minimum := 7, maximum := some 7 },
+        { form := "inc", minimum := 5, maximum := some 5 },
+        { form := "ctor", minimum := 6, maximum := some 6 },
+        { form := "oproj", minimum := 5, maximum := some 5 },
+        { form := "join", minimum := 4, maximum := some 4 },
+        { form := "isShared", minimum := 2, maximum := some 2 },
+        { form := "cases", minimum := 4, maximum := some 4 },
+        { form := "dec", minimum := 3, maximum := some 3 },
+        { form := "jump", minimum := 4, maximum := some 4 },
+        { form := "oset", minimum := 1, maximum := some 1 },
+        { form := "extern", minimum := 1, maximum := some 1 }]
+    requiredExecutedLcnfFormTrace := some recursiveReleaseSharedFormTrace
+    requiredAdministrativeStepKinds :=
+      #["admin:invoke-name", "admin:yield-cache", "admin:yield-bind",
+        "admin:yield-done"]
+    requiredExternals := #[``Nat.add]
+    requiredExecutedExternals := #[``Nat.add]
+    requiredExecutedExternalCounts :=
+      #[{ external := ``Nat.add, minimum := 1, maximum := some 1 }]
+    requiredExecutedExternalTrace := some #[``Nat.add]
+    provenance := firProvenance
+      "Stop recursive owner release at a retained child and preserve its original leaf" },
   { id := "big-ctor-70"
     entry := ``Source.bigCtorField
     dependencies := #[``Source.mkBigCtor]

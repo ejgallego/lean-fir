@@ -46,8 +46,8 @@
     "tiers": [
       {
         "id": "source-lcnf",
-        "minimumCases": 647,
-        "minimumComparisons": 647,
+        "minimumCases": 649,
+        "minimumComparisons": 649,
         "requiredBackends": [
           "lcnf",
           "native"
@@ -66,8 +66,8 @@
       },
       {
         "id": "wasm-v8",
-        "minimumCases": 647,
-        "minimumComparisons": 1294,
+        "minimumCases": 649,
+        "minimumComparisons": 1298,
         "requiredBackends": [
           "lcnf",
           "native",
@@ -77,13 +77,13 @@
       }
     ],
     "aggregate": {
-      "minimumUniqueCases": 656,
-      "minimumTierCases": 1303,
-      "minimumComparisons": 1950
+      "minimumUniqueCases": 658,
+      "minimumTierCases": 1307,
+      "minimumComparisons": 1956
     },
     "machine": {
-      "minimumCases": 656,
-      "minimumInterpreterSteps": 6431,
+      "minimumCases": 658,
+      "minimumInterpreterSteps": 6563,
       "requiredStaticForms": [
         "box",
         "cases",
@@ -447,7 +447,7 @@
       {
         "tier": "source-lcnf",
         "tag": "allocation",
-        "minimumCases": 17
+        "minimumCases": 19
       },
       {
         "tier": "source-lcnf",
@@ -497,7 +497,7 @@
       {
         "tier": "source-lcnf",
         "tag": "constructor",
-        "minimumCases": 21
+        "minimumCases": 23
       },
       {
         "tier": "source-lcnf",
@@ -512,7 +512,7 @@
       {
         "tier": "source-lcnf",
         "tag": "copy-on-write",
-        "minimumCases": 18
+        "minimumCases": 19
       },
       {
         "tier": "source-lcnf",
@@ -523,6 +523,11 @@
         "tier": "source-lcnf",
         "tag": "entry-abi",
         "minimumCases": 30
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "erased",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -557,7 +562,7 @@
       {
         "tier": "source-lcnf",
         "tag": "heap",
-        "minimumCases": 94
+        "minimumCases": 96
       },
       {
         "tier": "source-lcnf",
@@ -597,7 +602,7 @@
       {
         "tier": "source-lcnf",
         "tag": "object",
-        "minimumCases": 23
+        "minimumCases": 25
       },
       {
         "tier": "source-lcnf",
@@ -607,12 +612,12 @@
       {
         "tier": "source-lcnf",
         "tag": "outside-alias",
-        "minimumCases": 9
+        "minimumCases": 10
       },
       {
         "tier": "source-lcnf",
         "tag": "ownership",
-        "minimumCases": 29
+        "minimumCases": 31
       },
       {
         "tier": "source-lcnf",
@@ -626,8 +631,23 @@
       },
       {
         "tier": "source-lcnf",
+        "tag": "recursive-release",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "reference-count",
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
         "tag": "release",
-        "minimumCases": 8
+        "minimumCases": 9
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "release-fidelity",
+        "minimumCases": 2
       },
       {
         "tier": "source-lcnf",
@@ -647,7 +667,7 @@
       {
         "tier": "source-lcnf",
         "tag": "retain",
-        "minimumCases": 5
+        "minimumCases": 6
       },
       {
         "tier": "source-lcnf",
@@ -662,7 +682,7 @@
       {
         "tier": "source-lcnf",
         "tag": "shared",
-        "minimumCases": 26
+        "minimumCases": 27
       },
       {
         "tier": "source-lcnf",
@@ -688,6 +708,11 @@
         "tier": "source-lcnf",
         "tag": "single-use",
         "minimumCases": 3
+      },
+      {
+        "tier": "source-lcnf",
+        "tag": "stop-recursion",
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -762,7 +787,7 @@
       {
         "tier": "wasm-v8",
         "tag": "constructor",
-        "minimumCases": 21
+        "minimumCases": 23
       },
       {
         "tier": "wasm-v8",
@@ -786,6 +811,11 @@
       },
       {
         "tier": "wasm-v8",
+        "tag": "erased",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
         "tag": "external",
         "minimumCases": 305
       },
@@ -797,7 +827,7 @@
       {
         "tier": "wasm-v8",
         "tag": "heap",
-        "minimumCases": 94
+        "minimumCases": 96
       },
       {
         "tier": "wasm-v8",
@@ -837,7 +867,7 @@
       {
         "tier": "wasm-v8",
         "tag": "object",
-        "minimumCases": 23
+        "minimumCases": 25
       },
       {
         "tier": "wasm-v8",
@@ -847,17 +877,32 @@
       {
         "tier": "wasm-v8",
         "tag": "outside-alias",
-        "minimumCases": 9
+        "minimumCases": 10
       },
       {
         "tier": "wasm-v8",
         "tag": "ownership",
-        "minimumCases": 29
+        "minimumCases": 31
       },
       {
         "tier": "wasm-v8",
         "tag": "partial-application",
         "minimumCases": 45
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "recursive-release",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "reference-count",
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "release-fidelity",
+        "minimumCases": 2
       },
       {
         "tier": "wasm-v8",
@@ -898,6 +943,11 @@
         "tier": "wasm-v8",
         "tag": "signed",
         "minimumCases": 302
+      },
+      {
+        "tier": "wasm-v8",
+        "tag": "stop-recursion",
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -1351,7 +1401,7 @@
         "tier": "source-lcnf",
         "name": "memory-retain-release",
         "allTags": ["release", "retain"],
-        "minimumCases": 5
+        "minimumCases": 6
       },
       {
         "tier": "source-lcnf",
@@ -1387,19 +1437,19 @@
         "tier": "source-lcnf",
         "name": "ownership-copy-on-write",
         "allTags": ["copy-on-write", "ownership"],
-        "minimumCases": 7
+        "minimumCases": 8
       },
       {
         "tier": "source-lcnf",
         "name": "ownership-shared",
         "allTags": ["ownership", "shared"],
-        "minimumCases": 17
+        "minimumCases": 18
       },
       {
         "tier": "source-lcnf",
         "name": "ownership-unique",
         "allTags": ["ownership", "unique"],
-        "minimumCases": 8
+        "minimumCases": 9
       },
       {
         "tier": "source-lcnf",
@@ -1412,6 +1462,30 @@
         "name": "recursive-constructor",
         "allTags": ["constructor", "recursion"],
         "minimumCases": 5
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "recursive-release-erased-owner",
+        "allTags": ["erased", "recursive-release", "release-fidelity"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "recursive-release-shared-stop",
+        "allTags": [
+          "outside-alias",
+          "recursive-release",
+          "release-fidelity",
+          "shared",
+          "stop-recursion"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "source-lcnf",
+        "name": "recursive-release-unique-reuse",
+        "allTags": ["recursive-release", "release-fidelity", "reuse", "unique"],
+        "minimumCases": 1
       },
       {
         "tier": "source-lcnf",
@@ -1598,7 +1672,7 @@
         "tier": "source-lcnf",
         "name": "string-copy-on-write",
         "allTags": ["copy-on-write", "string"],
-        "minimumCases": 4
+        "minimumCases": 5
       },
       {
         "tier": "source-lcnf",
@@ -2115,19 +2189,19 @@
         "tier": "wasm-v8",
         "name": "ownership-copy-on-write",
         "allTags": ["copy-on-write", "ownership"],
-        "minimumCases": 7
+        "minimumCases": 8
       },
       {
         "tier": "wasm-v8",
         "name": "ownership-shared",
         "allTags": ["ownership", "shared"],
-        "minimumCases": 17
+        "minimumCases": 18
       },
       {
         "tier": "wasm-v8",
         "name": "ownership-unique",
         "allTags": ["ownership", "unique"],
-        "minimumCases": 8
+        "minimumCases": 9
       },
       {
         "tier": "wasm-v8",
@@ -2140,6 +2214,30 @@
         "name": "recursive-constructor",
         "allTags": ["constructor", "recursion"],
         "minimumCases": 5
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "recursive-release-erased-owner",
+        "allTags": ["erased", "recursive-release", "release-fidelity"],
+        "minimumCases": 2
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "recursive-release-shared-stop",
+        "allTags": [
+          "outside-alias",
+          "recursive-release",
+          "release-fidelity",
+          "shared",
+          "stop-recursion"
+        ],
+        "minimumCases": 1
+      },
+      {
+        "tier": "wasm-v8",
+        "name": "recursive-release-unique-reuse",
+        "allTags": ["recursive-release", "release-fidelity", "reuse", "unique"],
+        "minimumCases": 1
       },
       {
         "tier": "wasm-v8",
@@ -2326,7 +2424,7 @@
         "tier": "wasm-v8",
         "name": "string-copy-on-write",
         "allTags": ["copy-on-write", "string"],
-        "minimumCases": 4
+        "minimumCases": 5
       },
       {
         "tier": "wasm-v8",
