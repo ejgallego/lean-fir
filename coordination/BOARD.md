@@ -15,6 +15,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-RETURN-SIMULATION`.
+- Integration owner: `wasm-proof`; this is the first positive target-path
+  slice of W6.7e.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `230d805a`.
+- Published stack: active-slice record `05b29e67`, functional head `ab58cd2e`,
+  and ready mailbox `95ce391f`.
+- Accepted proof: `ConcreteStructuredYieldFocus` relates yielded source control
+  to explicit structured-Wasm return control while retaining the concrete
+  runtime/local relation, exact observations, and an ABI-indexed
+  `PhysicalValueRel` for the returned word. `advance_return` inverts the real
+  two-stage compiler, resolves the generated local, and matches one source
+  return by exactly two target steps: `local.get` and `ret`.
+- Compiler boundary: `advance_return_of_step` derives the source lookup and
+  yielded value from the successful source-step premise supplied by generic
+  weak simulation. No target execution evidence, source lookup, translation
+  certificate, or return representation choice is added to the public
+  relation. Continuation-frame correspondence remains the next W6.7e layer.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam update/sync/save with zero diagnostics; focused 3,107-
+  job dependency-cone build; `git diff --check`; complete `make check` with 642
+  validation cases and 1,844/1,844 backend comparisons; Talos pinned at
+  `a01d01c`; and all 3,133 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-COMPILER-RELATION-SILENT-OWNERSHIP`.
 - Integration owner: `wasm-proof`; this is the first accepted W6.7e
   compiler-relation slice.
