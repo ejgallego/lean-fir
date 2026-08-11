@@ -15,6 +15,34 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-TERMINAL-ADEQUACY`.
+- Integration owner: `wasm-proof`; the user retained the W6 owner as
+  integration owner for the certificate-free compiler proof.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `f161a37f`.
+- Published stack: active-slice record `26cde178`, W6 functional head
+  `2557bcbe`, and ready mailbox `13eed416`.
+- Accepted theorem: `StructuredWasmStep.finitePath_run_of_adapt` collapses any
+  finite structured-machine path from a canonical adapted-function entry to a
+  halted empty-frame state into the exact Talos `Wasm.run` final store and
+  normalized result stack, uniformly above one finite fuel bound. Explicit
+  continuation semantics and one-step collapse cover internal calls, labels,
+  conditionals, loop restart, outward branches, and returns.
+- Compiler boundary: successful `FirTalos.adapt` proves the adapter's
+  zero-parameter-loop invariant. Structured-step preservation derives every
+  path arity obligation automatically; no representation choice, translation
+  certificate, or manually supplied module-shape premise reaches the eventual
+  public compiler theorem. W6.7e must now construct the structured target path
+  from source execution and restore the compiler relation.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam green save; focused dependency-cone builds before and
+  after rebase; `git diff --check`; complete `make check` with 642 validation
+  cases and 1,844/1,844 backend comparisons; Talos pinned at `a01d01c`; and all
+  3,132 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W7-GENERIC-BUILD-CLOSURE`.
 - Integration owner: `wasm-gen`; the user asked to remove application-specific
   build/runtime shortcuts before resuming interface adaptation.
