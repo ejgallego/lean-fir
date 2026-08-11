@@ -5,21 +5,21 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: active
+state: ready
 base: aa3940b6 on main
-functional-head: aa3940b6
+functional-head: 1ab73d0e4212a1b6c2d202d272ac2ca7ede4c6df
 contract-base: aa3940b6 on main
 clean-at-update: true
-slice: Generalize the accepted consumer-package build closure before resuming object-carrier/provenance interface adaptation. Start by removing application declaration-name rewrites from the resident Float linker, then separate reusable declaration/signature-driven runtime closure from package facades and raw-memory adapters
-files: coordination/BOARD.md; coordination/lanes/wasm-gen.md; planned Fir/Wasm/Emit/ResidentFloat.lean and only package/runtime files justified by the resulting closure evidence
-contracts: no shared semantic ABI or concrete-layout change planned; preserve the accepted final-LCNF source boundary and resident helper signatures unless a separately coordinated contract commit becomes necessary
-checks: not-run; baseline is accepted main aa3940b6 with green HitScene publication, root, Talos, and deterministic artifact gates
-bug-cards: none; add one before working around any newly exposed semantic discrepancy
+slice: Generic closed-application build closure. Removed the exact Illuminate elapsedFrame declaration-name rewrites and source-body Float.ofNat substitution; introduced declaration/signature-driven retained external selection, checked residual-import policies, generic pure-lazy arena preparation, and one shared standard-math runtime/linker consumed by the full player, selection player, and HitScene packages. Kept the real final-LCNF source closures and application algorithms unchanged
+files: Fir/Wasm/Emit/ExternalRuntime.lean; Fir/Wasm/Emit/Resident{Array,Float,Linker,NatMod,NatShift}.lean; integration/wasm-runtime/; integration/illuminate-player/; integration/illuminate-hit-scene/; bugs/FIR-BUG-wasm-none-external-runtime-arena-overlap.md
+contracts: no shared semantic ABI, concrete layout, or resident-helper signature changed. New package-local runtime capability fir.standard-math/v1 reserves the first 65536 memory bytes and supports canonical immediate/one-limb u64 Nat plus Float.ofScientific exponents through 20; adapters validate this metadata and advance the FIR frontier before encoding
+checks: git diff --check passed; make check passed (642 unique cases, 1844/1844 comparisons, zero findings, 124 active bug cards); make talos-setup passed at Talos a01d01c; make talos-check passed (3131 jobs); bash integration/talos/artifact/check.sh passed before commit and again from clean functional head; bash integration/illuminate-player/check.sh passed from clean functional head (107 legacy/FIR-v3/FIR-selection-v4 traces, package checksums, 10000-tick flat-frontier smokes); clean deterministic HitScene publication passed (301 oracle queries and 10000 flat-frontier queries)
+bug-cards: FIR-BUG-wasm-none-external-runtime-arena-overlap (fixed; the linked C runtime reserved low memory overlapping FIR's old frontier 1024, so adapters now validate the shared runtime reservation and advance to 65536 before encoding)
 blockers: none
-artifacts: integration/illuminate-hit-scene/_build/illuminate-hit-scene-current -> illuminate-hit-scene-960979c729bc1199; 45595 bytes; SHA-256 960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6; zero imports; six function exports plus module-owned memory; BUILD.json records clean FIR package source da69d378 and clean Illuminate af088e313eaa
-measurements: 159 captured declarations, 34 reviewed source externals, 439 frontier functions, 15 unresolved Float/C-libm imports before the final resident merge, persistent checkpoint 69872, encoded scene allocation 4336 bytes, and flat post-query frontier across 10000 repeated calls
-handoff: none
-next: remove exact elapsedFrame closed-declaration handling, probe the ordinary captured Float.ofScientific/Float.ofNat path, and close any residual runtime frontier through generic declaration-and-signature-driven machinery
+artifacts: prettyM-current -> prettyM-current-releases/1ab73d0e4212-87f4b2452ccc706e (125540-byte Wasm, SHA-256 c9f62c69bd20fb9ccff6e444fd54f9e5f4d20281e566c93ab004fc539fb13919, zero imports); illuminate-player-current -> 1ab73d0e4212-6f16cdc3d432-e52eb0fa3f7fd5d558a6 (29146 bytes, SHA-256 8b9d1c9d5adfea0e734cdc0aa74f6816cdb064e76ed73f45833682b9000687e7, zero imports); illuminate-selection-player-current -> 1ab73d0e4212-6f16cdc3d432-01590a8f6d62e0c7142b (31929 bytes, SHA-256 3223e06a91874d735aa9b47a9a9c9c6f99e6023cdf6bd5d21360f73dae85a26a, zero imports); illuminate-hit-scene-current -> illuminate-hit-scene-0fc210079c434684 (package SHA-256 0fc210079c4346847bdcf06e67a9b09f51e036cc5de75f4ce8697e49abf8e6a3; 45595-byte Wasm SHA-256 960979c729bc119988abba24046c4bccd294f3346300d6d20ce53175b5f062d6; zero imports)
+measurements: player exact source closure 99 declarations/72 source functions/188 resident helpers/19097-byte base/29146-byte complete; selection 111/81/207/21046/31929; both retain exactly Float.ofScientific and Float.ofNat before the checked standard-math link; player checkpoint 66384 and peak 67088, selection checkpoint 66304 and peak 67024, HitScene checkpoint 69872, all flat after 10000 dispatches/queries
+handoff: integration may fast-forward the W7-GENERIC-BUILD-CLOSURE stack through functional head 1ab73d0e after resolving this containing mailbox commit from wasm/generation
+next: close the Flat provenance/publication backlog by regenerating it through the accepted generic closure, then resume the parked object-carrier/provenance interface adaptation; HTML remains after Flat and has no publishable package yet
 ```
 
 ## Verso Flat end-to-end probe (2026-08-09)
