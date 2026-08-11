@@ -5,8 +5,8 @@ lane: wasm-gen
 owner: wasm-gen
 branch: wasm/generation
 worktree: .worktrees/wasm-generation
-state: ready
-base: 81c03c983f19722c2189336be70d3e58e6f75485 on main
+state: waiting
+base: 8bcd73260d7cf18d2915e2aaee0a333ed6072c8c on main
 functional-head: f289322a240613ba66133747381ccdec1d016589
 contract-base: 81c03c983f19722c2189336be70d3e58e6f75485 on main
 clean-at-update: true
@@ -18,7 +18,7 @@ bug-cards: FIR-BUG-wasm-none-self-tail-local-reinitialization (fixed); FIR-BUG-w
 blockers: accepted Flat publication waits for the Verso owner to publish the semantic-neutral Pretty.lean source refactor currently proven only at clean local commit e9ae2ed6; the FIR prerequisite slice itself is green and ready
 artifacts: player 29018-byte Wasm SHA-256 3c7667bf3d5b5907650bf52dd87bd8e53e99efdfedad2378b04c5e07219d60cc; selection 31787-byte Wasm SHA-256 155443b3f3251f28e39414ba2da4be2ade8d8c29be10be3cad3dc1a4f8bcc62d; HitScene 45621-byte Wasm SHA-256 2bfe26020afe22c0f965bf85dcfd1c9f7aea4deb55ce44815fb937eb696698aa; provisional Flat 154635-byte Wasm SHA-256 60a70d63a38d230f37c04e1a88bad264a69cd9b23215b1ba859bd6dd125f0b0e; all zero imports
 measurements: generic Flat closure is 90 captured declarations, 64 source functions, 504 resident helpers, 568 complete functions, zero lazy initializers, and three resident globals, down from 113/82/574/656 with 23 lazy initializers. Safe precise local reset preserves the exact provisional Flat bytes; player shrinks 128 bytes and selection shrinks 142 bytes after generic self-tail lowering; HitScene grows 26 optimized bytes while retaining its exact semantics
-handoff: integration may fast-forward the two-commit W7-GENERIC-FLAT-PREREQUISITE stack through functional head f289322a after resolving the containing mailbox commit from wasm/generation
+handoff: none; W7-GENERIC-FLAT-PREREQUISITE was accepted on local main at 8bcd7326
 next: after this prerequisite lands, repin Flat to the remotely published Verso source and perform accepted immutable publication; then resume the parked object-carrier/provenance interface adaptation. HTML remains after accepted Flat publication
 ```
 
