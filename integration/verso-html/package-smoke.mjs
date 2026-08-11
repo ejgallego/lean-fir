@@ -98,7 +98,7 @@ assert.equal(large.html.length, "λ&lt;&amp;&quot;".repeat(512).length);
 assert.ok(large.memory.pagesAfterExecute > large.memory.pagesBefore,
   "large escaped output did not grow module memory");
 
-let lastFrontier = large.memory.frontierAfterDecode;
+let lastFrontier = nested.memory.frontierAfterDecode;
 for (let index = 0; index < 32; index += 1) {
   const repeated = adapter.render(request);
   assert.equal(repeated.html, result.html);
