@@ -52,6 +52,55 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-VERSO-HTML-PUBLICATION`.
+- Integration owner: `wasm-gen`; this lease closes the real Verso complete-HTML
+  compilation boundary and publishes the reusable package before W7 begins the
+  generic package-tooling backlog.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, rebased directly on `main` at `bf00e5c9` after
+  the accepted pointwise-resource proof and grow/delete fixture slices.
+- Published stack: generation-ready helper commit `909045b6`, functional head
+  `8a7452ec`, and clean ready mailbox `e3d7dfba`.
+- Accepted generation: FIR captures the real
+  `VersoSlides.Pretty.formatHtmlForRuntime` final-LCNF closure from clean Verso
+  revision `2ee1c804`, preserving upstream specializations. The closure has 128
+  captured declarations, 31 reviewed externals, 93 retained source functions,
+  631 resident helpers, 724 complete functions, zero runtime operations or lazy
+  initializers, and three resident globals.
+- Resident frontier: generic selection adds `Array.pop`, `UInt32.decEq`,
+  `String.append`, `String.push`, `String.Pos.next`, and `String.decodeChar`.
+  Partial String internalization now links only supported operations actually
+  present in a closure; the historical strict frontier remains stable. These
+  signatures are generation-ready and their W6 concrete refinements remain a
+  separate bridge milestone.
+- Package: API `fir.prettyM.html.browser/v1` accepts compact Lean 4.32
+  `Std.Format` plus `Array TaggedAnnotation` and returns a copied
+  `EscapedHtmlString` under `verso-token-html/v1`. The 187,855-byte complete
+  Wasm has SHA-256
+  `ce63b4fd71abddda8aa5795a57ab7849666f8029b501a015ee3e3c714a3eec1c`,
+  zero imports, five function exports, and module-owned memory. The immutable
+  directory is
+  `integration/verso-html/_build/verso-html-packages/8a7452ecd2c6-2ee1c804106b-a8918784b1503878bc43`.
+- Concrete validation repair: constructor fields are physically untyped and
+  may change from an object address to a tagged immediate after `objectSet`.
+  The artifact observer now updates descriptor field kinds after mutation,
+  fixing `FIR-BUG-wasm-none-concrete-validation-tagged-ctor-field`; it changes
+  no concrete-runtime or semantic ABI contract.
+- Acceptance: Lean Beam checkpoints with zero diagnostics; deterministic
+  double publication; SHA256SUMS, Node, native/Wasm 8/8, malformed-input,
+  bounded-growth, repeated-call, Verso-validator, and Chrome checks; complete
+  resident artifact gate including 608/653 concrete products with 45 explicit
+  ByteArray blocks and deterministic 44/44 concrete artifacts; `make check`
+  with 653 source/V8 cases, 9 direct machines, 662 unique cases, and
+  1,968/1,968 equal comparisons; and all 3,133 Talos jobs.
+- Result: `main` fast-forwards through the ready mailbox. The Verso source owner
+  should replace character-at-a-time immutable HTML escaping before the
+  deferred one-MiB throughput gate. W7 next takes the small generic immutable
+  package verifier/atomic-installer slice, then descriptor-driven browser
+  package generation and a shared benchmark schema.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-GROW-DELETE-RELEASE-S5C`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take
   the integration role when needed.
@@ -2563,7 +2612,7 @@ moving global snapshot hash.
 | Integration | integration owner | `integration/closure-ownership` | released | `WASM-DECLARATION-PARAMETER-UNIQUENESS` is green at isolated contract head `dfa8153e`; W6 and W7 rebase after main landing. | Narrows `WasmSupported` only for malformed duplicate binders. Semantic ABI and runtime contracts are unchanged. |
 | Lean pass proof | pass-proof owner | `proof/simpcase` | released | Ready mailbox head `52ad964a`, functional head `1640c7d4`, on corrected contract base `89fda41a` relates persistent, exclusive-transfer, and shared-retain closure application across AlphaEqv, SimpCase, and ElimDead. The 34-job examples cone and full root gate pass. | Changes no shared contract. The external waiting-runtime bug is resolved with a proof regression and landed in stack `229640de`. |
 | W6 runtime proof | W6 owner | `wasm/talos-runtime` | parked | Ready mailbox `d70ef62d`, documentation functional head `e46a5b86`, on base `14cc46ad`, synchronizes the W6.7a–g completion ladder and identifies structured terminal adequacy as the next proof boundary. | No source, proof, semantic/runtime contract, ABI, helper, or artifact changed. All 3,131 Talos jobs pass. Resume with W6.7d and stop before the larger compiler relation/rank milestone until terminal adequacy is green. |
-| W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `dfe6da0b`, functional head `e5a8612b`, on base `cdb8c4f3`, replaces application-specific final-LCNF kind repairs with the generic Lean object-family call ABI and publishes reviewed PrettyFormat and Illuminate v3/v4 artifacts. | Shared contract `bd7a5e55` makes `object`, `tagged`, and `tobject` compiler-call compatible without changing directional semantic refinement or concrete layout. W6 rebases and consumes the stable generic Array/weak-Inhabited `tobject` signatures in its next proof checkpoint. |
+| W7 generation | generation owner | `wasm/generation` | released | Ready mailbox `e3d7dfba`, functional head `8a7452ec`, on base `bf00e5c9`, publishes the real zero-import Verso complete-HTML package and repairs post-mutation field-kind tracking in the W7 concrete observer. | Six generic Array/scalar/String resident signatures are generation-ready without changing the semantic ABI or concrete layout; W6 owns their later refinement bridge. |
 | Compiler-native Wasm | integration owner | `wasm/lcnf-c` | parked | Landed checkpoint `a4855402` adds a separately packaged C/Emscripten `Std.Format.prettyM` facade on top of the optimized final-LCNF-to-C route from `2760e3e0`. The browser adapter shares the compact `Format` request and exact `{text, events}` trace contract with W7's FIR-native facade while retaining a private bulk wire, verified Emscripten loader, full pinned Lean runtime, and independent package. The differential suite compares Unicode, grouping, nesting, tags, arbitrary-precision values, initial columns, malformed requests, repeated calls, and a one-MiB UTF-8 transfer through both engines | No shared semantic contract changed and the packages remain physically independent. The lane consumes `Std.Format.prettyM`, final impure LCNF, and Lean's C ABI without changing the symbolic Wasm, W6 concrete-runtime, or W7 resident-runtime surfaces. Resume with controlled sampled profiling of the facade wire and generated C before accepting a runtime optimization |
 | Validation | validation owner | `validation/float-corpus` | active | Clean coordination head `cfa17d81` retains the long 1,008-case native/LCNF calibration. Current-main validation covers 633 native/LCNF cases, 601 V8 cases, 642 unique cases, 1,844 comparisons, 5,750 interpreter transitions, 51 semantic-tag floors, and 142 conjunctive domains. | Test-fixtures may now rebase and admit the 32 scalar-closure cases. The long validation branch rebases separately; alias, termination, IO, and stream-capture contracts remain isolated. |
 
@@ -2576,6 +2625,7 @@ moving global snapshot hash.
 | Standalone immediate-Natural and UTF-8 String literals | `64831f6` | current W6 object layouts | generation-ready | W6 owner | Wasm `ab63fa578576748ff3ea8230986cf908d7285c54bc840bb60fec5fc7fa978473` |
 | Bit-exact float source probes and styled zero-import `prettyM` package | W7 ready head `fdaa8bd1`; package source `56d18362` | landed closure proof/runtime stack `229640de` | linked/accepted | W6 float and closure refinements landed | styled Wasm `e7ccd1ac678900e0f6583a0d2251b0ef4d43de0b388d18033bbc86344eed4af7` |
 | Generic object-family calls and resident Array/weak-Inhabited results | `a13fa2ad` | shared call-ABI contract `bd7a5e55` | generation-ready | W6 owner for the later concrete refinement bridge | styled PrettyFormat `c928d30adb3d39f7409e7091b4e1f13289aac35c02b34d761062c8a8f3e74b60`; Illuminate v3 `a4de0ec22d50c5070dbfa90969dc95c41be6f747955f60c8f9620baeafefbfa5`; v4 `1c3064d4ee5b9ea0f96055b03e50e8477d29ce6f2313c23c9dcfc83d314eecd8` |
+| Generic Array/scalar/String HTML frontier: `Array.pop`, `UInt32.decEq`, `String.append`, `String.push`, `String.Pos.next`, `String.decodeChar` | `909045b6` | `bf00e5c9`; existing concrete layouts and semantic ABI | generation-ready | W6 owner for later concrete refinement | Verso complete HTML `ce63b4fd71abddda8aa5795a57ab7849666f8029b501a015ee3e3c714a3eec1c` |
 
 ## Contract queue
 
@@ -2586,6 +2636,7 @@ moving global snapshot hash.
 | `W7-RESIDENT-ALLOCATOR` | W7 | W6, integration | released | `21f382c` | Zero-import allocator and styled package are generation-ready; allocator installation preserves the current 177-import `prettyM` frontier, and W6 owns the later bridge proof |
 | `W7-CLOSURE-DESCRIPTORS` | W7 | W6, W7, integration, artifact clients | released | `40f41c0` | Retains the duplicate-free capture-kind table after `partialApply` imports are removed, so closure header `aux3` remains stable; W6 must rebase before W7 consumes it in the resident closure allocator |
 | `W7-RESIDENT-LITERALS` | W7 | W6, integration, artifact clients | released | `64831f6` | Adds a zero-import literal fixture, internalizes immediate Naturals in linked `prettyM`, retains Strings until their JavaScript consumers become resident, and advances text/styled checkpoints to 152/153 imports |
+| `W7-GENERIC-ARRAY-STRING-HTML-FRONTIER` | W7 | W6, integration, artifact clients | released | `909045b6` | Adds the six generic Array/scalar/String resident signatures required by the real Verso HTML closure and makes partial String selection capability-sensitive. Generation and real-engine acceptance are complete; W6 refinement remains separately tracked. |
 | `FLOAT-SCALAR-RUNTIME` | integration/validation | pass proof, W6, W7, validation | released | landed stack through `8a8d1387` | Adds bit-exact `float32Bits`/`float64Bits`, heap-only boxes, stable box-kind/layout signatures, exact ABI adapters, and concrete/proof refinements without the unrelated closure-ownership stack. The integrated stack passes `make check` and all 3,123 Talos jobs. W7 consumes it in candidate `2b4d9d23`. |
 | `WASM-FLOAT-REINTERPRET` | integration | W6, W7, Talos adapter | released | landed stack through `8a8d1387` | Symbolic, binary, Talos-adapter, runtime, and proof support for `i32.reinterpret_f32`, `i64.reinterpret_f64`, `f32.reinterpret_i32`, and `f64.reinterpret_i64` is landed. W7's integer-lane facade preserves signaling-NaN payloads across JavaScript without numeric coercion. |
 | `ILLUMINATE-FLOAT-MACHINE` | integration | W7, W6 | released | `e39d0bbb` | Adds only the typed symbolic and binary Wasm operations needed to implement Lean 4.32 Float subtraction/division/multiplication/comparison, round-away-from-zero, saturating `toUInt64`, and Nat-to-Float conversion. W7 consumes the vocabulary in resident helpers; the later W6 bridge proves those helpers against the concrete runtime contracts. |
