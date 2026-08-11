@@ -15,6 +15,48 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-GENERIC-FLAT-PREREQUISITE`.
+- Integration owner: `wasm-gen`; the lease closed the package-specific Flat
+  runtime policy and made the shared closed-application path safe for generic
+  self-tail lowering.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, rebased directly on `main` at `81c03c98`.
+- Published stack: runtime/compiler head `29e52f4b`, Flat functional head
+  `f289322a`, and ready mailbox `1847d5ea`.
+- Accepted generation surface: `closedApplicationPolicy` now selects complete
+  String and fail-closed fallback families only when the captured closure
+  retains them, prepares the generic arena, and applies optional validated
+  direct-self-tail lowering. Flat now supplies only its public entry to that
+  shared path; it no longer carries a handwritten 14-step resident policy.
+- Tail-call correctness: a differential HitScene failure showed that looped
+  activations retained non-parameter locals that a real Wasm call initializes
+  to zero. The transform now performs structured control-flow-aware definite
+  assignment and resets only locals observable before assignment. The fix is
+  recorded by `FIR-BUG-wasm-none-self-tail-local-reinitialization`; all 301
+  HitScene oracle queries and 10,000 flat-frontier queries pass.
+- Provenance: Flat publication now forces Lake reconfiguration, fixing
+  `FIR-BUG-wasm-none-flat-source-view-stale-reconfiguration`. FIR cannot
+  reconstruct the exact generated final-LCNF names of an already compiled
+  source ancestor; that toolchain limitation is recorded by
+  `FIR-BUG-impure-none-generated-external-source-ancestor`.
+- Artifact evidence: player is 29,018 bytes, selection is 31,787 bytes,
+  HitScene is 45,621 bytes, and provisional Flat is 154,635 bytes; all four
+  modules have zero imports. Flat retains 64 source functions and 504 generic
+  resident helpers with zero lazy initializers, down from 82/574 and 23.
+- Validation: Lean Beam update/sync/save and focused builds; `git diff
+  --check`; exact final-base `make check` with 642 covered cases and
+  1,844/1,844 comparisons; all 3,133 `make talos-check` jobs; the Talos
+  artifact gate; deterministic player, selection, HitScene, and provisional
+  Flat package gates; native/Wasm, 1 MiB UTF-8, cold-stack, repeated-call, and
+  package-validator checks.
+- Remaining boundary: accepted Flat publication is waiting, not blocked, on a
+  remotely resolvable Verso commit containing the already-proven
+  semantic-neutral `Pretty.lean` refactor from local commit `e9ae2ed6`. W7 may
+  repin and publish immediately after that source handoff. W6 may rebase on the
+  accepted stack and continue; no W6-owned file or proof contract changed.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-PURE-EXTERNAL-RESULTS`.
 - Integration owner: `wasm-proof`; this connects the pure external-result
   constructor to the recursive W6.7e structured simulation.
