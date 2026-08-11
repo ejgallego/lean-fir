@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-DIRECT-CALL-CORE`.
+- Integration owner: `wasm-proof`; this lease connects generated named calls
+  to the nonterminating pointwise core without evaluating a callee as a whole.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `0966e35f`.
+- Published stack: active-slice record `62f6d358`, functional proof head
+  `37f5f6bb`, and clean ready mailbox `0c4f2101`.
+- Local admission: `ConcreteStructuredCodeStepAdmission` is now indexed by the
+  current runtime and environment and admits a generated named call at exact
+  current-step cost zero. It still contains no successor admission, future
+  budget, dynamic result, endpoint, target path, or evaluation derivation.
+- Direct-call closure: compiler-derived staging constructs the semantic and
+  physical arguments plus exact target prefix and enters
+  `ConcreteStructuredDirectCallReadyCoreRel`. The entry rule takes one source
+  and one target step, pushes the caller scope, starts the callee core with
+  empty local reuse facts, and records the declared callee-result refinement.
+  Direct bind pop restores the caller core through the accepted resource
+  transport law. No rule assumes that the callee terminates.
+- Hereditary ABI invariant: active and suspended function-result kinds now
+  live in the same direct/saturated constructors as their resource scopes.
+  This prevents ABI metadata from disagreeing with the call protocol without
+  introducing a parallel proof stack or execution certificate.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: Lean Beam update/sync/save with zero errors; direct
+  `FirTalos.ConcreteStructuredSimulation` build (3,110 jobs);
+  `git diff --check`; complete `make check` including 122 interpreter tests;
+  Talos setup at `a01d01c`; and all 3,133 Talos jobs. No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next repeats this
+  construction for exactly saturated closure calls, then assembles the
+  relation-wide control sum and fresh successor-admission classifier.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-LOCAL-ADMISSION`.
 - Integration owner: `wasm-proof`; this corrective lease keeps the pointwise
   relation compatible with recursive and nonterminating source programs by
