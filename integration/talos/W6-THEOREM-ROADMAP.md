@@ -1400,12 +1400,17 @@ acceptance tests pass.
      `ConcreteStructuredExternalBindFocus.advance` matches source binding with
      the one generated destination write. The middle theorem consumes
      `ConcreteExternalCallEvidence`, an internal resource boundary containing
-     the concrete handler step and refinement extension. The next relation
-     slice constructs that evidence from the already proved Int/Nat/scalar
-     handler laws and allocation budget; it is not added to the public theorem
-     as a certificate. Pre-entry saturated-call staging then remains before the
-     per-step `advance` law and structural rank can be assembled. Heap-valued
-     cache misses and target-only loop unwinding remain later widenings.
+     the concrete handler step and refinement extension.
+     `callEvidence_of_budget` now constructs it from the already proved
+     Int/Nat/scalar handler laws and allocation budget, while retaining the
+     residual pure-external frame. The caller-facing
+     `advance_call_of_budget` exposes no execution certificate, and
+     `advance_call_bind_of_budget` plus `advance_external_of_budget` compose
+     the exact two-step target suffix and complete three-step source protocol
+     back into ordinary compiled code. Pre-entry saturated-call staging now
+     remains before the per-step `advance` law and structural rank can be
+     assembled. Heap-valued cache misses and target-only loop unwinding remain
+     later widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

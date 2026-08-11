@@ -5983,10 +5983,17 @@ call takes one target step, and the destination write takes one target step.
 `ConcreteExternalCallEvidence` is the deliberately orthogonal runtime boundary
 consumed by the middle transition; it records the concrete host step, witness
 extension, and runtime/result refinement, but is not a main-theorem premise.
-The next slice derives that evidence from the existing Int/Nat/scalar handler
-laws and heap budget. The pre-entry saturated-closure staging state then
-remains the missing control constructor before the unified relation can
-satisfy the per-source-step `advance` law.
+`callEvidence_of_budget` now derives that evidence from the existing
+Int/Nat/scalar handler laws and the ordinary heap-budget frame. It also
+reconstructs the exact residual budget and installed-handler frame.
+`advance_call_of_budget`, `advance_call_bind_of_budget`, and
+`advance_external_of_budget` progressively hide the internal evidence and
+compose the exact imported-call and destination-write steps. The final theorem
+matches the source's three-step external protocol against precisely the
+production argument prefix followed by two target steps, and re-enters the
+adapted continuation with the reduced frame. The pre-entry saturated-closure
+staging state now remains the missing control constructor before the unified
+relation can satisfy the per-source-step `advance` law.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

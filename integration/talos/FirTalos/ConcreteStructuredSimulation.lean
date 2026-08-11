@@ -6118,6 +6118,322 @@ structure ConcreteExternalCallEvidence
   valueRelated :
     PhysicalValueRel nextWitness resolvedResultKind physicalResult sourceValue
 
+/-- The ordinary pure-external resource frame constructs the exact evidence
+needed by the structured imported-call transition.  The construction is by
+the semantic result family selected by production admission: integer and
+natural results consume their exact allocation budget, while scalar results
+retain the current witness.  No target execution or representation
+certificate is supplied by the caller. -/
+theorem ConcreteStructuredExternalCallReadyFocus.callEvidence_of_budget
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {stepCost remainingBytes : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredExternalCallReadyFocus program context
+      sourceModule sourceFunction targetModule hosts externals site operation
+      resolvedResultKind targetImport labels continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs callIndex resultIndex source target)
+    (invariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime sourceEnv targetStore callerLocals witness)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ∃ nextStore nextWitness physicalResult,
+      ConcreteExternalCallEvidence operation resolvedResultKind targetStore
+        physicalArgs nextRuntime sourceValue witness nextStore nextWitness
+        physicalResult ∧
+      ConcreteBudgetedPureExternalFrame sourceFunction externals
+        (remainingBytes - stepCost) nextRuntime sourceEnv nextStore callerLocals
+        nextWitness := by
+  obtain ⟨concreteArgs, decoded, concreteLength, semanticLength,
+      concreteRelated⟩ :=
+    related.argumentsRelated.decodePhysicalLanes 0
+  have resultKindEq : resolvedResultKind = site.resultKind := by
+    have resultAt :=
+      congrArg (fun results : Array AbiKind => results[0]?)
+        related.resultSignature
+    symm
+    simpa [related.operationSignature] using resultAt
+  have resultShapeKindEq :
+      resolvedResultKind = site.resultShape.resultKind :=
+    resultKindEq.trans site.resultKindEq
+  have declarationName : site.name = site.declaration.name :=
+    related.operationName.symm.trans related.operationMatches.name
+  have requestEq :
+      operation.request site.semanticArgs =
+        declarationExternalRequest site.declaration site.semanticArgs := by
+    simp [ExternalOperation.request, declarationExternalRequest,
+      related.operationName, declarationName,
+      related.operationMatches.paramTypes,
+      related.operationMatches.resultType]
+  have requestRelated :
+      ConcreteExternalRequestRel witness
+        (concreteExternalRequest operation resolvedResultKind
+          concreteArgs.toArray)
+        (operation.request site.semanticArgs) := by
+    refine {
+      name := rfl
+      paramTypes := rfl
+      resultType := rfl
+      paramTypesSize := related.operationMatches.paramTypesSize
+      paramKindsSize := ?_
+      argsSize := ?_
+      arguments := ?_ }
+    · change operation.signature.params.size = site.semanticArgs.size
+      rw [related.operationSignature]
+      simpa using semanticLength.symm
+    · change concreteArgs.toArray.size = site.semanticArgs.size
+      simpa using concreteLength.trans semanticLength.symm
+    · intro index kind lane semantic kindAt laneAt semanticAt
+      change operation.signature.params[index]? = some kind at kindAt
+      change concreteArgs.toArray[index]? = some lane at laneAt
+      change site.semanticArgs[index]? = some semantic at semanticAt
+      exact concreteRelated index kind lane semantic
+        (by rw [related.operationSignature] at kindAt; simpa using kindAt)
+        (by simpa using laneAt) (by simpa using semanticAt)
+  have decoded' :
+      decodePhysicalLanes 0 operation.signature.params.toList physicalArgs =
+        .ok concreteArgs := by
+    simpa [related.operationSignature] using decoded
+  have semanticCalled :
+      externals.call (operation.request site.semanticArgs) sourceRuntime =
+        .ok (site.resultShape.response sourceRuntime) := by
+    rw [requestEq, ← site.responseEq]
+    exact site.semanticCalled
+  have nextRuntimeEq :
+      nextRuntime =
+        semanticExternalRuntimeAfter (operation.request site.semanticArgs)
+          sourceRuntime (site.resultShape.response sourceRuntime) := by
+    calc
+      nextRuntime =
+          semanticExternalRuntimeAfter
+            (declarationExternalRequest site.declaration site.semanticArgs)
+            sourceRuntime site.response := site.nextRuntimeEq
+      _ = semanticExternalRuntimeAfter (operation.request site.semanticArgs)
+            sourceRuntime (site.resultShape.response sourceRuntime) := by
+          rw [requestEq, site.responseEq]
+  have sourceValueEq :
+      sourceValue = (site.resultShape.response sourceRuntime).value := by
+    exact site.sourceValueEq.trans (congrArg ExternalResponse.value site.responseEq)
+  cases shapeEq : site.resultShape with
+  | integer value =>
+      have kindEq : resolvedResultKind = .tobject := by
+        simpa [shapeEq, PureExternalResultShape.resultKind] using
+          resultShapeKindEq
+      have called :
+          externals.call (operation.request site.semanticArgs) sourceRuntime =
+            .ok (semanticIntegerExternalResponse sourceRuntime value) := by
+        simpa [shapeEq, PureExternalResultShape.response] using semanticCalled
+      have costEq : stepCost = integerAllocationBytes value := by
+        simpa [shapeEq, PureExternalResultShape.cost] using site.stepCostEq
+      have fits : integerAllocationBytes value ≤ remainingBytes := by
+        rw [costEq] at stepFits
+        exact stepFits
+      obtain ⟨result, address, _allocated, operationStep, _semanticCalled,
+          witnessExtension, runtimeRelated, valueRelated, remainingBudget,
+          _closureAllocationsPersistent⟩ :=
+        integerExternalStep_of_budget operation resolvedResultKind targetStore
+          physicalArgs concreteArgs site.semanticArgs witness sourceRuntime
+          externals value remainingBytes decoded' related.callerStateRelated.1
+          requestRelated invariant.2.1 kindEq called invariant.1.2 fits
+      let nextStore :=
+        replaceRuntime targetStore
+          (targetStore.host.runtime.applyExternalResponse
+            (concreteExternalRequest operation resolvedResultKind
+              concreteArgs.toArray)
+            (concreteIntegerExternalResponse targetStore.host.runtime result
+              address))
+      let nextWitness :=
+        witness.bindInteger sourceRuntime.nextLocation address value
+      let physicalResult :=
+        physicalOfLane
+          (concreteIntegerExternalResponse targetStore.host.runtime result
+            address).value
+      have nextBudget :
+          nextStore.host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - stepCost) := by
+        rw [costEq]
+        simpa [nextStore, replaceRuntime, clearFailure,
+          concreteIntegerExternalResponse,
+          ConcreteRuntimeState.applyExternalResponse] using remainingBudget
+      have externalsEq :
+          nextStore.host.externals = targetStore.host.externals := by
+        simp [nextStore, replaceRuntime, clearFailure]
+      have nextFrame :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            (remainingBytes - stepCost) nextRuntime sourceEnv nextStore
+            callerLocals nextWitness := by
+        refine ⟨⟨invariant.1.1, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact invariant.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.2
+      refine ⟨nextStore, nextWitness, physicalResult, ?_, nextFrame⟩
+      exact {
+        operationStep := by
+          simpa [nextStore, physicalResult] using operationStep
+        witnessExtension := by
+          simpa [nextWitness] using witnessExtension
+        runtimeRelated := by
+          simpa [nextStore, nextWitness, replaceRuntime, clearFailure,
+            nextRuntimeEq, shapeEq, PureExternalResultShape.response] using
+            runtimeRelated
+        failureClear := by
+          simp [nextStore, replaceRuntime, clearFailure]
+        valueRelated := by
+          simpa [nextWitness, physicalResult, sourceValueEq, shapeEq,
+            PureExternalResultShape.response] using valueRelated }
+  | natural value =>
+      have kindEq : resolvedResultKind = .tobject := by
+        simpa [shapeEq, PureExternalResultShape.resultKind] using
+          resultShapeKindEq
+      have called :
+          externals.call (operation.request site.semanticArgs) sourceRuntime =
+            .ok (semanticNaturalExternalResponse sourceRuntime value) := by
+        simpa [shapeEq, PureExternalResultShape.response] using semanticCalled
+      have costEq : stepCost = naturalAllocationBytes value := by
+        simpa [shapeEq, PureExternalResultShape.cost] using site.stepCostEq
+      have fits : naturalAllocationBytes value ≤ remainingBytes := by
+        rw [costEq] at stepFits
+        exact stepFits
+      obtain ⟨result, word, nextWitness, _allocated, operationStep,
+          _semanticCalled, witnessExtension, runtimeRelated, valueRelated,
+          remainingBudget, _closureAllocationsPersistent⟩ :=
+        naturalExternalStep_of_budget operation resolvedResultKind targetStore
+          physicalArgs concreteArgs site.semanticArgs witness sourceRuntime
+          externals value remainingBytes decoded' related.callerStateRelated.1
+          requestRelated invariant.2.2.1 kindEq called invariant.1.2 fits
+      let nextStore :=
+        replaceRuntime targetStore
+          (targetStore.host.runtime.applyExternalResponse
+            (concreteExternalRequest operation resolvedResultKind
+              concreteArgs.toArray)
+            (concreteNaturalExternalResponse targetStore.host.runtime result
+              word))
+      let physicalResult :=
+        physicalOfLane
+          (concreteNaturalExternalResponse targetStore.host.runtime result
+            word).value
+      have nextBudget :
+          nextStore.host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - stepCost) := by
+        rw [costEq]
+        simpa [nextStore, replaceRuntime, clearFailure,
+          concreteNaturalExternalResponse,
+          ConcreteRuntimeState.applyExternalResponse] using remainingBudget
+      have externalsEq :
+          nextStore.host.externals = targetStore.host.externals := by
+        simp [nextStore, replaceRuntime, clearFailure]
+      have nextFrame :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            (remainingBytes - stepCost) nextRuntime sourceEnv nextStore
+            callerLocals nextWitness := by
+        refine ⟨⟨invariant.1.1, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact invariant.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.2
+      refine ⟨nextStore, nextWitness, physicalResult, ?_, nextFrame⟩
+      exact {
+        operationStep := by
+          simpa [nextStore, physicalResult] using operationStep
+        witnessExtension
+        runtimeRelated := by
+          simpa [nextStore, replaceRuntime, clearFailure, nextRuntimeEq,
+            shapeEq, PureExternalResultShape.response] using runtimeRelated
+        failureClear := by
+          simp [nextStore, replaceRuntime, clearFailure]
+        valueRelated := by
+          simpa [physicalResult, sourceValueEq, shapeEq,
+            PureExternalResultShape.response] using valueRelated }
+  | scalar value =>
+      have kindEq : resolvedResultKind = value.kind.abiKind := by
+        simpa [shapeEq, PureExternalResultShape.resultKind] using
+          resultShapeKindEq
+      have called :
+          externals.call (operation.request site.semanticArgs) sourceRuntime =
+            .ok (semanticScalarExternalResponse sourceRuntime value) := by
+        simpa [shapeEq, PureExternalResultShape.response] using semanticCalled
+      have costEq : stepCost = 0 := by
+        simpa [shapeEq, PureExternalResultShape.cost] using site.stepCostEq
+      obtain ⟨operationStep, _semanticCalled, runtimeRelated, valueRelated⟩ :=
+        scalarExternalStep operation resolvedResultKind targetStore
+          physicalArgs concreteArgs site.semanticArgs witness sourceRuntime
+          externals value decoded' related.callerStateRelated.1 requestRelated
+          invariant.2.2.2 kindEq called
+      let nextStore :=
+        replaceRuntime targetStore
+          (targetStore.host.runtime.applyExternalResponse
+            (concreteExternalRequest operation resolvedResultKind
+              concreteArgs.toArray)
+            (concreteScalarExternalResponse targetStore.host.runtime value))
+      let physicalResult :=
+        physicalOfLane
+          (concreteScalarExternalResponse targetStore.host.runtime value).value
+      have nextBudget :
+          nextStore.host.runtime.heap.AddressSpaceBudget
+            (remainingBytes - stepCost) := by
+        rw [costEq]
+        simpa [nextStore, replaceRuntime, clearFailure,
+          concreteScalarExternalResponse,
+          ConcreteRuntimeState.applyExternalResponse] using invariant.1.2
+      have externalsEq :
+          nextStore.host.externals = targetStore.host.externals := by
+        simp [nextStore, replaceRuntime, clearFailure]
+      have nextFrame :
+          ConcreteBudgetedPureExternalFrame sourceFunction externals
+            (remainingBytes - stepCost) nextRuntime sourceEnv nextStore
+            callerLocals witness := by
+        refine ⟨⟨invariant.1.1, nextBudget⟩, ?_, ?_, ?_⟩
+        · rw [externalsEq]
+          exact invariant.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.1
+        · rw [externalsEq]
+          exact invariant.2.2.2
+      refine ⟨nextStore, witness, physicalResult, ?_, nextFrame⟩
+      exact {
+        operationStep := by
+          simpa [nextStore, physicalResult] using operationStep
+        witnessExtension := .refl witness
+        runtimeRelated := by
+          simpa [nextStore, replaceRuntime, clearFailure, nextRuntimeEq,
+            shapeEq, PureExternalResultShape.response] using runtimeRelated
+        failureClear := by
+          simp [nextStore, replaceRuntime, clearFailure]
+        valueRelated := by
+          simpa [physicalResult, sourceValueEq, shapeEq,
+            PureExternalResultShape.response] using valueRelated }
+
 /-- After the imported call returns, the source has yielded the semantic
 result under its saved bind frame and the target is poised to write the one
 physical result into the compiler-selected caller local. -/
@@ -6417,6 +6733,68 @@ theorem ConcreteStructuredExternalCallReadyFocus.advance_call
       kindAt := related.resultKindAt
       valueRelated := by simpa [resultKindEq] using evidence.valueRelated }
 
+/-- Cross the imported-call boundary directly from the threaded resource
+frame.  This is the caller-facing progress theorem: concrete execution
+evidence is constructed internally by `callEvidence_of_budget` and is not an
+extra premise. -/
+theorem ConcreteStructuredExternalCallReadyFocus.advance_call_of_budget
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {stepCost remainingBytes : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredExternalCallReadyFocus program context
+      sourceModule sourceFunction targetModule hosts externals site operation
+      resolvedResultKind targetImport labels continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs callIndex resultIndex source target)
+    (invariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime sourceEnv targetStore callerLocals witness)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ∃ nextStore nextWitness physicalResult sourceAfter targetAfter,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 1
+        target targetAfter ∧
+      ConcreteStructuredExternalBindFocus context sourceModule sourceFunction
+        labels nextRuntime sourceEnv sourceValue decl.fvarId continuation
+        callerJoins sourceFrames nextStore callerLocals callerRemainder
+        targetRest targetFrames nextWitness site.resultKind physicalResult
+        resultIndex sourceAfter targetAfter ∧
+      ConcreteBudgetedPureExternalFrame sourceFunction externals
+        (remainingBytes - stepCost) nextRuntime sourceEnv nextStore callerLocals
+        nextWitness := by
+  obtain ⟨nextStore, nextWitness, physicalResult, evidence, nextInvariant⟩ :=
+    related.callEvidence_of_budget invariant stepFits
+  obtain ⟨sourceAfter, targetAfter, sourceStep, targetPath, nextFocus⟩ :=
+    related.advance_call evidence
+  exact ⟨nextStore, nextWitness, physicalResult, sourceAfter, targetAfter,
+    sourceStep, targetPath, nextFocus, nextInvariant⟩
+
 /-- Consume the external result's saved source bind frame and generated
 destination write.  This closes the three-step source protocol with exactly
 one final target instruction and re-enters ordinary compiled code. -/
@@ -6540,6 +6918,225 @@ theorem ConcreteStructuredExternalBindFocus.advance
   · simp [sourceAfter]
   · simp [sourceAfter]
   · simp [targetAfter]
+
+/-- The generated destination write preserves the residual pure-external
+resource frame.  Runtime, heap budget, installed handlers, and witness are
+unchanged; only the source binding and compiler-selected local slot advance. -/
+theorem ConcreteStructuredExternalBindFocus.advance_with_frame
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {remainingBytes : Nat}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredExternalBindFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      callerRemainder targetRest targetFrames witness kind physical resultIndex
+      source target)
+    (invariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime callerEnv targetStore callerLocals witness) :
+    ∃ sourceAfter targetAfter resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) 1 target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime (bind callerEnv result sourceValue) continuation
+        targetStore resumedLocals targetRest witness sourceAfter targetAfter ∧
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime (bind callerEnv result sourceValue) targetStore
+        resumedLocals witness ∧
+      sourceAfter.joins = callerJoins ∧
+      sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = targetFrames := by
+  obtain ⟨sourceAfter, targetAfter, _updated, resumedLocals, sourceStep,
+      targetPath, _targetSet, _resumedEq, nextFocus, sourceJoinsEq,
+      sourceFramesEq, targetFramesEq⟩ :=
+    related.advance (module := module) (hostEnv := hostEnv)
+      (externals := externals)
+  have nextInvariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime (bind callerEnv result sourceValue) targetStore
+        resumedLocals witness := by
+    exact ⟨⟨nextFocus.frameAligned, invariant.1.2⟩,
+      invariant.2.1, invariant.2.2.1, invariant.2.2.2⟩
+  exact ⟨sourceAfter, targetAfter, resumedLocals, sourceStep, targetPath,
+    nextFocus, nextInvariant, sourceJoinsEq, sourceFramesEq, targetFramesEq⟩
+
+/-- Complete the source's external resume-and-bind suffix from a call-ready
+focus.  Two source steps match exactly two target instructions (the resolved
+imported call and generated destination write), and ordinary compiled code is
+re-entered with the exact residual budget. -/
+theorem ConcreteStructuredExternalCallReadyFocus.advance_call_bind_of_budget
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {sourceValue : Value} {stepCost remainingBytes : Nat}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {site : PureExternalCallShape context externals sourceRuntime sourceEnv decl
+      nextRuntime sourceValue stepCost}
+    {operation : ExternalOperation}
+    {resolvedResultKind : AbiKind}
+    {targetImport : Wasm.ImportDecl}
+    {labels : List Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals : Wasm.Locals}
+    {callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {physicalArgs : List Wasm.Value}
+    {callIndex resultIndex : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredExternalCallReadyFocus program context
+      sourceModule sourceFunction targetModule hosts externals site operation
+      resolvedResultKind targetImport labels continuation callerJoins
+      sourceFrames targetStore callerLocals callerRemainder targetRest
+      targetFrames witness physicalArgs callIndex resultIndex source target)
+    (invariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime sourceEnv targetStore callerLocals witness)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ∃ nextStore nextWitness sourceAfter targetAfter resumedLocals,
+      FinitePath
+        (fun before after => executeStep externals before = .next after) 2
+        source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2
+        target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        nextStore resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
+      ConcreteBudgetedPureExternalFrame sourceFunction externals
+        (remainingBytes - stepCost) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore resumedLocals
+        nextWitness ∧
+      sourceAfter.joins = callerJoins ∧
+      sourceAfter.frames = sourceFrames ∧
+      targetAfter.frames = targetFrames := by
+  obtain ⟨nextStore, nextWitness, _physicalResult, sourceMiddle, targetMiddle,
+      sourceCall, targetCall, bindFocus, middleInvariant⟩ :=
+    related.advance_call_of_budget invariant stepFits
+  obtain ⟨sourceAfter, targetAfter, resumedLocals, sourceBind, targetBind,
+      nextFocus, nextInvariant, sourceJoinsEq, sourceFramesEq,
+      targetFramesEq⟩ :=
+    bindFocus.advance_with_frame
+      (module := targetModule.wasmModule) (hostEnv := hosts.env)
+      middleInvariant
+  have sourceCallPath :
+      FinitePath
+        (fun before after => executeStep externals before = .next after) 1
+        source sourceMiddle :=
+    FinitePath.single sourceCall
+  have sourceBindPath :
+      FinitePath
+        (fun before after => executeStep externals before = .next after) 1
+        sourceMiddle sourceAfter :=
+    FinitePath.single sourceBind
+  exact ⟨nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
+    sourceCallPath.trans sourceBindPath,
+    targetCall.trans targetBind, nextFocus, nextInvariant, sourceJoinsEq,
+    sourceFramesEq, targetFramesEq⟩
+
+/-- Complete one admitted pure-external `let` from ordinary compiled code.
+The source follows its exact three-step request/resume/bind protocol.  The
+target evaluates precisely the production argument prefix, executes one
+resolved imported call, writes one destination local, and returns to the
+adapted continuation with the exact residual resource frame. -/
+theorem ConcreteStructuredCodeFocus.advance_external_of_budget
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {rootCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    (spec : ConcreteSupportedFunction program context rootCode sourceModule
+      sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
+    {decl : Lean.Compiler.LCNF.LetDecl .impure}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceValue : Value} {stepCost remainingBytes : Nat}
+    (supported : PureExternalSupported context externals sourceRuntime sourceEnv
+      decl continuation nextRuntime sourceValue stepCost)
+    {labels : List Lean.FVarId}
+    {targetStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {witness : RefinementWitness}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (localsAligned : LocalLayoutAligned context sourceFunction)
+    (related : ConcreteStructuredCodeFocus context sourceModule sourceFunction
+      labels sourceRuntime sourceEnv (.let decl continuation) targetStore
+      targetLocals targetCode witness source target)
+    (invariant :
+      ConcreteBudgetedPureExternalFrame sourceFunction externals remainingBytes
+        sourceRuntime sourceEnv targetStore targetLocals witness)
+    (stepFits : stepCost ≤ remainingBytes) :
+    ∃ nextStore nextWitness sourceAfter targetAfter resumedLocals,
+    ∃ targetArguments targetRest : Wasm.Program,
+      FinitePath
+        (fun before after => executeStep externals before = .next after) 3
+        source sourceAfter ∧
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env)
+        (targetArguments.length + 2) target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        nextRuntime (bind sourceEnv decl.fvarId sourceValue) continuation
+        nextStore resumedLocals targetRest nextWitness sourceAfter targetAfter ∧
+      ConcreteBudgetedPureExternalFrame sourceFunction externals
+        (remainingBytes - stepCost) nextRuntime
+        (bind sourceEnv decl.fvarId sourceValue) nextStore resumedLocals
+        nextWitness ∧
+      sourceAfter.joins = source.joins ∧
+      sourceAfter.frames = source.frames ∧
+      targetAfter.frames = target.frames := by
+  obtain ⟨site, physicalArgs, operation, resolvedResultKind, targetImport,
+      callIndex, resultIndex, targetArguments, targetRest, sourceMiddle,
+      targetMiddle, sourceStage, targetStage, callReady⟩ :=
+    related.advance_external_stage spec supported localsAligned
+  obtain ⟨nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
+      sourceSuffix, targetSuffix, nextFocus, nextInvariant, sourceJoinsEq,
+      sourceFramesEq, targetFramesEq⟩ :=
+    callReady.advance_call_bind_of_budget invariant stepFits
+  have sourceStagePath :
+      FinitePath
+        (fun before after => executeStep externals before = .next after) 1
+        source sourceMiddle :=
+    FinitePath.single sourceStage
+  exact ⟨nextStore, nextWitness, sourceAfter, targetAfter, resumedLocals,
+    targetArguments, targetRest, sourceStagePath.trans sourceSuffix,
+    targetStage.trans targetSuffix, nextFocus, nextInvariant, sourceJoinsEq,
+    sourceFramesEq, targetFramesEq⟩
 
 /-- Intermediate relation after the source has staged an internal named call
 and the generated target has evaluated its argument prefix.  Both machines
