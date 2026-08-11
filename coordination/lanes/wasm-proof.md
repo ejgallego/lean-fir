@@ -5,17 +5,17 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: active
-base: 71890121 on main
-functional-head: ff2104c1 (exact source and target entry into the compiler-resolved saturated-closure callee)
-contract-base: 71890121; proof-only extension over the accepted saturated callee-entry and generic Flat contracts
+state: ready
+base: c90db59d on main
+functional-head: 536fd94b (exact saturated-closure callee return, matcher unwind, and caller resumption)
+contract-base: c90db59d; proof-only extension over the accepted saturated callee-entry and generic Flat contracts
 clean-at-update: true
-slice: SaturatedClosureCallSite.semanticArgs_size exposes the shared source-evaluation arity fact. SaturatedClosureCallResolution.sourceStageAndEnterFinitePath reconstructs source staging and ownership-consuming closure entry in exactly two interpreter steps. targetDispatchArgumentsAndEnterFinitePath composes the real matcher fold, selected capture/argument execution, and generated enterCall step, reaching the generated callee with its exact saved call frame and every conditional label. structuredWasmLeaveReplicatedClosureLabelsFinitePath proves normal selected-body fallthrough restores the caller operand tail and residual continuation in exactly before.length + 1 target steps. No theorem accepts a target path, branch, or translation certificate.
-files: integration/talos/FirTalos/ConcreteReuseCapacityCacheCorrectness.lean; integration/talos/FirTalos/ConcreteStructuredSimulation.lean; integration/talos/PLAN.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
+slice: locals_set?_idempotent proves that repeating a successful checked local write is a no-op. structuredWasmSaturatedCalleeReturnAndResumeFinitePath composes the one-result call return, selected-body result write, exact matcher-label unwind, and enclosing generic let reload/write pair in exactly matcherCount + 5 target steps. ConcreteStructuredSaturatedBindFrameFocus and its advance/advance_of_step theorems lift that path into the simulation relation: one source bind-frame step reconstructs the continuation code focus with the semantic result bound, original caller operand tail restored, local/environment relation and frame alignment preserved, and exact source/target frame suffixes. No theorem accepts a target execution, branch, or translation certificate.
+files: integration/talos/FirTalos/ConcreteStructuredSimulation.lean; integration/talos/PLAN.md; integration/talos/W6-THEOREM-ROADMAP.md; coordination/lanes/wasm-proof.md
 contracts: none; proof construction over accepted contracts
-checks: rebased onto 8bcd7326; Lean Beam 0.2.0-beta (source 662b514f) refresh/sync/save ConcreteReuseCapacityCacheCorrectness version 1 hash a83847e992abe157 and ConcreteStructuredSimulation version 1 hash a411bda670ebc2b4 (zero local warnings in the changed structured module); forced lake env lean FirTalos/ConcreteReuseCapacityCacheCorrectness.lean and FirTalos/ConcreteStructuredSimulation.lean; lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (122 tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 indexed comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green after rebase
+checks: rebased onto c90db59d; Lean Beam 0.2.0-beta (source 662b514f) update/sync/save ConcreteStructuredSimulation version 8 hash ed75aa0173077884 with zero errors and zero warnings; forced lake env lean FirTalos/ConcreteStructuredSimulation.lean; lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (122 tests, 633 native/LCNF cases, 9 direct-machine cases, 601 native/LCNF/V8 cases, 1844/1844 indexed comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green after rebase
 bug-cards: none
 blockers: none
-handoff: none; the exact saturated callee-entry slice landed on main at 71890121 and the lane is active on recursive return/control composition.
-next: Run the recursive saturated callee from the exact entry, return through the saved call frame, write the selected body's result local, apply the exact conditional-label unwind, and restore the ownership/resource frame before continuation recursion. Defer heap-valued lazy publication until the entry transport is made facts-aware.
+handoff: ready for integration; resolve the mailbox-containing head from wasm/talos-runtime and fast-forward main from c90db59d.
+next: Connect the exact saturated entry theorem, recursive callee induction hypothesis, and this return/resume focus inside ReuseCapacityStructuredPureExternalLazyCodeEvaluates, then restore the enclosing ownership/resource frame with the entry-relative transports before continuation recursion. Defer heap-valued lazy publication until the entry transport is made facts-aware.
 ```
