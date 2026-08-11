@@ -230,6 +230,63 @@ theorem structuredWasmUnaryHostEffectPrefixFinitePath
     flat.finitePathWithSuffix (suffix := targetRest) (frames := frames)
       executed
 
+/-- A proved binary no-result host operation reifies as the exact generated
+three-instruction structured prefix beneath arbitrary residual code and saved
+frames. -/
+theorem structuredWasmBinaryHostEffectPrefixFinitePath
+    {module : Wasm.Module} {env : Wasm.HostEnv Host}
+    {spec : Wasm.HostSpec Host} {id : Nat} {imp : Wasm.ImportDecl}
+    {step : Wasm.Store Host → List Wasm.Value → Wasm.HostResult Host}
+    {initial final : Wasm.Store Host} {locals : Wasm.Locals}
+    {firstIndex secondIndex : Nat}
+    {physicalFirst physicalSecond : Wasm.Value}
+    {targetRest : Wasm.Program} {tail : List Wasm.Value}
+    {frames : List StructuredWasmFrame}
+    (firstFound : locals.get firstIndex = some physicalFirst)
+    (secondFound : locals.get secondIndex = some physicalSecond)
+    (imported : module.imports[id]? = some imp)
+    (satisfies : env.Satisfies module spec)
+    (inBounds : id < module.imports.length)
+    (contracted : spec.contracts[id]? = some
+      (fun initial args result => result = step initial args))
+    (parameterCount : imp.params.length = 2)
+    (resultCount : imp.results.length = 0)
+    (operation : step initial [physicalFirst, physicalSecond] =
+      .Return [] final) :
+    FinitePath (StructuredWasmStep module env) 3
+      ⟨initial,
+        .running { locals with values := tail }
+          ([.localGet firstIndex, .localGet secondIndex, .call id] ++
+            targetRest),
+        frames⟩
+      ⟨final, .running { locals with values := tail } targetRest, frames⟩ := by
+  have flat :
+      StructuredWasmFlatProgram module
+        [.localGet firstIndex, .localGet secondIndex, .call id] :=
+    .cons (.atomic (by trivial))
+      (.cons (.atomic (by trivial)) (.cons (.importedCall imported) .nil))
+  have executed :
+      StructuredWasmExecutes module env initial
+        { locals with values := tail }
+        [.localGet firstIndex, .localGet secondIndex, .call id]
+        (.fallthrough final { locals with values := tail }) := by
+    apply structuredWasmExecutes_fallthrough_of_wp
+    let Q : Wasm.Assertion Host := fun continuation =>
+      continuation = .Fallthrough final { locals with values := tail }
+    have finalWP :
+        Wasm.wp module [] Q final { locals with values := tail } env :=
+      (Wasm.wp_nil).2 rfl
+    simpa [Q] using
+      wp_effect_localGets
+        (indices := [firstIndex, secondIndex])
+        (physicalArgs := [physicalFirst, physicalSecond])
+        (rest := []) (tail := tail)
+        (.cons firstFound (.cons secondFound .nil)) imported satisfies
+        inBounds contracted parameterCount resultCount operation finalWP
+  simpa using
+    flat.finitePathWithSuffix (suffix := targetRest) (frames := frames)
+      executed
+
 /-- The concrete target for any admitted immediate literal followed by its
 destination write is a straight-line structured fragment. -/
 theorem ImmediateLiteralKind.structuredFlatProgram
@@ -5395,6 +5452,20 @@ inductive ReuseCapacityStructuredPureExternalLazyCodeEvaluates
       ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
         expectedResult facts sourceRuntime sourceEnv code resultFacts
         resultRuntime resultEnv resultValue requiredBytes
+  | objectFieldFVarEffect
+      (supported :
+        ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv code
+          continuation nextRuntime)
+      (sourceStep :
+        SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+          continuation)
+      (continued :
+        ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+          expectedResult facts nextRuntime sourceEnv continuation resultFacts
+          resultRuntime resultEnv resultValue requiredBytes) :
+      ReuseCapacityStructuredPureExternalLazyCodeEvaluates externals context
+        expectedResult facts sourceRuntime sourceEnv code resultFacts
+        resultRuntime resultEnv resultValue requiredBytes
 
 /-- The structured admission remains an exact finite source execution.  In
 particular, the recursive initializer premise of a miss is semantic evidence,
@@ -5501,6 +5572,9 @@ theorem ReuseCapacityStructuredPureExternalLazyCodeEvaluates.sourceResult
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
   | constructorTagEffect _ sourceStep _ ih =>
+      apply SourceCodeResult.ofSteps
+        (.step (sourceStep externals) (.refl _)) ih
+  | objectFieldFVarEffect _ sourceStep _ ih =>
       apply SourceCodeResult.ofSteps
         (.step (sourceStep externals) (.refl _)) ih
 
@@ -6395,10 +6469,272 @@ theorem ConcreteStructuredCodeFocus.advance_constructorTag
       | float32Bits valueRelated => cases valueRelated
       | float64Bits valueRelated => cases valueRelated
 
+/-- One successful FVar object-field mutation advances the source by one
+effect step and the structured target by the exact generated binary-host
+prefix. Descriptor-slot alignment relates the second local at the compiler's
+selected ABI kind; the concrete writer and common replace-heap transport then
+restore the recursive entry frame. -/
+theorem ConcreteStructuredCodeFocus.advance_objectFieldFVar
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule} {hosts : ResolvedHosts}
+    (functionSpec :
+      ConcreteSupportedFunction program context functionCode sourceModule
+        sourceFunction targetModule hosts)
+    {externals : ExternalImpl}
+    {facts : ReuseCapacityFacts} {remainingBytes : Nat}
+    {sourceRuntime nextRuntime entryRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {targetStore entryStore : Wasm.Store Host}
+    {targetLocals : Wasm.Locals}
+    {witness entryWitness : RefinementWitness}
+    {targetCode : Wasm.Program}
+    {source : MachineState} {target : StructuredWasmState Host}
+    (supported :
+      ObjectFieldFVarEffectSupported context sourceRuntime sourceEnv code
+        continuation nextRuntime)
+    (sourceStep :
+      SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+        continuation)
+    (related :
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+        sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
+        source target)
+    (invariant :
+      ReuseCapacityEntryRelativeFrame
+        (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction externals)
+        entryRuntime entryStore entryWitness facts remainingBytes sourceRuntime
+        sourceEnv targetStore targetLocals witness) :
+    ∃ sourceAfter targetAfter nextStore targetRest,
+      FinitePath
+          (fun before after => executeStep externals before = .next after)
+          1 source sourceAfter ∧
+        FinitePath
+            (StructuredWasmStep targetModule.wasmModule hosts.env)
+            3 target targetAfter ∧
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+              nextRuntime sourceEnv continuation nextStore targetLocals
+              targetRest witness sourceAfter targetAfter ∧
+            ReuseCapacityEntryRelativeFrame
+              (ConcreteReuseCapacityCacheFrame sourceModule sourceFunction
+                externals)
+              entryRuntime entryStore entryWitness facts remainingBytes
+              nextRuntime sourceEnv nextStore targetLocals witness ∧
+            sourceAfter.joins = source.joins ∧
+              sourceAfter.frames = source.frames ∧
+                targetAfter.frames = target.frames := by
+  cases supported with
+  | oset sourceRuntime nextRuntime sourceEnv objectId fieldId index continuation
+      location cell semantic field fieldKind objectCompiled fieldCompiled
+      fieldObjectKind objectLookup fieldLookup updated found live objectEq
+      indexValid fieldKindAligned =>
+      obtain ⟨objectIndex, fieldIndex, callIndex, targetRest, objectFound,
+          objectKindAt, fieldFound, fieldKindAt, callFound,
+          continuationAdapted, targetCodeEq⟩ :=
+        CodeAdapted.objectSetFVar_eq functionSpec.localsAligned objectCompiled
+          fieldCompiled related.adapted
+      subst targetCode
+      have objectSourceLookup :
+          lookup sourceEnv objectId = some (.object (.heap location)) := by
+        unfold lookupValue at objectLookup
+        split at objectLookup
+        · rename_i value foundLookup
+          injection objectLookup with valueEq
+          subst value
+          exact foundLookup
+        · contradiction
+      obtain ⟨physicalObject, targetObjectLookup, physicalObjectRelated⟩ :=
+        related.stateRelated.resolve objectSourceLookup objectFound objectKindAt
+      cases physicalObjectRelated with
+      | word32 objectRelated =>
+          rename_i objectWord
+          have decoded :
+              getConstructor sourceRuntime (.object (.heap location)) =
+                .ok (location, cell, semantic) := by
+            unfold getConstructor
+            simp only [getLiveCell, found, live, if_true, Bind.bind,
+              Except.bind]
+            rw [objectEq]
+            rfl
+          have tobjectRelated := objectRelated.object_to_tobject
+          obtain ⟨info, fieldKinds, descriptorFound⟩ :=
+            ConcreteRuntimeRel.constructorDescriptor_of_getConstructor
+              related.stateRelated.1 tobjectRelated decoded
+          have fieldDescriptorKindAt :=
+            fieldKindAligned tobjectRelated descriptorFound
+          obtain ⟨imp, imported, inBounds, contracted, parameterCount,
+              resultCount⟩ :=
+            functionSpec.objectSetCall callFound
+          have fieldArgCompiled :=
+            compileArg_fvar_of_getLocal fieldCompiled
+          have fieldSourceLookup : lookup sourceEnv fieldId = some field := by
+            unfold lookupValue at fieldLookup
+            split at fieldLookup
+            · rename_i value foundLookup
+              injection fieldLookup with valueEq
+              subst value
+              exact foundLookup
+            · contradiction
+          obtain ⟨physicalField, targetFieldLookup, physicalFieldRelated⟩ :=
+            related.stateRelated.resolve fieldSourceLookup fieldFound fieldKindAt
+          cases physicalFieldRelated with
+          | word32 fieldRelated =>
+              rename_i fieldWord
+              obtain ⟨heap, operation, runtimeRelated, capacity, cursor⟩ :=
+                objectSetStep_of_refines_with_capacity related.stateRelated.1
+                  objectRelated fieldRelated found live objectEq descriptorFound
+                  indexValid fieldDescriptorKindAt updated
+              have nextRelated :
+                  StateRelated sourceFunction nextRuntime sourceEnv
+                    (replaceHeap targetStore heap) targetLocals witness :=
+                ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
+                  related.stateRelated.2.2⟩
+              have effectStep :
+                  EffectStepSimulates context sourceModule sourceFunction []
+                    targetModule.wasmModule hosts.env sourceRuntime nextRuntime
+                    sourceEnv
+                    (.oset objectId index (.fvar fieldId) continuation)
+                    continuation
+                    ([.localGet objectIndex, .localGet fieldIndex,
+                        .call callIndex] ++ targetRest)
+                    targetRest targetStore (replaceHeap targetStore heap)
+                    targetLocals witness witness := by
+                apply effectStepSimulates_binaryHost
+                  (spec := hosts.spec)
+                  (step := objectSetStep index fieldKind)
+                · exact sourceStep
+                · apply codeAdapted_oset
+                    (targetField := [.localGet fieldIndex]) objectCompiled
+                    fieldArgCompiled objectFound
+                  · apply instructions_localGets (fvarIds := [fieldId])
+                      (indices := [fieldIndex])
+                    exact .cons
+                      (by simpa [functionBindings] using fieldFound) .nil
+                  · exact callFound
+                  · exact continuationAdapted
+                · exact related.stateRelated
+                · exact nextRelated
+                · exact targetObjectLookup
+                · exact targetFieldLookup
+                · exact imported
+                · exact functionSpec.hostsSatisfy
+                · exact inBounds
+                · exact contracted
+                · exact parameterCount
+                · exact resultCount
+                · exact operation
+              have ordinaryTransport :
+                  OrdinaryPersistenceTransport sourceRuntime nextRuntime :=
+                modifyConstructor_ordinaryPersistenceTransport updated
+              have sourceGlobals :
+                  nextRuntime.globals = sourceRuntime.globals :=
+                (setObjectField_runtimeAux updated).globals
+              have nextInvariant :
+                  ReuseCapacityEntryRelativeFrame
+                    (ConcreteReuseCapacityCacheFrame sourceModule
+                      sourceFunction externals)
+                    entryRuntime entryStore entryWitness facts remainingBytes
+                    nextRuntime sourceEnv (replaceHeap targetStore heap)
+                    targetLocals witness :=
+                invariant.ofReplaceHeapEffectStep effectStep capacity
+                  ordinaryTransport sourceGlobals cursor
+              let sourceAfter : MachineState := {
+                source with control := .code continuation
+                            runtime := nextRuntime }
+              have sourcePath :
+                  executeStep externals source = .next sourceAfter := by
+                rcases source with
+                  ⟨sourceProgram, sourceControl, actualEnv, sourceJoinEnv,
+                    sourceFrames, actualRuntime⟩
+                have programEq := related.sourceProgramEq
+                change sourceProgram = context.program at programEq
+                subst sourceProgram
+                have controlEq := related.sourceControlEq
+                change sourceControl = _ at controlEq
+                subst sourceControl
+                have envEq := related.sourceEnvEq
+                change actualEnv = sourceEnv at envEq
+                subst actualEnv
+                have runtimeEq := related.sourceRuntimeEq
+                change actualRuntime = sourceRuntime at runtimeEq
+                subst actualRuntime
+                change evalArg sourceEnv (.fvar fieldId) = .ok field
+                  at fieldLookup
+                simp [sourceAfter, executeStep, coreStep, objectLookup,
+                  fieldLookup, updated]
+              let targetAfter : StructuredWasmState Host := {
+                store := replaceHeap targetStore heap
+                control := .running
+                  { targetLocals with values := targetLocals.values } targetRest
+                frames := target.frames }
+              have targetPath :
+                  FinitePath
+                    (StructuredWasmStep targetModule.wasmModule hosts.env) 3
+                    target targetAfter := by
+                rcases target with ⟨actualStore, actualControl, actualFrames⟩
+                have storeEq := related.targetStoreEq
+                change actualStore = targetStore at storeEq
+                subst actualStore
+                have controlEq := related.targetControlEq
+                change actualControl =
+                  .running targetLocals
+                    ([.localGet objectIndex, .localGet fieldIndex,
+                        .call callIndex] ++ targetRest)
+                  at controlEq
+                subst actualControl
+                simpa [targetAfter] using
+                  structuredWasmBinaryHostEffectPrefixFinitePath
+                    (module := targetModule.wasmModule) (env := hosts.env)
+                    (spec := hosts.spec)
+                    (step := objectSetStep index fieldKind)
+                    (initial := targetStore)
+                    (final := replaceHeap targetStore heap)
+                    (locals := targetLocals) (firstIndex := objectIndex)
+                    (secondIndex := fieldIndex)
+                    (physicalFirst :=
+                      .i32 (UInt32.ofNat objectWord.value))
+                    (physicalSecond :=
+                      .i32 (UInt32.ofNat fieldWord.value))
+                    (targetRest := targetRest) (tail := targetLocals.values)
+                    (frames := actualFrames) targetObjectLookup
+                    targetFieldLookup imported functionSpec.hostsSatisfy
+                    inBounds contracted parameterCount resultCount operation
+              have nextFocus :
+                  ConcreteStructuredCodeFocus context sourceModule
+                    sourceFunction [] nextRuntime sourceEnv continuation
+                    (replaceHeap targetStore heap) targetLocals targetRest witness
+                    sourceAfter targetAfter := {
+                sourceProgramEq := by
+                  simp [sourceAfter, related.sourceProgramEq]
+                sourceControlEq := by simp [sourceAfter]
+                sourceEnvEq := by simp [sourceAfter, related.sourceEnvEq]
+                sourceRuntimeEq := by simp [sourceAfter]
+                targetStoreEq := by simp [targetAfter]
+                targetControlEq := by simp [targetAfter]
+                adapted := continuationAdapted
+                stateRelated := nextRelated
+                frameAligned := nextInvariant.1.1.1.1.2.2.1 }
+              exact ⟨sourceAfter, targetAfter, replaceHeap targetStore heap,
+                targetRest, .single sourcePath, targetPath, nextFocus,
+                nextInvariant, by simp [sourceAfter], by simp [sourceAfter],
+                by simp [targetAfter]⟩
+          | word64 fieldRelated =>
+              cases fieldRelated <;>
+                simp [AbiKind.isObjectField] at fieldObjectKind
+          | float32Bits fieldRelated => cases fieldRelated
+          | float64Bits fieldRelated => cases fieldRelated
+      | word64 objectRelated => cases objectRelated
+      | float32Bits objectRelated => cases objectRelated
+      | float64Bits objectRelated => cases objectRelated
+
 /-- Recursive structured partial correctness for direct values, supported pure
 external results, statically named calls, generated lazy caches, erased
 default-case wrappers, arbitrary normalized object and scalar `UInt8`
-dispatchers, ownership effects through deletion, and constructor-tag mutation.
+dispatchers, ownership effects through deletion, constructor-tag mutation,
+and FVar object-field mutation.
 
 External results traverse the interpreter's exact three-step request protocol
 and the compiler-derived imported-call prefix. A named call is staged by the
@@ -7564,6 +7900,26 @@ theorem
           (sourceMiddleJoins.trans sourceJoins) nextInvariant
       exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
         resultWitness, kind, physical, 1 + sourceCount, 2 + targetCount,
+        sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
+        resultInvariant, resultRefines, resultJoins,
+        sourceFramesEq.trans sourceMiddleFrames,
+        targetFramesEq.trans targetMiddleFrames⟩
+  | @objectFieldFVarEffect sourceRuntime sourceEnv code continuation
+      nextRuntime context expectedResult facts resultFacts resultRuntime
+      resultEnv resultValue requiredBytes supported sourceStep continued ih =>
+      obtain ⟨sourceMiddle, targetMiddle, nextStore, targetRest, sourcePrefix,
+          targetPrefix, nextFocus, nextInvariant, sourceMiddleJoins,
+          sourceMiddleFrames, targetMiddleFrames⟩ :=
+        related.advance_objectFieldFVar functionSpec supported sourceStep
+          invariant
+      obtain ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+          resultWitness, kind, physical, sourceCount, targetCount, sourceTail,
+          targetTail, yielded, resultInvariant, resultRefines, resultJoins,
+          sourceFramesEq, targetFramesEq⟩ :=
+        ih functionSpec contextCaches nextFocus
+          (sourceMiddleJoins.trans sourceJoins) nextInvariant
+      exact ⟨sourceAfter, targetAfter, resultStore, resultLocals,
+        resultWitness, kind, physical, 1 + sourceCount, 3 + targetCount,
         sourcePrefix.trans sourceTail, targetPrefix.trans targetTail, yielded,
         resultInvariant, resultRefines, resultJoins,
         sourceFramesEq.trans sourceMiddleFrames,

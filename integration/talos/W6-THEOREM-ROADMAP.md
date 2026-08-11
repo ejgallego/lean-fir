@@ -1330,9 +1330,13 @@ acceptance tests pass.
      is now connected as the first mutation case: its admitted live-constructor
      facts drive the concrete header writer, and the compiler-selected tag host
      still yields an exact two-instruction local-read/imported-call prefix.
-     Subsequent slices connect object/`USize`/packed-scalar field mutations and
-     add saturated closure calls, heap-valued cache misses, and target-only
-     label/loop unwinding to this induction.
+     FVar object-field mutation is now connected through an exact three-step
+     two-local/imported-call prefix. Descriptor-slot alignment fixes the second
+     local's ABI relation, and the concrete slot writer preserves the same
+     witness and entry-relative frame. Subsequent slices connect erased-object,
+     `USize`, and packed-scalar field mutations and add saturated closure calls,
+     heap-valued cache misses, and target-only label/loop unwinding to this
+     induction.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source
