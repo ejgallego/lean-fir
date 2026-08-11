@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-RESOURCE-STACK`.
+- Integration owner: `wasm-proof`; this lease assembles the exact call-scope
+  resource laws into the recursive stack component of the finite-prefix
+  simulation relation.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `bf00e5c9` after the
+  grow/delete release-fixture acceptance.
+- Published stack: active-slice record `d87858db`, functional proof head
+  `1f57b48d`, and clean ready mailbox `c3ba7830`.
+- Accepted proof: `ConcreteStructuredSuspendedResourceStack` chains saved
+  caller scopes so every adjacent caller/callee pair shares the exact
+  runtime/store/witness entry boundary by construction.
+  `ConcreteStructuredResourceStack` pairs that chain with the active scope;
+  its `frameRel` projection transports every saved caller to the current heap
+  and reconstructs the accepted `ConcreteStructuredFrameRel`.
+- Transition closure: generated direct and saturated entries push the unified
+  resource stack. Both bind-return protocols compose the active callee into
+  the saved caller, erase exactly the result fact, restore the caller's outer
+  scope, expose the older chain, and construct the successor
+  `ConcreteStructuredStackRel`. No whole-callee evaluation or termination
+  premise is introduced.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: pre- and post-rebase Lean Beam update/sync/save with zero
+  errors; direct `FirTalos.ConcreteStructuredSimulation` build (3,110 jobs);
+  `git diff --check`; Talos setup at `a01d01c`; all 3,133 Talos jobs; and
+  complete post-rebase `make check` with 653/653 native/LCNF/V8 cases,
+  1,968/1,968 equal backend comparisons, 662 unique cases, 6,829 interpreter
+  steps, 124 tag floors, 233 semantic domains, and zero findings. No bug card
+  was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next defines the
+  source-only pointwise admission classifier over the combined
+  control/resource relation and begins its local successor-preservation proof.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-GROW-DELETE-RELEASE-S5C`.
 - Integration owner: `test-fixtures`; the user authorized this lane to take
   the integration role when needed.
