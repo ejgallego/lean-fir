@@ -19,7 +19,7 @@ exception text, or allocator identity.
 
 | Track | State | Scope | Immediate move |
 | --- | --- | --- | --- |
-| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Land S2 closure multiplicity, then execute S3 capture topology |
+| A Memory fidelity | active, primary | Allocation, retain/release, alias topology, mutation, copy-on-write, reuse, and persistence | Execute S3 capture topology from the landed S2 multiplicity matrix |
 | B Calls and control | active through A/B bridge | Application shapes, tail calls, recursion, branch topology, and depth behavior | Use S4 tail-call ownership as the first joint slice |
 | C Effects and termination | queued | Ordered external effects, output, caught/uncaught exceptions, runtime faults, exits, and controlled divergence | Add an ordered-effect boundary pair, then queue the shared source-error contract |
 | D Floating semantics | contract-blocked | Bit-exact entry/result transport, arithmetic, comparison, conversion, NaNs, infinities, subnormals, and signed zero | Resolve `FIR-BUG-wasm-none-float-runtime-gap` in the shared runtime before execution fixtures |
@@ -94,7 +94,7 @@ near-synonym drift:
 | --- | --- | --- | --- |
 | M0 Mixed closure baseline | landed | `mixed-closure-capture-once` and `mixed-closure-capture-twice` pin 36 and 62 interpreter transitions and pass the native/LCNF/V8 triangle | Maintain the landed baseline while later slices reuse its mixed capture shape |
 | M1 Ownership coverage ledger | active | Existing coverage distinguishes unique/shared, copy-on-write, recursive release, and closure multiplicity | Add lifetime-operation, alias-shape, and observation-strength domains with each fixture slice |
-| M2 Closure/capture ownership | active | The zero/one/two/three-use matrix pins 14/36/62/87 transitions and passes native/LCNF/V8; the outside-alias ByteArray pair remains green | Land S2, then execute S3 repeated-capture and outside-alias topology |
+| M2 Closure/capture ownership | active | S2 is on `main`: the zero/one/two/three-use matrix pins 14/36/62/87 transitions and passes native/LCNF/V8; the outside-alias ByteArray pair remains green | Execute S3 repeated-capture and outside-alias topology |
 | M3 Tail-call ownership (A/B bridge) | queued | `local-tail` pins source-level tail-recursive control through native/LCNF/V8, while W7 separately differentially checks its direct self-tail-call transform | Carry unique versus shared heap state through tail calls and make transfer/retention observable |
 | M4 Allocation and reuse | queued | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Add paired reuse-versus-fresh-allocation cases across heap kinds and retained capacities |
 | M5 Recursive release | queued | Direct LCNF covers repeated aliases, nested release, shared stopping, and persistent owners | Add source-generated observable release pairs and exact decrement multiplicities |
@@ -181,8 +181,7 @@ alias materialization or the effect-wrapper contracts.
 
 ### S2: closure-use multiplicity
 
-State: `prepared` and real-engine validated on
-`validation/closure-ownership-fixtures`.
+State: `landed` and real-engine validated on `main` at `c9b80cd7`.
 
 The same-closure matrix now covers zero, one, two, and three uses. Final LCNF
 retains a real four-box `pap` in the zero-use case and releases it without
@@ -194,11 +193,23 @@ path from disappearing. All four cases pass native Lean, LCNF, and real V8.
 
 ### S3: capture alias topology
 
+State: `active` on `validation/closure-ownership-fixtures`.
+
 Compare one captured heap object with the same object captured in multiple
 slots, then retain an independent alias outside the closure. Cover callees that
 ignore, read, return, and consume/mutate the capture. Use constructor, String,
 ByteArray, large Nat/Int, and floating boxes as pairwise representatives rather
 than repeating a scalar matrix.
+
+The first vertical slice uses one closure with the same `ByteArray` in two
+capture slots and a third alias retained by its caller. A Boolean-controlled
+pair returns both captures unchanged on one path and consumes/mutates the
+second capture on the other. Both observations return the outside alias, the
+first captured alias, and the second result, so an incorrect retain, release,
+or copy-on-write decision is visible. Exact final-LCNF traces must prove the
+repeated capture, partial application, branch choice, returned-alias path, and
+consuming external path actually execute. The already-landed single-capture
+outside-alias mutation remains the one-slot comparison point.
 
 ### S4: tail-call ownership
 
