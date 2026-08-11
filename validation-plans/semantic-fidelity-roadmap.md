@@ -32,9 +32,9 @@ another exhaustive scalar matrix.
 
 ## Coverage gap snapshot
 
-At the current 647-case source checkpoint, case counts are concentrated in
+At the current 651-case source checkpoint, case counts are concentrated in
 scalar and pure-external behavior: 413 cases are tagged `scalar`, 302 `signed`,
-305 `external`, and 146 `arithmetic`. In contrast, only 21 are tagged
+305 `external`, and 146 `arithmetic`. In contrast, only 25 are tagged
 `constructor`, 12 `control-flow`, three `effect`, five `recursion`, three
 `tail-control`, two `tail-ownership`, and one `polymorphism`. The two float-tagged cases preserve
 captured `Float32`/`Float` words but return non-floating observations; they do
@@ -59,7 +59,7 @@ conjunctive-domain floors are green.
 | `coverage-index.json` | Cross-tier regression ratchet | Exact tier, aggregate, machine, tag, and conjunctive-domain floors |
 
 The `-scalars` suffix on the V8 plan and its provider/adapter files is
-historical: the plan currently selects all 647 eligible cases, not a scalar
+historical: the plan currently selects all 651 eligible cases, not a scalar
 subset. Rename those root-wired assets through the integration owner rather
 than creating a second semantically identical plan in this lane.
 
@@ -98,7 +98,7 @@ near-synonym drift:
 | M2 Closure/capture ownership | landed | S2, S3a, and S3b are on `main`; S3b adds ByteArray and allocated constructor/String ignore-versus-read pairs with repeated captures and outside aliases, pinning 24/30 and 36/44 transitions | Carry the landed alias shapes into S4 tail-call ownership |
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
-| M5 Recursive release | active, primary | S5a is landed with source-generated unique nested release versus shared-child stopping; direct LCNF additionally anchors repeated aliases and persistent owners | Use coverage-guided narrowing to admit the repeated-child-alias unique-release versus shared-owner-stop pair |
+| M5 Recursive release | active, primary | S5a is landed; S5b is validated on the fixture branch with repeated-child-alias unique release versus shared-owner stopping; direct LCNF additionally anchors repeated aliases and persistent owners | Integrate S5b, then use the coverage model to choose the smallest undominated retained-capacity or grow/delete pair |
 | M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
@@ -288,7 +288,7 @@ control.
 
 ### S5: recursive release and reuse
 
-State: active on `validation/closure-ownership-fixtures` from `main` at
+State: S5b prepared on `validation/closure-ownership-fixtures` from `main` at
 `5dfa5778`; changes no shared contract.
 
 Cover repeated child aliases, nested unique release, shared-child recursion
@@ -363,6 +363,19 @@ owner, preserve both original leaf fields, and force the outside leaf update to
 allocate. Exact decrement, increment, constructor, projection, branch, and
 reuse counts distinguish the paths, while returned aliases make under-release
 and over-release observable.
+
+That pair now passes native Lean versus final LCNF and the complete
+native/LCNF/real-V8 triangle with no finding. The unique-owner path pins 62
+interpreter steps, four increments, three decrements, three constructors, five
+projections, and three `oset` writes; two consecutive `oproj`/`dec` sequences
+prove that both repeated fields were released before the surviving leaf was
+reused. The shared-owner path pins 64 steps, eight increments, three
+decrements, six constructors, three projections, and exactly zero `oset`
+writes, proving that release stopped before traversing either owner field and
+that both the replacement and updated leaf allocated. Both execute exactly one
+ordered `Nat.add`. The resulting snapshot is 651 source cases, 660 aggregate
+unique cases, 1,311 tier cases, 1,962 comparisons, 6,689 interpreter steps,
+122 tag floors, and 227 semantic domains.
 
 ### S6: nonlocal ownership boundaries
 

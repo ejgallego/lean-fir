@@ -550,7 +550,7 @@ the ordered tier list that observed it.
 Policy-required items remain in the inventory even when no tier observed them,
 so an aggregate failure has a direct uncovered-item witness. Per-tier summaries
 also retain contribution counts and the exact items unique to that tier. In the
-current baseline, the 649 source cases are shared by the source-LCNF and V8
+current baseline, the 651 source cases are shared by the source-LCNF and V8
 tiers, the nine direct cases are unique to the direct tier, and
 `admin:yield-apply` is the direct tier's unique administrative contribution.
 The erased-reset fixture also makes `erased`, `reset`, and `reuse`
@@ -1882,6 +1882,18 @@ Exact form and `Nat.add` traces plus paired recursive-release domains retain
 the allocation/reuse distinction even though allocation identity is not part
 of the portable result protocol.
 
+The repeated-child release pair adds alias multiplicity to that boundary. It
+stores the same retained leaf in two fields of one erased-neighbor owner. The
+unique-owner case executes two consecutive field projections and decrements,
+then reuses the now-exclusive surviving leaf; its exact 62-step trace contains
+four `inc`, three `dec`, three `ctor`, five `oproj`, and three `oset` forms.
+The paired case retains the whole owner, so release stops before either field:
+both original fields remain observable and the outside leaf update allocates.
+Its exact 64-step trace contains eight `inc`, three `dec`, six `ctor`, three
+`oproj`, and exactly zero `oset` forms. Native Lean, final LCNF, and real V8
+agree on both observations, and dedicated source/V8 domains pin the combined
+repeated-child, release-boundary, and surviving-alias claim.
+
 The first read probe returned `ByteArray × UInt8` and exposed
 `FIR-BUG-validation-none-nested-boxed-scalar-result`: execution completed, but
 the validation result codec could not decode the boxed `UInt8` stored in
@@ -1905,7 +1917,7 @@ copy.  The independent artifact corpus separately compares external
 world/trace effects and a two-call lazy-cache hit/miss sequence against Talos.
 Compiler-generated `Int.ofNat` and `Int.neg` calls construct positive and
 negative literals at both immediate/heap representation boundaries.
-The default native-to-V8 matrix covers all 649 corpus cases, including a natural
+The default native-to-V8 matrix covers all 651 corpus cases, including a natural
 above `UInt64`, a recursive list containing that value, tagged-to-heap
 `Nat.add`, heap-input `Nat.add`, tagged and multi-limb `Nat.mul`, multi-limb
 and saturating `Nat.sub`, paired `Nat.div`/`Nat.mod` including zero, all three
