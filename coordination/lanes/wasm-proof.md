@@ -5,8 +5,8 @@ lane: wasm-proof
 owner: wasm-proof
 branch: wasm/talos-runtime
 worktree: .worktrees/wasm-talos
-state: ready
-base: f1147aad on main
+state: active
+base: 499c07e6 on main
 functional-head: 2309fbaa (recursive structured simulation now includes constructor-tag mutation)
 contract-base: 745610b0; proof-only extension over the accepted W6.7e recursion and existing concrete lazy-cache runtime contracts
 clean-at-update: true
@@ -16,6 +16,6 @@ contracts: none; proof construction over accepted contracts
 checks: Lean Beam update/sync/save version 132 hash 44a4df4560df8732 (zero local warnings); forced lake env lean FirTalos/ConcreteStructuredSimulation.lean (zero local warnings); lake build FirTalos.ConcreteStructuredSimulation (3110 jobs); git diff --check; make check (642 unique cases, 1844/1844 comparisons); Talos remains at setup a01d01c; make talos-check (3133 jobs); all green
 bug-cards: none
 blockers: none
-handoff: ready from base f1147aad at functional head 2309fbaa; worktree was clean before this mailbox update.
-next: Land this slice, then connect FVar object-field mutation. Its generated two-local/imported-call prefix needs an exact three-step structured path and ownership/fact transport for the replaced field. Keep `USize`/packed-scalar mutations, heap-valued lazy publication, and saturated closure calls separate.
+handoff: none; constructor-tag mutation landed on main at 499c07e6 and the lane is active on FVar object-field mutation.
+next: Connect FVar object-field mutation. Its generated two-local/imported-call prefix needs an exact three-step structured path and ownership/fact transport for the replaced field. Keep `USize`/packed-scalar mutations, heap-valued lazy publication, and saturated closure calls separate.
 ```
