@@ -15,6 +15,35 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-STRUCTURED-FLAT-PREFIX`.
+- Integration owner: `wasm-proof`; this is the first recursive direct-body
+  transition of W6.7e.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `85cc4c15`.
+- Published stack: active-slice record `b654688d`, functional head `62069562`,
+  and ready mailbox `9ffe7641`.
+- Accepted proof: existing concrete runtime WP laws now produce exact
+  successful Talos outcomes without a caller-supplied execution witness.
+  `StructuredWasmFlatProgram.finitePathWithSuffix` reifies such outcomes as
+  one structured-machine step per straight-line instruction beneath arbitrary
+  residual code and saved frames. `ConcreteStructuredCodeFocus.advance_flatLet`
+  matches one direct source `let`, preserves operand/frame suffixes, and
+  reconstructs the recursively compiled continuation focus. Executable
+  compiler/adapter inversion discharges flatness for immediate literals and
+  local aliases.
+- Remaining boundary: extend the compiler-derived flatness proof across the
+  remaining direct runtime-import families, fold the transition into the
+  resource-indexed code induction, then nest the accepted saved-caller
+  relation recursively for internal calls.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam green saves with source hashes `5a117d1bfce21995`
+  and `e43cbd52f5f3aafe`; forced direct recompilation; focused 3,110-job
+  dependency-cone build; `git diff --check`; complete `make check`; Talos
+  pinned at `a01d01c`; and all 3,133 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-CALLER-TRANSPORT`.
 - Integration owner: `wasm-proof`; this is the hereditary call-scope bridge
   of W6.7e.
