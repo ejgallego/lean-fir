@@ -15,6 +15,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-COMPILER-RELATION-SILENT-OWNERSHIP`.
+- Integration owner: `wasm-proof`; this is the first accepted W6.7e
+  compiler-relation slice.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, based directly on `main` at `5429510c`.
+- Published stack: functional head `e05013ab` and ready mailbox `3c9c55a5`.
+- Accepted proof: `ConcreteStructuredCodeFocus` relates a source code focus to
+  its real two-stage adapted structured-Wasm program, exact target control,
+  locals, and store, and the established concrete `StateRelated` runtime
+  relation. The relation itself derives exact finite-prefix observation
+  agreement. Leading persistent increment/decrement operations take one real
+  source step, require a reflexive structured target path, restore the compiler
+  focus, and strictly decrease `compilerCodeSilenceRank`.
+- Boundary: this slice intentionally leaves continuation-stack correspondence
+  to the next relation layer. It neither assumes target execution evidence nor
+  weakens source admission, the semantic ABI, or the concrete-runtime
+  relation. The next slice adds the first positive structured target path for
+  source return through the adapted result local and `ret`.
+- Contracts: no shared semantic, symbolic Wasm, concrete-runtime, ABI,
+  resident-helper, or artifact contract changed.
+- Validation: Lean Beam update/sync/save with zero diagnostics; focused 3,107-
+  job dependency-cone build; `git diff --check`; complete `make check` with 642
+  validation cases and 1,844/1,844 backend comparisons; Talos pinned at
+  `a01d01c`; and all 3,133 `make talos-check` jobs.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STRUCTURED-TERMINAL-ADEQUACY`.
 - Integration owner: `wasm-proof`; the user retained the W6 owner as
   integration owner for the certificate-free compiler proof.
