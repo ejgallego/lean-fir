@@ -1365,10 +1365,17 @@ acceptance tests pass.
      step, retaining the saved call frame and all matcher labels.
      `structuredWasmLeaveReplicatedClosureLabelsFinitePath` separately proves
      exact normal fallthrough through those labels back to the compiler's
-     residual continuation. Subsequent slices run the recursive callee, write
-     its result local, apply that unwind, and restore the caller resource
-     frame; then add heap-valued cache misses and target-only loop unwinding to
-     this induction.
+     residual continuation. The return half is now composed as well:
+     `structuredWasmSaturatedCalleeReturnAndResumeFinitePath` takes exactly
+     `before.length + 5` target steps to return the recursive callee, write the
+     selected result, leave all matcher labels, and execute the enclosing
+     generic `let` reload/write pair. The corresponding
+     `ConcreteStructuredSaturatedBindFrameFocus.advance` matches one source
+     bind-frame step and reconstructs the compiled continuation focus with its
+     original operand tail and aligned caller locals. The next slice connects
+     recursive callee entry/yield plus entry-relative resource restoration to
+     this relation inside the main induction; then add heap-valued cache misses
+     and target-only loop unwinding.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
      `ConcreteSupportedExport` and its ordinary initial runtime assumptions,
      construct `ConcreteFiniteTraceCorrect` at the compiler-produced source

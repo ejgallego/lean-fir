@@ -2852,6 +2852,27 @@ theorem locals_set?_with_values
       simp [Wasm.Locals.set?, notInParams, inLocals]
     · contradiction
 
+/-- Repeating the same successful checked local write is a no-op.  This is
+the local-state fact needed by closure dispatch: the selected candidate body
+writes its result slot, then the enclosing generic `let` wrapper reloads and
+writes that same value once more. -/
+theorem locals_set?_idempotent
+    {locals updated : Wasm.Locals}
+    {index : Nat} {value : Wasm.Value}
+    (set : locals.set? index value = some updated) :
+    updated.set? index value = some updated := by
+  unfold Wasm.Locals.set? at set ⊢
+  split at set
+  · rename_i inParams
+    cases set
+    simp [inParams, List.set_set]
+  · rename_i notInParams
+    split at set
+    · rename_i inLocals
+      cases set
+      simp [notInParams, inLocals, List.set_set]
+    · contradiction
+
 /-- A populated generated lazy-cache slot takes the exact five target steps
 of the cache-hit path: load the published flag, enter and leave the empty
 `then` arm, load the published value, and write the destination local.  The
@@ -3687,6 +3708,398 @@ theorem structuredWasmLeaveReplicatedClosureLabelsFinitePath
       rw [List.replicate_succ]
       exact .cons StructuredWasmStep.leaveLabel
         (ih (locals := { locals with values := belowStack }))
+
+/-- A recursively evaluated saturated closure callee returns through the saved
+call frame, writes the selected candidate's result slot, exits every matcher
+conditional, and executes the enclosing generic `let` reload/write pair.  The
+result is the caller continuation with its original operand tail in exactly
+`count + 5` structured steps. -/
+theorem structuredWasmSaturatedCalleeReturnAndResumeFinitePath
+    {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
+    {store : Wasm.Store Host}
+    {callerLocals calleeLocals updated : Wasm.Locals}
+    {physical : Wasm.Value} {physicalArgs tail : List Wasm.Value}
+    {resultIndex count : Nat} {targetRest : Wasm.Program}
+    {frames : List StructuredWasmFrame}
+    (targetSet :
+      callerLocals.set? resultIndex physical = some updated) :
+    FinitePath (StructuredWasmStep module hostEnv) (count + 5)
+      ⟨store, .returning (physical :: calleeLocals.values),
+        .call 1 tail
+            { callerLocals with
+              values := physicalArgs.reverse ++ tail }
+            [.localSet resultIndex] ::
+          (List.replicate count (.label 0 tail []) ++
+            .label 0 tail
+                ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+              frames)⟩
+      ⟨store, .running { updated with values := tail } targetRest, frames⟩ := by
+  let matcherFrames : List StructuredWasmFrame :=
+    List.replicate count (.label 0 tail []) ++
+      .label 0 tail
+          ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+        frames
+  let afterReturn : StructuredWasmState Host :=
+    ⟨store,
+      .running { callerLocals with values := physical :: tail }
+        [.localSet resultIndex],
+      matcherFrames⟩
+  let afterSelectedSet : StructuredWasmState Host :=
+    ⟨store, .running { updated with values := tail } [], matcherFrames⟩
+  let afterLabels : StructuredWasmState Host :=
+    ⟨store, .running { updated with values := tail }
+      ([.localGet resultIndex, .localSet resultIndex] ++ targetRest), frames⟩
+  let afterReload : StructuredWasmState Host :=
+    ⟨store, .running { updated with values := physical :: tail }
+      (.localSet resultIndex :: targetRest), frames⟩
+  have returnToCaller :
+      StructuredWasmStep module hostEnv
+        ⟨store, .returning (physical :: calleeLocals.values),
+          .call 1 tail
+              { callerLocals with
+                values := physicalArgs.reverse ++ tail }
+              [.localSet resultIndex] :: matcherFrames⟩
+        afterReturn := by
+    simpa [afterReturn, matcherFrames] using
+      (StructuredWasmStep.returnCall
+        (module := module) (env := hostEnv)
+        (values := physical :: calleeLocals.values) (resultArity := 1)
+        (callerRemainder := tail)
+        (callerLocals :=
+          { callerLocals with values := physicalArgs.reverse ++ tail })
+        (rest := [.localSet resultIndex]) (store := store)
+        (frames := matcherFrames))
+  have selectedStackSet :
+      ({ callerLocals with values := physical :: tail }.set? resultIndex
+          physical) =
+        some { updated with values := physical :: tail } :=
+    locals_set?_with_values (physical :: tail) targetSet
+  have writeSelected :
+      StructuredWasmStep module hostEnv afterReturn afterSelectedSet := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, selectedStackSet]
+  have leaveMatchers :
+      FinitePath (StructuredWasmStep module hostEnv) count.succ
+        afterSelectedSet afterLabels := by
+    simpa only [afterSelectedSet, afterLabels, matcherFrames] using
+      (structuredWasmLeaveReplicatedClosureLabelsFinitePath
+        (module := module) (hostEnv := hostEnv) (store := store)
+        (locals := { updated with values := tail }) (belowStack := tail)
+        (rest := [.localGet resultIndex, .localSet resultIndex] ++ targetRest)
+        (frames := frames) count)
+  have updatedGet : updated.get resultIndex = some physical :=
+    (FirTalos.Correctness.localUpdate_of_set? targetSet).1
+  have updatedGetWithStack :
+      ({ updated with values := tail } : Wasm.Locals).get resultIndex =
+        some physical := by
+    simpa [Wasm.Locals.get] using updatedGet
+  have reloadResult :
+      StructuredWasmStep module hostEnv afterLabels afterReload := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, updatedGetWithStack]
+  have repeatedSet : updated.set? resultIndex physical = some updated :=
+    locals_set?_idempotent targetSet
+  have repeatedStackSet :
+      ({ updated with values := physical :: tail }.set? resultIndex physical) =
+        some { updated with values := physical :: tail } :=
+    locals_set?_with_values (physical :: tail) repeatedSet
+  have writeOuter :
+      StructuredWasmStep module hostEnv afterReload
+        ⟨store, .running { updated with values := tail } targetRest,
+          frames⟩ := by
+    apply StructuredWasmStep.atomic (fuel := 1)
+    · trivial
+    · simp only [Wasm.execOne.eq_def, repeatedStackSet]
+  have prefixPath :
+      FinitePath (StructuredWasmStep module hostEnv) 2
+        ⟨store, .returning (physical :: calleeLocals.values),
+          .call 1 tail
+              { callerLocals with
+                values := physicalArgs.reverse ++ tail }
+              [.localSet resultIndex] :: matcherFrames⟩
+        afterSelectedSet :=
+    .cons returnToCaller (.cons writeSelected (.refl _))
+  have suffix :=
+    (leaveMatchers.trans (.single reloadResult)).trans (.single writeOuter)
+  simpa [matcherFrames, Nat.succ_eq_add_one, Nat.add_assoc,
+    Nat.add_comm, Nat.add_left_comm] using (prefixPath.trans suffix)
+
+/-- One suspended source bind frame corresponds to a saturated closure call
+frame surrounded by the compiler-generated matcher labels.  Unlike the
+ordinary direct-call focus, the selected body first stores its result, exits
+the failed-matcher prefix and selected matcher, and then executes the generic
+enclosing `let` reload/write pair. -/
+structure ConcreteStructuredSaturatedBindFrameFocus
+    (context : Fir.Wasm.Context)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (labels : List Lean.FVarId)
+    (sourceRuntime : RuntimeState)
+    (callerEnv : Env)
+    (sourceValue : Value)
+    (result : Lean.FVarId)
+    (continuation : Lean.Compiler.LCNF.Code .impure)
+    (callerJoins : JoinEnv)
+    (sourceFrames : List Frame)
+    (targetStore : Wasm.Store Host)
+    (callerLocals calleeLocals : Wasm.Locals)
+    (physicalArgs callerRemainder : List Wasm.Value)
+    (targetRest : Wasm.Program)
+    (targetFrames : List StructuredWasmFrame)
+    (witness : RefinementWitness)
+    (kind : AbiKind)
+    (physical : Wasm.Value)
+    (resultIndex matcherCount : Nat)
+    (source : MachineState)
+    (target : StructuredWasmState Host) : Prop where
+  sourceProgramEq : source.program = context.program
+  sourceControlEq : source.control = .yielded sourceValue
+  sourceRuntimeEq : source.runtime = sourceRuntime
+  sourceFramesEq :
+    source.frames = .bind result continuation callerEnv callerJoins ::
+      sourceFrames
+  targetStoreEq : target.store = targetStore
+  targetControlEq :
+    target.control = .returning (physical :: calleeLocals.values)
+  targetFramesEq :
+    target.frames =
+      .call 1 callerRemainder
+          { callerLocals with
+            values := physicalArgs.reverse ++ callerRemainder }
+          [.localSet resultIndex] ::
+        (List.replicate matcherCount (.label 0 callerRemainder []) ++
+          .label 0 callerRemainder
+              ([.localGet resultIndex, .localSet resultIndex] ++ targetRest) ::
+            targetFrames)
+  continuationAdapted :
+    CodeAdapted context sourceModule sourceFunction labels continuation
+      targetRest
+  stateRelated :
+    StateRelated sourceFunction sourceRuntime callerEnv targetStore callerLocals
+      witness
+  frameAligned :
+    ConcreteLocalFrameAligned sourceFunction sourceRuntime callerEnv targetStore
+      callerLocals witness
+  resultFound :
+    findFVar? (functionBindings sourceFunction) result = some resultIndex
+  kindAt :
+    (functionBindings sourceFunction)[resultIndex]?.map Prod.snd = some kind
+  valueRelated : PhysicalValueRel witness kind physical sourceValue
+
+theorem ConcreteStructuredSaturatedBindFrameFocus.observes
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {physicalArgs callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSaturatedBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      calleeLocals physicalArgs callerRemainder targetRest targetFrames witness
+      kind physical resultIndex matcherCount source target) :
+    ConcretePrefixObservationRel
+      (sourcePrefixObservation source)
+      (concretePrefixObservation target.store) := by
+  refine ⟨witness, ?_, ?_⟩
+  · change target.store.host.runtime.world = source.runtime.world
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.world
+  · change ConcreteTraceRel witness target.store.host.runtime.trace
+      source.runtime.trace
+    rw [related.targetStoreEq, related.sourceRuntimeEq]
+    exact related.stateRelated.1.trace
+
+/-- Resume a saturated closure call after its recursive callee has yielded.
+The source takes its single bind-frame step.  The target takes the exact
+`matcherCount + 5` path proved above and re-enters the adapted continuation
+with the result installed in the caller local frame. -/
+theorem ConcreteStructuredSaturatedBindFrameFocus.advance
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {physicalArgs callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSaturatedBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      calleeLocals physicalArgs callerRemainder targetRest targetFrames witness
+      kind physical resultIndex matcherCount source target) :
+    ∃ sourceAfter targetAfter updated resumedLocals,
+      executeStep externals source = .next sourceAfter ∧
+      FinitePath (StructuredWasmStep module hostEnv) (matcherCount + 5)
+          target targetAfter ∧
+      callerLocals.set? resultIndex physical = some updated ∧
+      resumedLocals = { updated with values := callerRemainder } ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+          sourceRuntime (bind callerEnv result sourceValue) continuation
+          targetStore resumedLocals targetRest witness sourceAfter targetAfter ∧
+        sourceAfter.joins = callerJoins ∧
+        sourceAfter.frames = sourceFrames ∧
+        targetAfter.frames = targetFrames := by
+  obtain ⟨updated, targetSet, updatedAligned⟩ :=
+    related.frameAligned.set?
+      (nextRuntime := sourceRuntime)
+      (nextEnv := bind callerEnv result sourceValue)
+      (nextStore := targetStore)
+      (nextWitness := witness)
+      related.resultFound
+  let resumedLocals : Wasm.Locals :=
+    { updated with values := callerRemainder }
+  have updatedRelated :
+      StateRelated sourceFunction sourceRuntime
+        (bind callerEnv result sourceValue) targetStore resumedLocals witness := by
+    have bound := related.stateRelated.bindPhysical related.resultFound
+      related.kindAt related.valueRelated targetSet
+    rw [related.stateRelated.clearFailure] at bound
+    simpa [resumedLocals, StateRelated, EnvLocalsRelated, Wasm.Locals.get]
+      using bound
+  have resumedAligned :
+      ConcreteLocalFrameAligned sourceFunction sourceRuntime
+        (bind callerEnv result sourceValue) targetStore resumedLocals witness := by
+    simpa [resumedLocals, ConcreteLocalFrameAligned] using updatedAligned
+  let sourceAfter : MachineState :=
+    { source with
+      control := .code continuation
+      env := bind callerEnv result sourceValue
+      joins := callerJoins
+      frames := sourceFrames }
+  let targetAfter : StructuredWasmState Host :=
+    { target with
+      control := .running resumedLocals targetRest
+      frames := targetFrames }
+  refine ⟨sourceAfter, targetAfter, updated, resumedLocals, ?_, ?_, targetSet,
+    rfl, ?_, ?_, ?_, ?_⟩
+  · rcases source with
+      ⟨program, control, env, joins, frames, runtime⟩
+    have controlEq := related.sourceControlEq
+    change control = .yielded sourceValue at controlEq
+    subst control
+    have framesEq := related.sourceFramesEq
+    change frames = _ at framesEq
+    subst frames
+    simp [sourceAfter, executeStep, coreStep]
+  · rcases target with ⟨store, control, frames⟩
+    have storeEq := related.targetStoreEq
+    change store = targetStore at storeEq
+    subst store
+    have controlEq := related.targetControlEq
+    change control = .returning (physical :: calleeLocals.values) at controlEq
+    subst control
+    have framesEq := related.targetFramesEq
+    change frames = _ at framesEq
+    subst frames
+    simpa [targetAfter, resumedLocals] using
+      (structuredWasmSaturatedCalleeReturnAndResumeFinitePath
+        (module := module) (hostEnv := hostEnv) (store := targetStore)
+        (callerLocals := callerLocals) (calleeLocals := calleeLocals)
+        (physical := physical) (physicalArgs := physicalArgs)
+        (tail := callerRemainder) (resultIndex := resultIndex)
+        (count := matcherCount) (targetRest := targetRest)
+        (frames := targetFrames) targetSet)
+  · exact {
+      sourceProgramEq := by simp [sourceAfter, related.sourceProgramEq]
+      sourceControlEq := by simp [sourceAfter]
+      sourceEnvEq := by simp [sourceAfter]
+      sourceRuntimeEq := by simp [sourceAfter, related.sourceRuntimeEq]
+      targetStoreEq := by simp [targetAfter, related.targetStoreEq]
+      targetControlEq := by simp [targetAfter]
+      adapted := related.continuationAdapted
+      stateRelated := updatedRelated
+      frameAligned := resumedAligned }
+  · simp [sourceAfter]
+  · simp [sourceAfter]
+  · simp [targetAfter]
+
+/-- Simulation-facing saturated bind rule.  A supplied source successor is
+identified with the deterministic bind-frame successor constructed by
+`advance`; the target path remains derived from the structured semantics. -/
+theorem ConcreteStructuredSaturatedBindFrameFocus.advance_of_step
+    {context : Fir.Wasm.Context}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {labels : List Lean.FVarId}
+    {module : Wasm.Module}
+    {hostEnv : Wasm.HostEnv Host}
+    {externals : ExternalImpl}
+    {sourceRuntime : RuntimeState}
+    {callerEnv : Env}
+    {sourceValue : Value}
+    {result : Lean.FVarId}
+    {continuation : Lean.Compiler.LCNF.Code .impure}
+    {callerJoins : JoinEnv}
+    {sourceFrames : List Frame}
+    {targetStore : Wasm.Store Host}
+    {callerLocals calleeLocals : Wasm.Locals}
+    {physicalArgs callerRemainder : List Wasm.Value}
+    {targetRest : Wasm.Program}
+    {targetFrames : List StructuredWasmFrame}
+    {witness : RefinementWitness}
+    {kind : AbiKind}
+    {physical : Wasm.Value}
+    {resultIndex matcherCount : Nat}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSaturatedBindFrameFocus context sourceModule
+      sourceFunction labels sourceRuntime callerEnv sourceValue result
+      continuation callerJoins sourceFrames targetStore callerLocals
+      calleeLocals physicalArgs callerRemainder targetRest targetFrames witness
+      kind physical resultIndex matcherCount source target)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter resumedLocals,
+      FinitePath (StructuredWasmStep module hostEnv) (matcherCount + 5)
+          target targetAfter ∧
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
+        sourceRuntime (bind callerEnv result sourceValue) continuation
+        targetStore resumedLocals targetRest witness sourceAfter targetAfter := by
+  obtain ⟨computedAfter, targetAfter, _updated, resumedLocals, computedStep,
+      path, _targetSet, _resumedEq, focus, _sourceJoinsEq, _sourceFramesEq,
+      _targetFramesEq⟩ :=
+    related.advance (module := module) (hostEnv := hostEnv)
+      (externals := externals)
+  have afterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    injection computedStep
+  subst computedAfter
+  exact ⟨targetAfter, resumedLocals, path, focus⟩
 
 /-- Appending one more copy to a replicated prefix is insensitive to whether
 that copy is exposed at the front or at the end of the identical prefix. -/

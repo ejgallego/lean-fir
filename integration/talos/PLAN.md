@@ -5947,10 +5947,17 @@ capture/argument assembly, and the real generated `enterCall` step, retaining
 the precise call frame and every conditional label. Finally,
 `structuredWasmLeaveReplicatedClosureLabelsFinitePath` proves that normal
 selected-body fallthrough restores the caller operand tail and continuation
-in exactly `before.length + 1` steps. None of these theorems accepts an
-execution certificate. The next closure slice runs the recursive callee,
-writes its result local, applies this exact label unwind, and restores the
-caller resource frame before continuation recursion.
+in exactly `before.length + 1` steps. The callee-return boundary is now exact
+too. `structuredWasmSaturatedCalleeReturnAndResumeFinitePath` composes the
+one-result call return, selected-body result write, complete matcher-label
+unwind, and the enclosing generic `let` reload/write pair in exactly
+`before.length + 5` target steps. `ConcreteStructuredSaturatedBindFrameFocus`
+lifts that control path to the simulation relation: one source bind-frame step
+re-enters the recursively compiled continuation with the caller operand tail,
+local relation, and frame alignment restored. None of these theorems accepts
+an execution certificate. The next closure slice connects recursive callee
+entry/yield and entry-relative resource restoration to this bind focus inside
+the hereditary structured induction.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 
