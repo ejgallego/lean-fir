@@ -15,6 +15,43 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W6-POINTWISE-ADMISSION-CORE`.
+- Integration owner: `wasm-proof`; this lease replaces the first terminating
+  hereditary-evaluator dependency with a source-only pointwise compiler
+  relation.
+- Integration branch/worktree: `wasm/talos-runtime` in
+  `.worktrees/wasm-talos`, rebased directly on `main` at `2d24f623` after the
+  Verso HTML publication and mutated-constructor validation repair.
+- Published stack: active-slice record `0191141b`, functional proof head
+  `56a3e15d`, and clean ready mailbox `22204d0d`.
+- Accepted admission: `ConcreteStructuredCodeAdmission` records structural
+  source coverage, deterministic reuse-fact transfer, remaining allocation
+  budget, covered source continuations, and return ABI compatibility. It
+  contains no runtime step, final value or state, target path, or terminating
+  evaluation derivation.
+- Pointwise relation: `ConcreteStructuredCodePointwiseRel` combines the real
+  compiler/adaptor focus, hereditary entry-relative resource stack, and
+  source-only admission under one generated-function specification. Its root
+  constructor starts at canonical empty stacks. The direct-value rule uses
+  the production runtime law to construct the exact target path and complete
+  successor relation. The return rule derives its dynamic lookup from the
+  supplied successful source step and classifies the target as terminal,
+  direct-bind, or saturated-bind using the existing recursive frame stack.
+- Contracts: none. The slice changes W6 proof code, W6 roadmaps, and the W6
+  mailbox only; it changes no compiler/runtime semantics, concrete layout,
+  symbolic-Wasm instruction, or resident-helper signature.
+- Acceptance: post-rebase Lean Beam update/sync/save with zero errors; direct
+  `FirTalos.ConcreteStructuredSimulation` build (3,110 jobs);
+  `git diff --check`; complete `make check` including 122 unit tests and the
+  native/LCNF/Wasm validation gates; Talos setup at `a01d01c`; and all 3,133
+  Talos jobs. No bug card was required.
+- Result: `main` fast-forwards through the ready mailbox. W6 next carries
+  source-only continuation admission through direct and saturated call
+  push/pop, then widens the relation-wide `advance` dispatcher to the already
+  proved external, lazy, case, effect, and ranked silent-step families.
+
+## Latest completed integration lease
+
 - Milestone: `W6-POINTWISE-RESOURCE-STACK`.
 - Integration owner: `wasm-proof`; this lease assembles the exact call-scope
   resource laws into the recursive stack component of the finite-prefix
