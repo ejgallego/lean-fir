@@ -20159,6 +20159,311 @@ theorem SomeLedgerBinderReadyReachableMachineRelated.ledgerBinderReadyReachableM
   exact sourceReady
     ⟨rho, target.frames, targetFrameRoots, frames⟩ sourceControl
 
+/-- Root-independent description of one deleted let whose dynamic readiness
+is obtained from a target allocation ledger.  The operation records its
+actual source control, the source-only allocation it consumes, and two
+ownership bridges: one using an explicit post-operation freshness proof and
+one using the maintained source-ownership carrier.
+
+Reset and concrete-token reuse clients construct this interface through the
+factories below.  Downstream exact-graph reasoning therefore does not need to
+classify whole-program states or rediscover operation-specific heap facts. -/
+structure DeletedLedgerLetLocalReadyAt (state : MachineState) where
+  declaration : LCNF.LetDecl .impure
+  continuation : LCNF.Code .impure
+  location : Location
+  control : state.control = .code (.let declaration continuation)
+  deletedReady :
+    ∀ {rho targetRuntime sourceExtra targetExtra},
+      ShadowRuntimeRel rho state.runtime targetRuntime
+        sourceExtra targetExtra →
+      (ledger : TargetAllocationLedger rho targetRuntime.nextLocation) →
+      SourceOnlyUnderTargetLedger ledger location →
+      DeletedLetReadyAt state
+        (runtimeRoots state.runtime sourceExtra) declaration
+  deletedReadyWithOwnership :
+    ∀ {rho targetRuntime sourceExtra targetExtra},
+      ShadowRuntimeRel rho state.runtime targetRuntime
+        sourceExtra targetExtra →
+      (ledger : TargetAllocationLedger rho targetRuntime.nextLocation) →
+      SourceMachineOwnershipBelowFrontier state →
+      SourceOnlyUnderTargetLedger ledger location →
+      DeletedLetReadyAt state
+        (runtimeRoots state.runtime sourceExtra) declaration
+
+/-- A locally successful reset plus hereditary source-only closure ownership
+supplies the generic deleted-ledger operation interface. -/
+def DeletedLedgerLetLocalReadyAt.of_reset
+    {continuation : LCNF.Code .impure} {location : Location}
+    (localReady : DeletedResetLocalReadyAt state count object)
+    (control : state.control = .code (.let {
+      fvarId, binderName, type, value := .reset count object
+    } continuation))
+    (closure : ∀ {rho rightFrontier}
+      (ledger : TargetAllocationLedger rho rightFrontier),
+      SourceOnlyUnderTargetLedger ledger location →
+      SourceOnlyHeapClosureBinding ledger state.env object location
+        state.runtime.heap)
+    (globalsEq : localReady.nextRuntime.globals = state.runtime.globals)
+    (worldEq : localReady.nextRuntime.world = state.runtime.world)
+    (traceEq : localReady.nextRuntime.trace = state.runtime.trace)
+    (afterFresh : ∀ freshLocation,
+      localReady.nextRuntime.nextLocation ≤ freshLocation →
+      findCell? localReady.nextRuntime.heap freshLocation = none) :
+    DeletedLedgerLetLocalReadyAt state where
+  declaration := {
+    fvarId, binderName, type, value := .reset count object }
+  continuation := continuation
+  location := location
+  control := control
+  deletedReady := by
+    intro rho targetRuntime sourceExtra targetExtra related ledger sourceOnly
+    exact .reset fvarId binderName type count object
+      (localReady
+        |>.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure
+          related ledger (closure ledger sourceOnly)
+          globalsEq worldEq traceEq afterFresh)
+  deletedReadyWithOwnership := by
+    intro rho targetRuntime sourceExtra targetExtra related ledger ownership
+      sourceOnly
+    exact .reset fvarId binderName type count object
+      (localReady
+        |>.deletedReadyAt_of_targetAllocationLedger_sourceOnlyClosure_withOwnership
+          related ledger (closure ledger sourceOnly) ownership
+          globalsEq worldEq traceEq)
+
+/-- Exact concrete-token provenance and a successful reuse effect supply the
+same generic deleted-ledger operation interface.  Source ownership is not
+needed by this branch because the token's source-only location directly
+discharges reachability exclusion. -/
+def DeletedLedgerLetLocalReadyAt.of_reuse
+    {continuation : LCNF.Code .impure}
+    {values : Array Value} {result : RuntimeState × Value}
+    (control : state.control = .code (.let {
+      fvarId, binderName, type,
+      value := .reuse token info updateHeader arguments
+    } continuation))
+    (location : Location)
+    (tokenBinding : ∀ {rho rightFrontier}
+      (ledger : TargetAllocationLedger rho rightFrontier),
+      SourceOnlyUnderTargetLedger ledger location →
+      SourceOnlyReuseTokenBinding ledger state.env token location)
+    (argumentsRead : evalArgs state.env arguments = .ok values)
+    (effect : reuse state.runtime (.reuseToken (some location))
+      info updateHeader values = .ok result) :
+    DeletedLedgerLetLocalReadyAt state where
+  declaration := {
+    fvarId, binderName, type,
+    value := .reuse token info updateHeader arguments }
+  continuation := continuation
+  location := location
+  control := control
+  deletedReady := by
+    intro rho targetRuntime sourceExtra targetExtra related ledger sourceOnly
+    exact .reuse fvarId binderName type token info updateHeader arguments
+      ((tokenBinding ledger sourceOnly)
+        |>.deletedReuseSomeReadyAt_of_effect
+          argumentsRead effect related)
+  deletedReadyWithOwnership := by
+    intro rho targetRuntime sourceExtra targetExtra related ledger _ownership
+      sourceOnly
+    exact .reuse fvarId binderName type token info updateHeader arguments
+      ((tokenBinding ledger sourceOnly)
+        |>.deletedReuseSomeReadyAt_of_effect
+          argumentsRead effect related)
+
+/-- A generic source-plan special node contains an operation interface rather
+than a constructor naming a particular whole-program state. -/
+def DeletedLedgerLetLocalReady (state : MachineState) : Prop :=
+  Nonempty (DeletedLedgerLetLocalReadyAt state)
+
+/-- Target-side prefix evidence for one generic deleted-ledger operation.
+The active target code and proof-relevant binding map are existential because
+`CodeCovered` is proposition-valued; keeping this interface in `Prop` avoids
+illegitimate elimination of a coverage proof into compiler data. -/
+def DeletedLedgerTargetLiveHeapPrefixAt
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (target : MachineState) : Prop :=
+  ∃ targetCode : LCNF.Code .impure,
+    target.control = .code targetCode ∧
+    (∀ {used}, CodeCovered used targetCode →
+      ∃ bindings : TargetLiveHeapBindingPrefix
+          used source.env target.env target.runtime.nextLocation,
+        ∀ rightLocation,
+          rightLocation < target.runtime.nextLocation →
+          bindings.sourceOwner rightLocation ≠ operation.location) ∧
+    ∀ targetContinuation,
+      targetCode ≠ .let operation.declaration targetContinuation
+
+/-- A generic deleted-ledger operation upgrades an exact structural pair once
+the active target code covers its allocated heap prefix and every witnessed
+prefix owner differs from the operation's source-only location. -/
+theorem DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetPrefix : DeletedLedgerTargetLiveHeapPrefixAt operation target)
+    (related : SomeLedgerBinderReadyReachableMachineRelated
+      fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  rcases targetPrefix with
+    ⟨targetCode, targetControl, targetBindings, targetNotSame⟩
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [operation.control] at control
+  rw [targetControl] at control
+  cases control with
+  | code graph joins env =>
+      rename_i used
+      have covered : CodeCovered used targetCode :=
+        graph.toShadowCodeGraph.covered
+      rcases targetBindings covered with
+        ⟨ownerBindings, different⟩
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger operation.location :=
+        ownerBindings.sourceOnly_of_owners_ne env
+          (by
+            intro rightLocation bounded
+            exact different rightLocation bounded)
+          ledger
+      have removed :
+          DeletedLetReadyAt source
+            (runtimeRoots source.runtime
+              (envRootsOn used source.env ++ sourceFrameRoots))
+            operation.declaration :=
+        operation.deletedReady runtime ledger sourceOnly
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision : exact.view.runtimeDecision = .deletedLet :=
+        exact.view.runtimeDecision_eq_deletedLet_of_target_not_same_let
+          targetNotSame
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [operation.control, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+
+/-- Source-owned form of the generic deleted-ledger operation bridge.  The
+operation chooses its ownership-aware reset proof or its ownership-neutral
+reuse proof without exposing that distinction to the source plan. -/
+theorem DeletedLedgerLetLocalReadyAt.ledgerMachineReadyAt_withOwnership
+    (operation : DeletedLedgerLetLocalReadyAt source)
+    (targetPrefix : DeletedLedgerTargetLiveHeapPrefixAt operation target)
+    (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
+    (related : SomeLedgerBinderReadyReachableMachineRelated
+      fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  rcases targetPrefix with
+    ⟨targetCode, targetControl, targetBindings, targetNotSame⟩
+  rcases related with
+    ⟨rho, ledger, sourceControlRoots, targetControlRoots,
+      sourceFrameRoots, targetFrameRoots,
+      programs, control, frames, runtime⟩
+  rw [operation.control] at control
+  rw [targetControl] at control
+  cases control with
+  | code graph joins env =>
+      rename_i used
+      have covered : CodeCovered used targetCode :=
+        graph.toShadowCodeGraph.covered
+      rcases targetBindings covered with
+        ⟨ownerBindings, different⟩
+      have sourceOnly :
+          SourceOnlyUnderTargetLedger ledger operation.location :=
+        ownerBindings.sourceOnly_of_owners_ne env
+          (by
+            intro rightLocation bounded
+            exact different rightLocation bounded)
+          ledger
+      have removed :
+          DeletedLetReadyAt source
+            (runtimeRoots source.runtime
+              (envRootsOn used source.env ++ sourceFrameRoots))
+            operation.declaration :=
+        operation.deletedReadyWithOwnership runtime ledger
+          sourceOwnership sourceOnly
+      rcases graph with
+        ⟨remaining, final, bounded, exact, subset, static⟩
+      have decision : exact.view.runtimeDecision = .deletedLet :=
+        exact.view.runtimeDecision_eq_deletedLet_of_target_not_same_let
+          targetNotSame
+      refine ⟨rho, _, _, sourceFrameRoots, targetFrameRoots,
+        ledger, programs, ?_, frames, runtime⟩
+      simpa only [operation.control, targetControl] using
+        (BinderReadyReachableControlReadyAt.code
+          ⟨remaining, final, bounded, exact, subset, static,
+            ExactShadowCodeRuntimeReadyAt.letDeleted
+              decision removed⟩
+          joins env)
+
+/-- Source-side premises for deleting one operation against a singleton live
+target prefix: the retained binder identifies the unique mapped source owner,
+which is distinct from the operation's source-only allocation. -/
+structure SingletonLivePrefixDeletedLedgerOperationAt
+    (state : MachineState) (retainedBinder : FVarId)
+    (retainedSourceOwner : Location) where
+  operation : DeletedLedgerLetLocalReadyAt state
+  retainedRead : lookup state.env retainedBinder =
+    some (.object (.heap retainedSourceOwner))
+  ownerNe : retainedSourceOwner ≠ operation.location
+
+/-- Proposition-valued source-plan interface hiding the proof-relevant local
+operation package. -/
+def SingletonLivePrefixDeletedLedgerReady
+    (retainedBinder : FVarId) (retainedSourceOwner : Location)
+    (state : MachineState) : Prop :=
+  Nonempty (SingletonLivePrefixDeletedLedgerOperationAt
+    state retainedBinder retainedSourceOwner)
+
+/-- Generic singleton-prefix specialization of ledger operation readiness. -/
+theorem SingletonLivePrefixDeletedLedgerOperationAt.ledgerMachineReadyAt
+    (readiness : SingletonLivePrefixDeletedLedgerOperationAt
+      source retainedBinder retainedSourceOwner)
+    (targetShape : TargetSingletonLiveReturnAt target retainedBinder
+      rightLocation rightFrontier)
+    (related : SomeLedgerBinderReadyReachableMachineRelated
+      fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  apply readiness.operation.ledgerMachineReadyAt
+      (target := target) (related := related)
+  refine ⟨.return retainedBinder, targetShape.control, ?_, ?_⟩
+  · intro used covered
+    cases covered with
+    | ret binderUsed =>
+        refine ⟨targetShape.liveHeapBindingPrefix
+          binderUsed readiness.retainedRead, ?_⟩
+        intro rightLocation bounded
+        exact readiness.ownerNe
+  · intro targetContinuation
+    simp
+
+/-- Source-owned singleton-prefix specialization. -/
+theorem SingletonLivePrefixDeletedLedgerOperationAt.ledgerMachineReadyAt_withOwnership
+    (readiness : SingletonLivePrefixDeletedLedgerOperationAt
+      source retainedBinder retainedSourceOwner)
+    (targetShape : TargetSingletonLiveReturnAt target retainedBinder
+      rightLocation rightFrontier)
+    (sourceOwnership : SourceMachineOwnershipBelowFrontier source)
+    (related : SomeLedgerBinderReadyReachableMachineRelated
+      fuel source target) :
+    LedgerBinderReadyReachableMachineReadyAt fuel source target := by
+  apply readiness.operation.ledgerMachineReadyAt_withOwnership
+      (target := target) (sourceOwnership := sourceOwnership)
+      (related := related)
+  refine ⟨.return retainedBinder, targetShape.control, ?_, ?_⟩
+  · intro used covered
+    cases covered with
+    | ret binderUsed =>
+        refine ⟨targetShape.liveHeapBindingPrefix
+          binderUsed readiness.retainedRead, ?_⟩
+        intro rightLocation bounded
+        exact readiness.ownerNe
+  · intro targetContinuation
+    simp
+
 /-- Hereditary source-execution certificate parameterized by two local
 readiness interfaces. Ordinary states carry a target-independent source
 machine certificate; special states expose only the operation-specific shape
