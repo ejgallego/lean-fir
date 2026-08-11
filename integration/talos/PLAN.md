@@ -6061,16 +6061,16 @@ law; returns obtain their dynamic lookup from the supplied successful source
 step and become terminal, direct-bind, or saturated-bind control according to
 the existing frame stack.
 The complete admitted interprocedural call family is now connected to the
-pointwise core.
+pointwise core and its first relation-wide source-step law.
 `ConcreteStructuredCodeCoreRel.advance_directCall_stage` derives the semantic
 and physical arguments plus the exact generated prefix and moves to
 `ConcreteStructuredDirectCallReadyCoreRel`. Its `advance_enter` rule takes the
 single source/target entry steps, pushes caller resources and result ABI
 metadata atomically, and reconstructs the callee code core. Direct bind pop now
 exposes the resumed compiler focus, and `advance_popCore` restores the caller
-core without evaluating the callee as a whole. The relation-wide classifier
-will attach fresh local admission only after each dynamic code successor is
-known. Exactly saturated closure calls now follow the same local discipline.
+core without evaluating the callee as a whole. Fresh local admission is
+attached only after each dynamic code successor is known. Exactly saturated
+closure calls now follow the same local discipline.
 Their state-indexed zero-cost admission stages one source step against a
 reflexive target path and a strict compiler-rank decrease. The saturated-ready
 core then derives matcher selection, closure consumption, capture/argument
@@ -6078,9 +6078,16 @@ assembly, and generated callee entry from the compiler/runtime contracts while
 atomically pushing the caller scope and result ABI. Saturated bind pop exposes
 the resumed compiler focus and reconstructs the caller core after the exact
 matcher-label unwind. These rules neither evaluate the callee nor assume that
-it terminates. The next boundary wires these core-preserving call variants and
-the already established local operation laws into the relation-wide one-step
-`advance` theorem.
+it terminates. `ConcreteStructuredCodePointwiseRel.advance` now wires return,
+direct values, generated named calls, and exactly saturated closure calls into
+a single ordinary-`executeStep` theorem. It derives the target path and
+production callee row internally, returns
+`ConcreteStructuredCodeStepOutcome`, and proves strict compiler-rank descent
+for every empty target path. Continued code is admission-free;
+`withAdmission` attaches only the newly reached node's local classifier after
+that dynamic successor is known. The next boundary closes the
+ready/entry/return outcome states, then widens the same law over the already
+established external, lazy, case, and effect operations.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

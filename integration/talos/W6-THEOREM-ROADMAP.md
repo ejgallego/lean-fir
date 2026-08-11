@@ -1419,8 +1419,13 @@ acceptance tests pass.
      with recursive silence depth. It proves strict descent for empty-argument
      call staging, persistent ownership erasure, and nested default-only case
      erasure; `advance_defaultOnlyCase_ranked` exposes the last of those as an
-     exact one-source/zero-target local rule. Assembling these local rules into
-     the relation-wide per-step `advance` law is now the next proof boundary.
+     exact one-source/zero-target local rule. The first relation-wide per-step
+     law is now checked for the pointwise return, direct-value, generated
+     named-call, and exactly saturated closure-call admission family.
+     `ConcreteStructuredCodePointwiseRel.advance` accepts only the ordinary
+     `executeStep`, constructs the finite structured target path, selects exact
+     generated callee rows from the production pipeline, and proves strict
+     compiler-rank descent whenever that path is empty.
      The hereditary stack component is now explicit.
      `ConcreteStructuredFrameRel` recursively relates saved source binds to
      exact direct call frames or saturated call/matcher-label protocols, with
@@ -1479,9 +1484,14 @@ acceptance tests pass.
      hereditary constructor. Saturated bind pop exposes the resumed compiler
      focus and restores the complete caller core after every matcher label is
      unwound. These local rules contain no whole-callee evaluation or
-     termination premise. The next slice widens the relation-wide one-step
-     `advance` case split over these call rules and the established external,
-     lazy, case, and effect laws.
+     termination premise. `ConcreteStructuredCodeStepOutcome` records exactly
+     the four successors of that first relation-wide slice: admission-free
+     continued code, named-call ready, saturated-call ready, or returned
+     control. `ConcreteStructuredCodeCoreRel.withAdmission` makes the remaining
+     locality obligation explicit: fresh current-node admission is attached
+     only after the dynamic successor is known. The next slice closes the
+     ready/entry/return control states under the same outcome relation and then
+     widens admission to the established external, lazy, case, and effect laws.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
