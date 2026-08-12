@@ -1538,9 +1538,16 @@ acceptance tests pass.
      contain no whole external execution or target certificate.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
-     termination evidence. The next slice packages the root/current-node
-     classifier into the public finite-prefix simulation; later runtime
-     families widen admission without changing this theorem shape.
+     termination evidence. `ConcreteStructuredCurrentStepClassifier` now
+     isolates the remaining universal source-local coverage theorem. Its
+     `toGeneratedTraceSimulation` construction uses the admission-free strong
+     relation as the stable simulation relation and reconstructs runnable
+     evidence only when the current source step is supplied. The corresponding
+     `toFiniteTraceCorrect` theorem already packages that classifier plus an
+     initial strong root relation as `ConcreteFiniteTraceCorrect`. The next
+     slice derives the classifier and root relation from compiler coverage;
+     later runtime families widen admission without changing this theorem
+     shape.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
@@ -1558,10 +1565,11 @@ acceptance tests pass.
      supported target transition surface is closed enough for a useful weak
      bisimulation.
 
-   Thus W6.7e is the remaining proof-bearing construction; W6.7f and W6.7g
-   are principally public packaging and consequences. W6.7e is the main
-   remaining integration risk because it must restore the complete relation
-   across every source-step family.
+   Thus the reusable W6.7e-to-W6.7f packaging bridge is complete. The remaining
+   proof-bearing construction is the compiler-derived current-step classifier
+   and canonical root relation; W6.7g is principally consequences. Operation
+   coverage remains an explicit admission widening rather than a premise added
+   to the public caller.
 8. Let W7 generation proceed independently against the current concrete
    runtime surface, then prove T5 per internalized runtime function.
 9. Close with T6 and the pure `prettyM` acceptance theorem.

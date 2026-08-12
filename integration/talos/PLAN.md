@@ -5833,7 +5833,7 @@ correctness becomes a corollary; a backward simulation is deliberately later.
 | W6.7c emitted structured target | complete | frame laws plus the explicit label/loop/call stack expose progress through calls, branches, loops, returns, and halting |
 | W6.7d structured terminal adequacy | complete | every reachable canonical-entry-to-halted path collapses to the exact instruction-boundary/Talos run; stack shape and arities are proved, not assumed at the public boundary |
 | W6.7e compiler relation and rank | in progress; the branch-complete strong one-step dispatcher now closes direct values, the staged pure-external request/import/bind protocol, generated named/saturated call staging and entry, and direct/saturated return-pop in one module-stable relation; direct return, silence, the complete resource-indexed direct-value spine, pure external-result lets, generated lazy-cache hits and non-heap misses, erased default-only cases, arbitrary normalized object-constructor and scalar `UInt8` dispatch, all persistent and ordinary ownership effects through explicit deletion, constructor-tag, both FVar/erased object-field mutation, `USize` and all supported packed-integer field mutations, and arbitrary finite nesting of generated named and exactly saturated closure calls are complete; the terminating fragment starts at compiler-produced canonical source/target body entries | each currently runnable LCNF `executeStep` produces a finite structured path restoring the aligned supported global relation; zero-step matches decrease a compiler-derived structural rank; newly reached code receives only a fresh local admission, never a future execution certificate |
-| W6.7f public finite-trace theorem | pending | `ConcreteSupportedExport` constructs `ConcreteFiniteTraceCorrect` for compiler-produced initial states without a target path, simulation/certificate, resolver package, or termination premise |
+| W6.7f public finite-trace theorem | in progress; `ConcreteStructuredCurrentStepClassifier.toGeneratedTraceSimulation` constructs the ranked simulation over the stable admission-free strong relation, and `toFiniteTraceCorrect` packages it with an initial root relation | derive the universal current-step classifier and canonical root relation from `ConcreteSupportedExport`, so the public caller supplies no target path, simulation/certificate, resolver package, or termination premise |
 | W6.7g corollaries | pending | finite whole-export correctness follows from W6.7d/f; infinite source progress and trace preservation follow from W6.7e/f; backward weak simulation remains explicitly deferred |
 
 W6.7e initially follows the same admitted production fragment as
@@ -6129,10 +6129,14 @@ generated `local.set` erases only the shadowed destination fact before
 ordinary code resumes. Int, Nat, and scalar results share this path; no whole
 external execution or target certificate is stored in the relation.
 Fresh admission for successor code is attached after that dynamic state is
-known rather than stored as a recursive certificate. The next widening adds a
-root/current-node classifier constructor and packages this local closure into
-the public finite-prefix theorem; further operation families remain ordinary
-admission widenings.
+known rather than stored as a recursive certificate.
+`ConcreteStructuredCurrentStepClassifier` now states the universal source-local
+coverage boundary, and its `toGeneratedTraceSimulation` construction closes the
+admission-free supported relation under the existing one-step theorem.
+`toFiniteTraceCorrect` already produces the generic public proposition from
+that classifier and an initial strong relation. The next slice derives both
+obligations from the compiler-produced root/current-node boundary; further
+operation families remain ordinary admission widenings.
 Heap-valued cache misses remain the facts-aware transport redesign after
 saturated calls.
 

@@ -54,4 +54,74 @@ def ConcreteGeneratedTraceSimulation
   ConcreteRankedTraceSimulation externals
     (concreteStructuredWasmMachine module env)
 
+/-- Source-local closure of the strong compiler relation.
+
+The classifier is applied only after the current source transition is known.
+It reconstructs the current node's runnable evidence from the admission-free
+supported relation; it stores no successor admission, future execution, target
+path, or termination evidence.  The eventual public export theorem derives
+this interface from compiler coverage instead of asking its caller to provide
+it. -/
+structure ConcreteStructuredCurrentStepClassifier
+    (program : Fir.LeanIR.ImpureProgram)
+    (sourceModule : Fir.Wasm.Module)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (externals : Fir.LeanIR.Impure.ExternalImpl) : Prop where
+  classify :
+    ∀ {source sourceAfter : Fir.LeanIR.Impure.MachineState}
+      {target : StructuredWasmState Host},
+      ConcreteStructuredSupportedGlobalOutcome program sourceModule
+          targetModule hosts externals source target →
+        Fir.LeanIR.Impure.executeStep externals source = .next sourceAfter →
+        ConcreteStructuredRunnableGlobalOutcome program sourceModule
+          targetModule hosts externals source target
+
+/-- A source-local current-step classifier closes the admission-free strong
+relation into the generic ranked finite-prefix simulation object.  This is the
+central W6.7e-to-W6.7f bridge: its relation is stable across every step, while
+runnable evidence is reconstructed only for the current transition. -/
+def ConcreteStructuredCurrentStepClassifier.toGeneratedTraceSimulation
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (classifier : ConcreteStructuredCurrentStepClassifier program sourceModule
+      targetModule hosts externals) :
+    ConcreteGeneratedTraceSimulation externals targetModule.wasmModule
+      hosts.env where
+  relation := ConcreteStructuredSupportedGlobalOutcome program sourceModule
+    targetModule hosts externals
+  rank := compilerStructuredControlRank
+  observes := by
+    intro sourceState targetState related
+    exact related.observes
+  advance := by
+    intro sourceBefore sourceAfter targetBefore related sourceStep
+    exact (classifier.classify related sourceStep).advance sourceStep
+
+/-- Intermediate certificate-free finite-trace packaging theorem.
+
+The two remaining compiler obligations are now explicit and orthogonal: prove
+the universal current-step classifier, and construct the admission-free strong
+relation at the compiler-produced root entry.  Neither obligation exposes a
+target execution path or a simulation relation to the eventual public caller. -/
+theorem ConcreteStructuredCurrentStepClassifier.toFiniteTraceCorrect
+    {program : Fir.LeanIR.ImpureProgram}
+    {sourceModule : Fir.Wasm.Module}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {externals : Fir.LeanIR.Impure.ExternalImpl}
+    (classifier : ConcreteStructuredCurrentStepClassifier program sourceModule
+      targetModule hosts externals)
+    {sourceInitial : Fir.LeanIR.Impure.MachineState}
+    {targetInitial : StructuredWasmState Host}
+    (initial : ConcreteStructuredSupportedGlobalOutcome program sourceModule
+      targetModule hosts externals sourceInitial targetInitial) :
+    ConcreteFiniteTraceCorrect externals
+      (concreteStructuredWasmMachine targetModule.wasmModule hosts.env)
+      sourceInitial targetInitial :=
+  ⟨classifier.toGeneratedTraceSimulation, initial⟩
+
 end FirTalos.Concrete
