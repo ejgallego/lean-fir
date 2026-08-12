@@ -38,6 +38,7 @@ private def u32 (value : Nat) : UInt32 := UInt32.ofNat value
 def arrayMarker : UInt32 := ResidentContainerLayout.arrayMarker
 
 def allocateEmptyName : Name := `fir_array_allocate_empty
+def allocateListConsName : Name := `fir_array_allocate_list_cons
 def swapElementsName : Name := `fir_array_swap_elements
 
 def externalDeclarations : Array Name := #[
@@ -57,7 +58,7 @@ historical strict `internalize` frontier remains source-compatible.
 def availableExternalDeclarations : Array Name :=
   externalDeclarations ++ #[`Array.usize, `Array.ugetBorrowed, `Array.uget,
     `Array.uset, `Array.replicate, `Array.pop, `Array.getInternal,
-    `Array.set, `Array.set!, `Array.swap]
+    `Array.set, `Array.set!, `Array.swap, `Array.mk, `Array.toList]
 
 def externalName (declaration : Name) : Name :=
   Name.mkSimple s!"fir_ext_{declaration.toString.replace "." "_"}"
@@ -65,7 +66,7 @@ def externalName (declaration : Name) : Name :=
 def externalHelperNames : Array Name :=
   availableExternalDeclarations.map externalName
 def helperNames : Array Name :=
-  #[allocateEmptyName, swapElementsName] ++ externalHelperNames
+  #[allocateEmptyName, allocateListConsName, swapElementsName] ++ externalHelperNames
 
 private def erasedParam : FVarId := ⟨`erased⟩
 private def defaultParam : FVarId := ⟨`default⟩
@@ -76,6 +77,8 @@ private def proofParam : FVarId := ⟨`proof⟩
 private def proof2Param : FVarId := ⟨`proof2⟩
 private def capacityParam : FVarId := ⟨`capacity⟩
 private def valueParam : FVarId := ⟨`value⟩
+private def listParam : FVarId := ⟨`list⟩
+private def tailParam : FVarId := ⟨`tail⟩
 
 private def addressLocal : FVarId := ⟨`address⟩
 private def inputAddressLocal : FVarId := ⟨`inputAddress⟩
@@ -94,15 +97,22 @@ private def targetCursorLocal : FVarId := ⟨`targetCursor⟩
 private def allocationBytesLocal : FVarId := ⟨`allocationBytes⟩
 private def elementLocal : FVarId := ⟨`element⟩
 private def element2Local : FVarId := ⟨`element2⟩
+private def listLocal : FVarId := ⟨`listValue⟩
+private def tailLocal : FVarId := ⟨`tailValue⟩
 private def rawLocal : FVarId := ⟨`raw⟩
 private def savedScratchLocal : FVarId := ⟨`savedScratch⟩
 private def objectResultLocal : FVarId := ⟨`objectResult⟩
 private def taggedResultLocal : FVarId := ⟨`taggedResult⟩
+private def tobjectResultLocal : FVarId := ⟨`tobjectResult⟩
 
 private def elementLoopLabel : FVarId := ⟨`elementLoop⟩
 private def element2LoopLabel : FVarId := ⟨`element2Loop⟩
 private def copyLoopLabel : FVarId := ⟨`copyLoop⟩
 private def retainedCopyLoopLabel : FVarId := ⟨`retainedCopyLoop⟩
+private def listCountLoopLabel : FVarId := ⟨`arrayListCountLoop⟩
+private def listFillLoopLabel : FVarId := ⟨`arrayListFillLoop⟩
+private def arrayListCursorLoopLabel : FVarId := ⟨`arrayListCursorLoop⟩
+private def arrayToListLoopLabel : FVarId := ⟨`arrayToListLoop⟩
 
 private def equalsConst (kind : AbiKind) (value : UInt32) : List Instruction :=
   [.i32Const kind value, .i32Eq]
@@ -143,6 +153,35 @@ private def requireArray (array : FVarId) : List Instruction :=
   trapWhenTrue (load32 array headerAux3Offset) ++
   trapWhenTrue (load32 array headerAux2Offset ++
     load32 array headerAux1Offset ++ [.i32LtU])
+
+private def listConsAllocationBytes : Nat :=
+  headerBytes + 2 * target.semanticSlotBytes
+
+/-- Validate the concrete two-object-field representation of `List.cons`. -/
+private def requireListCons (list : FVarId) : List Instruction :=
+  trapUnless ([
+    .localGet list,
+    .i32Const .uint32 (u32 heapBase),
+    .i32LtU] ++ equalsConst .uint32 0) ++
+  trapUnless ([
+    .localGet list,
+    .i32Const .uint32 (u32 (target.heapAlignment - 1)),
+    .i32And] ++ equalsConst .uint32 0) ++
+  (load32 list headerFlagsOffset ++ equalsConst .uint32 liveFlag ++
+    [.ifElse
+      (trapWhenTrue (load32 list headerRefCountOffset ++
+        equalsConst .uint32 0))
+      (trapUnless (load32 list headerFlagsOffset ++
+          equalsConst .uint32 (persistentFlag + liveFlag)) ++
+        trapWhenTrue (load32 list headerRefCountOffset))]) ++
+  trapUnless (load32 list headerKindOffset ++
+    equalsConst .uint32 ObjectKind.constructor.code) ++
+  trapUnless (load32 list headerAllocationBytesOffset ++
+    equalsConst .uint32 (u32 listConsAllocationBytes)) ++
+  trapUnless (load32 list headerAux0Offset ++ equalsConst .uint32 1) ++
+  trapUnless (load32 list headerAux1Offset ++ equalsConst .uint32 2) ++
+  trapWhenTrue (load32 list headerAux2Offset) ++
+  trapWhenTrue (load32 list headerAux3Offset)
 
 private def loadSize (array : FVarId) : List Instruction := [
   .localGet array,
@@ -204,6 +243,22 @@ private def retypeAddressValue : List Instruction := [
 
 private def retypeAddress : List Instruction :=
   retypeAddressValue ++ [.ret]
+
+private def retypeAddressTObject : List Instruction := [
+  .i32Const .uint32 0,
+  .i32Load .uint32 0,
+  .localSet savedScratchLocal,
+  .i32Const .uint32 0,
+  .localGet addressLocal,
+  .i32Store .uint32 0,
+  .i32Const .uint32 0,
+  .i32Load .tobject 0,
+  .localSet tobjectResultLocal,
+  .i32Const .uint32 0,
+  .localGet savedScratchLocal,
+  .i32Store .uint32 0,
+  .localGet tobjectResultLocal,
+  .ret]
 
 private def captureInputAddress : List Instruction := [
   .i32Const .uint32 0,
@@ -303,6 +358,36 @@ def allocateEmptyFunction : Function := {
     initializeHeader [.i32Const .uint32 0] [.localGet capacityLocal] ++
     retypeAddress }
 
+/-- Allocate the ordinary resident representation of `List.cons`. The helper
+consumes the owned head and tail references supplied by its caller. -/
+def allocateListConsFunction : Function := {
+  name := allocateListConsName
+  params := #[(valueParam, .tobject), (tailParam, .tobject)]
+  results := #[.tobject]
+  locals := #[(addressLocal, .uint32), (savedScratchLocal, .uint32),
+    (tobjectResultLocal, .tobject)]
+  body := [
+    .i32Const .uint32 (u32 listConsAllocationBytes),
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+    storeHeaderWord headerKindOffset
+      [.i32Const .uint32 ObjectKind.constructor.code] ++
+    storeHeaderWord headerFlagsOffset [.i32Const .uint32 liveFlag] ++
+    storeHeaderWord headerRefCountOffset [.i32Const .uint32 1] ++
+    storeHeaderWord headerAllocationBytesOffset
+      [.i32Const .uint32 (u32 listConsAllocationBytes)] ++
+    storeHeaderWord headerAux0Offset [.i32Const .uint32 1] ++
+    storeHeaderWord headerAux1Offset [.i32Const .uint32 2] ++
+    storeHeaderWord headerAux2Offset [.i32Const .uint32 0] ++
+    storeHeaderWord headerAux3Offset [.i32Const .uint32 0] ++ [
+    .localGet addressLocal,
+    .localGet valueParam,
+    .i32Store .tobject (u32 headerBytes),
+    .localGet addressLocal,
+    .localGet tailParam,
+    .i32Store .tobject (u32 (headerBytes + target.semanticSlotBytes))] ++
+    retypeAddressTObject }
+
 def sizeFunction : Function := {
   name := externalName `Array.size
   params := #[(erasedParam, .erased), (arrayParam, .object)]
@@ -325,6 +410,165 @@ def usizeFunction : Function := {
   body := requireArray arrayParam ++ loadSize arrayParam ++ [
     .localGet sizeLocal,
     .i64ExtendI32U .usize,
+    .ret] }
+
+private def countInputList : List Instruction := [
+  .localGet listParam,
+  .localSet listLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop listCountLoopLabel ([
+    .localGet listLocal,
+    .i32Const .uint32 1,
+    .i32And,
+    .ifElse
+      (trapUnless ([.localGet listLocal] ++ equalsConst .tobject 1))
+      (requireListCons listLocal ++ [
+        .localGet countLocal,
+        .i32Const .uint32 1,
+        .i32Add,
+        .localSet countLocal] ++
+        trapWhenTrue ([.localGet countLocal] ++ equalsConst .uint32 0) ++ [
+        .localGet listLocal,
+        .i32Load .tobject
+          (u32 (headerBytes + target.semanticSlotBytes)),
+        .localSet listLocal,
+        .br listCountLoopLabel])]),
+  .localGet countLocal,
+  .localSet sizeLocal]
+
+/-- Fill a freshly allocated Array while consuming the input List one node at
+a time. Retaining both fields before decrementing the node makes the operation
+correct for unique, shared, and persistent List spines without recursive tail
+release. -/
+private def consumeListIntoArray : List Instruction := [
+  .localGet listParam,
+  .localSet listLocal,
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet targetCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop listFillLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse (requireListCons listLocal ++ [
+      .localGet listLocal,
+      .i32Load .tobject (u32 headerBytes),
+      .localSet elementLocal,
+      .localGet listLocal,
+      .i32Load .tobject (u32 (headerBytes + target.semanticSlotBytes)),
+      .localSet tailLocal,
+      .localGet elementLocal,
+      .call (.declaration ResidentReferenceCount.incrementOnceName),
+      .localGet tailLocal,
+      .call (.declaration ResidentReferenceCount.incrementOnceName),
+      .localGet listLocal,
+      .i32Const .uint32 1,
+      .call (.declaration ResidentRelease.decrementOnceName),
+      .localGet targetCursorLocal,
+      .localGet elementLocal,
+      .i32Store .tobject 0,
+      .localGet targetCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet targetCursorLocal,
+      .localGet tailLocal,
+      .localSet listLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br listFillLoopLabel]) []]] ++
+  trapUnless ([.localGet listLocal] ++ equalsConst .tobject 1)
+
+/-- Resident implementation of the upstream `Array.mk` extern. -/
+def mkFunction : Function := {
+  name := externalName `Array.mk
+  params := #[(erasedParam, .erased), (listParam, .tobject)]
+  results := #[.object]
+  locals := #[(addressLocal, .uint32), (sizeLocal, .uint32),
+    (capacityLocal, .uint32), (countLocal, .uint32),
+    (targetCursorLocal, .uint32), (allocationBytesLocal, .uint32),
+    (elementLocal, .tobject), (listLocal, .tobject),
+    (tailLocal, .tobject), (savedScratchLocal, .uint32),
+    (objectResultLocal, .object)]
+  body := countInputList ++ [
+    .localGet sizeLocal,
+    .localSet capacityLocal] ++ allocationBytesBody ++ [
+    .localGet allocationBytesLocal,
+    .call (.declaration ResidentAllocator.allocateName),
+    .localSet addressLocal] ++
+    initializeHeader [.localGet sizeLocal] [.localGet capacityLocal] ++
+    consumeListIntoArray ++ retypeAddress }
+
+private def advanceToArrayEnd : List Instruction := [
+  .localGet arrayParam,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet sourceCursorLocal,
+  .i32Const .uint32 0,
+  .localSet countLocal,
+  .loop arrayListCursorLoopLabel [
+    .localGet countLocal,
+    .localGet sizeLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet sourceCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Add,
+      .localSet sourceCursorLocal,
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Add,
+      .localSet countLocal,
+      .br arrayListCursorLoopLabel] []]]
+
+private def buildListFromArray : List Instruction := [
+  .i32Const .tobject 1,
+  .localSet listLocal,
+  .localGet sizeLocal,
+  .localSet countLocal,
+  .loop arrayToListLoopLabel [
+    .i32Const .uint32 0,
+    .localGet countLocal,
+    .i32LtU,
+    .ifElse [
+      .localGet countLocal,
+      .i32Const .uint32 1,
+      .i32Sub,
+      .localSet countLocal,
+      .localGet sourceCursorLocal,
+      .i32Const .uint32 (u32 target.semanticSlotBytes),
+      .i32Sub,
+      .localSet sourceCursorLocal,
+      .localGet sourceCursorLocal,
+      .i32Load .tobject 0,
+      .localSet elementLocal,
+      .localGet elementLocal,
+      .call (.declaration ResidentReferenceCount.incrementOnceName),
+      .localGet elementLocal,
+      .localGet listLocal,
+      .call (.declaration allocateListConsName),
+      .localSet listLocal,
+      .br arrayToListLoopLabel] []]]
+
+/-- Resident implementation of the upstream `Array.toList` extern. -/
+def toListFunction : Function := {
+  name := externalName `Array.toList
+  params := #[(erasedParam, .erased), (arrayParam, .object)]
+  results := #[.tobject]
+  locals := #[(sizeLocal, .uint32), (countLocal, .uint32),
+    (sourceCursorLocal, .uint32), (elementLocal, .tobject),
+    (listLocal, .tobject)]
+  body := requireArray arrayParam ++ loadSize arrayParam ++
+    advanceToArrayEnd ++ buildListFromArray ++ [
+    .localGet arrayParam,
+    .i32Const .uint32 1,
+    .call (.declaration ResidentRelease.decrementOnceName),
+    .localGet listLocal,
     .ret] }
 
 private def elementAddressFor (array index cursor loopLabel : FVarId) :
@@ -991,6 +1235,7 @@ def replicateFunction : Function := {
 
 def functions : Array Function := #[
   allocateEmptyFunction,
+  allocateListConsFunction,
   swapDecodedElementsFunction,
   sizeFunction,
   usizeFunction,
@@ -1008,7 +1253,9 @@ def functions : Array Function := #[
   setFunction,
   setBangFunction,
   swapFunction,
-  replicateFunction]
+  replicateFunction,
+  mkFunction,
+  toListFunction]
 
 private partial def rewriteInstruction (declarations : Array Name) : Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -1071,6 +1318,10 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.erased, .tobject, .tobject]
       results := #[.object] }
+  else if declaration == `Array.mk then
+    some { params := #[.erased, .tobject], results := #[.object] }
+  else if declaration == `Array.toList then
+    some { params := #[.erased, .object], results := #[.tobject] }
   else if declaration == `Array.push then
     some { params := #[.erased, .object, .tobject], results := #[.object] }
   else if declaration == `Array.pop then
@@ -1097,11 +1348,15 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     unless module.functions.any (·.name == name) do
       throw (.missingOwnershipHelper name)
   let needsEmptyAllocator := declarations.contains `Array.emptyWithCapacity ||
-    declarations.contains `Array.mkEmpty
+    declarations.contains `Array.mkEmpty || declarations.contains `Array.mk
+  let needsListConsAllocator := declarations.contains `Array.toList
   let needsSwap := declarations.contains `Array.swap
   let selectedHelperNames := declarations.map externalName
   let selectedHelperNames := if needsEmptyAllocator then
     #[allocateEmptyName] ++ selectedHelperNames
+  else selectedHelperNames
+  let selectedHelperNames := if needsListConsAllocator then
+    #[allocateListConsName] ++ selectedHelperNames
   else selectedHelperNames
   let selectedHelperNames := if needsSwap then
     selectedHelperNames.push swapElementsName
@@ -1156,7 +1411,7 @@ def internalizeAvailable (module : Module) (validate : Bool := true) : Except Li
 private def exampleDeclarations : Array Name :=
   #[`Array.emptyWithCapacity, `Array.push, `Array.uget, `Array.uset,
     `Array.replicate, `Array.pop, `Array.getInternal, `Array.set,
-    `Array.set!, `Array.swap]
+    `Array.set!, `Array.swap, `Array.mk, `Array.toList]
 
 private def exampleReleaseOperation : RuntimeOp := .dec 1 true none
 
@@ -1196,6 +1451,10 @@ private def exampleExternalTypes (declaration : Name) : ExternalTypes :=
       result := object }
   else if declaration == `Array.pop then
     { params := #[erased, object], result := object }
+  else if declaration == `Array.mk then
+    { params := #[erased, tobject], result := object }
+  else if declaration == `Array.toList then
+    { params := #[erased, object], result := tobject }
   else
     { params := #[erased, tobject, tobject], result := object }
 

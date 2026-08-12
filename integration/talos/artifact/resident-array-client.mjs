@@ -22,6 +22,7 @@ function immediateNatural(value) {
 }
 
 const KIND_OPAQUE = 8;
+const KIND_CONSTRUCTOR = 1;
 const KIND_FREED = 255;
 const LIVE = 2;
 const LIVE_PERSISTENT = 3;
@@ -63,6 +64,35 @@ function heapObjectState(memory, address) {
   };
 }
 
+function listState(memory, root) {
+  const view = new DataView(memory.buffer);
+  const addresses = [];
+  const words = [];
+  let cursor = root;
+  while (cursor !== 1) {
+    expect(addresses.length < 10000, "resident List appears cyclic");
+    equal(cursor & 7, 0, "List.cons alignment");
+    equal(view.getUint32(cursor, true), KIND_CONSTRUCTOR,
+      "List.cons object kind");
+    equal(view.getUint32(cursor + 4, true), LIVE, "List.cons flags");
+    expect(view.getUint32(cursor + 8, true) > 0,
+      "List.cons reference count");
+    equal(view.getUint32(cursor + 12, true), 48,
+      "List.cons allocation bytes");
+    equal(view.getUint32(cursor + 16, true), 1, "List.cons tag");
+    equal(view.getUint32(cursor + 20, true), 2,
+      "List.cons object-field count");
+    equal(view.getUint32(cursor + 24, true), 0,
+      "List.cons usize-field count");
+    equal(view.getUint32(cursor + 28, true), 0,
+      "List.cons scalar byte count");
+    addresses.push(cursor);
+    words.push(view.getUint32(cursor + 32, true));
+    cursor = view.getUint32(cursor + 40, true);
+  }
+  return { addresses, words };
+}
+
 function allocateOwnedOpaque(exports) {
   const address = exports.fir_heap_alloc(32);
   const view = new DataView(exports.memory.buffer);
@@ -94,6 +124,9 @@ export async function checkResidentArrays(bytes) {
   const setBang = exports["fir_ext_Array_set!"];
   const swap = exports.fir_ext_Array_swap;
   const pop = exports.fir_ext_Array_pop;
+  const arrayMk = exports.fir_ext_Array_mk;
+  const arrayToList = exports.fir_ext_Array_toList;
+  const allocateListCons = exports.fir_array_allocate_list_cons;
   const release = exports.resident_array_release;
   equal(typeof emptyWithCapacity, "function", "Array.emptyWithCapacity export");
   equal(typeof push, "function", "Array.push export");
@@ -105,7 +138,100 @@ export async function checkResidentArrays(bytes) {
   equal(typeof setBang, "function", "Array.set! export");
   equal(typeof swap, "function", "Array.swap export");
   equal(typeof pop, "function", "Array.pop export");
+  equal(typeof arrayMk, "function", "Array.mk export");
+  equal(typeof arrayToList, "function", "Array.toList export");
+  equal(typeof allocateListCons, "function",
+    "resident List.cons allocator export");
   equal(typeof release, "function", "array release export");
+
+  let inputList = 1;
+  const inputListAddresses = [];
+  for (const value of [3, 2, 1]) {
+    inputList = allocateListCons(immediateNatural(value), inputList);
+    inputListAddresses.push(inputList);
+  }
+  equal(listState(exports.memory, inputList).words.join(","),
+    [1, 2, 3].map(immediateNatural).join(","),
+    "List.cons standalone construction");
+  const convertedArray = arrayMk(0, inputList);
+  equal(arrayState(exports.memory, convertedArray).words.join(","),
+    [1, 2, 3].map(immediateNatural).join(","), "Array.mk ordering");
+  for (const address of inputListAddresses) {
+    equal(heapObjectState(exports.memory, address).kind, KIND_FREED,
+      "Array.mk did not consume a unique List node");
+  }
+  const convertedList = arrayToList(0, convertedArray);
+  equal(heapObjectState(exports.memory, convertedArray).kind, KIND_FREED,
+    "Array.toList did not consume its unique Array");
+  const convertedListState = listState(exports.memory, convertedList);
+  equal(convertedListState.words.join(","),
+    [1, 2, 3].map(immediateNatural).join(","), "Array.toList ordering");
+  release(convertedList);
+  for (const address of convertedListState.addresses) {
+    equal(heapObjectState(exports.memory, address).kind, KIND_FREED,
+      "released Array.toList node remained live");
+  }
+
+  const emptyFromList = arrayMk(0, 1);
+  equal(arrayState(exports.memory, emptyFromList).size, 0,
+    "Array.mk empty size");
+  equal(arrayToList(0, emptyFromList), 1, "Array.toList empty result");
+  equal(heapObjectState(exports.memory, emptyFromList).kind, KIND_FREED,
+    "Array.toList empty did not consume its Array");
+  expectTrap(() => arrayMk(0, 3), "Array.mk malformed immediate List");
+
+  const sharedListChild = allocateOwnedOpaque(exports);
+  const sharedList = allocateListCons(sharedListChild, 1);
+  new DataView(exports.memory.buffer).setUint32(sharedList + 8, 2, true);
+  const sharedListArray = arrayMk(0, sharedList);
+  equal(heapObjectState(exports.memory, sharedList).refCount, 1,
+    "Array.mk did not consume one shared List reference");
+  equal(heapObjectState(exports.memory, sharedListChild).refCount, 2,
+    "Array.mk did not retain a shared List element");
+  release(sharedListArray);
+  equal(heapObjectState(exports.memory, sharedListChild).refCount, 1,
+    "Array.mk shared element did not survive its Array release");
+  release(sharedList);
+  equal(heapObjectState(exports.memory, sharedListChild).kind, KIND_FREED,
+    "Array.mk shared element remained live after final List release");
+
+  const persistentList = allocateListCons(immediateNatural(17), 1);
+  const persistentListView = new DataView(exports.memory.buffer);
+  persistentListView.setUint32(persistentList + 4, LIVE_PERSISTENT, true);
+  persistentListView.setUint32(persistentList + 8, 0, true);
+  const persistentListArray = arrayMk(0, persistentList);
+  equal(arrayState(exports.memory, persistentListArray).words[0],
+    immediateNatural(17), "Array.mk persistent List element");
+  equal(heapObjectState(exports.memory, persistentList).kind, KIND_CONSTRUCTOR,
+    "Array.mk retired a persistent List");
+  release(persistentListArray);
+
+  const sharedArrayChild = allocateOwnedOpaque(exports);
+  const sharedArray = replicate(0, immediateNatural(1), sharedArrayChild);
+  new DataView(exports.memory.buffer).setUint32(sharedArray + 8, 2, true);
+  const sharedArrayList = arrayToList(0, sharedArray);
+  equal(heapObjectState(exports.memory, sharedArray).refCount, 1,
+    "Array.toList did not consume one shared Array reference");
+  equal(heapObjectState(exports.memory, sharedArrayChild).refCount, 2,
+    "Array.toList did not retain a shared Array element");
+  release(sharedArrayList);
+  equal(heapObjectState(exports.memory, sharedArrayChild).refCount, 1,
+    "Array.toList element did not survive its List release");
+  release(sharedArray);
+  equal(heapObjectState(exports.memory, sharedArrayChild).kind, KIND_FREED,
+    "Array.toList element remained live after final Array release");
+
+  const persistentArray = replicate(
+    0, immediateNatural(1), immediateNatural(23));
+  const persistentArrayView = new DataView(exports.memory.buffer);
+  persistentArrayView.setUint32(persistentArray + 4, LIVE_PERSISTENT, true);
+  persistentArrayView.setUint32(persistentArray + 8, 0, true);
+  const persistentArrayList = arrayToList(0, persistentArray);
+  equal(listState(exports.memory, persistentArrayList).words[0],
+    immediateNatural(23), "Array.toList persistent Array element");
+  equal(heapObjectState(exports.memory, persistentArray).kind, KIND_OPAQUE,
+    "Array.toList retired a persistent Array");
+  release(persistentArrayList);
 
   const value = immediateNatural(21);
   const replacement = immediateNatural(49);

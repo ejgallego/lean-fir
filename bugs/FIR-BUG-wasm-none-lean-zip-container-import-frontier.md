@@ -18,7 +18,8 @@ After closing the complete scalar and runtime-operation frontiers, the real
 `Zip.Wasm.compressLevel1` closure initially retained 22 ordinary imports
 across generic Array, ByteArray, Nat, List, String, and platform APIs. The
 first Array slice internalizes owned lookup, Nat-indexed update, checked
-update, and swap, leaving 18 imports.
+update, and swap, leaving 18 imports. The platform and Array/List conversion
+slices remove three more, leaving 15 imports.
 
 ## Minimal reproduction
 
@@ -35,11 +36,9 @@ From `integration/lean-zip`, run the configured source-view build followed by
 
 - eight ByteArray operations: unchecked little-endian 32/64-bit loads and
   stores, `get`, `uget`, `push`, and `pushUInt64LE`;
-- two Array conversion operations: `mk` and `toList`;
 - four Nat operations: `mul`, `pow`, `land`, and `div`;
 - two specialized List loops: Array append-list fold and List zip;
-- `String.ofList`; and
-- `System.Platform.getNumBits`.
+- `String.ofList`.
 
 ## Expected semantics
 
@@ -49,8 +48,9 @@ unique-update behavior, and leave no host import.
 
 ## Actual behavior
 
-The linked module after the Array mutation slice has 1,726 functions, zero
-runtime operations, and exactly these 18 declaration imports. It therefore
+The linked module after the platform and Array conversion slices has 1,730
+functions, zero runtime operations, and exactly these 15 declaration imports.
+It therefore
 cannot yet be published as a self-contained Level-1 package.
 
 ## Semantic impact
@@ -86,6 +86,15 @@ The Array mutation slice adds zero-import resident implementations of
 engine checks cover owned-result retention, exclusive update, out-of-bounds
 replacement consumption, exclusive swap, and shared copy-on-write swap. The
 real production probe confirms that all four imports disappear.
+
+The next slices add the exact wasm32/Lean64 `System.Platform.getNumBits`
+result and zero-import `Array.mk`/`Array.toList` implementations over the
+generic resident List constructor representation. Their external-engine
+checks cover ordering, empty values, malformed inputs, unique spine
+consumption, and shared/persistent ownership. The 391-declaration production
+probe confirms that all three imports disappear: it now links 1,730 functions
+with 15 imports and zero runtime operations (57,309 ms capture, 15,321 ms
+lowering, 119,920 ms linking).
 
 Unresolved. Ratchet the exact real-source inventory after coherent resident
 family slices until `remainingImports` is empty.
