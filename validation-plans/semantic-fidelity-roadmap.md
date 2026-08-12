@@ -101,7 +101,7 @@ near-synonym drift:
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
 | M7 Escaping closure ownership | landed | S7 returns a closure-bearing owner across a noinline maker, then distinguishes unique transfer from a retained outside alias during mutation with exact 27/29-step traces | Maintain the landed returned-closure baseline while B2 selects its next application shape |
-| M8 Aggregate erasure ownership | prepared through S8 | A proof-erased outer owner contains `Option ByteArray`; releasing it before closure application is distinguished from retaining the whole owner through application and observing it afterward by exact 37/48-step traces | Land the clean native/LCNF/V8 checkpoint, then preserve it while E1 selects a different shape only when it adds signal |
+| M8 Aggregate erasure ownership | landed through S8 | A proof-erased outer owner contains `Option ByteArray`; releasing it before closure application is distinguished from retaining the whole owner through application and observing it afterward by exact 37/48-step traces | Maintain the landed baseline; select a different shape only when it adds a new execution signature |
 | M9 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, returned/consumed/ignored/read capture topology, and the S8 aggregate-erasure pair run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
@@ -607,8 +607,8 @@ tier cases, 1,986 equal comparisons, 7,063 interpreter steps, 146 tag floors,
 and 249 conjunctive domains. This remains fixture-only and consumes no active
 argument-alias, error, exception, or source-stream contract.
 
-State: S8 is prepared on `validation/closure-ownership-fixtures`; landing waits
-only for the complete post-rebase acceptance gate and clean mailbox handoff.
+State: S8 is landed on `main` through clean ready head `91a38725`; functional
+head `15f04191` changes no shared contract.
 
 ### E2: polymorphic and dictionary traffic
 

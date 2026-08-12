@@ -15,6 +15,41 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `VALIDATION-S8-AGGREGATE-ERASURE-OWNERSHIP`.
+- Integration owner: `test-fixtures`, acting under the user-authorized
+  integration lease for this fixture-only milestone. The lane branch was
+  already based on accepted main `ad3bea73` and landed through clean ready
+  head `91a38725`; functional head `15f04191` changes no shared contract.
+- Semantic pair: a proof-bearing outer owner contains `Option ByteArray` and
+  supplies its nested payload to a real partial application. The released
+  path consumes the owner before application and returns updated
+  `[42, 127, 128, 255]`; the retained path keeps the complete owner live across
+  application and returns both unchanged `[0, 127, 128, 255]` and the updated
+  copy. Final LCNF constructs two runtime fields from the three source fields,
+  statically witnessing proof erasure.
+- Executed evidence: complete 37/48-transition paths pin construction,
+  `Option.some` case selection and projection, `pap`, `fvar`, ownership
+  increments/decrements, and exactly one `ByteArray.set!` dispatch. A noinline
+  post-application observer forces the retained path to keep the outer owner,
+  rather than merely a hoisted inner projection, live across mutation.
+- Contracts: none. The slice consumes accepted aggregate, erased-field,
+  closure-application, ByteArray, compiler, and real-engine surfaces while
+  leaving the active argument-alias, effectful-native-oracle, IO-error,
+  exception, and source-stream contracts fenced.
+- Acceptance: Lean Beam update/sync/save at version 6 with zero diagnostics;
+  dependency-cone build; focused native/LCNF/V8 probes; `git diff --check`;
+  and complete `make check`. The final snapshot has 659 source cases, 668
+  unique cases, 1,327 tier cases, 1,986/1,986 equal comparisons, 7,063
+  interpreter steps, 146/146 tag floors, 249/249 semantic domains, 1,318
+  native-oracle witnesses, and zero findings. V8 opened all 1,318 products
+  under strace. No bug card was required.
+- Result: `main` fast-forwards through the clean handoff and this acceptance
+  record. S8 is the aggregate-erasure lifetime baseline. Another E1 shape is
+  admitted only if narrowing finds a new execution signature; otherwise the
+  fixture lane advances to E2 dictionary traffic or B2 application shapes.
+
+## Latest completed integration lease
+
 - Milestone: `VALIDATION-S7-ESCAPING-CLOSURE-OWNERSHIP`.
 - Integration owner: `test-fixtures`, acting under the user-authorized
   integration lease for this fixture-only milestone. The lane branch was
