@@ -906,6 +906,14 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some { params := #[.uint64], results := #[.usize] }
   else none
 
+private def functionSignature (function : Function) : Signature := {
+  params := function.params.map (·.2)
+  results := function.results }
+
+private def sourceProviderCompatible (helper provider : Signature) : Bool :=
+  helper.params == provider.params &&
+    Fir.Wasm.kindsRefine helper.results provider.results
+
 private partial def rewriteInstruction (declarations : Array Name) :
     Instruction → Instruction
   | .call (.declaration declaration) =>
@@ -951,12 +959,19 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
       throw (.reservedDeclaration name)
   for declaration in declarations do
     let imports := module.imports.filter (·.declaration? == some declaration)
-    unless imports.size == 1 do
+    let definitions := module.functions.filter (·.name == declaration)
+    unless imports.size + definitions.size == 1 do
       throw (.missingExternal declaration)
     let some signature := expectedSignature? declaration |
       throw (.incompatibleExternal declaration)
-    unless imports[0]!.signature == signature do
-      throw (.incompatibleExternal declaration)
+    match imports[0]?, definitions[0]? with
+    | some import_, none =>
+        unless import_.signature == signature do
+          throw (.incompatibleExternal declaration)
+    | none, some function =>
+        unless sourceProviderCompatible signature (functionSignature function) do
+          throw (.incompatibleExternal declaration)
+    | _, _ => throw (.missingExternal declaration)
   let linkedFunctions := module.functions.map fun function =>
     { function with body := function.body.map (rewriteInstruction declarations) }
   let linkedFunctions := linkedFunctions ++ functions.filter fun function =>
@@ -980,7 +995,8 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
 /-- Internalize exactly the supported fixed-width operations present. -/
 def internalizeAvailable (module : Module) (validate : Bool := true) : Except LinkError Module :=
   let declarations := externalDeclarations.filter fun declaration =>
-    module.imports.any (·.declaration? == some declaration)
+    module.imports.any (·.declaration? == some declaration) ||
+      module.functions.any (·.name == declaration)
   if declarations.isEmpty then pure module else internalizeSelected module declarations validate
 
 private def impureType (kind : AbiKind) : Expr :=
@@ -1029,6 +1045,37 @@ def residentExampleModule : Except String Module := do
   ResidentUSize.internalizeAvailable module
     |>.mapError fun error => s!"usize: {repr error}"
 
+private def sourceUInt32OfNatFunction : Function := {
+  name := `UInt32.ofNat
+  params := #[(valueParam, .tobject)]
+  results := #[.uint32]
+  locals := #[]
+  body := [.i32Const .uint32 0, .ret] }
+
+private def sourceUInt32OfNatCaller : Function := {
+  name := `resident_fixed_width_source_definition
+  params := #[(valueParam, .tobject)]
+  results := #[.uint32]
+  locals := #[(uint32ResultLocal, .uint32)]
+  body := [
+    .localGet valueParam,
+    .call (.declaration `UInt32.ofNat),
+    .localSet uint32ResultLocal,
+    .localGet uint32ResultLocal,
+    .ret] }
+
+/-- The same checked fixed-width implementation replaces a captured source
+definition as well as an external import. -/
+def sourceDefinitionExampleModule : Except String Module := do
+  let numeric ← ResidentNumeric.residentExampleModule
+  let module : Module := {
+    numeric with
+    functions := numeric.functions ++ #[
+      sourceUInt32OfNatFunction, sourceUInt32OfNatCaller]
+    exports := #[sourceUInt32OfNatCaller.name] }
+  internalizeAvailable module
+    |>.mapError fun error => s!"fixed-width source definition: {repr error}"
+
 def manifest : Json :=
   Json.mkObj [
     ("entries", Json.arr <| (externalDeclarations ++
@@ -1037,6 +1084,7 @@ def manifest : Json :=
         ("sourceEntry", declaration.toString),
         ("entry", externalName declaration |>.toString)]),
     ("imports", Json.arr #[]),
+    ("providers", Json.arr #["external", "source-definition"]),
     ("status", "generation-ready; W6 fixed-width contract proofs pending")]
 
 #guard match residentExampleModule with
@@ -1049,6 +1097,17 @@ def manifest : Json :=
       module.memory == some ResidentRuntime.residentMemory &&
       (Fir.Wasm.validateModule module |>.isOk) &&
       (Fir.Wasm.Emit.encode module |>.isOk)
+  | .error _ => false
+
+#guard match sourceDefinitionExampleModule with
+  | .ok module =>
+      module.imports.isEmpty && module.runtimeOperations.isEmpty &&
+      module.functions.any (·.name == externalName `UInt32.ofNat) &&
+      (module.functions.find? (·.name == sourceUInt32OfNatCaller.name)).any
+        fun function => function.body.contains
+          (.call (.declaration (externalName `UInt32.ofNat)) ) &&
+      (Fir.Wasm.validateModule module).isOk &&
+      (Fir.Wasm.Emit.encode module).isOk
   | .error _ => false
 
 end Fir.Wasm.Emit.ResidentFixedWidth
