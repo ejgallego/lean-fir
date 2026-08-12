@@ -15,6 +15,33 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-RESIDENT-CONTAINER-OWNERSHIP`.
+- Integration owner: `wasm-gen`; this lease aligns the executable resident
+  Array and String families with Lean's uniqueness and copy-on-write model.
+- Integration branch/worktree: `wasm/generation` in
+  `.worktrees/wasm-generation`, rebased directly on `main` at `e37175ba`.
+- Published stack: generic Array ownership `6592e2cb`, String and conversion
+  ownership `114a4840`, and clean ready mailbox `282e2f30`.
+- Runtime behavior: module-created Arrays and Strings are live refcount-one
+  values. Exclusive capacity-fitting mutation preserves address and frontier;
+  shared and persistent values copy. Array release recursively releases its
+  live child prefix. String capacity is derived from allocation extent without
+  changing its frozen header. `ByteArray.mk` accepts and consumes live Arrays.
+- Contracts: the Array and String executable helper semantics are
+  generation-ready. W6 refinement remains deliberately separate; no symbolic
+  Wasm, interpreter, or shared source-semantics contract changed.
+- Acceptance: Lean Beam was green on the String and ByteArray modules; focused
+  real-engine fixtures passed for all three repaired discrepancies;
+  `git diff --check`; complete `make check` with 122 harness tests, 662 unique
+  cases, and 1,968/1,968 comparisons; all 3,143 Talos jobs; and the complete
+  deterministic artifact/package gate including the 653-case V8 triangle.
+- Result: `main` fast-forwards through the clean W7 mailbox. W7 next implements
+  the exact packed ByteArray mutation surface required by
+  `Zip.Wasm.compressRaw`/Level1, then `Array.swap`; `FloatArray` remains a
+  distinct packed-layout slice.
+
+## Latest completed integration lease
+
 - Milestone: `W6-STAGED-EXTERNAL-RUNNABLE-CLOSURE`.
 - Integration owner: `wasm-proof`; this lease adds the first non-erased
   runtime family to the certificate-free, module-stable one-source-step
