@@ -15,6 +15,53 @@ Statuses are `active`, `ready`, `blocked`, `released`, or `parked`.
 
 ## Latest completed integration lease
 
+- Milestone: `W7-LEVEL1-BYTEARRAY-STRING-NAT-FRONTIER`.
+- Integration owner: `wasm-gen-2`, acting under the user-authorized temporary
+  integration lease. Branch `wasm/gen-bytearray-level1` was rebased on
+  accepted local main `af3ed1e0`; the clean functional head is `b923b4dc`.
+- Runtime slice: `8087adf3` internalizes the eight ByteArray operations used by
+  the real Level-1 compressor, `89cca9ee` internalizes UTF-8
+  `String.ofList`, and `b923b4dc` internalizes arbitrary-precision `Nat.mul`,
+  `Nat.pow`, `Nat.land`, and `Nat.div`. The generic closed-application linker
+  selects the Nat family after the accepted arbitrary-precision base.
+- Semantics: ByteArray preserves packed little-endian data, geometric growth,
+  and unique/shared/persistent ownership. `String.ofList` validates Unicode,
+  allocates one exact UTF-8 result, and consumes its list spine. Nat operations
+  accept immediate, promoted, and multi-limb values without wasm32 narrowing;
+  division by zero and exponentiation corner cases match Lean. Inputs are
+  borrowed and all walkers use structured loops.
+- Production evidence: the real Lean 4.33 `Zip.Wasm.compressLevel1` closure
+  captures 391 declarations and 110 externals with zero unsupported
+  declarations. Resident linking leaves zero runtime operations and exactly
+  two ordinary imports:
+  `List.foldl._at_.Array.appendList.spec_0._redArg` and
+  `List.zipWith._at_.List.zip.spec_0._redArg`. On the accepted linear-linker
+  base, phases measure 15.723s capture, 2.973s lowering, and 5.418s linking;
+  the same closure linked in 43.141s before the linear-linker landing.
+- Artifacts: the standalone ByteArray, String, and Nat fixtures are
+  zero-import/module-memory modules of 9,861, 17,734, and 15,405 bytes. The Nat
+  SHA-256 is
+  `d0ecc0ecc9432678aab649391731da8d2981ad1352941fd2d47b0942b15c61e3`;
+  repeated generation is byte-identical.
+- Contracts and discrepancies: no shared semantic, concrete-layout, or
+  symbolic-Wasm contract changed. All three executable families are W7
+  generation-ready; W6 refinement remains separate. Bug cards
+  `FIR-BUG-wasm-none-lean-zip-byte-array-import-frontier`,
+  `FIR-BUG-wasm-none-lean-zip-string-of-list-import-frontier`, and
+  `FIR-BUG-wasm-none-lean-zip-nat-arithmetic-import-frontier` are fixed.
+- Acceptance: Lean Beam saves all edited Lean modules with zero diagnostics;
+  focused Node/V8 ownership and arbitrary-precision differential clients pass;
+  `git diff --check` and complete `make check` pass with 670 unique cases,
+  1,992/1,992 equal comparisons, zero findings, and 150 valid bug cards;
+  Talos setup and all 3,143 Talos jobs pass; and the complete deterministic
+  artifact gate passes resident helpers, both prettyM packages, and the
+  661-case native/LCNF/V8 triangle.
+- Result: `main` fast-forwards through the dependency-ordered three-commit
+  stack and this acceptance record; the lease is released. The two generated
+  List specializations are the complete remaining Level-1 generation frontier.
+
+## Latest completed integration lease
+
 - Milestone: `W7-GENERIC-LEVEL1-STANDARD-RUNTIME-FRONTIER`.
 - Integration owner: `wasm-gen`, acting under the user-authorized integration
   lease. Branch `wasm/generation` was rebased on accepted local main
