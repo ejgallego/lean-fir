@@ -99,7 +99,7 @@ near-synonym drift:
 | M3 Tail-call ownership (A/B bridge) | landed | `local-tail` supplies the control baseline; S4 adds a nested ByteArray owner whose unique path executes three in-place outer updates while its outside-aliased path allocates once and then reuses twice, with exact 121/126-step traces | Maintain the landed pair while S5 varies recursive release/reuse |
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
-| M6 Nonlocal control | queued | External yield/bind and ordered effects are observable | Carry owned aliases across an external suspension; add caught exceptions only after their shared protocol lands |
+| M6 Nonlocal control | active | S6 starts with a fixture-only final-use/retained-use closure pair around the already linked `recordByteArray` effect | Require the final-use path to release its capture before the effect and the retained-use path to preserve and reread the original capture after the effect; add caught exceptions only after their shared protocol lands |
 | M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
@@ -407,6 +407,21 @@ different alias. Admit the captured aliased-ByteArray taken/skipped pair only
 after argument-alias materialization and the boxed effect protocol are linked.
 Add caught exceptions after the source-entry/error contract is accepted by all
 participating backends.
+
+The first S6 slice does not wait for or duplicate those queued contracts. It
+uses the already linked `recordByteArray` effect and compares final versus
+retained use of a closure capturing the same source `ByteArray` that is passed
+to the effect. In the final-use case the capture is read and released before
+the effect, so the outside alias can be consumed uniquely. In the retained-use
+case the closure remains live across the effect and is invoked afterward, so
+the effect must preserve the captured original while returning its updated
+copy. Both cases retain exact event-time argument/result snapshots; complete
+LCNF traces must additionally prove the `pap`, closure invocation count,
+release/retention distinction, ordered effect, and post-effect observation.
+The pair is admitted only if its path signatures are not dominated by the
+landed single-use closure or effect-sequence fixtures. The argument-alias
+taken/skipped pair remains separately queued behind
+`ARGUMENT-ALIAS-MATERIALIZATION`.
 
 ## Track B: calls and control
 
