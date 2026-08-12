@@ -13,6 +13,9 @@ private def runtimeOperationArrayJson (operations : Array Fir.Wasm.RuntimeOp) : 
     | .ok json => json
     | .error error => Json.mkObj [("manifestError", error)]
 
+private def externalImportNames (imports : Array Fir.Wasm.Import) : Array Name :=
+  imports.filterMap (fun import_ => import_.declaration?)
+
 set_option maxHeartbeats 0 in
 run_cmd do
   IO.FS.createDirAll "_build"
@@ -33,6 +36,24 @@ run_cmd do
           Json.null)
     | .error error =>
         (0, #[], (toString (repr error) : Json))
+  let linkedResult := result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
+    |>.bind fun artifact =>
+      let policy : Fir.Wasm.Emit.ResidentLinker.Policy := {
+        steps :=
+          Fir.Wasm.Emit.ResidentLinker.availableCommonSteps artifact.module ++
+          Fir.Wasm.Emit.ResidentLinker.closedApplicationFamilySteps
+        requireZeroImports := false
+        requireNoRuntimeOperations := false }
+      Fir.Wasm.Emit.ResidentLinker.linkArtifact policy artifact
+  let (linkedFunctions, remainingImports, remainingRuntimeOperations,
+      linkingError) := match linkedResult with
+    | .ok artifact =>
+        ((artifact.module.functions.size : Json),
+          externalImportNames artifact.module.imports,
+          artifact.module.runtimeOperations, Json.null)
+    | .error error =>
+        (Json.null, #[], #[], (toString (repr error) : Json))
+  let linkedAt ← IO.monoMsNow
   let inventory := Json.mkObj [
     ("entry", LeanZipFir.Compile.level1Entry.toString),
     ("capturedDeclarations", source.program.decls.size),
@@ -44,9 +65,20 @@ run_cmd do
     ("runtimeOperations", runtimeOperations.size),
     ("runtimeOperationNames", runtimeOperationArrayJson runtimeOperations),
     ("loweringError", loweringError),
+    ("linkedFunctions", linkedFunctions),
+    ("remainingImports", nameArrayJson remainingImports),
+    ("remainingRuntimeOperations", remainingRuntimeOperations.size),
+    ("remainingRuntimeOperationNames",
+      runtimeOperationArrayJson remainingRuntimeOperations),
+    ("linkingError", linkingError),
     ("captureMs", capturedAt - startedAt),
-    ("lowerMs", loweredAt - capturedAt)]
+    ("lowerMs", loweredAt - capturedAt),
+    ("linkMs", linkedAt - loweredAt)]
   IO.FS.writeFile "_build/level1-probe.json" (inventory.pretty ++ "\n")
   IO.FS.writeFile "_build/level1-unsupported.lcnf"
     (String.intercalate "\n" unsupportedText.toList)
-  logInfo m!"captured {source.program.decls.size} Level-1 declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms)"
+  match linkedResult with
+  | .ok _ =>
+      logInfo m!"captured {source.program.decls.size} Level-1 declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations; linked to {remainingImports.size} imports and {remainingRuntimeOperations.size} runtime operations (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"
+  | .error error =>
+      logInfo m!"captured {source.program.decls.size} Level-1 declarations with {source.externalNames.size} externals and {unsupported.size} unsupported declarations; resident linking stopped at {repr error} (capture {capturedAt - startedAt}ms, lower {loweredAt - capturedAt}ms, link {linkedAt - loweredAt}ms)"
