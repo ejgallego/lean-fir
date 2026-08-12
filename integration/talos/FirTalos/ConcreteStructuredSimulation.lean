@@ -2705,9 +2705,9 @@ theorem ConcreteStructuredCodeFocus.advance_flatLet
     {context : Fir.Wasm.Context}
     {sourceModule : Fir.Wasm.Module}
     {sourceFunction : Fir.Wasm.Function}
-    {labels : List Lean.FVarId}
     {module : Wasm.Module} {hostEnv : Wasm.HostEnv Host}
     {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
     {sourceRuntime nextRuntime : RuntimeState} {sourceEnv : Env}
     {decl : Lean.Compiler.LCNF.LetDecl .impure}
     {continuation : Lean.Compiler.LCNF.Code .impure}
@@ -11637,6 +11637,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
       ConcreteSupportedFunction program context functionCode sourceModule
         sourceFunction targetModule hosts)
     {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
     {facts : ReuseCapacityFacts} {remainingBytes : Nat}
     {sourceRuntime nextRuntime entryRuntime : RuntimeState}
     {sourceEnv : Env}
@@ -11652,7 +11653,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
       SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
         continuation)
     (related :
-      ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+      ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
         sourceRuntime sourceEnv code targetStore targetLocals targetCode witness
         source target)
     (invariant :
@@ -11667,7 +11668,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
         FinitePath
             (StructuredWasmStep targetModule.wasmModule hosts.env)
             2 target targetAfter ∧
-          ConcreteStructuredCodeFocus context sourceModule sourceFunction []
+          ConcreteStructuredCodeFocus context sourceModule sourceFunction labels
               nextRuntime sourceEnv continuation nextStore targetLocals
               targetRest witness sourceAfter targetAfter ∧
             ReuseCapacityEntryRelativeFrame
@@ -11716,7 +11717,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
             ⟨runtimeRelated, by simp [replaceHeap, clearFailure],
               related.stateRelated.2.2⟩
           have effectStep :
-              EffectStepSimulates context sourceModule sourceFunction []
+              EffectStepSimulates context sourceModule sourceFunction labels
                 targetModule.wasmModule hosts.env sourceRuntime nextRuntime
                 sourceEnv (.inc objectId amount check false continuation)
                 continuation
@@ -11808,7 +11809,7 @@ theorem ConcreteStructuredCodeFocus.advance_ordinaryIncrement
                 resultCount operation
           have nextFocus :
               ConcreteStructuredCodeFocus context sourceModule sourceFunction
-                [] nextRuntime sourceEnv continuation
+                labels nextRuntime sourceEnv continuation
                 (replaceHeap targetStore heap) targetLocals targetRest witness
                 sourceAfter targetAfter := {
             sourceProgramEq := by
@@ -17954,6 +17955,35 @@ inductive ConcreteStructuredCodeStepAdmission
       ConcreteStructuredCodeStepAdmission context externals expectedResult facts
         sourceRuntime sourceEnv 0
           (.dec objectId amount check true objectFields? continuation)
+  | ordinaryIncrement
+      {facts : ReuseCapacityFacts}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {code continuation : Lean.Compiler.LCNF.Code .impure}
+      (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+        sourceEnv code continuation nextRuntime) :
+      ConcreteStructuredCodeStepAdmission context externals expectedResult facts
+        sourceRuntime sourceEnv 0 code
+
+/-- Ordinary increment admission already contains the successful semantic
+lookup and update for the current state.  Those facts construct the canonical
+one-step source law; no execution derivation needs to be retained in the
+pointwise relation. -/
+theorem OrdinaryIncrementEffectSupported.sourceEffectResult
+    {context : Fir.Wasm.Context}
+    {sourceRuntime nextRuntime : RuntimeState}
+    {sourceEnv : Env}
+    {code continuation : Lean.Compiler.LCNF.Code .impure}
+    (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv code continuation nextRuntime) :
+    SourceEffectResult context sourceRuntime nextRuntime sourceEnv code
+      continuation := by
+  cases supported with
+  | inc sourceRuntime nextRuntime sourceEnv objectId amount check continuation
+      objectKind sourceObject objectCompiled objectRefines objectLookup updated
+      fits =>
+      intro externals
+      simp [executeStep, coreStep, objectLookup, updated]
 
 theorem ConcreteStructuredCodeStepAdmission.return_cases
     {context : Fir.Wasm.Context} {externals : ExternalImpl}
@@ -17972,6 +18002,7 @@ theorem ConcreteStructuredCodeStepAdmission.return_cases
   cases admitted with
   | ret resultCompiled resultRefines =>
       exact ⟨_, resultCompiled, resultRefines, rfl⟩
+  | ordinaryIncrement supported => cases supported
 
 /-- Exhaustive inversion of an admitted `let` node.
 
@@ -18015,6 +18046,7 @@ theorem ConcreteStructuredCodeStepAdmission.let_cases
       exact .inr (.inr (.inl ⟨site, rfl⟩))
   | saturatedCall site resolution sharedCapacity =>
       exact .inr (.inr (.inr ⟨site, resolution, rfl, sharedCapacity⟩))
+  | ordinaryIncrement supported => cases supported
 
 /-- Compatibility between an active generated function's result ABI and the
 optional ABI expected by its suspended caller. -/
@@ -21980,6 +22012,92 @@ theorem ConcreteStructuredCodePointwiseRel.advance_decPersistent_of_step
     exact related.resources
   exact ⟨targetPath, framesEq, ⟨nextFocus, nextResources⟩, rank⟩
 
+/-- A successful ordinary increment preserves the full admission-free
+compiler relation across its exact two-step generated host prefix.
+
+The current-node admission supplies only source/compiler facts.  The concrete
+heap transition, target execution, entry-relative resource transport, and
+successor core are reconstructed here, after the actual source step is known.
+The successor carries no admission for its continuation. -/
+theorem ConcreteStructuredCodePointwiseRel.advance_ordinaryIncrement_of_step
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode code continuation : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime sourceRuntime nextRuntime : RuntimeState}
+    {entryStore targetStore : Wasm.Store Host}
+    {entryWitness witness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {sourceEnv : Env}
+    {targetLocals : Wasm.Locals}
+    {targetCode : Wasm.Program}
+    {source sourceAfter : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredCodePointwiseRel program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts 0 remainingBytes sourceRuntime sourceEnv code targetStore
+      targetLocals targetCode witness source target)
+    (supported : OrdinaryIncrementEffectSupported context sourceRuntime
+      sourceEnv code continuation nextRuntime)
+    (sourceStep : executeStep externals source = .next sourceAfter) :
+    ∃ targetAfter nextStore targetRest,
+      FinitePath (StructuredWasmStep targetModule.wasmModule hosts.env) 2 target
+          targetAfter ∧
+        sourceAfter.frames = source.frames ∧
+        targetAfter.frames = target.frames ∧
+        ConcreteStructuredCodeCoreRel program context sourceModule
+          sourceFunction externals labels entryRuntime entryStore entryWitness
+          functionResult callerExpectedResult facts remainingBytes nextRuntime
+          sourceEnv continuation nextStore targetLocals targetRest witness
+          sourceAfter targetAfter := by
+  obtain ⟨computedAfter, targetAfter, nextStore, targetRest, sourcePath,
+      targetPath, nextFocus, nextInvariant, _joinsEq, sourceFramesEq,
+      targetFramesEq⟩ :=
+    related.focus.advance_ordinaryIncrement spec supported
+      supported.sourceEffectResult related.resources.current.1
+  have computedStep :
+      executeStep externals source = .next computedAfter := by
+    cases sourcePath with
+    | cons head tail =>
+        cases tail
+        exact head
+  have sourceAfterEq : sourceAfter = computedAfter := by
+    rw [sourceStep] at computedStep
+    exact ExecResult.next.inj computedStep
+  subst computedAfter
+  have nextScope :
+      ConcreteStructuredResourceScope context sourceModule sourceFunction
+        externals entryRuntime entryStore entryWitness facts remainingBytes
+        nextRuntime sourceEnv nextStore targetLocals witness :=
+    ⟨nextInvariant, related.resources.current.2⟩
+  have nextResourcesBefore :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult source.frames target.frames :=
+    ⟨nextScope, related.resources.suspended⟩
+  have nextResources :
+      ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime nextRuntime entryStore nextStore
+        entryWitness witness facts remainingBytes sourceEnv targetLocals
+        functionResult callerExpectedResult sourceAfter.frames
+        targetAfter.frames := by
+    rw [sourceFramesEq, targetFramesEq]
+    exact nextResourcesBefore
+  exact ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+    targetFramesEq, ⟨nextFocus, nextResources⟩⟩
+
 /-- Stage one admitted pure external into the resource-indexed call-ready
 relation.  The source result and allocation cost come from current-node
 admission, while the production compiler and adapter determine the exact
@@ -22181,6 +22299,13 @@ theorem ConcreteStructuredCodePointwiseRel.advance
         related.advance_decPersistent_of_step sourceStep
       exact ⟨0, target, targetPath,
         .code related.contextCaches nextCore, fun _ => rank⟩
+  | ordinaryIncrement supported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath,
+          _sourceFramesEq, _targetFramesEq, nextCore⟩ :=
+        related.advance_ordinaryIncrement_of_step supported sourceStep
+      refine ⟨2, targetAfter, targetPath,
+        .code related.contextCaches nextCore, ?_⟩
+      omega
 
 /-- Strong form of the pointwise ordinary-code step law.
 
@@ -22365,6 +22490,20 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
         .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
         nextActive.toGlobal, fun _ => rank⟩
+  | ordinaryIncrement incrementSupported =>
+      obtain ⟨targetAfter, nextStore, targetRest, targetPath, sourceFramesEq,
+          targetFramesEq, nextCore⟩ :=
+        related.advance_ordinaryIncrement_of_step incrementSupported sourceStep
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        agrees.reindex sourceFramesEq targetFramesEq
+          nextCore.resources.suspended
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
+      exact ⟨2, targetAfter, targetPath,
+        nextActive.toGlobal, by omega⟩
 
 /-- Strong, locally runnable control states for the compiler simulation.
 
