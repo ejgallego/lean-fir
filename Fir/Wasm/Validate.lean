@@ -279,6 +279,9 @@ structure CheckContext where
   module : Module
   function : Function
   locals : LocalKinds
+  /-- Pre-indexed by whole-function validation; external instruction-checking
+  consumers may retain the canonical ordered local list alone. -/
+  localIndex? : Option (Std.HashMap Name AbiKind) := none
   labels : List LabelTarget := []
   /-- Omitted by external single-function consumers that prefer the canonical
   array lookup; module validation and binary emission install one shared
@@ -295,6 +298,12 @@ def CheckContext.globalKinds (context : CheckContext) : Array AbiKind :=
   match context.index? with
   | some index => index.globalKinds
   | none => context.module.globalKinds
+
+def CheckContext.localKind? (context : CheckContext) (fvarId : FVarId) :
+    Option AbiKind :=
+  match context.localIndex? with
+  | some index => index.get? fvarId.name
+  | none => findLocalKind? context.locals fvarId
 
 def CheckContext.findLabel? (context : CheckContext) (fvarId : FVarId) :
     Option LabelTarget :=
@@ -342,17 +351,17 @@ partial def checkInstruction (context : CheckContext) (stack? : Option OperandSt
   | .f64Const _ =>
       return { fallthrough := stack?.map (· ++ [.float]) }
   | .localGet fvarId => do
-      let some kind := findLocalKind? context.locals fvarId |
+      let some kind := context.localKind? fvarId |
         throw (.unknownLocal context.function.name fvarId)
       return { fallthrough := stack?.map (· ++ [kind]) }
   | .localGetObject fvarId => do
-      let some kind := findLocalKind? context.locals fvarId |
+      let some kind := context.localKind? fvarId |
         throw (.unknownLocal context.function.name fvarId)
       unless kind == .tobject do
         throw (.invalidLocalRefinement context.function.name fvarId kind)
       return { fallthrough := stack?.map (· ++ [.object]) }
   | .localSet fvarId => do
-      let some kind := findLocalKind? context.locals fvarId |
+      let some kind := context.localKind? fvarId |
         throw (.unknownLocal context.function.name fvarId)
       let stack? ← stack?.mapM fun stack => popKinds context.function.name stack [kind]
       return { fallthrough := stack? }
@@ -687,6 +696,9 @@ private def validateFunctionWithIndex (index : CheckIndex)
     module
     function
     locals := locals.toList
+    localIndex? := some <| locals.foldl
+      (init := Std.HashMap.emptyWithCapacity locals.size)
+      fun localIndex (fvarId, kind) => localIndex.insert fvarId.name kind
     index? := some index }
   let flow ← checkInstructions context (some []) function.body
   if let some label := flow.branches.head? then

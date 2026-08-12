@@ -29,25 +29,34 @@ private def zeroValue : AbiKind → List Instruction
   | .float32 => [.i32Const .uint32 0, .f32ReinterpretI32 .float32]
   | .float => [.f64Const 0]
 
-private def containsFVar (fvarIds : List FVarId) (candidate : FVarId) : Bool :=
-  fvarIds.any (sameFVar candidate)
+private abbrev FVarNames := Std.HashSet Name
 
-private def insertFVar (fvarIds : List FVarId) (candidate : FVarId) : List FVarId :=
-  if containsFVar fvarIds candidate then fvarIds else candidate :: fvarIds
+private def functionLocalNames (function : Function) : FVarNames :=
+  function.locals.foldl
+    (init := Std.HashSet.emptyWithCapacity function.locals.size)
+    fun names (fvarId, _) => names.insert fvarId.name
 
-private def intersectFVars (left right : List FVarId) : List FVarId :=
-  left.filter (containsFVar right)
+private def containsFVar (fvarIds : FVarNames) (candidate : FVarId) : Bool :=
+  fvarIds.contains candidate.name
 
-private def isFunctionLocal (function : Function) (candidate : FVarId) : Bool :=
-  function.locals.any fun (fvarId, _) => sameFVar candidate fvarId
+private def insertFVar (fvarIds : FVarNames) (candidate : FVarId) : FVarNames :=
+  fvarIds.insert candidate.name
+
+private def intersectFVars (left right : FVarNames) : FVarNames :=
+  left.fold
+    (fun common name => if right.contains name then common.insert name else common)
+    (Std.HashSet.emptyWithCapacity (min left.size right.size))
+
+private def isFunctionLocal (localNames : FVarNames) (candidate : FVarId) : Bool :=
+  localNames.contains candidate.name
 
 private structure AssignmentFlow where
-  fallthrough : Option (List FVarId)
-  branches : List (FVarId × List FVarId) := []
-  needsInitialization : List FVarId
+  fallthrough : Option FVarNames
+  branches : List (FVarId × FVarNames) := []
+  needsInitialization : FVarNames
   deriving Inhabited
 
-private def mergeAssigned : Option (List FVarId) → List FVarId → Option (List FVarId)
+private def mergeAssigned : Option FVarNames → FVarNames → Option FVarNames
   | none, assigned => some assigned
   | some previous, assigned => some (intersectFVars previous assigned)
 
@@ -59,37 +68,37 @@ read before such an assignment. Structured branch states are consumed by their
 target block or loop, so assignments after an early branch cannot make a local
 look initialized on that path.
 -/
-private partial def analyzeInstructions (function : Function) :
-    List FVarId → List FVarId → List Instruction → AssignmentFlow
+private partial def analyzeInstructions (localNames : FVarNames) :
+    FVarNames → FVarNames → List Instruction → AssignmentFlow
   | assigned, needsInitialization, [] =>
       { fallthrough := some assigned, needsInitialization }
   | assigned, needsInitialization, instruction :: rest =>
       let instructionFlow :=
-        analyzeInstruction function assigned needsInitialization instruction
+        analyzeInstruction localNames assigned needsInitialization instruction
       match instructionFlow.fallthrough with
       | none => instructionFlow
       | some assigned =>
-          let restFlow := analyzeInstructions function assigned
+          let restFlow := analyzeInstructions localNames assigned
             instructionFlow.needsInitialization rest
           { restFlow with
             branches := instructionFlow.branches ++ restFlow.branches }
 
-private partial def analyzeInstruction (function : Function)
-    (assigned needsInitialization : List FVarId) :
+private partial def analyzeInstruction (localNames : FVarNames)
+    (assigned needsInitialization : FVarNames) :
     Instruction → AssignmentFlow
   | .localGet fvarId | .localGetObject fvarId =>
-      if isFunctionLocal function fvarId && !containsFVar assigned fvarId then
+      if isFunctionLocal localNames fvarId && !containsFVar assigned fvarId then
         { fallthrough := some assigned
           needsInitialization := insertFVar needsInitialization fvarId }
       else
         { fallthrough := some assigned, needsInitialization }
   | .localSet fvarId =>
-      if isFunctionLocal function fvarId then
+      if isFunctionLocal localNames fvarId then
         { fallthrough := some (insertFVar assigned fvarId), needsInitialization }
       else
         { fallthrough := some assigned, needsInitialization }
   | .block label body =>
-      let bodyFlow := analyzeInstructions function assigned needsInitialization body
+      let bodyFlow := analyzeInstructions localNames assigned needsInitialization body
       let exits := bodyFlow.branches.filter fun (target, _) => sameFVar target label
       let escaping := bodyFlow.branches.filter fun (target, _) => !sameFVar target label
       let fallthrough := exits.foldl
@@ -99,12 +108,12 @@ private partial def analyzeInstruction (function : Function)
       { fallthrough, branches := escaping
         needsInitialization := bodyFlow.needsInitialization }
   | .loop label body =>
-      let bodyFlow := analyzeInstructions function assigned needsInitialization body
+      let bodyFlow := analyzeInstructions localNames assigned needsInitialization body
       let escaping := bodyFlow.branches.filter fun (target, _) => !sameFVar target label
       { bodyFlow with branches := escaping }
   | .ifElse thenBody elseBody =>
-      let thenFlow := analyzeInstructions function assigned needsInitialization thenBody
-      let elseFlow := analyzeInstructions function assigned
+      let thenFlow := analyzeInstructions localNames assigned needsInitialization thenBody
+      let elseFlow := analyzeInstructions localNames assigned
         thenFlow.needsInitialization elseBody
       let fallthrough := match thenFlow.fallthrough, elseFlow.fallthrough with
         | none, none => none
@@ -122,8 +131,10 @@ private partial def analyzeInstruction (function : Function)
 
 end
 
-private def localsNeedingInitialization (function : Function) : List FVarId :=
-  (analyzeInstructions function [] [] function.body).needsInitialization
+private def localsNeedingInitialization (function : Function) : FVarNames :=
+  let localNames := functionLocalNames function
+  let empty := Std.HashSet.emptyWithCapacity function.locals.size
+  (analyzeInstructions localNames empty empty function.body).needsInitialization
 
 /-- Restore the fresh zeroed locals observable at a real Wasm call boundary. -/
 private def localInitializations (function : Function) : List Instruction :=
@@ -310,6 +321,6 @@ private def exampleModule : Module := {
 #guard zeroValue .uint64 == [.i64Const .uint64 0]
 #guard zeroValue .float32 == [.i32Const .uint32 0, .f32ReinterpretI32 .float32]
 #guard zeroValue .float == [.f64Const 0]
-#guard localsNeedingInitialization exampleFunction == [scratchLocal]
+#guard (localsNeedingInitialization exampleFunction).contains scratchLocal.name
 
 end Fir.Wasm.Emit.TailCall
