@@ -8,8 +8,8 @@ phase: wasm
 pass: none
 discovered-by: differential-test
 first-seen: 2026-08-12
-reproduction: integration/talos/artifact/resident-big-numeric-client.mjs
-regression: integration/talos/artifact/resident-big-numeric-client.mjs
+reproduction: integration/lean-zip/level1-smoke.mjs
+regression: integration/lean-zip/level1-smoke.mjs
 ---
 
 # Summary

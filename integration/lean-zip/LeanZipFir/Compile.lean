@@ -53,4 +53,24 @@ def compileStored : CoreM (Except Fir.Wasm.Emit.Source.CompileError
       Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
         module #[storedEntry]
 
+private def compileLevel1Unprepared : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let source ← captureLevel1
+  Fir.Wasm.Emit.Source.compileModuleArtifact source
+
+/-- Lower the unmodified Level-1 closure before resident linking. -/
+def compileLevel1Base : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let result ← compileLevel1Unprepared
+  return result.bind Fir.Wasm.Emit.ResidentLinker.prepareArenaArtifact
+
+/-- Complete zero-import resident package frontier for Level-1 DEFLATE. -/
+def compileLevel1 : CoreM (Except Fir.Wasm.Emit.Source.CompileError
+    Fir.Wasm.Emit.Source.ModuleArtifact) := do
+  let result ← compileLevel1Unprepared
+  return result.bind <|
+    Fir.Wasm.Emit.ResidentLinker.prepareArenaAndLinkArtifact fun module =>
+      Fir.Wasm.Emit.ResidentLinker.closedApplicationAvailablePolicy
+        module #[level1Entry]
+
 end LeanZipFir.Compile

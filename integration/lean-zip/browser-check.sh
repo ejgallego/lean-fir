@@ -43,4 +43,4 @@ chrome_pid=$!
 
 node "$here/../talos/artifact/wait-browser-result.mjs" \
   "http://127.0.0.1:$debug_port" "$url"
-echo "PASS browser lean-zip stored package ($browser)"
+echo "PASS browser lean-zip stored + Level-1 packages ($browser)"

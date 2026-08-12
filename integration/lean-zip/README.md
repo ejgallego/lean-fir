@@ -1,16 +1,16 @@
 # FIR-native lean-zip bring-up
 
-This integration compiles the real Lean 4.32-compatible entry
+This integration compiles the real Lean 4.32-compatible entries
 
 ```lean
 Zip.Wasm.compressStored : ByteArray → ByteArray
+Zip.Wasm.compressLevel1 : ByteArray → ByteArray
 ```
 
 from lean-zip commit `30737b4e2ebfd0fc889f0b2e265aae0635d668a1`.
-It is the first vertical slice toward the production
-`Zip.Wasm.compressRaw : ByteArray → UInt8 → ByteArray` artifact. FIR reads
-clean source checkouts and writes every build product locally; it never consumes
-lean-zip's `.lake` products.
+The stored entry is the minimal boundary control. Level-1 is the first
+production matcher/emitter slice. FIR reads clean source checkouts and writes
+every build product locally; it never consumes lean-zip's `.lake` products.
 
 This revision uses Lean's legacy module syntax. FIR therefore captures its real
 declarations through the generic single-unit final-LCNF path; module-wise replay
@@ -29,6 +29,7 @@ lake --keep-toolchain --reconfigure \
   -KzipCommonRoot=/tmp/fir-zip-common-4425 \
   build LeanZipFir.Compile
 lake --keep-toolchain env lean Probe.lean
+lake --keep-toolchain env lean ProbeLevel1.lean
 ```
 
 The produced artifact is not a host-backed ByteArray facade. `ByteArray.size`,
@@ -52,9 +53,11 @@ FIR_BROWSER=google-chrome \
 ./check.sh
 ```
 
-The immutable packages are under `_build/lean-zip-stored-packages/`, and the
-atomic canonical pointer is `_build/lean-zip-stored-current`. A consumer needs
-only the six files in that directory and can run `node smoke.mjs`.
+Immutable packages are under `_build/lean-zip-stored-packages/` and
+`_build/lean-zip-level1-packages/`. Their atomic canonical pointers are
+`_build/lean-zip-stored-current` and `_build/lean-zip-level1-current`. Each
+package contains seven checksummed files and can run `node smoke.mjs` without
+the FIR or lean-zip source trees.
 
 The browser/Node API is:
 
@@ -62,7 +65,16 @@ The browser/Node API is:
 const adapter = await createLeanZipStoredAdapter({ bytes, descriptor });
 const { bytes: compressed, timings, memory } =
   adapter.compressStored(inputBytes);
+
+const level1 = await createLeanZipLevel1Adapter({ bytes, descriptor });
+const level1Result = level1.compressLevel1(inputBytes);
 ```
 
 Every call uses a scratch checkpoint: the adapter copies the result, rewinds
 the module-owned arena even on failure, and exposes no Wasm address.
+
+Both public wrappers reuse the same versioned ByteArray encoder, decoder,
+module validator, timing, and scratch-ownership implementation. Level-1 has
+zero imports and is suitable for correctness testing in Node and browsers. It
+is not yet a performance artifact: generic resident Nat and closure execution
+remain allocation-heavy, and `BUILD.json` records that limitation explicitly.

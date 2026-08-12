@@ -21,6 +21,10 @@ import {
   LEAN_ZIP_STORED_ADAPTER_API_VERSION,
   LEAN_ZIP_STORED_OWNERSHIP_VERSION,
 } from "./lean-zip-stored-browser-adapter.mjs";
+import {
+  LEAN_ZIP_LEVEL1_ADAPTER_API_VERSION,
+  LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
+} from "./lean-zip-level1-browser-adapter.mjs";
 
 const directory = dirname(fileURLToPath(import.meta.url));
 const firRoot = realpathSync(join(directory, "../.."));
@@ -32,15 +36,35 @@ const buildDirectory = join(directory, "_build");
 const wasmStem = join(buildDirectory, "lean-zip-stored.wasm");
 const baseStem = join(buildDirectory, "lean-zip-stored-base.wasm");
 const inventoryPath = join(buildDirectory, "lean-zip-stored.inventory.json");
+const level1WasmStem = join(buildDirectory, "lean-zip-level1.wasm");
+const level1BaseStem = join(buildDirectory, "lean-zip-level1-base.wasm");
+const level1InventoryPath = join(buildDirectory,
+  "lean-zip-level1.inventory.json");
 const expectedClosure = JSON.parse(readFileSync(
   join(directory, "closure-contract.json"), "utf8"));
+const expectedLevel1Closure = JSON.parse(readFileSync(
+  join(directory, "level1-closure-contract.json"), "utf8"));
+const byteArrayAdapterPath = join(directory,
+  "lean-zip-byte-array-browser-adapter.mjs");
 const adapterPath = join(directory, "lean-zip-stored-browser-adapter.mjs");
 const smokePath = join(directory, "package-smoke.mjs");
+const level1AdapterPath = join(directory,
+  "lean-zip-level1-browser-adapter.mjs");
+const level1SmokePath = join(directory, "level1-package-smoke.mjs");
 const outputNames = [
   "BUILD.json",
+  "lean-zip-byte-array-browser-adapter.mjs",
   "lean-zip-stored-browser-adapter.mjs",
   "lean-zip-stored.wasm",
   "lean-zip-stored.wasm.json",
+  "smoke.mjs",
+];
+const level1OutputNames = [
+  "BUILD.json",
+  "lean-zip-byte-array-browser-adapter.mjs",
+  "lean-zip-level1-browser-adapter.mjs",
+  "lean-zip-level1.wasm",
+  "lean-zip-level1.wasm.json",
   "smoke.mjs",
 ];
 
@@ -75,10 +99,10 @@ function sourceFile(root, path) {
   return { path, sha256: sha256(readFileSync(join(root, path))) };
 }
 
-function publishCurrent(destination) {
-  const current = join(buildDirectory, "lean-zip-stored-current");
+function publishCurrent(destination, currentName) {
+  const current = join(buildDirectory, currentName);
   const temporary = join(buildDirectory,
-    `.lean-zip-stored-current-${process.pid}`);
+    `.${currentName}-${process.pid}`);
   rmSync(temporary, { force: true });
   symlinkSync(relative(buildDirectory, destination), temporary);
   renameSync(temporary, current);
@@ -111,16 +135,25 @@ run("lake", [...lakeArguments, "build", "LeanZipFir.Compile",
   "leanZipFirOracle"], { capture: false });
 run("lake", ["--keep-toolchain", "env", "lean", "Probe.lean"],
   { capture: false });
+run("lake", ["--keep-toolchain", "env", "lean", "ProbeLevel1.lean"],
+  { capture: false });
 run("lake", ["--keep-toolchain", "env", "lean", "Emit.lean"],
   { capture: false });
 const firstWasm = readFileSync(wasmStem);
 const firstDescriptor = readFileSync(`${wasmStem}.json`);
+const firstLevel1Wasm = readFileSync(level1WasmStem);
+const firstLevel1Descriptor = readFileSync(`${level1WasmStem}.json`);
 run("lake", ["--keep-toolchain", "env", "lean", "Emit.lean"],
   { capture: false });
 assert.deepEqual(readFileSync(wasmStem), firstWasm,
   "repeated stored generation was not deterministic");
 assert.deepEqual(readFileSync(`${wasmStem}.json`), firstDescriptor,
   "repeated stored descriptor generation was not deterministic");
+assert.deepEqual(readFileSync(level1WasmStem), firstLevel1Wasm,
+  "repeated Level-1 generation was not deterministic");
+assert.deepEqual(readFileSync(`${level1WasmStem}.json`),
+  firstLevel1Descriptor,
+  "repeated Level-1 descriptor generation was not deterministic");
 run(process.execPath, [join(directory, "smoke.mjs")], { capture: false });
 
 const wasm = readFileSync(wasmStem);
@@ -157,6 +190,7 @@ assert.equal(descriptor.entry, "Zip.Wasm.compressStored");
 assert.deepEqual(descriptor.params, ["object"]);
 assert.equal(descriptor.result, "object");
 
+const byteArrayAdapterBytes = readFileSync(byteArrayAdapterPath);
 const adapterBytes = readFileSync(adapterPath);
 const smokeBytes = readFileSync(smokePath);
 const leanToolchain = readFileSync(join(firRoot, "lean-toolchain"), "utf8").trim();
@@ -221,6 +255,7 @@ const build = {
     },
     adapter: {
       module: "lean-zip-stored-browser-adapter.mjs",
+      implementationModule: "lean-zip-byte-array-browser-adapter.mjs",
       apiVersion: LEAN_ZIP_STORED_ADAPTER_API_VERSION,
       operation: "adapter.compressStored(Uint8Array)",
       result: "copied Uint8Array",
@@ -247,7 +282,8 @@ const build = {
 
 const buildBytes = Buffer.from(`${JSON.stringify(build, null, 2)}\n`);
 const fingerprint = sha256(Buffer.concat([
-  wasm, descriptorBytes, adapterBytes, buildBytes, smokeBytes,
+  wasm, descriptorBytes, byteArrayAdapterBytes, adapterBytes, buildBytes,
+  smokeBytes,
 ]));
 const packageId = `${fir.commit.slice(0, 12)}-${leanZip.commit.slice(0, 12)}-` +
   fingerprint.slice(0, 20);
@@ -259,6 +295,8 @@ rmSync(staging, { recursive: true, force: true });
 mkdirSync(staging);
 copyFileSync(wasmStem, join(staging, "lean-zip-stored.wasm"));
 copyFileSync(`${wasmStem}.json`, join(staging, "lean-zip-stored.wasm.json"));
+copyFileSync(byteArrayAdapterPath,
+  join(staging, "lean-zip-byte-array-browser-adapter.mjs"));
 copyFileSync(adapterPath,
   join(staging, "lean-zip-stored-browser-adapter.mjs"));
 copyFileSync(smokePath, join(staging, "smoke.mjs"));
@@ -278,9 +316,10 @@ if (existsSync(destination)) {
 } else {
   renameSync(staging, destination);
 }
-publishCurrent(destination);
+publishCurrent(destination, "lean-zip-stored-current");
 console.log(JSON.stringify({
   ok: true,
+  entry: "Zip.Wasm.compressStored",
   packageId,
   directory: destination,
   canonical: join(buildDirectory, "lean-zip-stored-current"),
@@ -290,4 +329,200 @@ console.log(JSON.stringify({
   memoryImports: 0,
   sourceFunctions: inventory.sourceFunctions.length,
   residentHelpers: inventory.residentHelpers.length,
+}));
+
+const level1Wasm = readFileSync(level1WasmStem);
+const level1BaseWasm = readFileSync(level1BaseStem);
+const level1DescriptorBytes = readFileSync(`${level1WasmStem}.json`);
+const level1Descriptor = JSON.parse(level1DescriptorBytes);
+const level1Inventory = JSON.parse(readFileSync(level1InventoryPath, "utf8"));
+const level1Module = new WebAssembly.Module(level1Wasm);
+const level1Imports = WebAssembly.Module.imports(level1Module);
+const level1Exports = WebAssembly.Module.exports(level1Module);
+assert.deepEqual(level1Imports, []);
+assert.deepEqual(level1Exports, [
+  { name: "Zip.Wasm.compressLevel1", kind: "function" },
+  { name: "fir_heap_frontier", kind: "function" },
+  { name: "fir_heap_set_frontier", kind: "function" },
+  { name: "fir_heap_rewind", kind: "function" },
+  { name: "fir_heap_alloc", kind: "function" },
+  { name: "memory", kind: "memory" },
+]);
+for (const [field, expected] of Object.entries(expectedLevel1Closure)) {
+  const actual = {
+    capturedDeclarations: level1Inventory.capturedDeclarations,
+    reviewedExternalsBeforeLink: level1Inventory.reviewedExternalsBeforeLink,
+    retainedSourceFunctions: level1Inventory.sourceFunctions.length,
+    residentHelpers: level1Inventory.residentHelpers.length,
+    completeFunctions: level1Inventory.functions.length,
+    baseWasmBytes: level1BaseWasm.byteLength,
+    completeWasmBytes: level1Wasm.byteLength,
+  }[field];
+  assert.equal(actual, expected, `Level-1 ${field} changed`);
+}
+assert.equal(level1Inventory.runtimeOperations, 0);
+assert.equal(level1Descriptor.entry, "Zip.Wasm.compressLevel1");
+assert.deepEqual(level1Descriptor.params, ["object"]);
+assert.equal(level1Descriptor.result, "object");
+run(process.execPath, [join(directory, "level1-smoke.mjs")],
+  { capture: false });
+
+const level1AdapterBytes = readFileSync(level1AdapterPath);
+const level1SmokeBytes = readFileSync(level1SmokePath);
+const level1Build = {
+  schemaVersion: "fir.lean-zip.level1.build/v1",
+  sources: {
+    fir,
+    leanZip: {
+      ...leanZip,
+      sourceView: "clean read-only source compiled by FIR toolchain",
+      relevantFiles: [
+        sourceFile(leanZipRoot, "Zip/Wasm/Level1.lean"),
+        sourceFile(leanZipRoot, "Zip/Native/DeflateDynamic.lean"),
+        sourceFile(leanZipRoot, "Zip/Native/DeflateFreqsFused.lean"),
+        sourceFile(leanZipRoot, "Zip/Native/Deflate.lean"),
+      ],
+    },
+    zipCommon: {
+      ...zipCommon,
+      relevantFiles: [sourceFile(zipCommonRoot, "ZipForStd/ByteArray.lean")],
+    },
+  },
+  toolchain: {
+    leanToolchain,
+    leanVersion: capture("lake", ["--keep-toolchain", "env", "lean",
+      "--version"], directory),
+  },
+  entry: {
+    sourceName: "Zip.Wasm.compressLevel1",
+    parameters: [{ name: "input", lean: "ByteArray", fir: "object" }],
+    result: { lean: "ByteArray", fir: "object" },
+  },
+  wasm: {
+    file: "lean-zip-level1.wasm",
+    byteLength: level1Wasm.byteLength,
+    sha256: sha256(level1Wasm),
+    base: {
+      byteLength: level1BaseWasm.byteLength,
+      sha256: sha256(level1BaseWasm),
+    },
+    functionImportCount: 0,
+    memoryImportCount: 0,
+    memoryOwner: "module",
+    exports: level1Exports,
+  },
+  closure: {
+    capture: "compileEntriesFinalCapturedInternalized",
+    residentPolicy: "closedApplicationAvailablePolicy",
+    capturedDeclarations: level1Inventory.capturedDeclarations,
+    reviewedExternalsBeforeLink:
+      level1Inventory.reviewedExternalsBeforeLink,
+    retainedSourceFunctions: level1Inventory.sourceFunctions,
+    residentHelpers: level1Inventory.residentHelpers,
+    residualRuntimeOperations: level1Inventory.runtimeOperations,
+  },
+  capabilities: {
+    byteArray: {
+      layoutVersion: LEAN_ZIP_BYTE_ARRAY_LAYOUT_VERSION,
+      representation: "32-byte resident header followed by packed UInt8 bytes",
+      operations: ["ByteArray.size", "ByteArray.mk",
+        "ByteArray.emptyWithCapacity", "ByteArray.copySlice"],
+      allocationOwnership: "live nonpersistent, reference count one",
+      uniqueUpdate:
+        "copySlice preserves identity iff capacity suffices and refcount is one",
+      sharedUpdate:
+        "copySlice allocates and consumes one destination reference",
+      hostCallbacks: false,
+    },
+    adapter: {
+      module: "lean-zip-level1-browser-adapter.mjs",
+      implementationModule: "lean-zip-byte-array-browser-adapter.mjs",
+      apiVersion: LEAN_ZIP_LEVEL1_ADAPTER_API_VERSION,
+      operation: "adapter.compressLevel1(Uint8Array)",
+      result: "copied Uint8Array",
+      timings: ["encodeMs", "executeMs", "decodeMs", "totalMs", "overheadMs"],
+    },
+    ownership: {
+      version: LEAN_ZIP_LEVEL1_OWNERSHIP_VERSION,
+      publicInput: "borrowed JavaScript bytes",
+      encodedInput: "fresh packed ByteArray in module-owned memory",
+      encodedInputOwnership: "borrowed persistent; never mutated by Lean",
+      residentResults: "ordinary Lean-owned values with checked reference counts",
+      output: "copied JavaScript bytes before rewind",
+      rawAddressesExposed: false,
+      reclamation: "per-call scratch checkpoint rewind, including failures",
+      runtimeRootsAboveCheckpoint: false,
+    },
+  },
+  performance: {
+    status: "correctness artifact; no performance claim",
+    caveat:
+      "generic resident Nat and closure paths remain allocation-heavy for Level-1",
+  },
+  proofStatus: {
+    generation: "native-oracle and Node/Chrome real-engine checked",
+    refinement: "W6 concrete-runtime proofs pending for newly used helpers",
+  },
+  test: "node smoke.mjs",
+};
+
+const level1BuildBytes = Buffer.from(
+  `${JSON.stringify(level1Build, null, 2)}\n`);
+const level1Fingerprint = sha256(Buffer.concat([
+  level1Wasm,
+  level1DescriptorBytes,
+  byteArrayAdapterBytes,
+  level1AdapterBytes,
+  level1BuildBytes,
+  level1SmokeBytes,
+]));
+const level1PackageId = `${fir.commit.slice(0, 12)}-` +
+  `${leanZip.commit.slice(0, 12)}-${level1Fingerprint.slice(0, 20)}`;
+const level1Packages = join(buildDirectory, "lean-zip-level1-packages");
+const level1Destination = join(level1Packages, level1PackageId);
+const level1Staging = join(level1Packages,
+  `.staging-${level1PackageId}-${process.pid}`);
+mkdirSync(level1Packages, { recursive: true });
+rmSync(level1Staging, { recursive: true, force: true });
+mkdirSync(level1Staging);
+copyFileSync(level1WasmStem,
+  join(level1Staging, "lean-zip-level1.wasm"));
+copyFileSync(`${level1WasmStem}.json`,
+  join(level1Staging, "lean-zip-level1.wasm.json"));
+copyFileSync(byteArrayAdapterPath,
+  join(level1Staging, "lean-zip-byte-array-browser-adapter.mjs"));
+copyFileSync(level1AdapterPath,
+  join(level1Staging, "lean-zip-level1-browser-adapter.mjs"));
+copyFileSync(level1SmokePath, join(level1Staging, "smoke.mjs"));
+writeFileSync(join(level1Staging, "BUILD.json"), level1BuildBytes);
+const level1Sums = level1OutputNames.map((name) =>
+  `${sha256(readFileSync(join(level1Staging, name)))}  ${name}`)
+  .join("\n") + "\n";
+writeFileSync(join(level1Staging, "SHA256SUMS"), level1Sums);
+run(process.execPath, [join(level1Staging, "smoke.mjs")],
+  { capture: false });
+
+if (existsSync(level1Destination)) {
+  for (const name of [...level1OutputNames, "SHA256SUMS"]) {
+    assert.deepEqual(readFileSync(join(level1Staging, name)),
+      readFileSync(join(level1Destination, name)),
+      `immutable package ${level1PackageId} differs at ${name}`);
+  }
+  rmSync(level1Staging, { recursive: true });
+} else {
+  renameSync(level1Staging, level1Destination);
+}
+publishCurrent(level1Destination, "lean-zip-level1-current");
+console.log(JSON.stringify({
+  ok: true,
+  entry: "Zip.Wasm.compressLevel1",
+  packageId: level1PackageId,
+  directory: level1Destination,
+  canonical: join(buildDirectory, "lean-zip-level1-current"),
+  wasmBytes: level1Wasm.byteLength,
+  wasmSha256: sha256(level1Wasm),
+  functionImports: 0,
+  memoryImports: 0,
+  sourceFunctions: level1Inventory.sourceFunctions.length,
+  residentHelpers: level1Inventory.residentHelpers.length,
 }));

@@ -33,9 +33,9 @@ which the emitted inventory identifies as `fir_ext_Nat_mod`, and executes
 ## Exact commands
 
 ```sh
-cd integration/talos/artifact
-lake exe fir-wasm-artifact resident-nat-arithmetic _build/resident-nat-arithmetic.wasm
-node run-resident-nat-arithmetic.mjs _build/resident-nat-arithmetic.wasm
+cd integration/lean-zip
+lake --keep-toolchain env lean Emit.lean
+node level1-smoke.mjs
 ```
 
 ## Expected semantics
@@ -51,9 +51,10 @@ resident execution discrepancy rather than an unresolved frontier.
 
 ## Proof or differential evidence
 
-The standalone V8 client compares small, 64-bit, multi-limb, and zero-divisor
-remainders against JavaScript `BigInt` arithmetic. The real Level-1 artifact
-then passes the zero-import closure probe and native/Wasm differential.
+The native oracle returns normally on the five-case Level-1 corpus while the
+original resident artifact traps on its first case. The repaired standalone
+Nat arithmetic artifact checks small, 64-bit, multi-limb, and zero-divisor
+remainders in V8; `level1-smoke.mjs` checks the real source closure.
 
 ## Semantic impact
 
@@ -63,8 +64,9 @@ succeed.
 
 ## Classification and triage
 
-This is a Wasm-resident helper implementation gap. Source capture and lowering
-preserve the real `Nat.mod` call and its object-family ABI correctly.
+This is a resident Wasm implementation gap. Capture and lowering preserve the
+real `Nat.mod` call correctly, but the selected bounded helper cannot implement
+the arbitrary-precision values admitted by the source ABI.
 
 ## Workaround
 

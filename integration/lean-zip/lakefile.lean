@@ -1,6 +1,6 @@
 import Lake
 
-open Lake DSL
+open System Lake DSL
 
 package «LeanZipFir»
 
@@ -32,6 +32,28 @@ lean_lib «LeanZipSource» where
   srcDir := System.FilePath.mk leanZipRoot
   globs := #[.submodules `Zip]
   leanOptions := #[⟨`compiler.postponeCompile, true⟩]
+
+/--
+Native-oracle support from the exact lean-zip source view. The FIR Wasm path
+does not link this object: its fixed-width and ByteArray operations remain
+module-resident. The native executable needs the same optimized externs as
+lean-zip's own `zip-wasm-oracle`.
+-/
+input_file leanZipByteArrayWideFFI.c where
+  path := System.FilePath.mk leanZipRoot / "c" / "bytearray_wide_ffi.c"
+  text := true
+
+target leanZipByteArrayWideFFI.o pkg : FilePath := do
+  let source ← leanZipByteArrayWideFFI.c.fetch
+  let object := pkg.buildDir / "c" / "bytearray_wide_ffi.o"
+  let flags := #["-O2", "-DNDEBUG"] ++
+    if Platform.isWindows then #[] else #["-fPIC"]
+  buildLeanO object source #[] flags
+
+extern_lib libLeanZipByteArrayWideFFI pkg := do
+  let object ← leanZipByteArrayWideFFI.o.fetch
+  buildStaticLib (pkg.staticLibDir / nameToStaticLib "lean_zip_bytearray_wide_ffi")
+    #[object]
 
 @[default_target]
 lean_lib «LeanZipFir»

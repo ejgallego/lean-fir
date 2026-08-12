@@ -8,8 +8,8 @@ phase: wasm
 pass: none
 discovered-by: differential-test
 first-seen: 2026-08-12
-reproduction: integration/lean-zip/ProbeLevel1.lean
-regression: Fir/Wasm/Emit/ResidentFixedWidth.lean
+reproduction: integration/lean-zip/level1-smoke.mjs
+regression: integration/lean-zip/level1-smoke.mjs
 ---
 
 # Summary

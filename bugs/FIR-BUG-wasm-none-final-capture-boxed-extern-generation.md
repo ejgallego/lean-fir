@@ -57,9 +57,10 @@ boxed adapter.
 
 ## Proof or differential evidence
 
-The Level-1 probe requires all three upstream-generated adapters to be local,
-reports zero unsupported declarations, and links the complete artifact with
-zero imports and zero remaining runtime operations.
+The Level-1 probe requires all three upstream-generated adapters to be local.
+After regeneration through `ExplicitBoxing`, it reports zero unsupported
+declarations and links the complete artifact with zero imports and zero
+remaining runtime operations, without a named resident shim.
 
 ## Semantic impact
 
