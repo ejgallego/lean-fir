@@ -33,7 +33,9 @@ def clearClosedTermCache (env : Environment) : Environment :=
 Treat imported generated closed terms and specializations as local names during
 source recompilation. Their original module indices make LCNF phase lookup
 prefer the imported signature over the freshly generated declaration with the
-same name. Ordinary source declarations keep their module mapping.
+same name. Ordinary source declarations keep their module mapping. Use each
+selected module's `extraConstNames`, the environment's reverse index for
+compiler auxiliaries, instead of scanning every imported constant mapping.
 -/
 def forgetGeneratedCompilerModuleMappings (env : Environment)
     (moduleIndices : Array ModuleIdx) : Environment :=
@@ -43,12 +45,13 @@ def forgetGeneratedCompilerModuleMappings (env : Environment)
   let selectedModules := moduleIndices.foldl
     (init := Std.HashSet.emptyWithCapacity moduleIndices.size)
     fun modules moduleIndex => modules.insert moduleIndex
-  let mappings := env.base.private.const2ModIdx.fold
-    (fun mappings name moduleIndex =>
-      if selectedModules.contains moduleIndex && name.toString.contains "._closed_" then
-        mappings.erase name
-      else mappings)
-    env.base.private.const2ModIdx
+  let mappings := moduleIndices.foldl (init := env.base.private.const2ModIdx)
+    fun mappings moduleIndex =>
+      let moduleData := env.header.moduleData[moduleIndex]!
+      moduleData.extraConstNames.foldl
+        (fun mappings name =>
+          if name.toString.contains "._closed_" then mappings.erase name else mappings)
+        mappings
   let mappings := closedNames.foldl
     (fun mappings name =>
       match originalMappings[name]? with
