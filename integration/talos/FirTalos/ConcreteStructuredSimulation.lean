@@ -20274,101 +20274,222 @@ theorem ConcreteStructuredSupportedFrameStack.Agrees.reindex
   subst targetTargetFrames
   exact ⟨supported, agrees⟩
 
-/-- Select the exact suspended resource stack owned by an open outcome.
+/-- Branch-exact admission-free control for the strong simulation relation.
 
-This graph relation is deliberately proposition-valued.  The outcome itself
-is also proof data, so Lean may not eliminate it into a data-valued projection;
-the graph gives us the same branch-exact connection without leaving `Prop`. -/
-inductive ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {spec : ConcreteSupportedFunction program context functionCode sourceModule
-      sourceFunction targetModule hosts}
-    {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
-    {entryRuntime : RuntimeState}
-    {entryStore : Wasm.Store Host}
-    {entryWitness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {source : MachineState}
-    {target : StructuredWasmState Host} :
-    ConcreteStructuredCodeStepOutcome program context functionCode sourceModule
-      sourceFunction targetModule hosts spec externals labels entryRuntime
-      entryStore entryWitness functionResult callerExpectedResult facts
-      remainingBytes source target →
-    {sourceFrames : List Frame} →
-    {targetFrames : List StructuredWasmFrame} →
-    ConcreteStructuredSuspendedResourceStack externals program entryRuntime
-      entryStore entryWitness functionResult callerExpectedResult sourceFrames
-      targetFrames → Prop where
-  | code {contextCaches related} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.code contextCaches related) related.resources.suspended
-  | directReady {site row related} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.directReady site row related) related.resources.suspended
-  | saturatedReady {site resolution sharedCapacity row related} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.saturatedReady site resolution sharedCapacity row related)
-        related.resources.suspended
-  | externalReady {related} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.externalReady related) related.resources.suspended
-  | externalBind {related} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.externalBind related) related.resources.suspended
-  | returned {yielded compatible resources} :
-      ConcreteStructuredCodeStepOutcome.OwnsResourceStack
-        (.returned yielded compatible resources) resources.suspended
-
-/-- Static support for one open control outcome.
-
-The supported stack is indexed by the outcome's exact frames, and `Agrees`
-additionally ties it to the exact dynamic resource-stack proof selected by
-`OwnsResourceStack`.  This is the recursively stable compiler-identity
-component missing from the lower-level open outcome sum. -/
-def ConcreteStructuredCodeStepOutcome.Supported
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {spec : ConcreteSupportedFunction program context functionCode sourceModule
-      sourceFunction targetModule hosts}
-    {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
-    {entryRuntime : RuntimeState}
-    {entryStore : Wasm.Store Host}
-    {entryWitness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {source : MachineState}
-    {target : StructuredWasmState Host}
-    (outcome : ConcreteStructuredCodeStepOutcome program context functionCode
-      sourceModule sourceFunction targetModule hosts spec externals labels
-      entryRuntime entryStore entryWitness functionResult callerExpectedResult
-      facts remainingBytes source target) : Prop :=
-  ∃ (sourceFrames : List Frame)
-      (targetFrames : List StructuredWasmFrame)
+This is a direct inductive sum rather than a graph indexed by a proof-valued
+`ConcreteStructuredCodeStepOutcome`.  Lean proof irrelevance makes an outcome
+proof unsuitable as a branch discriminator.  Each constructor therefore owns
+its compiler/resource core and the supported stack that agrees with that same
+core.  The code constructor deliberately omits current-step admission. -/
+inductive ConcreteStructuredSupportedOutcome
+    (program : Fir.LeanIR.ImpureProgram)
+    (context : Fir.Wasm.Context)
+    (functionCode : Lean.Compiler.LCNF.Code .impure)
+    (sourceModule : Fir.Wasm.Module)
+    (sourceFunction : Fir.Wasm.Function)
+    (targetModule : AdaptedModule)
+    (hosts : ResolvedHosts)
+    (spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts)
+    (externals : ExternalImpl)
+    (labels : List Lean.FVarId)
+    (entryRuntime : RuntimeState)
+    (entryStore : Wasm.Store Host)
+    (entryWitness : RefinementWitness)
+    (functionResult : AbiKind)
+    (callerExpectedResult : Option AbiKind) :
+    MachineState → StructuredWasmState Host → Prop where
+  | code
+      {source target facts remainingBytes sourceRuntime sourceEnv sourceCode
+        targetStore targetLocals targetCode witness}
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+      (related : ConcreteStructuredCodeCoreRel program context sourceModule
+        sourceFunction externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        sourceEnv sourceCode targetStore targetLocals targetCode witness source
+        target)
+      (supported : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult callerExpectedResult source.frames
+        target.frames)
+      (agrees : supported.Agrees related.resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        source target
+  | directReady
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {callerEnv : Env}
+      {calleeContext : Fir.Wasm.Context}
+      {calleeFunction : Fir.Wasm.Function}
+      {site : DirectInternalCallSite context decl callerEnv}
+      {row : ConcreteGeneratedInternalDeclaration context.program
+        site.sourceDeclaration calleeContext site.calleeCode sourceModule
+        calleeFunction targetModule}
+      {sourceRuntime : RuntimeState}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {targetStore : Wasm.Store Host}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {witness : RefinementWitness}
+      {physicalArgs : List Wasm.Value}
+      {resultIndex : Nat}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      (related : ConcreteStructuredDirectCallReadyCoreRel program context
+        calleeContext sourceModule sourceFunction calleeFunction targetModule
+        site row externals labels entryRuntime entryStore entryWitness
+        functionResult callerExpectedResult facts remainingBytes sourceRuntime
+        continuation callerJoins sourceFrames targetStore callerLocals
+        callerRemainder targetRest targetFrames witness physicalArgs resultIndex
+        source target)
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
       (supported : ConcreteStructuredSupportedFrameStack program sourceModule
         targetModule hosts functionResult callerExpectedResult sourceFrames
         targetFrames)
-      (resources : ConcreteStructuredSuspendedResourceStack externals program
+      (agrees : supported.Agrees related.resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
         entryRuntime entryStore entryWitness functionResult callerExpectedResult
-        sourceFrames targetFrames),
-    outcome.OwnsResourceStack resources ∧ supported.Agrees resources
+        source target
+  | saturatedReady
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {callerEnv : Env}
+      {sourceRuntime : RuntimeState}
+      {calleeContext : Fir.Wasm.Context}
+      {calleeFunction : Fir.Wasm.Function}
+      {sourceFrames : List Frame}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {targetStore : Wasm.Store Host}
+      {callerLocals : Wasm.Locals}
+      {targetValue targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {witness : RefinementWitness}
+      {resultIndex : Nat}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      {site : SaturatedClosureCallSite context decl callerEnv}
+      {resolution : SaturatedClosureCallResolution context sourceRuntime site}
+      (row : ConcreteGeneratedInternalDeclaration context.program
+        resolution.target calleeContext resolution.calleeCode sourceModule
+        calleeFunction targetModule)
+      (sharedCapacity : ∀ parentRuntime,
+        setCell sourceRuntime resolution.location
+            { resolution.cell with rc := resolution.cell.rc - 1 } =
+              .ok parentRuntime →
+          ClosureRetainCapacity parentRuntime resolution.captures.toList)
+      (related : ConcreteStructuredSaturatedCallReadyCoreRel program context
+        sourceModule sourceFunction targetModule site externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        facts remainingBytes sourceRuntime continuation callerJoins sourceFrames
+        targetStore callerLocals targetValue targetRest targetFrames witness
+        resultIndex source target)
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+      (supported : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult callerExpectedResult sourceFrames
+        targetFrames)
+      (agrees : supported.Agrees related.resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        source target
+  | externalReady
+      {source : MachineState}
+      {target : StructuredWasmState Host}
+      {sourceRuntime nextRuntime : RuntimeState}
+      {sourceEnv : Env}
+      {sourceValue : Value}
+      {stepCost : Nat}
+      {decl : Lean.Compiler.LCNF.LetDecl .impure}
+      {site : PureExternalCallShape context externals sourceRuntime sourceEnv
+        decl nextRuntime sourceValue stepCost}
+      {operation : ExternalOperation}
+      {resolvedResultKind : AbiKind}
+      {targetImport : Wasm.ImportDecl}
+      {continuation : Lean.Compiler.LCNF.Code .impure}
+      {callerJoins : JoinEnv}
+      {sourceFrames : List Frame}
+      {targetStore : Wasm.Store Host}
+      {callerLocals : Wasm.Locals}
+      {callerRemainder : List Wasm.Value}
+      {targetRest : Wasm.Program}
+      {targetFrames : List StructuredWasmFrame}
+      {witness : RefinementWitness}
+      {physicalArgs : List Wasm.Value}
+      {callIndex resultIndex : Nat}
+      {facts : ReuseCapacityFacts}
+      {remainingBytes : Nat}
+      (related : ConcreteStructuredExternalCallReadyCoreRel program context
+        sourceModule sourceFunction targetModule hosts externals site operation
+        resolvedResultKind targetImport labels continuation callerJoins
+        sourceFrames entryRuntime entryStore entryWitness functionResult
+        callerExpectedResult facts remainingBytes targetStore callerLocals
+        callerRemainder targetRest targetFrames witness physicalArgs callIndex
+        resultIndex source target)
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+      (supported : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult callerExpectedResult sourceFrames
+        targetFrames)
+      (agrees : supported.Agrees related.resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        source target
+  | externalBind
+      {source target facts remainingBytes sourceRuntime callerEnv sourceValue
+        result continuation callerJoins sourceFrames targetStore callerLocals
+        callerRemainder targetRest targetFrames witness kind physical
+        resultIndex}
+      (related : ConcreteStructuredExternalBindCoreRel program context
+        sourceModule sourceFunction externals labels entryRuntime entryStore
+        entryWitness functionResult callerExpectedResult facts remainingBytes
+        sourceRuntime callerEnv sourceValue result continuation callerJoins
+        sourceFrames targetStore callerLocals callerRemainder targetRest
+        targetFrames witness kind physical resultIndex source target)
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+      (supported : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult callerExpectedResult sourceFrames
+        targetFrames)
+      (agrees : supported.Agrees related.resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        source target
+  | returned
+      {source target facts remainingBytes sourceRuntime sourceEnv sourceValue
+        targetStore targetLocals witness kind physical}
+      (yielded : ConcreteStructuredYieldFocus context sourceFunction
+        sourceRuntime sourceEnv sourceValue targetStore targetLocals witness kind
+        physical source target)
+      (compatible : ConcreteStructuredResultCompatible kind callerExpectedResult)
+      (resources : ConcreteStructuredResourceStack program context sourceModule
+        sourceFunction externals entryRuntime sourceRuntime entryStore
+        targetStore entryWitness witness facts remainingBytes sourceEnv
+        targetLocals functionResult callerExpectedResult source.frames
+        target.frames)
+      (contextCaches :
+        context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
+      (supported : ConcreteStructuredSupportedFrameStack program sourceModule
+        targetModule hosts functionResult callerExpectedResult source.frames
+        target.frames)
+      (agrees : supported.Agrees resources.suspended) :
+      ConcreteStructuredSupportedOutcome program context functionCode
+        sourceModule sourceFunction targetModule hosts spec externals labels
+        entryRuntime entryStore entryWitness functionResult callerExpectedResult
+        source target
 
 /-- Module-wide open successor relation for the pointwise simulation.
 
@@ -20428,15 +20549,40 @@ def ConcreteStructuredSupportedGlobalOutcome
       (entryStore : Wasm.Store Host)
       (entryWitness : RefinementWitness)
       (functionResult : AbiKind)
-      (callerExpectedResult : Option AbiKind)
-      (facts : ReuseCapacityFacts)
-      (remainingBytes : Nat)
-      (outcome : ConcreteStructuredCodeStepOutcome program context functionCode
-        sourceModule sourceFunction targetModule hosts spec externals labels
-        entryRuntime entryStore entryWitness functionResult callerExpectedResult
-        facts remainingBytes source target),
-    context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program ∧
-      outcome.Supported
+      (callerExpectedResult : Option AbiKind),
+    ConcreteStructuredSupportedOutcome program context functionCode sourceModule
+      sourceFunction targetModule hosts spec externals labels entryRuntime
+      entryStore entryWitness functionResult callerExpectedResult source target
+
+/-- Hide the active generated-function indices of a branch-exact supported
+control state. -/
+theorem ConcreteStructuredSupportedOutcome.toGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredSupportedOutcome program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      source target) :
+    ConcreteStructuredSupportedGlobalOutcome program sourceModule targetModule
+      hosts externals source target :=
+  ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
+    entryStore, entryWitness, functionResult, callerExpectedResult, related⟩
 
 /-- Lift one function-local pointwise successor into the module-wide relation.
 No proof data are changed; only the active-function indices become hidden. -/
@@ -20470,42 +20616,6 @@ theorem ConcreteStructuredCodeStepOutcome.toGlobal
   ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
     entryStore, entryWitness, functionResult, callerExpectedResult, facts,
     remainingBytes, related⟩
-
-/-- Lift an open outcome whose active cache identity and aligned suspended
-caller chain are known into the recursively stable module-wide relation. -/
-theorem ConcreteStructuredCodeStepOutcome.toSupportedGlobal
-    {program : Fir.LeanIR.ImpureProgram}
-    {context : Fir.Wasm.Context}
-    {functionCode : Lean.Compiler.LCNF.Code .impure}
-    {sourceModule : Fir.Wasm.Module}
-    {sourceFunction : Fir.Wasm.Function}
-    {targetModule : AdaptedModule}
-    {hosts : ResolvedHosts}
-    {spec : ConcreteSupportedFunction program context functionCode sourceModule
-      sourceFunction targetModule hosts}
-    {externals : ExternalImpl}
-    {labels : List Lean.FVarId}
-    {entryRuntime : RuntimeState}
-    {entryStore : Wasm.Store Host}
-    {entryWitness : RefinementWitness}
-    {functionResult : AbiKind}
-    {callerExpectedResult : Option AbiKind}
-    {facts : ReuseCapacityFacts}
-    {remainingBytes : Nat}
-    {source : MachineState}
-    {target : StructuredWasmState Host}
-    (related : ConcreteStructuredCodeStepOutcome program context functionCode
-      sourceModule sourceFunction targetModule hosts spec externals labels
-      entryRuntime entryStore entryWitness functionResult callerExpectedResult
-      facts remainingBytes source target)
-    (contextCaches :
-      context.cachedDeclarations = Fir.Wasm.cachedDeclarationNames program)
-    (supported : related.Supported) :
-    ConcreteStructuredSupportedGlobalOutcome program sourceModule targetModule
-      hosts externals source target :=
-  ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
-    entryStore, entryWitness, functionResult, callerExpectedResult, facts,
-    remainingBytes, related, contextCaches, supported⟩
 
 /-- Every open module-wide successor preserves the exact world/trace prefix.
 Observation is independent of whether control is ordinary code, a poised
@@ -20553,9 +20663,19 @@ theorem ConcreteStructuredSupportedGlobalOutcome.observes
       (concretePrefixObservation target.store) := by
   rcases related with
     ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
-      entryStore, entryWitness, functionResult, callerExpectedResult, facts,
-      remainingBytes, outcome, _contextCaches, _supported⟩
-  exact outcome.toGlobal.observes
+      entryStore, entryWitness, functionResult, callerExpectedResult, active⟩
+  cases active with
+  | code _contextCaches core _supported _agrees => exact core.observes
+  | directReady ready _contextCaches _supported _agrees =>
+      exact ready.observes
+  | saturatedReady _row _sharedCapacity ready _contextCaches _supported
+      _agrees => exact ready.observes
+  | externalReady ready _contextCaches _supported _agrees =>
+      exact ready.observes
+  | externalBind ready _contextCaches _supported _agrees =>
+      exact ready.observes
+  | returned yielded _compatible _resources _contextCaches _supported
+      _agrees => exact yielded.observes
 
 /-- A poised generated named call takes one source step and one target call
 step into the same module-wide relation, now existentially anchored at the
@@ -20726,22 +20846,15 @@ theorem ConcreteStructuredDirectCallReadyCoreRel.advance_supportedGlobal_of_step
   obtain ⟨supportedAfter, agreesAfter⟩ :=
     pushedAgrees.reindex entry.sourceFramesEq entry.targetFramesEq
       nextCore.resources.suspended
-  let nextOutcome :
-      ConcreteStructuredCodeStepOutcome program calleeContext site.calleeCode
+  let nextActive :
+      ConcreteStructuredSupportedOutcome program calleeContext site.calleeCode
         sourceModule calleeFunction targetModule hosts calleeSpec externals []
         sourceRuntime targetStore witness site.calleeResultKind
-        (some site.resultKind) [] remainingBytes sourceAfter targetAfter :=
-    .code rowAtProgram.contextCaches nextCore
-  have nextSupported : nextOutcome.Supported := by
-    have owns : nextOutcome.OwnsResourceStack
-        nextCore.resources.suspended := by
-      simpa [nextOutcome] using
-        (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-          (contextCaches := rowAtProgram.contextCaches) (related := nextCore))
-    exact ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-      nextCore.resources.suspended, owns, agreesAfter⟩
-  exact ⟨targetAfter, targetPath,
-    nextOutcome.toSupportedGlobal rowAtProgram.contextCaches nextSupported⟩
+        (some site.resultKind) sourceAfter targetAfter :=
+    .code rowAtProgram.contextCaches nextCore supportedAfter agreesAfter
+  exact ⟨targetAfter, targetPath, calleeContext, site.calleeCode,
+    calleeFunction, calleeSpec, [], sourceRuntime, targetStore, witness,
+    site.calleeResultKind, some site.resultKind, nextActive⟩
 
 /-- A poised exactly saturated closure call likewise enters its selected
 generated callee inside the unchanged module-wide relation.  The only dynamic
@@ -20930,24 +21043,17 @@ theorem ConcreteStructuredSaturatedCallReadyCoreRel.advance_supportedGlobal_of_s
   obtain ⟨supportedAfter, agreesAfter⟩ :=
     pushedAgrees.reindex entry.sourceFramesEq entry.targetFramesEq
       nextCore.resources.suspended
-  let nextOutcome :
-      ConcreteStructuredCodeStepOutcome program calleeContext
+  let nextActive :
+      ConcreteStructuredSupportedOutcome program calleeContext
         resolution.calleeCode sourceModule calleeFunction targetModule hosts
         calleeSpec externals [] callRuntime nextStore witness
-        resolution.targetResultKind (some site.resultKind) [] remainingBytes
-        sourceAfter targetAfter :=
-    .code rowAtProgram.contextCaches nextCore
-  have nextSupported : nextOutcome.Supported := by
-    have owns : nextOutcome.OwnsResourceStack
-        nextCore.resources.suspended := by
-      simpa [nextOutcome] using
-        (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-          (contextCaches := rowAtProgram.contextCaches) (related := nextCore))
-    exact ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-      nextCore.resources.suspended, owns, agreesAfter⟩
+        resolution.targetResultKind (some site.resultKind) sourceAfter
+        targetAfter :=
+    .code rowAtProgram.contextCaches nextCore supportedAfter agreesAfter
   refine ⟨3 * (matcherCount + 1) + argumentCount + 1, targetAfter,
-    targetPath, ?_,
-    nextOutcome.toSupportedGlobal rowAtProgram.contextCaches nextSupported⟩
+    targetPath, ?_, calleeContext, resolution.calleeCode, calleeFunction,
+    calleeSpec, [], callRuntime, nextStore, witness,
+    resolution.targetResultKind, some site.resultKind, nextActive⟩
   omega
 
 /-- Close one yielded generated callee against its exact supported/resource
@@ -21077,30 +21183,19 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
             (bind callerEnv result sourceValue) continuation targetStore
             resumedLocals targetRest witness sourceAfter targetAfter := by
         simpa only [programEq] using nextCore
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program callerContext callerCode
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        tailAgrees.reindex sourceFramesAfter targetFramesAfter
+          nextCoreAtProgram.resources.suspended
+      let nextActive :
+          ConcreteStructuredSupportedOutcome program callerContext callerCode
             sourceModule callerFunction targetModule hosts callerSpec externals
             labels callerEntryRuntime callerEntryStore callerEntryWitness
-            callerResult tailResult (eraseReuseCapacityFact facts result)
-            remainingBytes sourceAfter targetAfter :=
-        .code contextCaches nextCoreAtProgram
-      have nextSupported : nextOutcome.Supported := by
-        have owns : nextOutcome.OwnsResourceStack
-            nextCoreAtProgram.resources.suspended := by
-          simpa [nextOutcome] using
-            (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-              (contextCaches := contextCaches)
-              (related := nextCoreAtProgram))
-        obtain ⟨supportedAfter, agreesAfter⟩ :=
-          tailAgrees.reindex sourceFramesAfter targetFramesAfter
-            nextCoreAtProgram.resources.suspended
-        exact ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-          nextCoreAtProgram.resources.suspended, owns, agreesAfter⟩
+            callerResult tailResult sourceAfter targetAfter :=
+        .code contextCaches nextCoreAtProgram supportedAfter agreesAfter
       exact ⟨2, targetAfter, targetPath, by omega,
         ⟨callerContext, callerCode, callerFunction, callerSpec, labels,
           callerEntryRuntime, callerEntryStore, callerEntryWitness,
-          callerResult, tailResult, eraseReuseCapacityFact facts result,
-          remainingBytes, nextOutcome, contextCaches, nextSupported⟩⟩
+          callerResult, tailResult, nextActive⟩⟩
   | @saturated activeEntryRuntime callerEntryRuntime activeEntryStore
       callerEntryStore activeEntryWitness callerEntryWitness callerContext
       callerCode callerFunction labels facts callerBytes callerEnv callerLocals
@@ -21176,30 +21271,19 @@ theorem ConcreteStructuredYieldFocus.advance_pop_supportedGlobal_of_step
             (bind callerEnv result sourceValue) continuation targetStore
             resumedLocals targetRest witness sourceAfter targetAfter := by
         simpa only [programEq] using nextCore
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program callerContext callerCode
+      obtain ⟨supportedAfter, agreesAfter⟩ :=
+        tailAgrees.reindex sourceFramesAfter targetFramesAfter
+          nextCoreAtProgram.resources.suspended
+      let nextActive :
+          ConcreteStructuredSupportedOutcome program callerContext callerCode
             sourceModule callerFunction targetModule hosts callerSpec externals
             labels callerEntryRuntime callerEntryStore callerEntryWitness
-            callerResult tailResult (eraseReuseCapacityFact facts result)
-            remainingBytes sourceAfter targetAfter :=
-        .code contextCaches nextCoreAtProgram
-      have nextSupported : nextOutcome.Supported := by
-        have owns : nextOutcome.OwnsResourceStack
-            nextCoreAtProgram.resources.suspended := by
-          simpa [nextOutcome] using
-            (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-              (contextCaches := contextCaches)
-              (related := nextCoreAtProgram))
-        obtain ⟨supportedAfter, agreesAfter⟩ :=
-          tailAgrees.reindex sourceFramesAfter targetFramesAfter
-            nextCoreAtProgram.resources.suspended
-        exact ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-          nextCoreAtProgram.resources.suspended, owns, agreesAfter⟩
+            callerResult tailResult sourceAfter targetAfter :=
+        .code contextCaches nextCoreAtProgram supportedAfter agreesAfter
       exact ⟨matcherCount + 5, targetAfter, targetPath, by omega,
         ⟨callerContext, callerCode, callerFunction, callerSpec, labels,
           callerEntryRuntime, callerEntryStore, callerEntryWitness,
-          callerResult, tailResult, eraseReuseCapacityFact facts result,
-          remainingBytes, nextOutcome, contextCaches, nextSupported⟩⟩
+          callerResult, tailResult, nextActive⟩⟩
 
 /-- A compiler-produced root focus and its ordinary resource invariant start
 the pointwise relation.  The empty source/target stacks are proved at the
@@ -22154,75 +22238,46 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
       obtain ⟨targetAfter, sourceValue, actualKind, physical, targetPath,
           yielded, compatible, resources, sourceFramesEq, targetFramesEq⟩ :=
         related.advance_return spec sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .returned yielded compatible resources
-      have owns : nextOutcome.OwnsResourceStack resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.returned
-            (yielded := yielded) (compatible := compatible)
-            (resources := resources))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq targetFramesEq resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-          resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .returned yielded compatible resources related.contextCaches
+          supportedAfter agreesAfter
       exact ⟨2, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        by omega⟩
+        nextActive.toGlobal, by omega⟩
   | directLet directSupported =>
       obtain ⟨targetAfter, nextRuntime, sourceValue, nextStore, resumedLocals,
           nextWitness, nextFacts, targetRest, targetCount, targetPath,
           targetPositive, sourceFramesEq, targetFramesEq, nextCore⟩ :=
         related.advance_directLet_of_step spec directSupported rfl sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .code related.contextCaches nextCore
-      have owns : nextOutcome.OwnsResourceStack
-          nextCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := related.contextCaches) (related := nextCore))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq targetFramesEq
           nextCore.resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-          nextCore.resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨targetCount, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        by omega⟩
+        nextActive.toGlobal, by omega⟩
   | pureExternal externalSupported =>
       obtain ⟨site, physicalArgs, operation, resolvedResultKind,
           targetImport, callIndex, resultIndex, targetArguments, targetRest,
           targetAfter, targetPath, ready, rank⟩ :=
         related.advance_pureExternal_stage_of_step externalSupported rfl
           sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .externalReady ready
-      have owns : nextOutcome.OwnsResourceStack
-          ready.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.externalReady
-            (related := ready))
       have nextAgrees : supported.Agrees ready.resources.suspended := by
         simpa using agrees
-      have nextSupported : nextOutcome.Supported :=
-        ⟨source.frames, target.frames, supported, ready.resources.suspended,
-          owns, nextAgrees⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .externalReady ready related.contextCaches supported nextAgrees
       exact ⟨targetArguments.length, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
   | directCall site =>
       obtain ⟨calleeContext, calleeFunction, _contexts,
           ⟨generatedRow⟩⟩ := related.directCallRow site
@@ -22239,25 +22294,15 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
         rw [sourceStep] at computedStep
         exact ExecResult.next.inj computedStep
       subst computedAfter
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .directReady site row ready
-      have owns : nextOutcome.OwnsResourceStack
-          ready.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.directReady
-            (site := site) (row := row) (related := ready))
       have nextAgrees : supported.Agrees ready.resources.suspended := by
         simpa using agrees
-      have nextSupported : nextOutcome.Supported :=
-        ⟨source.frames, target.frames, supported, ready.resources.suspended,
-          owns, nextAgrees⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .directReady ready related.contextCaches supported nextAgrees
       exact ⟨targetArguments.length, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
   | saturatedCall site resolution sharedCapacity =>
       obtain ⟨calleeContext, calleeFunction, _contexts,
           ⟨generatedRow⟩⟩ := related.saturatedCallRow resolution
@@ -22274,92 +22319,52 @@ theorem ConcreteStructuredCodePointwiseRel.advance_supportedGlobal
         rw [sourceStep] at computedStep
         exact ExecResult.next.inj computedStep
       subst computedAfter
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter target :=
-        .saturatedReady site resolution sharedCapacity row ready
-      have owns : nextOutcome.OwnsResourceStack
-          ready.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.saturatedReady
-            (site := site) (resolution := resolution)
-            (sharedCapacity := sharedCapacity) (row := row) (related := ready))
       have nextAgrees : supported.Agrees ready.resources.suspended := by
         simpa using agrees
-      have nextSupported : nextOutcome.Supported :=
-        ⟨source.frames, target.frames, supported, ready.resources.suspended,
-          owns, nextAgrees⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter target :=
+        .saturatedReady row sharedCapacity ready related.contextCaches supported
+          nextAgrees
       exact ⟨0, target, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
   | defaultOnlyCase caseSupported =>
       obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
         related.advance_defaultOnlyCase_of_step caseSupported sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter target :=
-        .code related.contextCaches nextCore
-      have owns : nextOutcome.OwnsResourceStack
-          nextCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := related.contextCaches) (related := nextCore))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, target.frames, supportedAfter,
-          nextCore.resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter target :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
   | incPersistent =>
       obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
         related.advance_incPersistent_of_step sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter target :=
-        .code related.contextCaches nextCore
-      have owns : nextOutcome.OwnsResourceStack
-          nextCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := related.contextCaches) (related := nextCore))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, target.frames, supportedAfter,
-          nextCore.resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter target :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
   | decPersistent =>
       obtain ⟨targetPath, sourceFramesEq, nextCore, rank⟩ :=
         related.advance_decPersistent_of_step sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter target :=
-        .code related.contextCaches nextCore
-      have owns : nextOutcome.OwnsResourceStack
-          nextCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := related.contextCaches) (related := nextCore))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq (by rfl) nextCore.resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, target.frames, supportedAfter,
-          nextCore.resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter target :=
+        .code related.contextCaches nextCore supportedAfter agreesAfter
       exact ⟨0, target, targetPath,
-        nextOutcome.toSupportedGlobal related.contextCaches nextSupported,
-        fun _ => rank⟩
+        nextActive.toGlobal, fun _ => rank⟩
 
 /-- Strong, locally runnable control states for the compiler simulation.
 
@@ -22392,8 +22397,6 @@ inductive ConcreteStructuredRunnableOutcome
   | code
       {source : MachineState}
       {target : StructuredWasmState Host}
-      {nextFacts : ReuseCapacityFacts}
-      {nextRemainingBytes : Nat}
       {sourceRuntime : RuntimeState}
       {sourceEnv : Env}
       {sourceCode : Lean.Compiler.LCNF.Code .impure}
@@ -22405,8 +22408,8 @@ inductive ConcreteStructuredRunnableOutcome
       (related : ConcreteStructuredCodePointwiseRel program context functionCode
         sourceModule sourceFunction targetModule hosts spec externals labels
         entryRuntime entryStore entryWitness functionResult callerExpectedResult
-        nextFacts requiredBytes nextRemainingBytes sourceRuntime sourceEnv
-        sourceCode targetStore targetLocals targetCode witness source target)
+        facts requiredBytes remainingBytes sourceRuntime sourceEnv sourceCode
+        targetStore targetLocals targetCode witness source target)
       (supported : ConcreteStructuredSupportedFrameStack program sourceModule
         targetModule hosts functionResult callerExpectedResult source.frames
         target.frames)
@@ -22664,47 +22667,30 @@ theorem ConcreteStructuredRunnableOutcome.advance_supportedGlobal
       obtain ⟨nextStore, nextWitness, physicalResult, targetAfter,
           targetPath, bindCore⟩ :=
         ready.advance_of_step sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .externalBind bindCore
-      have owns : nextOutcome.OwnsResourceStack
-          bindCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.externalBind
-            (related := bindCore))
       have nextAgrees : supported.Agrees bindCore.resources.suspended := by
         simpa using agrees
-      have nextSupported : nextOutcome.Supported :=
-        ⟨_, _, supported, bindCore.resources.suspended, owns, nextAgrees⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .externalBind bindCore contextCaches supported nextAgrees
       exact ⟨1, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal contextCaches nextSupported, by omega⟩
+        nextActive.toGlobal, by omega⟩
   | externalBind bindCore contextCaches supported agrees =>
       obtain ⟨targetAfter, resumedLocals, targetPath, nextCore,
           sourceFramesEq, targetFramesEq⟩ :=
         bindCore.advance_of_step (targetModule := targetModule)
           (hosts := hosts) sourceStep
-      let nextOutcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes sourceAfter targetAfter :=
-        .code contextCaches nextCore
-      have owns : nextOutcome.OwnsResourceStack
-          nextCore.resources.suspended := by
-        simpa [nextOutcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := contextCaches) (related := nextCore))
       obtain ⟨supportedAfter, agreesAfter⟩ :=
         agrees.reindex sourceFramesEq targetFramesEq
           nextCore.resources.suspended
-      have nextSupported : nextOutcome.Supported :=
-        ⟨sourceAfter.frames, targetAfter.frames, supportedAfter,
-          nextCore.resources.suspended, owns, agreesAfter⟩
+      let nextActive : ConcreteStructuredSupportedOutcome program context
+          functionCode sourceModule sourceFunction targetModule hosts spec
+          externals labels entryRuntime entryStore entryWitness functionResult
+          callerExpectedResult sourceAfter targetAfter :=
+        .code contextCaches nextCore supportedAfter agreesAfter
       exact ⟨1, targetAfter, targetPath,
-        nextOutcome.toSupportedGlobal contextCaches nextSupported, by omega⟩
+        nextActive.toGlobal, by omega⟩
   | returned yielded compatible resources contextCaches supported agrees =>
       obtain ⟨targetCount, targetAfter, targetPath, targetPositive,
           nextGlobal⟩ :=
@@ -22741,90 +22727,22 @@ theorem ConcreteStructuredRunnableOutcome.toSupportedGlobal
       facts remainingBytes source target) :
     ConcreteStructuredSupportedGlobalOutcome program sourceModule targetModule
       hosts externals source target := by
+  apply ConcreteStructuredSupportedOutcome.toGlobal
+    (functionCode := functionCode) (spec := spec)
   cases related with
   | code pointwise supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .code pointwise.contextCaches pointwise.core
-      have owns : outcome.OwnsResourceStack
-          pointwise.resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.code
-            (contextCaches := pointwise.contextCaches)
-            (related := pointwise.core))
-      exact outcome.toSupportedGlobal pointwise.contextCaches
-        ⟨source.frames, target.frames, supported,
-          pointwise.resources.suspended, owns, agrees⟩
+      exact .code pointwise.contextCaches pointwise.core supported agrees
   | directReady ready contextCaches supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .directReady _ _ ready
-      have owns : outcome.OwnsResourceStack ready.resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.directReady
-            (related := ready))
-      exact outcome.toSupportedGlobal contextCaches
-        ⟨_, _, supported, ready.resources.suspended, owns, agrees⟩
+      exact .directReady ready contextCaches supported agrees
   | saturatedReady row sharedCapacity ready contextCaches supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .saturatedReady _ _ sharedCapacity row ready
-      have owns : outcome.OwnsResourceStack ready.resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.saturatedReady
-            (sharedCapacity := sharedCapacity) (row := row) (related := ready))
-      exact outcome.toSupportedGlobal contextCaches
-        ⟨_, _, supported, ready.resources.suspended, owns, agrees⟩
+      exact .saturatedReady row sharedCapacity ready contextCaches supported
+        agrees
   | externalReady ready contextCaches supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .externalReady ready
-      have owns : outcome.OwnsResourceStack ready.resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.externalReady
-            (related := ready))
-      exact outcome.toSupportedGlobal contextCaches
-        ⟨_, _, supported, ready.resources.suspended, owns, agrees⟩
+      exact .externalReady ready contextCaches supported agrees
   | externalBind bindCore contextCaches supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .externalBind bindCore
-      have owns : outcome.OwnsResourceStack bindCore.resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.externalBind
-            (related := bindCore))
-      exact outcome.toSupportedGlobal contextCaches
-        ⟨_, _, supported, bindCore.resources.suspended, owns, agrees⟩
+      exact .externalBind bindCore contextCaches supported agrees
   | returned yielded compatible resources contextCaches supported agrees =>
-      let outcome :
-          ConcreteStructuredCodeStepOutcome program context functionCode
-            sourceModule sourceFunction targetModule hosts spec externals labels
-            entryRuntime entryStore entryWitness functionResult
-            callerExpectedResult facts remainingBytes source target :=
-        .returned yielded compatible resources
-      have owns : outcome.OwnsResourceStack resources.suspended := by
-        simpa [outcome] using
-          (ConcreteStructuredCodeStepOutcome.OwnsResourceStack.returned
-            (yielded := yielded) (compatible := compatible)
-            (resources := resources))
-      exact outcome.toSupportedGlobal contextCaches
-        ⟨source.frames, target.frames, supported, resources.suspended, owns,
-          agrees⟩
+      exact .returned yielded compatible resources contextCaches supported agrees
 
 /-- Module-wide runnable relation for the current source node.
 
@@ -22858,6 +22776,39 @@ def ConcreteStructuredRunnableGlobalOutcome
       sourceFunction targetModule hosts spec externals labels entryRuntime
       entryStore entryWitness functionResult callerExpectedResult facts
       remainingBytes source target
+
+/-- Hide the active generated-function and resource indices of one runnable
+control state. -/
+theorem ConcreteStructuredRunnableOutcome.toRunnableGlobal
+    {program : Fir.LeanIR.ImpureProgram}
+    {context : Fir.Wasm.Context}
+    {functionCode : Lean.Compiler.LCNF.Code .impure}
+    {sourceModule : Fir.Wasm.Module}
+    {sourceFunction : Fir.Wasm.Function}
+    {targetModule : AdaptedModule}
+    {hosts : ResolvedHosts}
+    {spec : ConcreteSupportedFunction program context functionCode sourceModule
+      sourceFunction targetModule hosts}
+    {externals : ExternalImpl}
+    {labels : List Lean.FVarId}
+    {entryRuntime : RuntimeState}
+    {entryStore : Wasm.Store Host}
+    {entryWitness : RefinementWitness}
+    {functionResult : AbiKind}
+    {callerExpectedResult : Option AbiKind}
+    {facts : ReuseCapacityFacts}
+    {remainingBytes : Nat}
+    {source : MachineState}
+    {target : StructuredWasmState Host}
+    (related : ConcreteStructuredRunnableOutcome program context functionCode
+      sourceModule sourceFunction targetModule hosts spec externals labels
+      entryRuntime entryStore entryWitness functionResult callerExpectedResult
+      facts remainingBytes source target) :
+    ConcreteStructuredRunnableGlobalOutcome program sourceModule targetModule
+      hosts externals source target :=
+  ⟨context, functionCode, sourceFunction, spec, labels, entryRuntime,
+    entryStore, entryWitness, functionResult, callerExpectedResult, facts,
+    remainingBytes, related⟩
 
 /-- The runnable relation is a current-node strengthening of the recursively
 stable supported relation. -/

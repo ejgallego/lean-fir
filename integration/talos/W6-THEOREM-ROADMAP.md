@@ -1538,16 +1538,17 @@ acceptance tests pass.
      contain no whole external execution or target certificate.
      Admission for a newly reached code node is attached after that dynamic
      successor is known, so neither relation contains future execution or
-     termination evidence. `ConcreteStructuredCurrentStepClassifier` now
-     isolates the remaining universal source-local coverage theorem. Its
-     `toGeneratedTraceSimulation` construction uses the admission-free strong
-     relation as the stable simulation relation and reconstructs runnable
-     evidence only when the current source step is supplied. The corresponding
-     `toFiniteTraceCorrect` theorem already packages that classifier plus an
-     initial strong root relation as `ConcreteFiniteTraceCorrect`. The next
-     slice derives the classifier and root relation from compiler coverage;
-     later runtime families widen admission without changing this theorem
-     shape.
+     termination evidence. `ConcreteStructuredCompilerCurrentStepCoverage`
+     now isolates the only non-structural source-local law: an ordinary
+     compiler-related code node that actually steps has an admission whose
+     exact allocation cost fits its retained budget. Its
+     `toCurrentStepClassifier` theorem derives the global classifier by
+     structural inversion; the five staged call/bind/return shapes require no
+     extra coverage. The coverage object's `toGeneratedTraceSimulation` and
+     `toFiniteTraceCorrect` wrappers no longer expose that intermediate
+     classifier to callers. The next slice proves the coverage law and root
+     relation from the compiler-produced export boundary; later runtime
+     families widen admission without changing this theorem shape.
      Heap-valued cache misses and target-only loop unwinding remain later
      widenings.
    - **W6.7f — public certificate-free finite-trace theorem.** From a
@@ -1565,9 +1566,10 @@ acceptance tests pass.
      supported target transition surface is closed enough for a useful weak
      bisimulation.
 
-   Thus the reusable W6.7e-to-W6.7f packaging bridge is complete. The remaining
-   proof-bearing construction is the compiler-derived current-step classifier
-   and canonical root relation; W6.7g is principally consequences. Operation
+   Thus the reusable W6.7e-to-W6.7f packaging bridge and the structural
+   coverage-to-classifier derivation are complete. The remaining proof-bearing
+   construction is the production proof of the ordinary-code coverage law and
+   the canonical root relation; W6.7g is principally consequences. Operation
    coverage remains an explicit admission widening rather than a premise added
    to the public caller.
 8. Let W7 generation proceed independently against the current concrete
