@@ -69,7 +69,7 @@ node run-resident-platform.mjs _build/resident-platform.wasm
 lake exe fir-wasm-artifact resident-string \
   _build/resident-string.wasm
 node run-resident-string.mjs _build/resident-string.wasm \
-  --require-usize-repr
+  --require-usize-repr --require-of-list
 lake exe fir-wasm-artifact resident-fallbacks \
   _build/resident-fallbacks.wasm
 node run-resident-fallbacks.mjs _build/resident-fallbacks.wasm

@@ -1,6 +1,8 @@
 import Fir.Wasm.Emit.ResidentLiteral
 import Fir.Wasm.Emit.ResidentNumeric
+import Fir.Wasm.Emit.ResidentReferenceCount
 import Fir.Wasm.Emit.ResidentRelease
+import Fir.Wasm.Emit.ResidentScalarBox
 
 namespace Fir.Wasm.Emit.ResidentString
 
@@ -58,11 +60,14 @@ private def byte1Param : FVarId := ⟨`byte1⟩
 private def byte2Param : FVarId := ⟨`byte2⟩
 private def byte3Param : FVarId := ⟨`byte3⟩
 private def usizeParam : FVarId := ⟨`usize⟩
+private def listParam : FVarId := ⟨`list⟩
 
 private def copyBytesLoop : FVarId := ⟨`copyBytesLoop⟩
 private def countLeadingLoop : FVarId := ⟨`countLeadingLoop⟩
 private def fillCodePointLoop : FVarId := ⟨`fillCodePointLoop⟩
 private def findCodePointLoop : FVarId := ⟨`findCodePointLoop⟩
+private def listSizeLoop : FVarId := ⟨`stringOfListSizeLoop⟩
+private def listEncodeLoop : FVarId := ⟨`stringOfListEncodeLoop⟩
 
 private def addressLocal : FVarId := ⟨`address⟩
 private def inputAddressLocal : FVarId := ⟨`inputAddress⟩
@@ -105,6 +110,11 @@ private def decimalLengthLocal : FVarId := ⟨`decimalLength⟩
 private def decimalDigitLocal : FVarId := ⟨`decimalDigit⟩
 private def decimalStartedLocal : FVarId := ⟨`decimalStarted⟩
 private def decimalBorrowLocal : FVarId := ⟨`decimalBorrow⟩
+private def listLocal : FVarId := ⟨`listValue⟩
+private def tailLocal : FVarId := ⟨`tailValue⟩
+private def charLocal : FVarId := ⟨`charValue⟩
+private def codePointLocal : FVarId := ⟨`codePointValue⟩
+private def cursorLocal : FVarId := ⟨`cursor⟩
 
 def validateName : Name := `fir_string_validate
 def byteLengthName : Name := `fir_string_byte_length
@@ -161,6 +171,7 @@ def availableExternalDeclarations : Array Name :=
     `String.push,
     `String.Pos.next,
     `String.decodeChar,
+    `String.ofList,
     `USize.repr]
 
 def externalName (declaration : Name) : Name :=
@@ -202,6 +213,27 @@ private def requireHeapAddress (object : FVarId) : List Instruction :=
     .localGet object,
     .i32Const .uint32 (u32 (target.heapAlignment - 1)),
     .i32And]
+
+private def listConsAllocationBytes : Nat :=
+  headerBytes + 2 * target.semanticSlotBytes
+
+private def requireListCons (list : FVarId) : List Instruction :=
+  requireHeapAddress list ++
+  (load32 list headerFlagsOffset ++ equalsConst .uint32 liveFlag ++
+    [.ifElse
+      (trapWhenTrue (load32 list headerRefCountOffset ++
+        equalsConst .uint32 0))
+      (trapUnlessTrue (load32 list headerFlagsOffset ++
+          equalsConst .uint32 (persistentFlag + liveFlag)) ++
+        trapWhenTrue (load32 list headerRefCountOffset))]) ++
+  trapUnlessTrue (load32 list headerKindOffset ++
+    equalsConst .uint32 ObjectKind.constructor.code) ++
+  trapUnlessTrue (load32 list headerAllocationBytesOffset ++
+    equalsConst .uint32 (u32 listConsAllocationBytes)) ++
+  trapUnlessTrue (load32 list headerAux0Offset ++ equalsConst .uint32 1) ++
+  trapUnlessTrue (load32 list headerAux1Offset ++ equalsConst .uint32 2) ++
+  trapWhenTrue (load32 list headerAux2Offset) ++
+  trapWhenTrue (load32 list headerAux3Offset)
 
 private def retypeRaw (result : AbiKind) (resultLocal : FVarId) :
     List Instruction := [
@@ -1575,6 +1607,123 @@ def usizeReprFunction : Function := {
     .call (.declaration retypeObjectName),
     .ret] }
 
+private def receiveListCodePoint : List Instruction := [
+  .localGet listLocal,
+  .i32Load .tobject (u32 headerBytes),
+  .localSet charLocal,
+  .localGet charLocal,
+  .call (.declaration ResidentScalarBox.unboxUInt32Name),
+  .localSet codePointLocal,
+  .localGet codePointLocal,
+  .call (.declaration encodeCodePointName),
+  .localSet byte3Local,
+  .localSet byte2Local,
+  .localSet byte1Local,
+  .localSet byte0Local,
+  .localSet widthLocal]
+
+private def advanceList : List Instruction := [
+  .localGet listLocal,
+  .i32Load .tobject (u32 (headerBytes + target.semanticSlotBytes)),
+  .localSet tailLocal,
+  .localGet tailLocal,
+  .call (.declaration ResidentReferenceCount.incrementOnceName),
+  .localGet listLocal,
+  .i32Const .uint32 1,
+  .call (.declaration ResidentRelease.decrementOnceName),
+  .localGet tailLocal,
+  .localSet listLocal]
+
+private def measureListChars : List Instruction := [
+  .localGet listParam,
+  .localSet listLocal,
+  .i32Const .uint32 0,
+  .localSet totalLengthLocal,
+  .loop listSizeLoop [
+    .localGet listLocal,
+    .i32Const .uint32 1,
+    .i32And,
+    .ifElse
+      (trapUnlessTrue ([.localGet listLocal] ++ equalsConst .tobject 1))
+      (requireListCons listLocal ++ receiveListCodePoint ++ [
+        .localGet totalLengthLocal,
+        .localGet widthLocal,
+        .i32Add,
+        .localSet extraLengthLocal] ++
+        trapWhenTrue [
+          .localGet extraLengthLocal,
+          .localGet totalLengthLocal,
+          .i32LtU] ++ [
+        .localGet extraLengthLocal,
+        .localSet totalLengthLocal,
+        .localGet listLocal,
+        .i32Load .tobject (u32 (headerBytes + target.semanticSlotBytes)),
+        .localSet listLocal,
+        .br listSizeLoop])]]
+
+private def storeListEncodedByte (byte : FVarId) (offset : UInt32) :
+    List Instruction := [
+  .localGet cursorLocal,
+  .localGet byte,
+  .i32Store8 .uint32 offset]
+
+private def storeListCodePoint : List Instruction :=
+  storeListEncodedByte byte0Local 0 ++ [
+    .i32Const .uint32 1,
+    .localGet widthLocal,
+    .i32LtU,
+    .ifElse (storeListEncodedByte byte1Local 1) [],
+    .i32Const .uint32 2,
+    .localGet widthLocal,
+    .i32LtU,
+    .ifElse (storeListEncodedByte byte2Local 2) [],
+    .i32Const .uint32 3,
+    .localGet widthLocal,
+    .i32LtU,
+    .ifElse (storeListEncodedByte byte3Local 3) [],
+    .localGet cursorLocal,
+    .localGet widthLocal,
+    .i32Add,
+    .localSet cursorLocal]
+
+private def encodeAndConsumeListChars : List Instruction := [
+  .localGet listParam,
+  .localSet listLocal,
+  .localGet addressLocal,
+  .i32Const .uint32 (u32 headerBytes),
+  .i32Add,
+  .localSet cursorLocal,
+  .loop listEncodeLoop [
+    .localGet listLocal,
+    .i32Const .uint32 1,
+    .i32And,
+    .ifElse
+      (trapUnlessTrue ([.localGet listLocal] ++ equalsConst .tobject 1))
+      (requireListCons listLocal ++ receiveListCodePoint ++ advanceList ++
+        storeListCodePoint ++ [.br listEncodeLoop])]]
+
+/-- Upstream `lean_string_mk`: consume a resident `List Char`, compute its
+UTF-8 extent without an intermediate ByteArray, then encode into one exactly
+sized resident String allocation. -/
+def ofListFunction : Function := {
+  name := externalName `String.ofList
+  params := #[(listParam, .tobject)]
+  results := #[.object]
+  locals := #[(listLocal, .tobject), (tailLocal, .tobject),
+    (charLocal, .tobject), (codePointLocal, .uint32),
+    (widthLocal, .uint32), (byte0Local, .uint32),
+    (byte1Local, .uint32), (byte2Local, .uint32),
+    (byte3Local, .uint32), (totalLengthLocal, .uint32),
+    (extraLengthLocal, .uint32), (addressLocal, .uint32),
+    (cursorLocal, .uint32)]
+  body := measureListChars ++ [
+    .localGet totalLengthLocal,
+    .call (.declaration allocateName),
+    .localSet addressLocal] ++ encodeAndConsumeListChars ++ [
+    .localGet addressLocal,
+    .call (.declaration retypeObjectName),
+    .ret] }
+
 def externalFunctions : Array Function := #[
   pushnFunction,
   appendFunction,
@@ -1588,6 +1737,7 @@ def externalFunctions : Array Function := #[
   publicPushFunction,
   positionNextFunction,
   decodeCharFunction,
+  ofListFunction,
   usizeReprFunction]
 
 def internalFunctions : Array Function := #[
@@ -1659,6 +1809,8 @@ private def expectedSignature? (declaration : Name) : Option Signature :=
     some {
       params := #[.object, .tobject, .erased]
       results := #[.uint32] }
+  else if declaration == `String.ofList then
+    some { params := #[.tobject], results := #[.object] }
   else if declaration == `USize.repr then
     some { params := #[.usize], results := #[.object] }
   else
@@ -1675,11 +1827,32 @@ private def internalizeSelected (module : Module) (declarations : Array Name)
     throw .missingAllocator
   unless module.memory == some ResidentRuntime.residentMemory do
     throw .incompatibleMemory
+  let module ←
+    if declarations.contains `String.ofList &&
+        !module.functions.any
+          (·.name == ResidentReferenceCount.incrementOnceName) then
+      ResidentReferenceCount.internalizeIncrements module validate
+        |>.mapError fun _ =>
+          .missingOwnershipHelper ResidentReferenceCount.incrementOnceName
+    else pure module
+  let module ←
+    if declarations.contains `String.ofList &&
+        !module.functions.any (·.name == ResidentScalarBox.unboxUInt32Name) then
+      ResidentScalarBox.internalizeOperations module #[.unbox .uint32] validate
+        |>.mapError fun _ =>
+          .missingOwnershipHelper ResidentScalarBox.unboxUInt32Name
+    else pure module
   for name in ResidentNumeric.helperNames do
     unless module.functions.any (·.name == name) do
       throw (.missingNumericHelper name)
   unless module.functions.any (·.name == ResidentRelease.decrementOnceName) do
     throw (.missingOwnershipHelper ResidentRelease.decrementOnceName)
+  if declarations.contains `String.ofList then
+    unless module.functions.any
+        (·.name == ResidentReferenceCount.incrementOnceName) do
+      throw (.missingOwnershipHelper ResidentReferenceCount.incrementOnceName)
+    unless module.functions.any (·.name == ResidentScalarBox.unboxUInt32Name) do
+      throw (.missingOwnershipHelper ResidentScalarBox.unboxUInt32Name)
   let selectedExternalHelperNames := declarations.map externalName
   let selectedImplementationHelperNames :=
     let names := selectedExternalHelperNames
@@ -1778,6 +1951,8 @@ private def externalTypes? (declaration : Name) : Option ExternalTypes :=
     some {
       params := #[object, tobject, LCNF.ImpureType.erased]
       result := uint32 }
+  else if declaration == `String.ofList then
+    some { params := #[tobject], result := object }
   else if declaration == `USize.repr then
     some { params := #[LCNF.ImpureType.usize], result := object }
   else

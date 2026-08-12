@@ -36,6 +36,27 @@ function naturalInput(host, value) {
   return result;
 }
 
+function charListInput(host, value) {
+  synchronize(host);
+  let list = host.encodeImmediate(0n);
+  const nodes = [];
+  const codePoints = Array.from(value, (character) => character.codePointAt(0));
+  for (let index = codePoints.length - 1; index >= 0; index -= 1) {
+    const node = host.allocate(1, 16, {
+      aux0: 1,
+      aux1: 2,
+      aux2: 0,
+      aux3: 0,
+    });
+    host.writeWordSlot(node + 32, host.encodeTagged(BigInt(codePoints[index])));
+    host.writeWordSlot(node + 40, list);
+    list = node;
+    nodes.push(node);
+  }
+  synchronize(host);
+  return { list: list | 0, nodes };
+}
+
 function stringValue(host, physical) {
   synchronize(host);
   return host.readString(physical >>> 0);
@@ -64,6 +85,7 @@ export async function checkResidentString({
   bytes,
   manifest,
   requireUSizeRepr = false,
+  requireOfList = false,
 }) {
   const host = new ConcreteHost(
     manifest.imports,
@@ -93,10 +115,15 @@ export async function checkResidentString({
   const publicPush = optionalExport(instance, "fir_ext_String_push");
   const positionNext = optionalExport(instance, "fir_ext_String_Pos_next");
   const decodeChar = optionalExport(instance, "fir_ext_String_decodeChar");
+  const ofList = optionalExport(instance, "fir_ext_String_ofList");
   const usizeRepr = optionalExport(instance, "fir_ext_USize_repr");
   if (requireUSizeRepr) {
     assert.equal(typeof usizeRepr, "function",
       "standalone resident String artifact must export USize.repr");
+  }
+  if (requireOfList) {
+    assert.equal(typeof ofList, "function",
+      "standalone resident String artifact must export String.ofList");
   }
 
   const zeroPushSource = stringInput(host, "unique");
@@ -272,6 +299,28 @@ export async function checkResidentString({
       assert.equal(stringValue(host, usizeRepr(value)), value.toString(),
         `USize.repr(${value})`);
     }
+  }
+  if (ofList !== undefined) {
+    const emptyList = charListInput(host, "");
+    assert.equal(stringValue(host, ofList(emptyList.list)), "",
+      "String.ofList empty payload");
+
+    const unicodeList = charListInput(host, "Aλ💩𐍈");
+    const unicodeResult = ofList(unicodeList.list);
+    assert.equal(stringValue(host, unicodeResult), "Aλ💩𐍈",
+      "String.ofList must preserve Unicode scalars");
+    for (const node of unicodeList.nodes) {
+      assert.equal(host.readHeader(node, false).live, false,
+        "String.ofList must consume a unique List spine");
+    }
+
+    const sharedList = charListInput(host, "shared");
+    const sharedHead = sharedList.list >>> 0;
+    host.writeHeader(sharedHead, { ...host.readHeader(sharedHead), rc: 2 });
+    assert.equal(stringValue(host, ofList(sharedList.list)), "shared",
+      "String.ofList shared-spine payload");
+    assert.equal(host.readHeader(sharedHead).rc, 1,
+      "String.ofList must consume exactly one shared List reference");
   }
 
   expectTrap(() =>
