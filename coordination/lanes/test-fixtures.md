@@ -5,17 +5,17 @@ lane: test-fixtures
 owner: test-fixtures
 branch: validation/closure-ownership-fixtures
 worktree: .worktrees/validation-closure-ownership-fixtures
-state: released
-base: f996628c736546c85a87795fc6d95c694baf0a48 on main
-functional-head: 4a17f43beb5e170d12d9552692f52b15c315e5c7
-contract-base: f996628c736546c85a87795fc6d95c694baf0a48 on main; consumes the linked closure-application ownership and existing `recordByteArray` effect protocol; does not consume or duplicate the active argument-alias, IO-entry, exception, or source-stream contracts
+state: active
+base: 8051df3c7430df5688035973635e66b058bff502 on main
+functional-head: none yet
+contract-base: 8051df3c7430df5688035973635e66b058bff502 on main; consumes only the linked closure-application and ByteArray runtime surfaces; does not consume or duplicate the active argument-alias, effectful-native-oracle, IO-error, exception, or source-stream contracts
 clean-at-update: true
-slice: S6 nonlocal ownership boundary: compare final versus retained use of one captured ByteArray around the existing ordered `recordByteArray` effect, then observe the updated result or reread the preserved capture after the effect
-files: Fir/Validation/Corpus.lean; validation-plans/semantic-fidelity-roadmap.md; validation-plans/coverage-index.json; validation-plans/native-oracle-attestations.json; docs/validation.md; coordination/lanes/test-fixtures.md
-contracts: none; fixture-only consumer of linked closure ownership, `recordByteArray` effect projection, and existing V8 provider; the argument-alias and IO/error contracts remain untouched
-checks: PASS Lean Beam update/sync/save Fir/Validation/Corpus.lean at version 5 with zero diagnostics and source hash bc4243cae2138326; PASS lake build fir-native-oracle Fir.Validation; PASS focused native/LCNF pinned replay 2/2 and focused native/LCNF/V8 triangle 6/6 with 4/4 unique products opened under strace; PASS git diff --check; PASS complete make check including 122 harness tests, 655/655 source native/LCNF cases, 9/9 direct machines, 655/655 native/LCNF/V8 triangles, 1,310 native-oracle witnesses, 1,974/1,974 indexed comparisons, 6,922 interpreter steps, 132/132 tag floors, and 241/241 semantic domains; findings 0; PASS 138 bug cards and exactly one registered trusted axiom
+slice: S7 escaping closure ownership: return a ByteArray-capturing closure from a noinline maker, then distinguish unique final mutation from retained-outside-alias copy-on-write after the return boundary
+files: validation-plans/semantic-fidelity-roadmap.md; coordination/lanes/test-fixtures.md; planned Fir/Validation/Corpus.lean, validation coverage plans, and docs/validation.md
+contracts: none; fixture-only; active argument-alias and IO/error contracts remain fenced
+checks: pending candidate compilation and dominance filter
 bug-cards: none
-blockers: none for this fixture-only pair; the separately queued argument-alias taken/skipped pair remains contract-blocked
-handoff: accepted on main through ready head e48e70d7; functional head 4a17f43b, base and contract base f996628c, lane test-fixtures; this released mailbox is carried by the integration acceptance record
-next: retain S6 as the nonlocal memory baseline; select the next undominated fixture-only lifetime interaction, and do not admit caught exceptions or the argument-alias taken/skipped pair until their named shared contracts are linked
+blockers: none for this candidate; reject it if compiler normalization removes the returned-closure boundary or its path signature is dominated by an existing case
+handoff: none; active fixture design
+next: compile the smallest unique/shared returned-closure pair, inspect exact final-LCNF and executed signatures, then admit it only if the boundary remains observable
 ```

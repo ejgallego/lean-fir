@@ -100,7 +100,8 @@ near-synonym drift:
 | M4 Allocation and reuse | active through S5 | Constructor, String, ByteArray, reset/reuse, growth, and copy-on-write fixtures already provide a base | Use the first S5 pair to distinguish post-release constructor reuse from shared-path allocation |
 | M5 Recursive release | landed through S5c | S5c adds one `del` on both growth paths and released-leaf reuse only on the unique-owner path to the landed S5a/S5b release matrix | Select the smallest undominated lifetime interaction outside the covered replacement/release matrix |
 | M6 Nonlocal control | landed through S6 | The fixture-only final-use/retained-use closure pair around the linked `recordByteArray` effect passes native/LCNF/V8 with exact 39/54-step traces | Add caught exceptions only after their shared protocol is accepted by all participating backends |
-| M7 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
+| M7 Escaping closure ownership | active | Existing closure-ownership cases create and consume their partial applications within one source entry | S7 returns a heap-capturing closure across a noinline call, then distinguishes unique transfer from a retained outside alias during mutation |
+| M8 Real-engine promotion | continuous | Scalar closures, the complete zero/one/two/three-use matrix, and all returned/consumed/ignored/read capture-topology pairs run through native/LCNF/V8 | Promote at least one representative pair per ownership domain whenever W7 support is linked |
 
 States are `queued`, `active`, `prepared`, `landed`, `parked`, or
 `contract-blocked`. A prepared slice is committed and locally validated but
@@ -439,6 +440,29 @@ fixture-only slice.
 
 State: S6 landed on `main` through ready handoff `e48e70d7`; functional head
 `4a17f43b` changes no shared contract.
+
+### S7: escaping closure ownership
+
+Return a heap-capturing closure from a noinline maker before applying it in the
+entry function. Compare a unique final application, where the captured
+`ByteArray` can transfer into mutation, with a retained-alias application,
+where copy-on-write must preserve the outside alias. The portable observations
+are the updated array and, on the shared path, the unchanged original array.
+
+Admit the pair only if final LCNF retains the maker call, returned `pap`, later
+closure invocation, and mutation, and if the complete execution signatures are
+not equivalent to the existing same-entry captured-ByteArray cases. Pin exact
+ownership, application, external, and return traces. Require native/LCNF/V8
+agreement and conjunctive `returned-closure` domains for both unique transfer
+and outside-alias preservation.
+
+This is a fixture-only consumer of the linked closure-application and
+ByteArray runtime surfaces. It does not use or duplicate the active
+argument-alias, effectful-native-oracle, IO-error, or source-termination
+contracts.
+
+State: S7 active on `validation/closure-ownership-fixtures` from base
+`8051df3c`; no shared contract changes are planned.
 
 ## Track B: calls and control
 
