@@ -1012,6 +1012,33 @@ export class ConcreteHost {
     return [address, header];
   }
 
+  constructorDescriptor(address, header) {
+    assert.equal(header.kind, KIND.constructor,
+      "constructor descriptor requires a constructor header");
+    let descriptor = this.descriptors.get(address);
+    if (descriptor === undefined) {
+      // A resident Wasm allocator does not cross the import boundary where the
+      // concrete host normally records allocation provenance. All constructor
+      // object slots nevertheless share Lean's machine-word object ABI. Zero
+      // slots are erased/uninitialized; every populated slot can be handled
+      // conservatively as `tobject`. Imported setters refine the affected slot
+      // with their exact ABI kind below.
+      descriptor = {
+        kind: "constructor",
+        fieldKinds: Array.from({ length: header.aux1 }, (_, index) =>
+          this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index) === 0
+            ? "erased"
+            : "tobject"),
+      };
+      this.descriptors.set(address, descriptor);
+    }
+    assert.equal(descriptor.kind, "constructor",
+      "concrete constructor address has a non-constructor descriptor");
+    assert.equal(descriptor.fieldKinds.length, header.aux1,
+      "concrete constructor descriptor arity mismatch");
+    return descriptor;
+  }
+
   objectProj(operation, args) {
     assert.equal(args.length, 1, "object projection host arity mismatch");
     const [address, header] = this.constructorHeader(args[0]);
@@ -1036,11 +1063,7 @@ export class ConcreteHost {
         size: header.aux1,
       });
     }
-    const descriptor = this.descriptors.get(address);
-    assert.equal(descriptor?.kind, "constructor",
-      "missing concrete constructor descriptor");
-    assert.equal(descriptor.fieldKinds.length, header.aux1,
-      "concrete constructor descriptor arity mismatch");
+    const descriptor = this.constructorDescriptor(address, header);
     this.writeU32(address + HEADER_BYTES + SLOT_BYTES * operation.index, field);
     const fieldKinds = [...descriptor.fieldKinds];
     fieldKinds[operation.index] = operation.field;
@@ -1401,9 +1424,8 @@ export class ConcreteHost {
   }
 
   ownedWords(address, header) {
-    const descriptor = this.descriptors.get(address);
-    const kinds = header.kind === KIND.constructor && descriptor?.kind === "constructor"
-      ? descriptor.fieldKinds
+    const kinds = header.kind === KIND.constructor
+      ? this.constructorDescriptor(address, header).fieldKinds
       : header.kind === KIND.closure
         ? this.closureDescriptors[header.aux3]
         : [];
@@ -1704,9 +1726,10 @@ export class ConcreteHost {
   }
 
   objectJson(address, header) {
-    const descriptor = this.descriptors.get(address);
+    const descriptor = header.kind === KIND.constructor
+      ? this.constructorDescriptor(address, header)
+      : this.descriptors.get(address);
     if (header.kind === KIND.constructor) {
-      assert.equal(descriptor?.kind, "constructor", "missing concrete constructor descriptor");
       const objectFields = descriptor.fieldKinds.map((kind, index) =>
         this.decode(kind, signed32(this.readWordSlot(address + HEADER_BYTES + SLOT_BYTES * index))));
       const usizeFields = Array.from({ length: header.aux2 }, (_, index) =>
@@ -1760,9 +1783,8 @@ export class ConcreteHost {
   }
 
   ownedAddresses(address, header) {
-    const descriptor = this.descriptors.get(address);
-    const kinds = header.kind === KIND.constructor && descriptor?.kind === "constructor"
-      ? descriptor.fieldKinds
+    const kinds = header.kind === KIND.constructor
+      ? this.constructorDescriptor(address, header).fieldKinds
       : header.kind === KIND.closure
         ? this.closureDescriptors[header.aux3]
         : [];

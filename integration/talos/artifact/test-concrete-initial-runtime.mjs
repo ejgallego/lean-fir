@@ -71,6 +71,10 @@ const mutable = mutationHost.allocCtor({
   ssize: 0,
   tag: "0",
 }, [largeNatural]);
+// Model an allocation performed by a resident Wasm helper: its concrete
+// header and slots are visible to the host, but no host-side allocation
+// descriptor was recorded.
+mutationHost.descriptors.delete(mutable >>> 0);
 mutationHost.objectSet({ index: 0, field: "tobject" }, [
   mutable,
   mutationHost.encode("tobject", { kind: "tagged", payload: 29n }),
